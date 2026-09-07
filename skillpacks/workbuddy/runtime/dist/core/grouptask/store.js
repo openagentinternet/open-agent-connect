@@ -2,7 +2,8 @@
 /**
  * Group Task store: file-backed CRUD for tasks / members / deliverables /
  * transitions / status events / checkpoints / integrity events / plan changes
- * / acceptance summaries, plus the task status state machine and an engine kv.
+ * / acceptance summaries / host notes (the single-commander host→chair
+ * one-way channel), plus the task status state machine and an engine kv.
  *
  * Layout (storage layout v2, all under the CHAIR profile's runtime root):
  *   .runtime/grouptask/state.json            — entities + kv + id sequence
@@ -35,6 +36,7 @@ function emptyState() {
         supervisorSignals: [],
         workRequests: [],
         acceptanceSummaries: [],
+        hostNotes: [],
         kv: {},
     };
 }
@@ -101,6 +103,7 @@ function createGroupTaskStore(paths) {
             acceptanceSummaries: Array.isArray(parsed.acceptanceSummaries)
                 ? parsed.acceptanceSummaries
                 : base.acceptanceSummaries,
+            hostNotes: Array.isArray(parsed.hostNotes) ? parsed.hostNotes : base.hostNotes,
             kv: parsed.kv && typeof parsed.kv === 'object' && !Array.isArray(parsed.kv)
                 ? parsed.kv
                 : {},
@@ -617,6 +620,61 @@ function createGroupTaskStore(paths) {
                 .filter((entry) => entry.taskId === taskId)
                 .sort((left, right) => left.createdAt - right.createdAt);
         },
+        recordHostNote: (input) => enqueue(async () => {
+            const state = await readState();
+            requireTask(state, input.taskId);
+            const dedupeKey = input.dedupeKey?.trim() || null;
+            if (dedupeKey) {
+                const existing = state.hostNotes.find((entry) => entry.taskId === input.taskId
+                    && entry.dedupeKey === dedupeKey
+                    && entry.consumedAt == null);
+                if (existing)
+                    return existing;
+            }
+            const note = {
+                id: nextId(state),
+                taskId: input.taskId,
+                kind: input.kind.trim() || 'fact',
+                target: input.target?.trim() || null,
+                body: input.body.trim().slice(0, 600),
+                dedupeKey,
+                consumedAt: null,
+                chairResponsePinId: null,
+                createdAt: Date.now(),
+            };
+            state.hostNotes.push(note);
+            await writeState(state);
+            return note;
+        }),
+        listPendingHostNotes: async (taskId) => {
+            const state = await readState();
+            return state.hostNotes
+                .filter((entry) => entry.taskId === taskId && entry.consumedAt == null)
+                .sort((left, right) => left.createdAt - right.createdAt);
+        },
+        listHostNotes: async (taskId) => {
+            const state = await readState();
+            return state.hostNotes
+                .filter((entry) => entry.taskId === taskId)
+                .sort((left, right) => left.createdAt - right.createdAt);
+        },
+        markHostNotesConsumed: (taskId, ids, chairResponsePinId) => enqueue(async () => {
+            const wanted = new Set(ids);
+            if (wanted.size === 0)
+                return 0;
+            const state = await readState();
+            let marked = 0;
+            for (const note of state.hostNotes) {
+                if (note.taskId !== taskId || !wanted.has(note.id) || note.consumedAt != null)
+                    continue;
+                note.consumedAt = Date.now();
+                note.chairResponsePinId = chairResponsePinId;
+                marked += 1;
+            }
+            if (marked > 0)
+                await writeState(state);
+            return marked;
+        }),
         createWorkRequest: (input) => enqueue(async () => {
             const state = await readState();
             requireTask(state, input.taskId);

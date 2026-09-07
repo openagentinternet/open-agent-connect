@@ -1,7 +1,8 @@
 /**
  * Group Task store: file-backed CRUD for tasks / members / deliverables /
  * transitions / status events / checkpoints / integrity events / plan changes
- * / acceptance summaries, plus the task status state machine and an engine kv.
+ * / acceptance summaries / host notes (the single-commander host→chair
+ * one-way channel), plus the task status state machine and an engine kv.
  *
  * Layout (storage layout v2, all under the CHAIR profile's runtime root):
  *   .runtime/grouptask/state.json            — entities + kv + id sequence
@@ -11,7 +12,7 @@
  * queue; the daemon is the only writer (CLI verbs delegate over HTTP).
  */
 import type { MetabotPaths } from '../state/paths';
-import { type GroupTaskAcceptanceSummary, type GroupTaskCheckpoint, type GroupTaskCheckpointStatus, type GroupTaskDeliverable, type GroupTaskDeliverableStatus, type GroupTaskIntegrityEvent, type GroupTaskIntegrityEventType, type GroupTaskMember, type GroupTaskMemberRole, type GroupTaskMemberStatus, type GroupTaskMessage, type GroupTaskPlanChange, type GroupTaskRecord, type GroupTaskStatus, type GroupTaskStatusEvent, type GroupTaskStatusEventActor, type GroupTaskSuperviseAction, type GroupTaskSupervisorSignal, type GroupTaskTransition, type GroupTaskWorkRequest, type GroupTaskWorkRequestStatus } from './types';
+import { type GroupTaskAcceptanceSummary, type GroupTaskCheckpoint, type GroupTaskCheckpointStatus, type GroupTaskDeliverable, type GroupTaskDeliverableStatus, type GroupTaskIntegrityEvent, type GroupTaskIntegrityEventType, type GroupTaskHostNote, type GroupTaskMember, type GroupTaskMemberRole, type GroupTaskMemberStatus, type GroupTaskMessage, type GroupTaskPlanChange, type GroupTaskRecord, type GroupTaskStatus, type GroupTaskStatusEvent, type GroupTaskStatusEventActor, type GroupTaskSuperviseAction, type GroupTaskSupervisorSignal, type GroupTaskTransition, type GroupTaskWorkRequest, type GroupTaskWorkRequestStatus } from './types';
 export interface GroupTaskStateFile {
     seq: number;
     tasks: GroupTaskRecord[];
@@ -25,6 +26,7 @@ export interface GroupTaskStateFile {
     supervisorSignals: GroupTaskSupervisorSignal[];
     workRequests: GroupTaskWorkRequest[];
     acceptanceSummaries: GroupTaskAcceptanceSummary[];
+    hostNotes: GroupTaskHostNote[];
     kv: Record<string, string>;
 }
 export interface CreateGroupTaskRecordInput {
@@ -149,6 +151,25 @@ export interface GroupTaskStore {
         note?: string | null;
     }): Promise<GroupTaskSupervisorSignal>;
     listSupervisorSignals(taskId: number): Promise<GroupTaskSupervisorSignal[]>;
+    /**
+     * Record one environment fact for the chair. When `dedupeKey` is set and an
+     * UNCONSUMED note with the same (taskId, dedupeKey) already exists, the
+     * existing row is returned unchanged — the bell never rings twice for the
+     * same fact.
+     */
+    recordHostNote(input: {
+        taskId: number;
+        kind: string;
+        target?: string | null;
+        body: string;
+        dedupeKey?: string | null;
+    }): Promise<GroupTaskHostNote>;
+    /** Unconsumed notes of one task, oldest first. */
+    listPendingHostNotes(taskId: number): Promise<GroupTaskHostNote[]>;
+    /** All notes of one task, oldest first (inspection/tests). */
+    listHostNotes(taskId: number): Promise<GroupTaskHostNote[]>;
+    /** Mark notes consumed by a chair turn; returns how many were marked. */
+    markHostNotesConsumed(taskId: number, ids: number[], chairResponsePinId: string | null): Promise<number>;
     createWorkRequest(input: {
         taskId: number;
         groupId: string | null;

@@ -16,6 +16,12 @@ export interface SyncGroupMessagesInput {
     groupId: string;
     /** Active (non-removed) member GlobalMetaIDs plus the owner's, lowercase. */
     trustedGlobalMetaIds: Set<string>;
+    /**
+     * Canonical sender display names by lowercase GlobalMetaID (IDBots R-04):
+     * names resolve by IDENTITY (roster/profile/owner), never by the chain
+     * nickname — a spoofed `userName` cannot impersonate a member.
+     */
+    senderNames?: Map<string, string>;
     transport?: GroupTaskTransportOptions;
     pageSize?: number;
     maxRows?: number;

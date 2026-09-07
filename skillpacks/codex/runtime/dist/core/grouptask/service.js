@@ -7,7 +7,7 @@
  * production implementations and tests wire fakes without chain writes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_TASK_MEMBER_STATUSES = exports.KICK_CONFIRM_MAX_ATTEMPTS = exports.KICK_CONFIRM_POLL_INTERVAL_MS = exports.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX = exports.GROUP_TASK_REVIEW_REASSERT_KV_PREFIX = exports.GROUP_TASK_OWNER_REPORTED_KV_PREFIX = exports.GROUP_TASK_REWORK_AT_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_WINDOW_MINUTES = exports.GROUP_TASK_WORKING_WINDOW_MINUTES = exports.GROUP_TASK_STALL_AFTER_MINUTES = exports.GroupTaskServiceError = void 0;
+exports.GROUP_TASK_MEMBER_STATUSES = exports.KICK_CONFIRM_MAX_ATTEMPTS = exports.KICK_CONFIRM_POLL_INTERVAL_MS = exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX = exports.GROUP_TASK_REVIEW_REASSERT_KV_PREFIX = exports.GROUP_TASK_OWNER_REPORTED_KV_PREFIX = exports.GROUP_TASK_REWORK_AT_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_WINDOW_MINUTES = exports.GROUP_TASK_WORKING_WINDOW_MINUTES = exports.GROUP_TASK_STALL_AFTER_MINUTES = exports.GroupTaskServiceError = void 0;
 exports.openteamStoreFor = openteamStoreFor;
 exports.staffingStoreFor = staffingStoreFor;
 exports.requireProfile = requireProfile;
@@ -50,6 +50,7 @@ const impressions_1 = require("./impressions");
 const openteam_1 = require("./openteam");
 const transport_1 = require("./transport");
 const backfill_1 = require("./backfill");
+const tags_1 = require("./tags");
 const types_1 = require("./types");
 class GroupTaskServiceError extends Error {
     code;
@@ -416,10 +417,33 @@ async function syncGroupTaskMessages(ctx, store, task) {
         return;
     try {
         const members = await store.listMembers(task.id, { includeRemoved: true });
+        // Sender display names resolve by IDENTITY (roster profile name / snapshot
+        // / owner), never by the spoofable chain nickname (IDBots R-04 parity).
+        const profiles = await ctx.listProfiles().catch(() => []);
+        const senderNames = new Map();
+        for (const member of members) {
+            const gmid = (member.globalMetaId ?? '').trim().toLowerCase();
+            if (!gmid)
+                continue;
+            const profile = member.slug ? profiles.find((entry) => entry.slug === member.slug) : undefined;
+            const name = (profile?.name ?? member.displayName ?? '').trim();
+            if (name)
+                senderNames.set(gmid, name);
+        }
+        try {
+            const owner = await ctx.ownerIdentity();
+            if (owner?.globalMetaId && owner.name?.trim()) {
+                senderNames.set(owner.globalMetaId.trim().toLowerCase(), owner.name.trim());
+            }
+        }
+        catch {
+            // Owner identity is optional for reads.
+        }
         await (0, backfill_1.syncGroupMessages)({
             store,
             groupId: task.groupId,
             trustedGlobalMetaIds: await buildTrustedGmidSet(ctx, members.filter((m) => m.removedAt == null)),
+            senderNames,
             transport: ctx.transport,
         });
     }
@@ -567,6 +591,15 @@ async function closeGroupTask(ctx, chairSlug, taskId, opts) {
         logOf(ctx)(`[GroupTask] Failed to cancel open checkpoints on close of task ${taskId}: `
             + `${error instanceof Error ? error.message : String(error)}`);
     }
+    // A closing task also cancels any still-pending supervisor wake (IDBots
+    // EP33 parity: no chair turn fires for a task that is already closed).
+    try {
+        await store.kvDelete(`${exports.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`);
+        await store.kvDelete(`${exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX}${taskId}`);
+    }
+    catch {
+        // Best-effort housekeeping; the close itself already landed.
+    }
     if (closed.status === 'done' && opts.rating != null) {
         await store.updateTaskRating(taskId, opts.rating, opts.ratingComment);
     }
@@ -640,6 +673,8 @@ function relayStoreFor(ctx, profile) {
 }
 /** Engine kv carrying a pending owner nudge (supervise → engine chair turn). */
 exports.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX = 'group_task_nudge_request:';
+/** Engine kv counting supervisor-wake attempts (cleared on close). */
+exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = 'group_task_nudge_attempts:';
 /**
  * Record one milestone row for the origin chat. Tasks created outside the
  * staffing flow have no source session and never emit. Best-effort: relay
@@ -650,13 +685,19 @@ async function emitGroupTaskRelay(ctx, chair, task, kind, text) {
     if (!sessionId)
         return;
     try {
+        // Stamped origin notices (IDBots EP33 P3①): the event timestamp lets a
+        // lazily-waking origin session tell an on-time delivery from a late one.
+        const eventAt = new Date();
+        const pad = (value) => String(value).padStart(2, '0');
+        const stamped = `${text}\n(event at ${eventAt.getFullYear()}-${pad(eventAt.getMonth() + 1)}-`
+            + `${pad(eventAt.getDate())} ${pad(eventAt.getHours())}:${pad(eventAt.getMinutes())} local)`;
         await relayStoreFor(ctx, chair).add({
             taskId: task.id,
             groupId: task.groupId,
             sessionId,
             kind,
             title: task.title,
-            text,
+            text: stamped,
         });
     }
     catch (error) {
@@ -688,10 +729,12 @@ async function drainGroupTaskRelay(ctx, chairSlug) {
     return drained.sort((left, right) => left.createdAt - right.createdAt);
 }
 /**
- * Owner-side supervision. `nudge` queues a directive-driven chair turn (the
- * engine @-mentions the idle member); `flag` records an observation for the
- * acceptance stage; `pause`/`resume` gate the engine's dispatcher. All actions
- * are owner-authority, visible in-group through host supervisor notices.
+ * Owner-side supervision (single-commander). Signals are recorded on the
+ * supervisor ledger and delivered to the chair through its own turn context —
+ * the host NEVER posts supervision into the group: `nudge` queues a
+ * directive-driven chair turn; `flag` records an observation for the
+ * acceptance stage (surfaced in the review-time owner report); `pause`/
+ * `resume` gate the engine's dispatcher (`resume` queues a re-engage wake).
  */
 async function superviseGroupTask(ctx, chairSlug, taskId, input) {
     const action = input.action;
@@ -710,11 +753,8 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
         }
         const updated = await store.setTaskDispatchPaused(taskId, Date.now());
         await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
-        const notice = '[GROUP_TASK_NOTICE:supervisor] Task paused by the owner — '
-            + 'dispatch is suspended until they resume it.';
-        await postGroupTaskMessage(ctx, chairSlug, taskId, { content: notice }).catch(() => undefined);
         await emitGroupTaskRelay(ctx, chair, updated, 'paused', 'The owner paused this task; dispatch is suspended.');
-        return { task: updated, action, notice, nudgeQueued: false };
+        return { task: updated, action, notice: null, nudgeQueued: false };
     }
     if (action === 'resume') {
         if (task.dispatchPausedAt == null) {
@@ -722,8 +762,6 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
         }
         const updated = await store.setTaskDispatchPaused(taskId, null);
         await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
-        const notice = '[GROUP_TASK_NOTICE:supervisor] Task resumed by the owner — work continues.';
-        await postGroupTaskMessage(ctx, chairSlug, taskId, { content: notice }).catch(() => undefined);
         // The chair must re-engage the roster: queue a resume wake turn.
         await store.kvSet(`${exports.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`, JSON.stringify({
             kind: 'resume',
@@ -731,7 +769,7 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
             attempts: 0,
         }));
         await emitGroupTaskRelay(ctx, chair, updated, 'resumed', 'The owner resumed this task; work continues.');
-        return { task: updated, action, notice, nudgeQueued: true };
+        return { task: updated, action, notice: null, nudgeQueued: true };
     }
     // nudge + flag address a member (nudge) or the whole room (flag).
     const members = await store.listMembers(taskId);
@@ -747,18 +785,14 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
         }
     }
     if (action === 'flag') {
-        const note = input.note?.trim() || '';
-        const signal = await store.addSupervisorSignal({
+        await store.addSupervisorSignal({
             taskId,
             signalType: action,
             memberGlobalMetaId: member?.globalMetaId ?? null,
             memberName: member?.displayName ?? null,
-            note,
+            note: input.note?.trim() || '',
         });
-        const notice = `[GROUP_TASK_NOTICE:supervisor] Owner observation recorded`
-            + `${member?.displayName ? ` on ${member.displayName}` : ''}${note ? `: ${note}` : '.'}`;
-        await postGroupTaskMessage(ctx, chairSlug, taskId, { content: notice }).catch(() => undefined);
-        return { task, action, notice, nudgeQueued: false };
+        return { task, action, notice: null, nudgeQueued: false };
     }
     // nudge: default target = the least-recently-active non-standby worker.
     const target = member ?? members
@@ -874,8 +908,10 @@ async function claimGroupTaskWork(ctx, workerSlug) {
 }
 /**
  * Host-side turn completion: a non-empty handoff is posted on-chain AS the
- * worker (reply-threaded to the target message) and the request completes;
- * an error or empty handoff fails the request so the engine falls back to its
+ * worker (reply-threaded to the target message) and the request completes.
+ * A `[NO_REPLY]` handoff completes WITHOUT posting (IDBots task #66-A parity:
+ * the worker already delivered mid-turn, or genuinely had nothing to add).
+ * An error or empty handoff fails the request so the engine falls back to its
  * bare-LLM turn. Posting to a task that closed mid-work fails the request.
  */
 async function submitGroupTaskWork(ctx, input) {
@@ -900,6 +936,14 @@ async function submitGroupTaskWork(ctx, input) {
             return fail(input.error.trim());
         if (!handoff)
             return fail('WORKER_EMPTY_HANDOFF: the worker session produced no handoff text');
+        if ((0, tags_1.isNoReplyResponse)(handoff)) {
+            await store.updateWorkRequest(request.id, {
+                status: 'completed',
+                handoff,
+                dshSessionId: input.dshSessionId ?? null,
+            });
+            return { status: 'completed', pinId: null, error: null };
+        }
         try {
             const posted = await postGroupTaskMessage(ctx, profile.slug, request.taskId, {
                 asSlug: request.workerSlug,

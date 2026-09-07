@@ -1,19 +1,31 @@
 "use strict";
 /**
- * Group Task engine — the OAC port of the IDBots groupTaskDaemon: a 5-second
- * tick loop that drives every non-terminal task chaired by a local profile.
- * Per task and per tick it (1) claims the kv driver mutex, (2) stamps the
- * stall heartbeat, (3) syncs the transcript from the chain indexers,
- * (4) runs the one-shot chair planning turn, and (5) processes new messages
- * after the cursor: idempotent tag side effects, then turn-taking LLM replies
- * under cooldowns/budgets. Chain history is the only truth — the engine's own
- * posts are processed when they round-trip through the indexer sync.
+ * Group Task engine — the OAC port of the IDBots groupTaskDaemon (single-
+ * commander contract): a 5-second tick loop that drives every non-terminal
+ * task chaired by a local profile. Per task and per tick it (1) claims the kv
+ * driver mutex, (2) stamps the stall heartbeat, (3) syncs the transcript from
+ * the chain indexers, (4) runs the one-shot chair planning turn, and (5)
+ * processes new messages after the cursor: idempotent tag side effects, then
+ * turn-taking LLM replies under cooldowns/budgets. Chain history is the only
+ * truth — the engine's own posts are processed when they round-trip through
+ * the indexer sync.
+ *
+ * SINGLE COMMANDER: the host is the environment, never a speaker — it never
+ * posts into the group under any identity (the chair is the only coordinator;
+ * workers and the human owner are the other participants). Host observations
+ * (missing ACKs, rung deadlines, joins, parser verdicts, chain health) are
+ * recorded as HOST NOTES (store.recordHostNote) and delivered to the chair in
+ * ONE dedicated turn; the chair decides what the group needs to hear in its
+ * own voice. Extension rule: if a change would make the host post into the
+ * group, it is wrong by construction — record a host note and let the chair
+ * decide. The single remaining host-directed group post is the deterministic
+ * owner-confirmed kick moderation notice (service.kickGroupTaskMember).
  *
  * All seams (profiles, signers, stores, indexer fetch, LLM runner, persona
  * loader, clock) are injected so tests run fully offline.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = exports.GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_WORK_REQ_KV_PREFIX = exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX = exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
+exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_DEADLINE_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_WORK_REQ_KV_PREFIX = exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
 exports.createGroupTaskEngine = createGroupTaskEngine;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
@@ -36,10 +48,7 @@ exports.GROUP_TASK_DRIVER_KV_PREFIX = 'group_task_driver:';
 exports.GROUP_TASK_PLANNED_KV_PREFIX = 'group_task_chair_planned:';
 exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = 'group_task_chair_plan_attempts:';
 exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = 'group_task_msg_retry:';
-exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = 'group_task_dep_wait:';
 exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = 'group_task_planning_deferred:';
-exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX = 'group_task_roster_wake:';
-exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = 'group_task_nudge_attempts:';
 exports.GROUP_TASK_WORK_REQ_KV_PREFIX = 'group_task_work_req:';
 /**
  * Worker-session handoff (Phase 3): the engine defers a worker turn while a
@@ -49,25 +58,30 @@ exports.GROUP_TASK_WORK_REQ_KV_PREFIX = 'group_task_work_req:';
  */
 const WORK_REQUEST_PENDING_TTL_MS = 8 * 60_000;
 const WORK_REQUEST_CLAIMED_TTL_MS = 20 * 60_000;
-/** [DEPENDS_ON] holds a worker reply at most this long before proceeding. */
-const DEPENDENCY_WAIT_MAX_MS = 15 * 60_000;
 /**
  * IDBots roster-settle cap: the one-shot planning turn waits at most this long
  * for OpenTeam invites to resolve before planning with whatever roster exists.
  */
 const ROSTER_SETTLE_MAX_WAIT_MS = 10 * 60_000;
-/** Host notice emitted on every confirmed remote join (see maintainInviterInvites). */
-const OPENTEAM_JOINED_NOTICE_RE = /^\[GROUP_TASK_NOTICE:openteam_joined\]\s*(.+?)\s+joined this task as a remote OpenTeam member(?:\s*\(skills: ([^)]*)\))?/u;
 /** Deliverable re-verification cadence (indexer lag absorption). */
 exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = 'group_task_deliverable_verify:';
 const DELIVERABLE_REVERIFY_INTERVAL_MS = 10 * 60_000;
-// Assignment ACK watch + member monitors (IDBots P0-3/R6 parity).
+// Assignment ACK watch + member monitors (single-commander: observations are
+// recorded as host notes for the chair; the host never posts into the group).
 exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = 'group_task_ack_pending:';
 exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = 'group_task_ack_reminded:';
 exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = 'group_task_ack_seen:';
-exports.GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = 'group_task_expected_delivery:';
-exports.GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = 'group_task_timeout_hint:';
 exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = 'group_task_timeout_owner:';
+/**
+ * Chair-stated step deadlines (single clock — IDBots single-commander): the
+ * chair's [DEADLINE: Nm] tag on a dispatch arms one entry per mentioned worker
+ * when that worker ACKs; a passed deadline without a [DELIVERABLE] records ONE
+ * `deadline` host note (chasing/extending/re-assigning is the chair's call).
+ */
+exports.GROUP_TASK_DEADLINE_KV_PREFIX = 'group_task_deadline:';
+/** Consecutive-failure budget for the host-notes delivery chair turn. */
+exports.GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX = 'group_task_host_note_attempts:';
+const HOST_NOTE_TURN_MAX_ATTEMPTS = 3;
 const ACK_TIMEOUT_MS = 3 * 60_000;
 const MEMBER_UNREACHABLE_AFTER_MS = 30 * 60_000;
 const MEMBER_TIMEOUT_AFTER_MS = 20 * 60_000;
@@ -241,12 +255,17 @@ function createGroupTaskEngine(options) {
             ownerGlobalMetaId: input.ownerGmid,
             role: input.seat.role,
         });
-        const prompt = input.promptOverride ?? (0, prompts_1.buildGroupTaskTurnContext)({
-            task: input.task,
-            recentMessages: input.recentMessages,
-            target: input.target,
-            nowMs: now(),
-        });
+        // The authoritative state line leads directive prompts (IDBots order) and
+        // rides the volatile context on reply turns.
+        const prompt = input.promptOverride
+            ? (input.stateLine ? `${input.stateLine}\n\n${input.promptOverride}` : input.promptOverride)
+            : (0, prompts_1.buildGroupTaskTurnContext)({
+                task: input.task,
+                recentMessages: input.recentMessages,
+                target: input.target,
+                stateLine: input.stateLine,
+                nowMs: now(),
+            });
         return options.runLlmTurn({
             profile: input.seat.profile,
             role: input.seat.role,
@@ -261,24 +280,107 @@ function createGroupTaskEngine(options) {
         const checkpoints = await store.listCheckpoints(taskId);
         return checkpoints.some((checkpoint) => checkpoint.status === 'open');
     }
-    async function postHostNotice(task, chairSlug, content) {
+    /**
+     * Single-commander host→chair one-way channel: record one environment fact
+     * (NEVER a group post). The store dedupes unconsumed notes by dedupeKey.
+     */
+    async function recordHostNote(store, taskId, input) {
+        const note = await store.recordHostNote({ taskId, ...input });
+        log(`[GroupTaskEngine] Task ${taskId}: host note [${note.kind}${note.target ? ` → ${note.target}` : ''}] recorded`);
+    }
+    // Chain-health environment facts (IDBots task #66① parity): consecutive
+    // send failures at the single post choke point ring ONE note per 10-min
+    // bucket; the first success after a degraded window records the recovery.
+    const chainHealth = new Map();
+    async function noteChainHealthDegraded(store, task, error) {
+        const state = chainHealth.get(task.id) ?? { failures: 0, downSince: null };
+        state.failures += 1;
+        state.downSince = state.downSince ?? now();
+        chainHealth.set(task.id, state);
+        if (state.failures < 2)
+            return;
+        const reason = (error instanceof Error ? error.message : String(error)).slice(0, 160);
+        const bucket = Math.floor(now() / 600_000);
+        await recordHostNote(store, task.id, {
+            kind: 'chain_health',
+            target: 'on-chain backend',
+            body: `On-chain group sends have failed ${state.failures} consecutive times (last error: ${reason}). `
+                + 'This is usually the chain backend being unreachable — every on-chain post (group messages, file '
+                + 'uploads, publishes) will keep failing and retrying until it recovers. Local work can continue; a '
+                + 'recovery note will follow when sends succeed again. Avoid stacking extra retries on top of the '
+                + 'automatic ones.',
+            dedupeKey: `chain_health_down:${task.id}:${bucket}`,
+        }).catch(() => undefined);
+    }
+    async function noteChainHealthRecovered(store, task) {
+        const state = chainHealth.get(task.id);
+        if (!state || state.downSince == null)
+            return;
+        chainHealth.delete(task.id);
+        if (state.failures < 2)
+            return;
+        await recordHostNote(store, task.id, {
+            kind: 'chain_health',
+            target: 'on-chain backend',
+            body: 'On-chain sends have RECOVERED (the failure window lasted '
+                + `~${Math.max(1, Math.round((now() - (state.downSince ?? now())) / 60_000))} min). `
+                + 'Pending retries and queued publications can proceed now.',
+            dedupeKey: `chain_health_recovered:${task.id}:${state.downSince}`,
+        }).catch(() => undefined);
+    }
+    /**
+     * The single engine post choke point: every engine-driven group post goes
+     * through here so chain-health facts stay accurate. Posts are always signed
+     * by a PARTICIPANT (chair or worker) — the host itself never speaks.
+     */
+    async function enginePost(store, task, input) {
         try {
-            await (0, service_1.postGroupTaskMessage)(ctx, chairSlug, task.id, { content });
+            const posted = await (0, service_1.postGroupTaskMessage)(ctx, task.chairSlug, task.id, input);
+            await noteChainHealthRecovered(store, task);
+            return posted.pinId ?? null;
         }
         catch (error) {
-            log(`[GroupTaskEngine] Host notice failed for task ${task.id}: `
-                + `${error instanceof Error ? error.message : String(error)}`);
+            await noteChainHealthDegraded(store, task, error);
+            throw error;
         }
+    }
+    /** The authoritative host-DB state line carried into every chair turn. */
+    async function chairStateLine(store, task) {
+        const deliverables = await store.listDeliverables(task.id).catch(() => []);
+        const confirmed = deliverables.filter((row) => row.confirmation === 'confirmed').length;
+        const reviewClause = task.status === 'review'
+            ? 'the task IS in review — owner acceptance is pending'
+            : 'the task is NOT in review — never announce that it is finished or awaiting owner acceptance until [STATUS:REVIEW] has been applied';
+        return `[Authoritative task state (host DB): status=${task.status}; deliverables on ledger: ${deliverables.length} (${confirmed} on-chain confirmed); ${reviewClause}]`;
     }
     async function applyChairStatusTag(store, task, chairSlug, target, message, ownerGmid, chairProfile) {
         if (task.status === target)
             return task;
-        if (!types_1.GROUP_TASK_LEGAL_TRANSITIONS[task.status].includes(target))
+        if (!types_1.GROUP_TASK_LEGAL_TRANSITIONS[task.status].includes(target)) {
+            // Parser feedback (single-commander): a silently-dropped chair tag is
+            // how stuck-review feedback loops were born — record a `parse` note so
+            // the chair learns the verdict in its own turn context.
+            await recordHostNote(store, task.id, {
+                kind: 'parse',
+                body: `Your [STATUS:${target.toUpperCase()}] from message #${message.index} was NOT applied: `
+                    + `${task.status} → ${target} is not a legal transition (legal from ${task.status}: `
+                    + `${types_1.GROUP_TASK_LEGAL_TRANSITIONS[task.status].join(' → ') || 'none'}). Check the authoritative `
+                    + 'state line and re-issue the correct lifecycle move if it is still warranted.',
+                dedupeKey: `parse:${task.id}:${message.index}:${target}`,
+            }).catch(() => undefined);
             return task;
+        }
         if (target === 'review' && task.status === 'executing') {
             const reworkRaw = await store.kvGet(`${service_1.GROUP_TASK_REWORK_AT_KV_PREFIX}${task.id}`);
             const reworkAt = Number(reworkRaw);
             if (Number.isFinite(reworkAt) && now() - reworkAt < REVIEW_REENTRY_DEBOUNCE_MS) {
+                await recordHostNote(store, task.id, {
+                    kind: 'parse',
+                    body: `Your [STATUS:REVIEW] from message #${message.index} was debounced: the task re-entered `
+                        + 'executing less than a minute ago (a fresh rework). Re-verify the ledger against the '
+                        + 'acceptance criteria, then re-issue the review verdict only if the goal is genuinely met.',
+                    dedupeKey: `parse:${task.id}:${message.index}:review_debounce`,
+                }).catch(() => undefined);
                 return task; // stale review re-entry right after a rework
             }
         }
@@ -388,10 +490,13 @@ function createGroupTaskEngine(options) {
             publishedGroupPinId: null,
         });
         // LLM owner private report (IDBots maybeSendOwnerReport parity): the
-        // chair narrates the saved summary to the owner first; the 【结论】 first
-        // line becomes the stamped conclusion the group notice re-renders from.
+        // chair narrates the saved summary to the owner PRIVATELY; the 【结论】
+        // first line becomes the stamped conclusion. Single-commander: nothing is
+        // posted to the group — the chair's own [STATUS:REVIEW] message is the
+        // group-facing wrap-up.
         if (ownerGmid && ctx.sendPrivateMessage) {
             try {
+                const supervisorSignals = await store.listSupervisorSignals(task.id).catch(() => []);
                 const record = {
                     goal: preview(task.goal, 160),
                     acceptanceCriteria: preview(task.acceptanceCriteria, 160) || '(none specified)',
@@ -403,6 +508,9 @@ function createGroupTaskEngine(options) {
                         .filter((member) => member.removedAt == null)
                         .map((member) => ({ name: member.displayName ?? member.slug, role: member.role })),
                     planChanges: planChanges.slice(0, 3).map((change) => preview(change.summary, 160)),
+                    supervisorInterventions: supervisorSignals
+                        .map((signal) => `${signal.signalType}${signal.memberName ? ` → ${signal.memberName}` : ''}${signal.note ? `: ${signal.note}` : ''}`)
+                        .slice(0, 5),
                 };
                 const report = (await options.runLlmTurn({
                     profile: chairProfile,
@@ -432,60 +540,18 @@ function createGroupTaskEngine(options) {
                     + `${error instanceof Error ? error.message : String(error)}`);
             }
         }
-        const onChainRows = deliverables.filter((row) => (0, deliverableVerification_1.extractDeliverablePinId)(row.uri) || row.confirmation === 'confirmed');
-        const omittedProcessCount = deliverables.length - onChainRows.length;
-        const memberLine = members
-            .filter((member) => member.removedAt == null)
-            .map((member) => `${member.displayName ?? member.slug} (${member.role})`)
-            .join(', ');
-        const lines = [
-            '[GROUP_TASK_NOTICE:review_summary] Task entered review — owner acceptance requested.',
-            ...(conclusion ? [`${conclusion}`] : []),
-            `Goal: ${preview(task.goal, 160)}`,
-            `Acceptance criteria: ${preview(task.acceptanceCriteria, 160) || '(none specified)'}`,
-        ];
-        if (onChainRows.length > 0) {
-            lines.push(`Deliverables (${onChainRows.length}):`);
-            for (const row of onChainRows) {
-                lines.push(`- [${row.status} · ${deliverableVerificationLabel(row)}] ${row.kind ?? 'text'}${row.uri ? ` ${preview(row.uri, 100)}` : ''}`);
-            }
-            if (omittedProcessCount > 0) {
-                lines.push(`- (+${omittedProcessCount} process output(s) not on-chain, omitted from the checklist)`);
-            }
-        }
-        else if (deliverables.length > 0) {
-            lines.push(`Deliverables: ${deliverables.length} process output(s), none verifiable on-chain.`);
-        }
-        if (memberLine)
-            lines.push(`Members: ${preview(memberLine, 200)}`);
-        if (planChanges.length > 0) {
-            lines.push('Plan changes:');
-            for (const change of planChanges.slice(0, 3))
-                lines.push(`- ${preview(change.summary, 160)}`);
-        }
-        await postHostNotice(task, chairSlug, lines.join('\n'));
+        // Single-commander: NO group-facing review summary post. The acceptance
+        // summary row above feeds the Tasks panel acceptance card; the owner heard
+        // privately; the chair's own [STATUS:REVIEW] message is the wrap-up.
         await store.kvSet(guardKey, String(now()));
-    }
-    /** Review straggler re-assert (IDBots parity): a non-chair message after
-     *  the closing line gets one compact re-close from the chair. */
-    async function maybeReassertReviewClosing(store, task, chairSlug, lastMessage, chairGmid) {
-        if (!chairGmid || task.status !== 'review' || !lastMessage.pinId)
-            return;
-        if (normalizeGmid(lastMessage.senderGlobalMetaId) === chairGmid)
-            return;
-        if ((0, tags_1.isHostNotice)(lastMessage.content))
-            return;
-        const guardKey = `group_task_review_reassert:${task.id}:${lastMessage.pinId}`;
-        if (await store.kvGet(guardKey))
-            return;
-        await store.kvSet(guardKey, String(now()));
-        await postHostNotice(task, chairSlug, '[GROUP_TASK_NOTICE:review_still_open] Still in review — owner acceptance pending; further work paused.');
     }
     // -------------------------------------------------------------------------
     // Assignment ACK watch + member monitors (IDBots P0-3 / R6 parity)
     // -------------------------------------------------------------------------
     /** Chair mention of a worker arms the 3-min no-ACK watch; worker speech
-     *  (explicit [WORKING] or any) clears it and records ack-seen. */
+     *  (explicit [WORKING] or any) clears it and records ack-seen. A chair
+     *  [DEADLINE: Nm] tag on the dispatch arms the SINGLE deadline clock for
+     *  each mentioned worker; the clock starts when the worker ACKs. */
     async function trackAssignmentAcks(store, task, message, members, tags) {
         const senderGmid = normalizeGmid(message.senderGlobalMetaId);
         const chairMember = members.find((member) => member.role === 'chair' && member.removedAt == null);
@@ -497,6 +563,16 @@ function createGroupTaskEngine(options) {
             for (const member of workers) {
                 if (!mentioned.has(normalizeGmid(member.globalMetaId)))
                     continue;
+                // Single deadline clock: the chair's [DEADLINE: Nm] tag is the ONLY
+                // deadline source; it arms (starts ticking) on the worker's ACK.
+                if (tags.deadlineMinutes != null) {
+                    await store.kvSet(`${exports.GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${member.slug}`, JSON.stringify({
+                        minutes: tags.deadlineMinutes,
+                        msgIndex: message.index,
+                        armedAt: null,
+                        dueAt: null,
+                    }));
+                }
                 // P5: legal silent states never arm the watch.
                 if (ROLL_CALL_RE.test(message.content))
                     continue;
@@ -541,11 +617,26 @@ function createGroupTaskEngine(options) {
         if (tags.working) {
             await store.setMemberStatus(task.id, member.slug, 'working', member.globalMetaId);
             await clearPendingAck();
-            if (tags.working.etaMinutes != null && tags.working.etaMinutes > 0) {
-                await store.kvSet(`${exports.GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX}${task.id}:${member.slug}`, JSON.stringify({
-                    dueAt: now() + tags.working.etaMinutes * 60_000,
-                    ackedAt: now(),
-                }));
+            // The worker ACK starts the chair-stated deadline clock (worker ETA
+            // numbers are planning information for the chair, never a clock).
+            const deadlineKey = `${exports.GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${member.slug}`;
+            const deadlineRaw = await store.kvGet(deadlineKey);
+            if (deadlineRaw) {
+                try {
+                    const entry = JSON.parse(deadlineRaw);
+                    if (typeof entry.minutes === 'number' && entry.armedAt == null) {
+                        const parsed = JSON.parse(deadlineRaw);
+                        await store.kvSet(deadlineKey, JSON.stringify({
+                            ...parsed,
+                            armedAt: now(),
+                            dueAt: now() + entry.minutes * 60_000,
+                        }));
+                    }
+                }
+                catch {
+                    // unparsable deadline entry: drop it
+                    await store.kvDelete(deadlineKey);
+                }
             }
             return;
         }
@@ -559,8 +650,19 @@ function createGroupTaskEngine(options) {
         }
         await clearPendingAck();
     }
-    /** One reminder per assignment past the 3-min ACK window; unreachable and
-     *  timeout escalation for silent workers; L3 owner brief past +10 min. */
+    /** An outstanding (pending/claimed, unexpired) work request means the
+     *  worker's turn is LIVE: the member is engaged, so monitors must not flag
+     *  a working member (the single-commander "engaged branch"). */
+    async function hasOutstandingWorkRequest(store, taskId, slug) {
+        const requests = await store.listWorkRequests({ workerSlug: slug }).catch(() => []);
+        return requests.some((request) => request.taskId === taskId
+            && ((request.status === 'pending' && now() - request.createdAt <= WORK_REQUEST_PENDING_TTL_MS)
+                || (request.status === 'claimed'
+                    && now() - (request.claimedAt ?? request.createdAt) <= WORK_REQUEST_CLAIMED_TTL_MS)));
+    }
+    /** Monitors record environment facts as host notes — the chair decides what
+     *  the group needs to hear; the host never posts. The L3 escalation briefs
+     *  the owner PRIVATELY. */
     async function monitorAssignmentsAndMembers(store, task, members, seats, ownerGmid, chairSlug, chairGmid) {
         if (task.status !== 'planning' && task.status !== 'executing')
             return;
@@ -569,7 +671,7 @@ function createGroupTaskEngine(options) {
         const chairSeat = seats.find((seat) => seat.role === 'chair') ?? null;
         const workers = members.filter((member) => member.role === 'worker'
             && member.removedAt == null && member.slug != null);
-        // ACK reminders (once per pending assignment; never auto-fails).
+        // No-ACK facts (once per pending assignment; never auto-fails).
         for (const member of workers) {
             if (member.status === 'standby')
                 continue;
@@ -587,12 +689,64 @@ function createGroupTaskEngine(options) {
             const assignedAt = typeof entry.assignedAt === 'number' ? entry.assignedAt : 0;
             if (now() - assignedAt < ACK_TIMEOUT_MS)
                 continue;
+            // Engaged branch: a live work request means the worker's turn is
+            // running — retire the watch silently (no note, no host speech).
+            if (await hasOutstandingWorkRequest(store, task.id, member.slug)) {
+                await store.kvDelete(pendingKey);
+                await store.kvDelete(`${exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX}${task.id}:${member.slug}`);
+                continue;
+            }
             const remindedKey = `${exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX}${task.id}:${member.slug}`;
             if (await store.kvGet(remindedKey) === '1')
                 continue;
             await store.kvSet(remindedKey, '1');
-            await postHostNotice(task, chairSlug, `[GROUP_TASK_NOTICE:ack_reminder] @${member.displayName ?? member.slug} assignment awaiting [WORKING] ACK `
-                + `(${Math.round((now() - assignedAt) / 60_000)} min) — please confirm you have taken the work.`);
+            await recordHostNote(store, task.id, {
+                kind: 'no_ack',
+                target: member.displayName ?? member.slug,
+                body: `${member.displayName ?? member.slug} has NOT sent a [WORKING] ACK for the assignment`
+                    + `${typeof entry.msgIndex === 'number' ? ` (message #${entry.msgIndex})` : ''} — `
+                    + `${Math.round((now() - assignedAt) / 60_000)} min elapsed. Once you next speak, verify the `
+                    + 'assignment was actually received and re-dispatch if it was not; whether to nudge them in the '
+                    + 'group is your call.',
+                dedupeKey: `no_ack:${task.id}:${member.slug}:${assignedAt}`,
+            }).catch(() => undefined);
+        }
+        // Chair-stated deadlines (single clock): ring the bell once per armed
+        // clock — one `deadline` host note, then the clock is done.
+        for (const member of workers) {
+            const deadlineKey = `${exports.GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${member.slug}`;
+            const deadlineRaw = await store.kvGet(deadlineKey);
+            if (!deadlineRaw)
+                continue;
+            let entry;
+            try {
+                entry = JSON.parse(deadlineRaw);
+            }
+            catch {
+                await store.kvDelete(deadlineKey);
+                continue;
+            }
+            if (entry.armedAt == null || entry.dueAt == null || typeof entry.minutes !== 'number')
+                continue;
+            if (now() <= entry.dueAt)
+                continue;
+            const gmid = normalizeGmid(member.globalMetaId);
+            const armedAt = entry.armedAt;
+            const delivered = await store.listDeliverables(task.id).then((rows) => rows.some((row) => normalizeGmid(row.authorGlobalMetaId) === gmid
+                && row.status !== 'rejected'
+                && row.createdAt >= armedAt)).catch(() => false);
+            await store.kvDelete(deadlineKey);
+            if (delivered)
+                continue;
+            await recordHostNote(store, task.id, {
+                kind: 'deadline',
+                target: member.displayName ?? member.slug,
+                body: `The ${entry.minutes}-min deadline you set for ${member.displayName ?? member.slug} `
+                    + `(assignment message #${entry.msgIndex ?? '?'}) rang ${Math.round((now() - entry.dueAt) / 60_000)} `
+                    + 'min ago with no [DELIVERABLE] recorded since the ACK. Chasing the member, extending the '
+                    + 'deadline, or re-assigning the step is your decision.',
+                dedupeKey: `deadline:${task.id}:${member.slug}:${entry.msgIndex ?? armedAt}`,
+            }).catch(() => undefined);
         }
         if (task.status !== 'executing')
             return;
@@ -606,37 +760,44 @@ function createGroupTaskEngine(options) {
         ]);
         for (const member of active) {
             const gmid = normalizeGmid(member.globalMetaId);
-            // Unreachable: no speech for 30+ min (baseline: join time).
+            const outstanding = await hasOutstandingWorkRequest(store, task.id, member.slug);
+            // Unreachable: no speech for 30+ min (baseline: join time). A live work
+            // request means the turn is running — never flag an engaged member.
             const lastSpeakMs = (speakMap.get(gmid) ?? 0) * 1000 || member.createdAt;
-            if (lastSpeakMs && now() - lastSpeakMs > MEMBER_UNREACHABLE_AFTER_MS) {
+            if (!outstanding && lastSpeakMs && now() - lastSpeakMs > MEMBER_UNREACHABLE_AFTER_MS) {
                 if (member.status !== 'unreachable') {
                     await store.setMemberStatus(task.id, member.slug, 'unreachable', member.globalMetaId);
                     log(`[GroupTaskEngine] Task ${task.id}: member ${member.slug} marked unreachable `
                         + '(no speech for 30+ min)');
                 }
             }
-            // Timeout L2: [WORKING] signal stale past 20 min → authoritative
-            // timeout + one chair re-assign hint notice per streak.
+            // Timeout L2: [WORKING] signal stale past 20 min → one `long_turn` fact
+            // for the chair; L3 past +10 min → private owner brief.
             const lastWorkingMs = (workingMap.get(gmid) ?? 0) * 1000;
             if (!lastWorkingMs)
                 continue;
             const staleMs = now() - lastWorkingMs;
             if (staleMs <= MEMBER_TIMEOUT_AFTER_MS)
                 continue;
+            if (outstanding)
+                continue; // live DSH turn in flight: engaged, not timed out
             await store.setMemberStatus(task.id, member.slug, 'unreachable', member.globalMetaId).catch(() => undefined);
-            const hintKey = `${exports.GROUP_TASK_TIMEOUT_HINT_KV_PREFIX}${task.id}:${member.slug}`;
-            if (await store.kvGet(hintKey) !== '1') {
-                await store.kvSet(hintKey, '1');
-                const standbyNames = workers
-                    .filter((row) => row.status === 'standby')
-                    .map((row) => row.displayName ?? row.slug);
-                const reAssign = standbyNames.length > 0
-                    ? `Re-assign to a standby member (${standbyNames.join(', ')}) or mark the step suspended.`
-                    : 'Mark the step suspended and tell the owner it is blocked on an unresponsive member.';
-                await postHostNotice(task, chairSlug, `[GROUP_TASK_NOTICE:member_timeout] ${member.displayName ?? member.slug} has been silent past the `
-                    + `20-min [WORKING] window. ${reAssign} Do NOT auto-fail them.`);
-                log(`[GroupTaskEngine] Task ${task.id}: ${member.slug} [WORKING] stale 20+ min; re-assign hint posted`);
-            }
+            const standbyNames = workers
+                .filter((row) => row.status === 'standby')
+                .map((row) => row.displayName ?? row.slug);
+            const reAssign = standbyNames.length > 0
+                ? `Standby members available for re-assignment: ${standbyNames.join(', ')}.`
+                : 'No standby members on the roster.';
+            await recordHostNote(store, task.id, {
+                kind: 'long_turn',
+                target: member.displayName ?? member.slug,
+                body: `${member.displayName ?? member.slug}'s [WORKING] signal has been silent for `
+                    + `${Math.round(staleMs / 60_000)} min (past the ${MEMBER_TIMEOUT_AFTER_MS / 60_000}-min window) `
+                    + `with no live turn on record. ${reAssign} Chasing, re-assigning, or marking the step suspended `
+                    + 'is your call — the host never auto-fails anyone.',
+                dedupeKey: `long_turn:${task.id}:${member.slug}:${lastWorkingMs}`,
+            }).catch(() => undefined);
+            log(`[GroupTaskEngine] Task ${task.id}: ${member.slug} [WORKING] stale 20+ min; long_turn note recorded`);
             // L3: still silent past +10 min → brief the owner once per streak.
             if (staleMs <= MEMBER_TIMEOUT_AFTER_MS + MEMBER_ESCALATE_AFTER_MS)
                 continue;
@@ -650,8 +811,8 @@ function createGroupTaskEngine(options) {
                 fromSlug: chairSlug,
                 toGlobalMetaId: ownerGmid,
                 content: `[GroupTask] Task "${task.title}": member "${member.displayName ?? member.slug}" has been silent for `
-                    + `${Math.round(staleMs / 60_000)}+ min (past the [WORKING] window). The chair has a re-assign hint; `
-                    + 'please decide whether to wait, reassign, or close the task.',
+                    + `${Math.round(staleMs / 60_000)}+ min (past the [WORKING] window). The chair has been informed `
+                    + 'through its environment notes; please decide whether to wait, reassign, or close the task.',
             }).catch(() => undefined);
         }
     }
@@ -678,19 +839,18 @@ function createGroupTaskEngine(options) {
                 }
             }
             if (tags.checkpointResolved) {
-                const resolved = await store.resolveCheckpoint(task.id, tags.checkpointDecision, message.pinId);
-                if (resolved) {
-                    await postHostNotice(current, chairSlug, `[GROUP_TASK_NOTICE:checkpoint_resolved] Checkpoint resolved${tags.checkpointDecision ? `: ${tags.checkpointDecision}` : ''}. Work resumes.`);
-                }
+                // The chair's own [CHECKPOINT_RESOLVED] message IS the resume signal —
+                // the host posts nothing into the group (single-commander).
+                await store.resolveCheckpoint(task.id, tags.checkpointDecision, message.pinId);
             }
             else if (tags.checkpointTopic
                 && current.status !== 'review'
                 && !(await hasOpenCheckpoint(store, task.id))) {
                 const opened = await store.openCheckpoint(task.id, tags.checkpointTopic, message.pinId);
-                // Pause line carries the decision summary clause (IDBots parity).
+                // The owner hears about the pause PRIVATELY (source-session relay +
+                // private report); the chair's [CHECKPOINT] message itself is the
+                // group-facing signal.
                 const summary = checkpointDecisionSummary(tags.checkpointTopic);
-                await postHostNotice(current, chairSlug, `[GROUP_TASK_NOTICE:checkpoint_open] Task paused — waiting for the owner: ${tags.checkpointTopic}`
-                    + (summary ? ` (decision needed: ${summary})` : ''));
                 await (0, service_1.emitGroupTaskRelay)(ctx, chairProfile, current, 'checkpoint', `Paused for your decision: ${tags.checkpointTopic}${summary ? ` (decision needed: ${summary})` : ''}`
                     + ' — reply in the group or open the Group Tasks panel.');
                 // One private owner report per checkpoint (IDBots parity).
@@ -712,6 +872,8 @@ function createGroupTaskEngine(options) {
         // Member tags (non-chair local members)
         if (senderSeat && !fromChair) {
             if (tags.deliverables.length > 0 && message.pinId) {
+                // A delivery settles the chair-stated deadline clock for this member.
+                await store.kvDelete(`${exports.GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${senderSeat.slug}`);
                 let recordedAny = false;
                 for (const candidate of tags.deliverables) {
                     // Per-(msgPin, uri, kind) dedupe (IDBots parity): the same line
@@ -719,6 +881,20 @@ function createGroupTaskEngine(options) {
                     const existing = await store.findDeliverableByMsgPinAndUri(task.id, message.pinId, candidate.uri, candidate.kind);
                     if (existing)
                         continue;
+                    // Fold-by-pin (IDBots R-03/7d617f2e): the same author re-posting the
+                    // same artifact (same on-chain pin) folds into the original row —
+                    // a viewer URL for it never mints a second row or a second author.
+                    const candidatePin = (0, deliverableVerification_1.extractDeliverablePinId)(candidate.uri);
+                    if (candidatePin) {
+                        const priorRows = await store.listDeliverables(task.id);
+                        const prior = priorRows.find((row) => row.authorGlobalMetaId === message.senderGlobalMetaId
+                            && (0, deliverableVerification_1.extractDeliverablePinId)(row.uri) === candidatePin);
+                        if (prior) {
+                            log(`[GroupTaskEngine] Deliverable from message ${message.index} of task ${task.id} `
+                                + `folded into row ${prior.id} (same author + pin)`);
+                            continue;
+                        }
+                    }
                     const recorded = await store.addDeliverable({
                         taskId: task.id,
                         msgPinId: message.pinId,
@@ -881,26 +1057,9 @@ function createGroupTaskEngine(options) {
             const last = lastReplyAt.get(key) ?? 0;
             if (now() - last < cooldown)
                 return 'defer';
-            // [DEPENDS_ON:<pin>] hold (IDBots parity): a worker dispatch whose
-            // upstream deliverable has not landed waits, bounded by 15 minutes.
-            if (decision.role === 'worker') {
-                const dependsOn = (0, tags_1.parseGroupTaskTags)(input.message.content).dependsOn;
-                if (dependsOn && (0, tags_1.isEnforceableDependencyToken)(dependsOn)) {
-                    const satisfied = await input.store.listDeliverables(input.task.id).then((rows) => rows.some((row) => row.status !== 'rejected'
-                        && ((row.uri ?? '').includes(dependsOn) || row.msgPinId === dependsOn))).catch(() => true);
-                    if (!satisfied) {
-                        const waitKey = `${exports.GROUP_TASK_DEP_WAIT_KV_PREFIX}${input.task.id}:${input.message.index}`;
-                        const since = Number((await input.store.kvGet(waitKey)) ?? '0') || 0;
-                        if (!since) {
-                            await input.store.kvSet(waitKey, String(now()));
-                            return 'defer';
-                        }
-                        if (now() - since < DEPENDENCY_WAIT_MAX_MS)
-                            return 'defer';
-                        await input.store.kvDelete(waitKey); // bounded: proceed without upstream
-                    }
-                }
-            }
+            // Single-commander: [DEPENDS_ON] is a DECLARATIVE marker — the host
+            // never holds or re-orders dispatches; sequencing is the chair's
+            // judgment (the marker only keeps timeout flags off a waiting member).
             const reply = (await runSeatTurn({
                 seat,
                 task: input.task,
@@ -909,6 +1068,9 @@ function createGroupTaskEngine(options) {
                 ownerGmid: input.ownerGmid,
                 recentMessages: input.recentMessages,
                 target: input.message,
+                stateLine: decision.role === 'chair'
+                    ? await chairStateLine(input.store, input.task)
+                    : null,
             })).trim();
             replyCounts.set(key, spent + 1);
             lastReplyAt.set(key, now());
@@ -918,7 +1080,7 @@ function createGroupTaskEngine(options) {
                 input.counters.chairAutoReplies += 1;
             if (!reply || (0, tags_1.isNoReplyResponse)(reply))
                 continue;
-            await (0, service_1.postGroupTaskMessage)(ctx, input.chairSlug, input.task.id, {
+            await enginePost(input.store, input.task, {
                 content: reply,
                 asSlug: seat.slug,
                 replyPin: input.message.pinId ?? undefined,
@@ -930,11 +1092,65 @@ function createGroupTaskEngine(options) {
     // -------------------------------------------------------------------------
     // Planning turn
     // -------------------------------------------------------------------------
+    /** Deterministic [STATUS:EXECUTING] footer for planning replies that carry
+     *  no honored status tag (IDBots parity: the bootstrap must move the task). */
+    function ensurePlanningStatusFooter(reply) {
+        return (0, tags_1.parseGroupTaskTags)(reply).status ? reply : `${reply}\n[STATUS:EXECUTING]`;
+    }
+    /** EP33 P2 planning dedupe: any chair-authored message beyond the
+     *  auto-kickoff that @-mentions a seated worker means the chair already
+     *  dispatched in its own voice — the bootstrap must not duplicate it. */
+    function chairAlreadyDispatched(messages, chairGmid, seats) {
+        const workers = seats.filter((seat) => seat.role === 'worker');
+        if (workers.length === 0)
+            return false;
+        return messages.some((message) => {
+            if (normalizeGmid(message.senderGlobalMetaId) !== chairGmid)
+                return false;
+            if (message.content.trimStart().startsWith('[GROUP TASK]'))
+                return false; // auto-kickoff
+            return workers.some((worker) => (0, tags_1.isMentioned)(message, worker));
+        });
+    }
     async function runPlanningTurn(input) {
         const { store, task } = input;
         const plannedKey = `${exports.GROUP_TASK_PLANNED_KV_PREFIX}${task.id}`;
         if (await store.kvGet(plannedKey))
             return;
+        const stateLine = await chairStateLine(store, task);
+        // EP33 P2: the planning bootstrap never duplicates an active chair. The
+        // minimal directive completes planning WITHOUT burning the 3-attempt
+        // budget; a [NO_REPLY] answer posts nothing.
+        if (chairAlreadyDispatched(input.recentMessages, normalizeGmid(input.chair.globalMetaId), input.seats)) {
+            const minimal = (0, prompts_1.buildMinimalPlanningDirective)({
+                task,
+                seats: input.promptSeats,
+                recentMessages: input.recentMessages,
+                nowMs: now(),
+            });
+            const reply = (await runSeatTurn({
+                seat: input.chair,
+                task,
+                promptSeats: input.promptSeats,
+                chairName: input.chair.name,
+                ownerGmid: input.ownerGmid,
+                recentMessages: input.recentMessages,
+                target: null,
+                promptOverride: minimal,
+                stateLine,
+            })).trim();
+            if (!reply || (0, tags_1.isNoReplyResponse)(reply)) {
+                await store.kvSet(plannedKey, String(now()));
+                log(`[GroupTaskEngine] Planning for task ${task.id} completed minimally `
+                    + '(chair already dispatched; nothing missing)');
+                return;
+            }
+            await enginePost(store, task, { content: ensurePlanningStatusFooter(reply) });
+            await store.kvSet(plannedKey, String(now()));
+            await refreshDriverClaim(store, task.id);
+            log(`[GroupTaskEngine] Planning for task ${task.id} completed minimally (chair already dispatched)`);
+            return;
+        }
         const attemptsKey = `${exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX}${task.id}`;
         const attempts = Number((await store.kvGet(attemptsKey)) ?? '0') || 0;
         if (attempts >= PLAN_ATTEMPTS_MAX)
@@ -955,10 +1171,11 @@ function createGroupTaskEngine(options) {
             recentMessages: input.recentMessages,
             target: null,
             promptOverride: directive,
+            stateLine,
         })).trim();
         if (!reply || (0, tags_1.isNoReplyResponse)(reply))
             return; // counts as a failed attempt
-        await (0, service_1.postGroupTaskMessage)(ctx, input.chairSlug, task.id, { content: reply });
+        await enginePost(store, task, { content: ensurePlanningStatusFooter(reply) });
         await store.kvSet(plannedKey, String(now()));
         await refreshDriverClaim(store, task.id);
     }
@@ -980,51 +1197,10 @@ function createGroupTaskEngine(options) {
             return { settled: true };
         return { settled: false, reason: `${pending.length} OpenTeam invite(s) pending` };
     }
-    /**
-     * Wake the chair when a remote member joined after the plan was made: join
-     * notices are host notices that never wake responders on their own, so the
-     * task would otherwise sit in executing with a chair-only plan. One wake
-     * per join notice (kv-guarded; idempotent across message retries).
-     */
-    async function runRosterChangeWake(input) {
-        const { store, task, message } = input;
-        const wakeKey = `${exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX}${task.id}:${message.index}`;
-        if (await store.kvGet(wakeKey))
-            return;
-        await store.kvSet(wakeKey, String(now()));
-        const match = OPENTEAM_JOINED_NOTICE_RE.exec(message.content.trim());
-        const joinedName = match?.[1]?.trim() || 'a new remote member';
-        const joinedSkills = (match?.[2] ?? '')
-            .split(',')
-            .map((entry) => entry.trim())
-            .filter(Boolean);
-        const directive = (0, prompts_1.buildRosterChangeDirective)({
-            task,
-            joinedName,
-            joinedSkills,
-            seats: input.promptSeats,
-            recentMessages: input.recentMessages,
-            nowMs: now(),
-        });
-        const reply = (await runSeatTurn({
-            seat: input.chair,
-            task,
-            promptSeats: input.promptSeats,
-            chairName: input.chairName,
-            ownerGmid: input.ownerGmid,
-            recentMessages: input.recentMessages,
-            target: null,
-            promptOverride: directive,
-        })).trim();
-        if (!reply || (0, tags_1.isNoReplyResponse)(reply))
-            return;
-        await (0, service_1.postGroupTaskMessage)(ctx, input.chairSlug, task.id, {
-            content: reply,
-            replyPin: message.pinId ?? undefined,
-        });
-        await refreshDriverClaim(store, task.id);
-        log(`[GroupTaskEngine] Roster-change wake for task ${task.id} (${joinedName})`);
-    }
+    // Note: remote-member joins wake the chair through a `join` HOST NOTE
+    // (recorded by maintainInviterInvites) — the host-notes turn delivers it and
+    // the chair greets/re-dispatches in its own voice (single-commander: no
+    // welcome broadcast, no host-directed wake post).
     /**
      * Owner-supervise wake (nudge / resume): ONE directive-driven chair turn.
      * The request kv is cleared by the caller before the turn; the attempts kv
@@ -1048,12 +1224,85 @@ function createGroupTaskEngine(options) {
             recentMessages: input.recentMessages,
             target: null,
             promptOverride: directive,
+            stateLine: await chairStateLine(input.store, input.task),
         })).trim();
         if (!reply || (0, tags_1.isNoReplyResponse)(reply))
             return;
-        await (0, service_1.postGroupTaskMessage)(ctx, input.chairSlug, input.task.id, { content: reply });
+        await enginePost(input.store, input.task, { content: reply });
         await refreshDriverClaim(input.store, input.task.id);
         log(`[GroupTaskEngine] Supervisor ${input.kind} wake for task ${input.task.id}`);
+    }
+    /**
+     * Host-notes delivery (the single-commander host→chair channel): pending
+     * environment notes are delivered in ONE dedicated chair turn. The chair
+     * speaks in its own voice (or stays silent with [NO_REPLY]); either way the
+     * batch is consumed. Three consecutive turn failures drop the batch with an
+     * origin-session anomaly relay — notes must never wedge the task.
+     */
+    async function processHostNotes(input) {
+        const { store, task } = input;
+        if (task.status !== 'planning' && task.status !== 'executing')
+            return;
+        if (task.dispatchPausedAt != null)
+            return; // owner paused: the room waits
+        if (await hasOpenCheckpoint(store, task.id))
+            return; // owner is mid-decision
+        const pending = await store.listPendingHostNotes(task.id);
+        if (pending.length === 0)
+            return;
+        const attemptsKey = `${exports.GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX}${task.id}`;
+        const attempts = Number((await store.kvGet(attemptsKey)) ?? '0') || 0;
+        if (attempts >= HOST_NOTE_TURN_MAX_ATTEMPTS) {
+            await store.markHostNotesConsumed(task.id, pending.map((note) => note.id), null);
+            await store.kvDelete(attemptsKey);
+            await (0, service_1.emitGroupTaskRelay)(ctx, input.profile, task, 'alert', `The host dropped ${pending.length} environment note(s) addressed to the chair after `
+                + `${attempts} failed delivery attempts (LLM/chain failures). Facts dropped: `
+                + pending.map((note) => `[${note.kind}${note.target ? ` → ${note.target}` : ''}]`).join(', '));
+            log(`[GroupTaskEngine] Task ${task.id}: dropped ${pending.length} host note(s) after ${attempts} attempts`);
+            return;
+        }
+        // Respect the chair cooldown so a notes turn never double-speaks right
+        // after a regular chair reply.
+        const key = seatKey(input.chair.slug, task.id, input.chair.slug);
+        const last = lastReplyAt.get(key) ?? 0;
+        if (now() - last < chairCooldownMs)
+            return;
+        const noteLines = pending.map((note) => `[${note.kind}${note.target ? ` → ${note.target}` : ''}] ${note.body}`);
+        const directive = (0, prompts_1.buildHostNotesDirective)({
+            task,
+            noteLines,
+            recentMessages: input.recentMessages,
+            nowMs: now(),
+        });
+        try {
+            const reply = (await runSeatTurn({
+                seat: input.chair,
+                task,
+                promptSeats: input.promptSeats,
+                chairName: input.chairName,
+                ownerGmid: input.ownerGmid,
+                recentMessages: input.recentMessages,
+                target: null,
+                promptOverride: directive,
+                stateLine: await chairStateLine(store, task),
+            })).trim();
+            lastReplyAt.set(key, now());
+            if (!reply || (0, tags_1.isNoReplyResponse)(reply)) {
+                await store.markHostNotesConsumed(task.id, pending.map((note) => note.id), null);
+            }
+            else {
+                const pinId = await enginePost(store, task, { content: reply });
+                await store.markHostNotesConsumed(task.id, pending.map((note) => note.id), pinId);
+                await refreshDriverClaim(store, task.id);
+            }
+            await store.kvDelete(attemptsKey);
+            log(`[GroupTaskEngine] Task ${task.id}: delivered ${pending.length} host note(s) to the chair`);
+        }
+        catch (error) {
+            await store.kvSet(attemptsKey, String(attempts + 1));
+            log(`[GroupTaskEngine] Host-notes turn failed for task ${task.id} (${attempts + 1}/${HOST_NOTE_TURN_MAX_ATTEMPTS}): `
+                + `${error instanceof Error ? error.message : String(error)}`);
+        }
     }
     // -------------------------------------------------------------------------
     // Per-task drive
@@ -1096,7 +1345,7 @@ function createGroupTaskEngine(options) {
                         store,
                         task: current,
                         chair,
-                        chairSlug: profile.slug,
+                        seats,
                         promptSeats,
                         ownerGmid,
                         recentMessages: page.messages,
@@ -1110,35 +1359,45 @@ function createGroupTaskEngine(options) {
         }
         // Supervisor wake (owner nudge / resume): the service queues a request kv;
         // the engine turns it into ONE directive-driven chair turn (attempt-capped).
+        // Single-commander teeth: an OPEN CHECKPOINT defers the wake (the owner is
+        // mid-decision); review status does NOT — the review-exception clause in
+        // the directive lets a genuine defect reopen rework.
         const nudgeRaw = await store.kvGet(`${service_1.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${current.id}`);
         if (nudgeRaw && chair) {
-            await store.kvDelete(`${service_1.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${current.id}`);
-            try {
-                const request = JSON.parse(nudgeRaw);
-                const attempts = (Number((await store.kvGet(`${exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX}${current.id}`)) ?? '0') || 0) + 1;
-                await store.kvSet(`${exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX}${current.id}`, String(attempts));
-                if (attempts <= 3) {
-                    await runSupervisorWake({
-                        store,
-                        task: current,
-                        chair,
-                        chairSlug: profile.slug,
-                        promptSeats,
-                        chairName,
-                        ownerGmid,
-                        recentMessages: page.messages,
-                        kind: request.kind === 'resume' ? 'resume' : 'nudge',
-                        memberName: request.name ?? null,
-                        memberNote: request.note ?? null,
-                    });
-                }
-                else {
-                    log(`[GroupTaskEngine] Supervisor wake for task ${current.id} dropped after ${attempts - 1} attempts`);
-                }
+            if (await hasOpenCheckpoint(store, current.id)) {
+                // Deferred: leave the request queued for a later tick.
             }
-            catch (error) {
-                log(`[GroupTaskEngine] Supervisor wake failed for task ${current.id}: `
-                    + `${error instanceof Error ? error.message : String(error)}`);
+            else {
+                await store.kvDelete(`${service_1.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${current.id}`);
+                try {
+                    const request = JSON.parse(nudgeRaw);
+                    const attempts = (Number((await store.kvGet(`${service_1.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX}${current.id}`)) ?? '0') || 0) + 1;
+                    await store.kvSet(`${service_1.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX}${current.id}`, String(attempts));
+                    if (attempts <= 3) {
+                        await runSupervisorWake({
+                            store,
+                            task: current,
+                            chair,
+                            promptSeats,
+                            chairName,
+                            ownerGmid,
+                            recentMessages: page.messages,
+                            kind: request.kind === 'resume' ? 'resume' : 'nudge',
+                            memberName: request.name ?? null,
+                            memberNote: request.note ?? null,
+                        });
+                    }
+                    else {
+                        log(`[GroupTaskEngine] Supervisor wake for task ${current.id} dropped after ${attempts - 1} attempts`);
+                        await (0, service_1.emitGroupTaskRelay)(ctx, profile, current, 'alert', `A supervisor ${request.kind === 'resume' ? 'resume' : 'nudge'} wake was dropped after `
+                            + `${attempts - 1} failed attempts (LLM/chain failures). The supervision signal stays on the `
+                            + 'task ledger; nudge again if it still matters.');
+                    }
+                }
+                catch (error) {
+                    log(`[GroupTaskEngine] Supervisor wake failed for task ${current.id}: `
+                        + `${error instanceof Error ? error.message : String(error)}`);
+                }
             }
         }
         const pending = page.messages.filter((message) => message.index > current.lastProcessedIndex);
@@ -1153,28 +1412,11 @@ function createGroupTaskEngine(options) {
                     await store.updateTaskCursor(current.id, message.index);
                     break;
                 }
-                // Remote joins never wake responders on their own (host notices are
-                // skipped by decideGroupTaskResponders); after the plan already ran,
-                // a join is exactly when the chair must re-dispatch.
-                if (chair
-                    && (current.status === 'executing' || current.status === 'review')
-                    && (0, tags_1.isHostNotice)(message.content)
-                    && message.content.includes('[GROUP_TASK_NOTICE:openteam_joined]')) {
-                    await runRosterChangeWake({
-                        store,
-                        task: current,
-                        message,
-                        chair,
-                        chairSlug: profile.slug,
-                        promptSeats,
-                        chairName,
-                        ownerGmid,
-                        recentMessages: page.messages.filter((entry) => entry.index <= message.index),
-                    }).catch((error) => {
-                        log(`[GroupTaskEngine] Roster-change wake failed for task ${current.id}: `
-                            + `${error instanceof Error ? error.message : String(error)}`);
-                    });
-                }
+                // Remote joins no longer ride the group transcript: the inviter side
+                // records a `join` HOST NOTE (see maintainInviterInvites) and the
+                // host-notes turn wakes the chair to greet/re-dispatch in its own
+                // voice. Historical [GROUP_TASK_NOTICE:openteam_joined] messages stay
+                // inert (isHostNotice keeps them out of the responder decision).
                 const decisions = (0, tags_1.decideGroupTaskResponders)({
                     message,
                     taskStatus: current.status,
@@ -1224,15 +1466,29 @@ function createGroupTaskEngine(options) {
                 break; // fail-stop: later messages wait for this one
             }
         }
-        // Review straggler re-assert: one compact re-close per late non-chair
-        // message while the owner acceptance is still pending.
-        const lastMessage = page.messages[page.messages.length - 1] ?? null;
-        if (lastMessage) {
-            await maybeReassertReviewClosing(store, current, profile.slug, lastMessage, chair ? normalizeGmid(chair.globalMetaId) : null).catch(() => undefined);
-        }
-        // Assignment ACK watch + member monitors (reminders, unreachable,
-        // timeout escalation with the L3 owner brief).
+        // Review stragglers: NO host re-assert (single-commander — a straggler
+        // message after review entry is recorded on the ledger but the host stays
+        // silent; the human gate already keeps workers quiet).
+        // Assignment ACK watch + member monitors (host-note facts, unreachable,
+        // deadline ring, timeout escalation with the L3 private owner brief).
         await monitorAssignmentsAndMembers(store, current, members, seats, ownerGmid, profile.slug, chair ? normalizeGmid(chair.globalMetaId) : null).catch(() => undefined);
+        // Host-notes delivery: pending environment facts reach the chair in ONE
+        // dedicated turn (the host never posts into the group).
+        if (chair) {
+            await processHostNotes({
+                profile,
+                store,
+                task: current,
+                chair,
+                promptSeats,
+                chairName,
+                ownerGmid,
+                recentMessages: page.messages,
+            }).catch((error) => {
+                log(`[GroupTaskEngine] Host-notes processing failed for task ${current.id}: `
+                    + `${error instanceof Error ? error.message : String(error)}`);
+            });
+        }
     }
     // -------------------------------------------------------------------------
     // OpenTeam: envelope scan (both sides)
@@ -1458,10 +1714,20 @@ function createGroupTaskEngine(options) {
                     displayName: invite.inviteeName,
                 });
                 const skills = invite.requiredSkills.length > 0
-                    ? ` (skills: ${invite.requiredSkills.join(', ')})`
+                    ? ` Invited for: ${invite.requiredSkills.join(', ')}.`
                     : '';
-                await postHostNotice(task, profile.slug, `[GROUP_TASK_NOTICE:openteam_joined] ${invite.inviteeName || invite.inviteeGlobalMetaId} `
-                    + `joined this task as a remote OpenTeam member${skills}.`);
+                // Single-commander: no welcome broadcast from the host — a `join`
+                // environment note wakes the chair, which greets the joiner and
+                // reconciles the plan in its own voice.
+                await store.recordHostNote({
+                    taskId: invite.taskId,
+                    kind: 'join',
+                    target: invite.inviteeName || invite.inviteeGlobalMetaId,
+                    body: `${invite.inviteeName || invite.inviteeGlobalMetaId} just joined the task as a remote `
+                        + `OpenTeam teammate.${skills} Greet them in the group and fold them into the plan (or state `
+                        + 'why the current plan already covers their seat) — never leave a joiner unacknowledged.',
+                    dedupeKey: `join:${invite.taskId}:${normalizeGmid(invite.inviteeGlobalMetaId)}`,
+                });
             }
             await openteam.updateInvite(invite.inviteId, { memberAddedAt: now() });
         }
@@ -1473,10 +1739,20 @@ function createGroupTaskEngine(options) {
         const store = storeFor(ctx, profile);
         try {
             const memberIds = await (0, transport_1.fetchGroupMembers)(membership.groupId, ctx.transport);
+            // Sender names resolve by identity (inviter snapshot + own profile),
+            // never by the spoofable chain nickname (IDBots R-04 parity).
+            const senderNames = new Map();
+            if (membership.inviterGlobalMetaId && membership.inviterName) {
+                senderNames.set(normalizeGmid(membership.inviterGlobalMetaId), membership.inviterName);
+            }
+            if (profile.globalMetaId && profile.name) {
+                senderNames.set(normalizeGmid(profile.globalMetaId), profile.name);
+            }
             await (0, backfill_1.syncGroupMessages)({
                 store,
                 groupId: membership.groupId,
                 trustedGlobalMetaIds: new Set((memberIds ?? []).map((id) => normalizeGmid(id))),
+                senderNames,
                 transport: ctx.transport,
             });
         }

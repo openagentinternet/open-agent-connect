@@ -415,3 +415,85 @@ test('kickGroupTaskMember removes on-chain via chair, marks the row, confirms vi
     (error) => error instanceof GroupTaskServiceError && error.code === 'cannot_kick_chair',
   );
 });
+
+// ---------------------------------------------------------------------------
+// Single-commander: supervision never posts; close cancels pending wakes
+// ---------------------------------------------------------------------------
+
+test('supervise records signals and queues wakes but NEVER posts into the group (single-commander)', async () => {
+  const { ctx, pins } = createFakeContext('metabot-gt-supervise-');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const { createGroupTaskRelayStore } = require('../../dist/core/grouptask/relayStore.js');
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { task, chairSlug } = await createGroupTask(ctx, {
+    title: 'Launch campaign',
+    goal: 'Run the launch',
+    workerSlugs: ['worker-1'],
+    sourceSessionId: 'sess-supervise',
+  });
+  const chairProfile = await ctx.getProfile(chairSlug);
+  const store = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
+  const pinCountAfterCreate = pins.length;
+
+  // pause: state gate set, signal recorded, no group post, relay emitted.
+  const paused = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'pause' });
+  assert.equal(paused.notice, null);
+  assert.equal(pins.length, pinCountAfterCreate, 'pause posted nothing');
+  assert.equal((await store.getTaskById(task.id)).dispatchPausedAt != null, true);
+
+  // resume: gate cleared, wake queued, no group post.
+  const resumed = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'resume' });
+  assert.equal(resumed.nudgeQueued, true);
+  assert.equal(pins.length, pinCountAfterCreate, 'resume posted nothing');
+  assert.ok(await store.kvGet(`group_task_nudge_request:${task.id}`), 'resume wake queued');
+
+  // flag: ledger only.
+  const flagged = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'flag', note: 'watch the scope' });
+  assert.equal(flagged.notice, null);
+  assert.equal(pins.length, pinCountAfterCreate, 'flag posted nothing');
+  const signals = await store.listSupervisorSignals(task.id);
+  assert.deepEqual(signals.map((signal) => signal.signalType), ['pause', 'resume', 'flag']);
+
+  // Relay milestones for pause/resume carry the event-time stamp (EP33 P3①).
+  const relayRows = await createGroupTaskRelayStore(resolveMetabotPaths(chairProfile.homeDir)).listPending();
+  const kinds = relayRows.map((row) => row.kind);
+  assert.ok(kinds.includes('created') && kinds.includes('paused') && kinds.includes('resumed'));
+  assert.ok(/\(event at \d{4}-\d{2}-\d{2} \d{2}:\d{2} local\)$/u.test(relayRows[0].text), 'stamped origin notice');
+
+  // Closing the task cancels the still-pending supervisor wake (EP33 parity).
+  await closeGroupTask(ctx, chairSlug, task.id, { status: 'cancelled', reason: 'owner gave up' });
+  assert.equal(await store.kvGet(`group_task_nudge_request:${task.id}`), undefined,
+    'pending wake cancelled on close');
+  assert.equal(await store.kvGet(`group_task_nudge_attempts:${task.id}`), undefined);
+});
+
+test('submitGroupTaskWork: a [NO_REPLY] handoff completes WITHOUT an on-chain post; empty handoff fails', async () => {
+  const { ctx, pins } = createFakeContext('metabot-gt-submit-noreply-');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { task, chairSlug } = await createGroupTask(ctx, {
+    title: 'Poster', goal: 'Make the poster', workerSlugs: ['worker-1'],
+  });
+  const chairProfile = await ctx.getProfile(chairSlug);
+  const store = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
+  const request = await store.createWorkRequest({
+    taskId: task.id, groupId: task.groupId, workerSlug: 'worker-1', targetIndex: 0, targetPinId: null,
+  });
+  const pinCount = pins.length;
+
+  // IDBots task #66-A: the worker already delivered mid-turn — complete
+  // WITHOUT re-posting.
+  const done = await service.submitGroupTaskWork(ctx, { requestId: request.id, handoff: '[NO_REPLY]' });
+  assert.equal(done.status, 'completed');
+  assert.equal(done.pinId, null);
+  assert.equal(pins.length, pinCount, 'nothing posted for [NO_REPLY]');
+  assert.equal((await store.getWorkRequest(request.id)).status, 'completed');
+
+  // An empty handoff still fails (the engine falls back to its bare-LLM turn).
+  const request2 = await store.createWorkRequest({
+    taskId: task.id, groupId: task.groupId, workerSlug: 'worker-1', targetIndex: 1, targetPinId: null,
+  });
+  const failed = await service.submitGroupTaskWork(ctx, { requestId: request2.id, handoff: '  ' });
+  assert.equal(failed.status, 'failed');
+  assert.ok(failed.error.includes('WORKER_EMPTY_HANDOFF'));
+});

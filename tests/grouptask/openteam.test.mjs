@@ -414,14 +414,28 @@ test('openteam inviter: invite → accept envelope → indexer join confirm → 
   assert.equal(remote.globalMetaId, 'IDREMOTE');
   assert.equal(remote.displayName, 'Remote Poet');
   assert.equal(remote.joinedPinId, 'join-pin-9');
+  // Single-commander: no welcome broadcast from the host — a `join` host note
+  // wakes the chair, which greets the joiner in its own voice.
   const welcome = h.pins.find((pin) => pinPlaintext(pin).includes('[GROUP_TASK_NOTICE:openteam_joined]'));
-  assert.ok(welcome, 'welcome notice posted');
+  assert.equal(welcome, undefined, 'no host welcome notice (single-commander)');
+  const joinNotes = (await h.chairStore.listHostNotes(task.id)).filter((note) => note.kind === 'join');
+  assert.equal(joinNotes.length, 1, 'one join host note recorded');
+  assert.ok(joinNotes[0].body.includes('Remote Poet'));
+  assert.ok(joinNotes[0].body.includes('poetry'), 'invited-for skills surfaced');
   const detailSummaryMembers = await h.chairStore.listMembers(task.id);
   assert.equal(detailSummaryMembers.length, 2);
 
-  // Idempotent: another tick must not duplicate the seat.
+  // The host-notes turn: the chair greets once, itself; then never again.
+  h.llmTurns.push('Welcome @Remote Poet — could you take the third verse?');
+  await h.engine.tick();
+  assert.ok(h.llmCalls[0].prompt.includes('[SYSTEM host environment notes'), 'host-notes directive used');
+  assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1,
+    'the chair greeted the joiner itself, once');
+  const consumedNotes = await h.chairStore.listHostNotes(task.id);
+  assert.ok(consumedNotes[0].consumedAt != null, 'join note consumed by the chair turn');
   await h.engine.tick();
   assert.equal((await h.chairStore.listMembers(task.id)).length, 2);
+  assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1, 'no duplicate greeting');
 });
 
 test('openteam inviter: decline envelope and pending expiry settle the invite', async () => {

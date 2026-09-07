@@ -1,11 +1,22 @@
 /**
- * Group Task worker sessions (Phase 3): the engine defers local worker turns
- * into work requests; this module claims them over the CLI, runs each one as
- * a REAL DSH sub-session (the Worker Bot's own preset: persona, memories,
- * skills — the local_worker_delegate machinery), and submits the handoff back
- * for the on-chain post. The reply is ONE group message; deliverables ride as
- * [DELIVERABLE] lines with owner-clickable URIs (serve-the-dish). Sessions are
- * reused per (task, worker) and kept alive after the turn (stop ≠ delete).
+ * Group Task worker sessions (Phase 3, single-commander): the engine defers
+ * local worker turns into work requests; this module claims them over the CLI,
+ * runs each one as a REAL DSH sub-session (the Worker Bot's own preset:
+ * persona, memories, skills — the local_worker_delegate machinery), and
+ * submits the handoff back for the on-chain post.
+ *
+ * Mid-turn speech (IDBots task #65/#66 parity): each work session carries a
+ * session-scoped `group_chat` tool (action `send_group_message`) bound to the
+ * claimed task's group — the worker posts [WORKING] progress and [DELIVERABLE]
+ * lines the moment results land instead of holding everything for the turn's
+ * end. A turn that delivered mid-turn closes with [NO_REPLY] and NOTHING else
+ * posts (no duplicate announcement); the service completes such submissions
+ * without an on-chain post.
+ *
+ * Single-commander: the host NEVER speaks under a bot identity — there is no
+ * auto-[WORKING] ACK on claim; the worker's own speech (mid-turn or final) is
+ * the only voice. The engine treats an outstanding work request as "engaged"
+ * (no false no-ACK/timeout flags while a live turn runs).
  *
  * Safety: the engine expires unclaimed/claim-stale requests (8/20 min TTLs)
  * and falls back to its bare-LLM turn, so a missing or wedged host can never
@@ -27,6 +38,7 @@ import type {
   HostAgentLike,
   HostAgentsRegistryLike,
   HostContext,
+  HostToolDefinition,
   HostUserMessage,
 } from './context-types.js'
 
@@ -34,9 +46,19 @@ import type {
 export const GROUP_TASK_WORK_SYSTEM_PROMPT =
   'You are a persistent Worker Bot executing ONE turn inside an on-chain multi-bot group task. '
   + 'Use your own persona, memories, skills, wallet, and permissions. '
-  + 'Your reply is posted to the group as a single message; deliverables ride as [DELIVERABLE] lines '
-  + 'with owner-clickable on-chain URIs (publish finished apps for metaapp://, publish text as pin:// '
-  + 'notes, metafile:// only for binaries — never hand the owner a file to download). '
+  + 'MID-TURN GROUP MESSAGES: you may speak to the group DURING the turn with the group_chat tool '
+  + '(action send_group_message) — post [WORKING] progress lines and [DELIVERABLE] lines the moment '
+  + 'results land instead of holding everything for the turn\'s end; mid-turn [DELIVERABLE] lines are '
+  + 'recorded on the task ledger exactly like turn replies. Never guess or invent a group_id — the '
+  + 'current group id is listed in your turn brief (a bare number like "65" is the task number, never '
+  + 'a group id). '
+  + 'ONE VOICE PER TURN: if you already delivered everything mid-turn, close the turn with exactly '
+  + '[NO_REPLY] instead of repeating it as the final reply — duplicate announcements read as double '
+  + 'postings to the group. '
+  + 'Otherwise your final assistant message is posted to the group as a single message; deliverables '
+  + 'ride as [DELIVERABLE] lines with owner-clickable on-chain URIs (publish finished apps for '
+  + 'metaapp://, publish text as pin:// notes, metafile:// only for binaries — never hand the owner '
+  + 'a file to download). '
   + 'Do not broaden your permission scope or claim unverifiable completion.'
 
 const DEFAULT_POLL_MS = 8_000
@@ -45,6 +67,8 @@ const DEFAULT_TURN_TIMEOUT_MS = 900_000
 interface ActiveWorkerSession {
   agent: HostAgentLike
   sessionId: string
+  /** Successful mid-turn group posts via the session's group_chat tool. */
+  midTurnSends: number
 }
 
 export interface GroupTaskWorkerOptions {
@@ -66,6 +90,7 @@ interface WorkClaim {
   requestId: number
   chairSlug: string
   taskId: number
+  groupId: string | null
   workerSlug: string
   workerName: string
   targetPinId: string | null
@@ -85,6 +110,7 @@ function buildWorkMessage(claim: WorkClaim): string {
   const lines = [
     '<group_task_work>',
     `  <task_id>${claim.taskId}</task_id>`,
+    claim.groupId ? `  <group_id>${claim.groupId}</group_id>` : null,
     `  <task_title>${claim.task.title}</task_title>`,
     `  <goal>${claim.task.goal}</goal>`,
     claim.task.acceptanceCriteria ? `  <acceptance_criteria>${claim.task.acceptanceCriteria}</acceptance_criteria>` : null,
@@ -98,7 +124,8 @@ function buildWorkMessage(claim: WorkClaim): string {
       ? `  <message_you_are_responding_to>#${claim.targetMessage.index} ${claim.targetMessage.sender}: ${claim.targetMessage.content}</message_you_are_responding_to>`
       : null,
     '  <handoff_contract>',
-    'Your final assistant message IS the group message posted on-chain as you — write it for the room, in the owner\'s language, concise.',
+    'MID-TURN SPEECH: post [WORKING] progress and [DELIVERABLE] lines the moment results land via the group_chat tool (action send_group_message) — the group id is the one above, never the task number.',
+    'Your final assistant message IS the group message posted on-chain as you — write it for the room, in the owner\'s language, concise. If you already said everything mid-turn, reply exactly [NO_REPLY] and nothing else posts.',
     'Append [DELIVERABLE] lines (one per line) for anything you produced, with owner-clickable on-chain URIs.',
     'If you genuinely have nothing to add this turn, reply exactly [NO_REPLY].',
     '  </handoff_contract>',
@@ -132,15 +159,72 @@ export function applyGroupTaskWorkerSessions(
     )
   }
 
-  async function postAck(claim: WorkClaim): Promise<void> {
-    try {
-      await run(['grouptask', 'post',
-        '--chair', claim.chairSlug,
-        '--task', String(claim.taskId),
-        '--as', claim.workerSlug,
-        '--content', '[WORKING] Claimed the assignment and started working.'], { timeoutMs: 180_000 })
-    } catch {
-      // Best-effort ACK: the engine's reminder ladder covers a missing one.
+  /**
+   * The session-scoped mid-turn speech tool (IDBots group_chat
+   * send_group_message parity): bound to the claimed task's group, so a
+   * worker can never guess a wrong group id — a mismatched group_id is
+   * overridden with a note, a malformed one is rejected with the teaching
+   * error. Successful sends count on the session so an empty final reply
+   * after mid-turn delivery settles as DELIVERED, not WORKER_EMPTY_HANDOFF.
+   */
+  function buildMidTurnGroupChatTool(
+    claim: WorkClaim,
+    sessionRef: () => ActiveWorkerSession | null,
+  ): HostToolDefinition {
+    return {
+      name: 'group_chat',
+      description:
+        'Speak in the group task DURING your turn: post [WORKING] progress lines and [DELIVERABLE] '
+        + 'lines the moment results land. Sends route to THIS turn\'s task group automatically.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['send_group_message'], description: 'Only send_group_message is supported here.' },
+          content: { type: 'string', description: 'The message text posted to the group as you.' },
+          group_id: { type: 'string', description: 'The on-chain group id (64 hex chars + "i0") from your turn brief. Optional; sends always route to this task\'s group.' },
+        },
+        required: ['action', 'content'],
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: String(value) }],
+      },
+      timeoutMs: 200_000,
+      async execute(args: Record<string, unknown>): Promise<string> {
+        const action = typeof args.action === 'string' ? args.action.trim() : ''
+        if (action !== 'send_group_message') {
+          throw new Error(`invalid_action: only send_group_message is supported in a group-task work turn (got "${action}")`)
+        }
+        const content = typeof args.content === 'string' ? args.content.trim() : ''
+        if (!content) throw new Error('missing_content: content is required.')
+        if (!claim.groupId) {
+          throw new Error('group_unavailable: this work turn has no on-chain group id; deliver through your final reply instead.')
+        }
+        let note = ''
+        const passed = typeof args.group_id === 'string' ? args.group_id.trim() : ''
+        if (passed) {
+          if (!/^[0-9a-f]{64}i\d+$/i.test(passed)) {
+            throw new Error(`Invalid group_id "${passed}": an on-chain group id is the group's pin id — exactly 64 lowercase hex chars followed by "i0" (66 characters). A bare number such as "65" is the TASK number, not a group id. Do not guess; the group id is in your turn brief.`)
+          }
+          if (passed.toLowerCase() !== claim.groupId!.toLowerCase()) {
+            note = `\n- note: routed to this turn's task group — you passed "${passed}", which is not that group id; the group id is the 64-hex+"i0" pin id shown in your turn brief, never the task number.`
+          }
+        }
+        const result: MetabotCommandResult = await run([
+          'grouptask', 'post',
+          '--chair', claim.chairSlug,
+          '--task', String(claim.taskId),
+          '--as', claim.workerSlug,
+          '--content', content,
+        ], { timeoutMs: 180_000 })
+        if (!result.ok) {
+          throw new Error(`send_failed: ${result.message ?? result.code ?? 'unknown error'}`)
+        }
+        const session = sessionRef()
+        if (session) session.midTurnSends += 1
+        const pinId = (result.data as { pinId?: string } | undefined)?.pinId ?? null
+        return `Sent to the group as ${claim.workerName}${pinId ? ` (pin ${pinId})` : ''}.${note}`
+      },
     }
   }
 
@@ -196,16 +280,21 @@ export function applyGroupTaskWorkerSessions(
           order: 100,
           text: GROUP_TASK_WORK_SYSTEM_PROMPT,
         })
-        session = { agent, sessionId }
+        session = { agent, sessionId, midTurnSends: 0 }
         activeSessions.set(sessionKey, session)
+        agent.ctx.tools?.register(
+          buildMidTurnGroupChatTool(claim, () => activeSessions.get(sessionKey) ?? null),
+        )
       } catch (error) {
         await fail(`worker_session_spawn_failed: ${error instanceof Error ? error.message : String(error)}`)
         return
       }
     }
 
-    // Immediate on-chain ACK so the engine's reminder ladder stands down.
-    await postAck(claim)
+    // Single-commander: NO host-posted [WORKING] ACK — the worker speaks for
+    // itself (mid-turn via group_chat, or in its final reply). The engine
+    // treats this outstanding request as "engaged" in its monitors.
+    session.midTurnSends = 0
 
     const agent = session.agent
     agent.followup?.({
@@ -255,6 +344,16 @@ export function applyGroupTaskWorkerSessions(
       return
     }
     if (!handoff) {
+      if (session.midTurnSends > 0) {
+        // IDBots task #66-A parity: an empty final reply after mid-turn group
+        // sends is a DELIVERED turn — complete without re-posting.
+        await submit({
+          requestId: claim.requestId,
+          handoff: '[NO_REPLY]',
+          dshSessionId: session.sessionId,
+        })
+        return
+      }
       const turnError = errorFromTurnEvents(sessionEvents)
       await submit({
         requestId: claim.requestId,
@@ -263,6 +362,7 @@ export function applyGroupTaskWorkerSessions(
       })
       return
     }
+    // A [NO_REPLY] final reply completes WITHOUT an on-chain post (service-side).
     await submit({
       requestId: claim.requestId,
       handoff,

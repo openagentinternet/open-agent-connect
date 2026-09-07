@@ -190,6 +190,8 @@ export declare function reopenGroupTask(ctx: GroupTaskServiceContext, chairSlug:
 export declare function relayStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): GroupTaskRelayStore;
 /** Engine kv carrying a pending owner nudge (supervise → engine chair turn). */
 export declare const GROUP_TASK_NUDGE_REQUEST_KV_PREFIX = "group_task_nudge_request:";
+/** Engine kv counting supervisor-wake attempts (cleared on close). */
+export declare const GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = "group_task_nudge_attempts:";
 /**
  * Record one milestone row for the origin chat. Tasks created outside the
  * staffing flow have no source session and never emit. Best-effort: relay
@@ -219,10 +221,12 @@ export interface SuperviseGroupTaskResult {
     nudgeQueued: boolean;
 }
 /**
- * Owner-side supervision. `nudge` queues a directive-driven chair turn (the
- * engine @-mentions the idle member); `flag` records an observation for the
- * acceptance stage; `pause`/`resume` gate the engine's dispatcher. All actions
- * are owner-authority, visible in-group through host supervisor notices.
+ * Owner-side supervision (single-commander). Signals are recorded on the
+ * supervisor ledger and delivered to the chair through its own turn context —
+ * the host NEVER posts supervision into the group: `nudge` queues a
+ * directive-driven chair turn; `flag` records an observation for the
+ * acceptance stage (surfaced in the review-time owner report); `pause`/
+ * `resume` gate the engine's dispatcher (`resume` queues a re-engage wake).
  */
 export declare function superviseGroupTask(ctx: GroupTaskServiceContext, chairSlug: string, taskId: number, input: SuperviseGroupTaskInput): Promise<SuperviseGroupTaskResult>;
 /** Lightweight task record read (manual-send gating and similar checks). */
@@ -281,8 +285,10 @@ export interface SubmitGroupTaskWorkResult {
 }
 /**
  * Host-side turn completion: a non-empty handoff is posted on-chain AS the
- * worker (reply-threaded to the target message) and the request completes;
- * an error or empty handoff fails the request so the engine falls back to its
+ * worker (reply-threaded to the target message) and the request completes.
+ * A `[NO_REPLY]` handoff completes WITHOUT posting (IDBots task #66-A parity:
+ * the worker already delivered mid-turn, or genuinely had nothing to add).
+ * An error or empty handoff fails the request so the engine falls back to its
  * bare-LLM turn. Posting to a task that closed mid-work fails the request.
  */
 export declare function submitGroupTaskWork(ctx: GroupTaskServiceContext, input: SubmitGroupTaskWorkInput): Promise<SubmitGroupTaskWorkResult>;
