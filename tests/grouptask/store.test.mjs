@@ -300,3 +300,62 @@ test('grouptask store: supervisor signals append and list per task', async () =>
   assert.equal(signals[1].memberName, 'worker');
   assert.equal((await store.listSupervisorSignals(999)).length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// Single-commander: host notes (the host→chair one-way channel)
+// ---------------------------------------------------------------------------
+
+test('grouptask store: host notes record, dedupe while unconsumed, and consume', async () => {
+  const { store } = createStore('metabot-grouptask-store-notes-');
+  const task = await createTask(store);
+
+  const first = await store.recordHostNote({
+    taskId: task.id, kind: 'no_ack', target: 'worker 1', body: 'no [WORKING] ACK for 4 min',
+    dedupeKey: 'no_ack:1:worker-1:0',
+  });
+  // The same dedupe key while unconsumed returns the existing row (the bell
+  // never rings twice for the same fact).
+  const dup = await store.recordHostNote({
+    taskId: task.id, kind: 'no_ack', target: 'worker 1', body: 'CHANGED BODY',
+    dedupeKey: 'no_ack:1:worker-1:0',
+  });
+  assert.equal(dup.id, first.id, 'deduped to the existing note');
+  assert.equal(dup.body, 'no [WORKING] ACK for 4 min', 'body unchanged');
+
+  await store.recordHostNote({
+    taskId: task.id, kind: 'join', target: 'Remote Bot', body: 'joined; greet them',
+    dedupeKey: 'join:1:idremote',
+  });
+  await store.recordHostNote({
+    taskId: task.id, kind: 'chain_health', target: 'on-chain backend', body: 'no dedupe key: repeats',
+  });
+  await store.recordHostNote({
+    taskId: task.id, kind: 'chain_health', target: 'on-chain backend', body: 'no dedupe key: repeats',
+  });
+
+  let pending = await store.listPendingHostNotes(task.id);
+  assert.equal(pending.length, 4, 'dedupe applied; keyless notes never dedupe');
+  assert.deepEqual(pending.map((note) => note.kind), ['no_ack', 'join', 'chain_health', 'chain_health']);
+
+  const marked = await store.markHostNotesConsumed(task.id, [first.id], 'pin-reply-1');
+  assert.equal(marked, 1);
+  pending = await store.listPendingHostNotes(task.id);
+  assert.equal(pending.length, 3);
+  assert.deepEqual(pending.map((note) => note.kind), ['join', 'chain_health', 'chain_health']);
+
+  const all = await store.listHostNotes(task.id);
+  assert.equal(all.length, 4);
+  assert.equal(all[0].chairResponsePinId, 'pin-reply-1');
+  assert.ok(all[0].consumedAt != null);
+
+  // After consumption the dedupe key is free again (a fresh fact re-rings).
+  const third = await store.recordHostNote({
+    taskId: task.id, kind: 'no_ack', target: 'worker 1', body: 'again silent',
+    dedupeKey: 'no_ack:1:worker-1:0',
+  });
+  assert.notEqual(third.id, first.id);
+
+  // Unknown task ids fail loudly; empty id lists are a no-op.
+  await assert.rejects(() => store.recordHostNote({ taskId: 999, kind: 'x', body: 'y' }), /not found/);
+  assert.equal(await store.markHostNotesConsumed(task.id, [], null), 0);
+});

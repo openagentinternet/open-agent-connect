@@ -45,7 +45,7 @@ async function syncGroupMessages(input) {
                 txId: item.txId || null,
                 senderMetaId: item.metaId || item.globalMetaId || item.address || '',
                 senderGlobalMetaId: item.globalMetaId || null,
-                senderName: item.userName || item.nickName || null,
+                senderName: (gmid && input.senderNames?.get(gmid)) || item.userName || item.nickName || null,
                 senderAvatar: item.userAvatar || null,
                 content,
                 contentType: item.contentType || null,

@@ -5,9 +5,14 @@
  * store and the chain.
  *
  * Tag emitters: chair-only tags are [STATUS:...], [CHECKPOINT:...],
- * [CHECKPOINT_RESOLVED...], [PLAN_CHANGE:...]; worker tags are [DELIVERABLE],
- * [WORKING], [STANDBY]; [NO_REPLY] is an LLM-output escape hatch (never sent
- * on-chain); [DEPENDS_ON:...] rides on chair dispatch messages.
+ * [CHECKPOINT_RESOLVED...], [PLAN_CHANGE:...], [DEADLINE:...]; worker tags are
+ * [DELIVERABLE], [WORKING], [STANDBY]; [NO_REPLY] is an LLM-output escape
+ * hatch (never sent on-chain); [DEPENDS_ON:...] rides on chair dispatch
+ * messages as a DECLARATIVE marker (single-commander: it gates nothing).
+ *
+ * Single-commander note: the host never produces [GROUP_TASK_NOTICE:...]
+ * messages anymore — the prefix matcher below survives so HISTORICAL notices
+ * on old transcripts stay inert (never trigger replies).
  */
 import type { GroupTaskMessage, GroupTaskStatus } from './types';
 export declare const DELIVERABLE_TAG: RegExp;
@@ -20,6 +25,8 @@ export declare const NO_REPLY_TAG: RegExp;
 export declare const WORKING_TAG: RegExp;
 export declare const STANDBY_TAG: RegExp;
 export declare const DEPENDS_ON_TAG: RegExp;
+/** Chair-stated step deadline in minutes: `[DEADLINE: 30m]` / `[DEADLINE: 30分钟]`. */
+export declare const DEADLINE_TAG: RegExp;
 /** Strips every checkpoint-family tag for display summaries. */
 export declare const CHECKPOINT_ANY_TAG: RegExp;
 /** Host-generated notice prefix (welcome / pause / resume / review lines). */
@@ -55,6 +62,8 @@ export interface ParsedGroupTaskTags {
     standby: boolean;
     /** [DEPENDS_ON: token] token, null when absent. */
     dependsOn: string | null;
+    /** Chair-stated [DEADLINE: Nm] in minutes, null when absent. */
+    deadlineMinutes: number | null;
 }
 /**
  * Extract deliverable candidates from a message. Line-scoped: each line
@@ -72,6 +81,13 @@ export declare function parseGroupTaskTags(content: string): ParsedGroupTaskTags
 export declare function isNoReplyResponse(reply: string): boolean;
 /** True for host-generated notice lines (never trigger engine replies). */
 export declare function isHostNotice(content: string): boolean;
+/**
+ * Ceremony-shaped worker lines (a bare [WORKING]/[STANDBY] progress or
+ * presence note — no question, no deliverable) never warrant a chair
+ * floor-control turn (IDBots entropy-floor gate). Questions and deliverables
+ * still reach the chair through their own reasons.
+ */
+export declare function isCeremonyAckMessage(content: string): boolean;
 /** [DEPENDS_ON] token is enforceable only when it names a pin or txid. */
 export declare function isEnforceableDependencyToken(token: string): boolean;
 export interface GroupTaskMentionTarget {

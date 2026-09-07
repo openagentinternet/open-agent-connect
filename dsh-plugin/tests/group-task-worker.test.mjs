@@ -11,6 +11,7 @@ function claim(overrides = {}) {
     requestId: 9,
     chairSlug: 'alice',
     taskId: 42,
+    groupId: 'grp-42',
     workerSlug: 'carol',
     workerName: 'Carol',
     targetPinId: 'pin-target',
@@ -30,6 +31,7 @@ function harness(options = {}) {
   const created = []
   const submits = []
   const acks = []
+  const tools = []
   let claimResult = { ok: true, data: { request: options.claim === undefined ? claim() : options.claim } }
   const run = async (args) => {
     calls.push(args)
@@ -70,9 +72,16 @@ function harness(options = {}) {
             : []
           const agent = {
             id: createOptions.sessionId,
-            ctx: {},
+            ctx: {
+              systemPrompt: { section: () => () => {} },
+              tools: { register: (def) => { tools.push(def); return () => {} } },
+            },
             followup: (message) => created.push({ followup: message }),
-            whenIdle: () => (handoffText === 'never' ? new Promise(() => {}) : Promise.resolve()),
+            whenIdle: async () => {
+              if (handoffText === 'never') return new Promise(() => {})
+              // Test seam: mid-turn tool calls happen while the turn runs.
+              if (options.beforeIdle) await options.beforeIdle()
+            },
             cancel: (reason) => created.push({ cancel: reason }),
             session: { id: createOptions.sessionId, snapshotEvents: () => events },
           }
@@ -84,28 +93,29 @@ function harness(options = {}) {
       }
     })(),
   }
-  return { calls, created, submits, acks, ctx, run, setClaim: (r) => { claimResult = r } }
+  return { calls, created, submits, acks, tools, ctx, run, setClaim: (r) => { claimResult = r } }
 }
 
-test('worker session: claim → ACK → sub-session → handoff submitted on-chain', async () => {
+test('worker session: claim → sub-session → handoff submitted on-chain (no host-posted ACK)', async () => {
   const h = harness()
   const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { daemonAlive: async () => true, run: h.run, pollMs: 600_000 })
   const worked = await runner.claimOnce()
-  console.error('DEBUG calls:', JSON.stringify(h.calls))
-  console.error('DEBUG worked:', worked)
-  // ACK posted on-chain as the worker before the session runs.
-  const ack = h.acks[0]
-  assert.equal(ack[ack.indexOf('--as') + 1], 'carol')
-  assert.match(ack[ack.indexOf('--content') + 1], /^\[WORKING\]/)
+  assert.equal(worked, true)
+  // Single-commander: the host NEVER speaks under the worker's identity — no
+  // auto-[WORKING] ACK on claim; the worker's own speech is the only voice.
+  assert.equal(h.acks.length, 0, 'no host-posted [WORKING] ACK on claim')
+  // The session carries the mid-turn speech tool bound to the task group.
+  assert.equal(h.tools.length, 1, 'the session-scoped group_chat tool registered')
+  assert.equal(h.tools[0].name, 'group_chat')
   // The sub-session carries the worker preset + its own LLM pair.
   const create = h.created.find((entry) => entry.create)?.create
   assert.equal(create.meta.agentPreset, 'oac-carol')
   assert.deepEqual(create.agentOptions, { provider: 'deepseek', model: 'deepseek-chat' })
-  const section = h.created.find((entry) => entry.create)
   assert.ok(create, 'session created')
   // The work wrapper carries the goal, roster, log, target, and handoff contract.
   const wrapper = h.created.find((entry) => entry.followup)?.followup
   assert.match(wrapper.content[0].text, /<group_task_work>/)
+  assert.match(wrapper.content[0].text, /<group_id>grp-42<\/group_id>/)
   assert.match(wrapper.content[0].text, /发布 MetaApp/)
   assert.match(wrapper.content[0].text, /@Carol 请做封面/)
   assert.match(wrapper.content[0].text, /\[DELIVERABLE\] lines/)
@@ -114,6 +124,62 @@ test('worker session: claim → ACK → sub-session → handoff submitted on-cha
   assert.equal(h.submits[0].requestId, 9)
   assert.match(h.submits[0].handoff, /封面做好了 \[DELIVERABLE\] metaapp:\/\/pin-1/)
   assert.ok(h.submits[0].dshSessionId)
+  runner.stop()
+})
+
+test('worker session: mid-turn group_chat sends post as the worker; empty final reply settles as delivered', async () => {
+  const h = harness({
+    handoffText: '',
+    beforeIdle: async () => {
+      const tool = h.tools.find((def) => def.name === 'group_chat')
+      assert.ok(tool, 'group_chat tool registered')
+      const result = await tool.execute({ action: 'send_group_message', content: '[WORKING] 做了一半' })
+      assert.match(result, /Sent to the group as Carol/)
+    },
+  })
+  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { daemonAlive: async () => true, run: h.run, pollMs: 600_000 })
+  await runner.claimOnce()
+  // The mid-turn send went through `grouptask post` as the worker.
+  const mid = h.acks.find((args) => args[1] === 'post')
+  assert.ok(mid, 'mid-turn post happened')
+  assert.equal(mid[mid.indexOf('--as') + 1], 'carol')
+  assert.equal(mid[mid.indexOf('--content') + 1], '[WORKING] 做了一半')
+  // IDBots task #66-A: empty final reply after mid-turn sends = DELIVERED turn
+  // — completed via a [NO_REPLY] handoff, no WORKER_EMPTY_HANDOFF, no repost.
+  assert.equal(h.submits.length, 1)
+  assert.equal(h.submits[0].handoff, '[NO_REPLY]')
+  assert.equal(h.submits[0].error, undefined)
+  runner.stop()
+})
+
+test('worker session: group_chat validates group_id and auto-routes to the task group', async () => {
+  const h = harness({
+    handoffText: '',
+    beforeIdle: async () => {
+      const tool = h.tools.find((def) => def.name === 'group_chat')
+      // A bare task number is rejected with the teaching error (IDBots #65).
+      await assert.rejects(
+        () => tool.execute({ action: 'send_group_message', content: 'x', group_id: '65' }),
+        /TASK number/,
+      )
+      // A well-formed but WRONG group id is overridden with a note.
+      const ok = await tool.execute({
+        action: 'send_group_message',
+        content: 'progress note',
+        group_id: `${'f'.repeat(64)}i9`,
+      })
+      assert.match(ok, /routed to this turn's task group/)
+      // Unknown actions are rejected.
+      await assert.rejects(
+        () => tool.execute({ action: 'delete_group', content: 'x' }),
+        /invalid_action/,
+      )
+    },
+  })
+  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { daemonAlive: async () => true, run: h.run, pollMs: 600_000 })
+  await runner.claimOnce()
+  // Only the two successful mid-turn sends posted (the wrong-id one routed).
+  assert.equal(h.acks.length, 1)
   runner.stop()
 })
 

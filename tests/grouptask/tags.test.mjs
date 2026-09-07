@@ -106,6 +106,34 @@ test('parseGroupTaskTags: status tags only count at protocol positions; the last
   assert.equal(lastWins.status, 'review');
 });
 
+test('parseGroupTaskTags: markdown-wrapped status tags on their own line are honored', () => {
+  // IDBots 4b996374: a bolded verdict parked a live task in executing for half
+  // an hour when the tag was silently ignored.
+  const bolded = parseGroupTaskTags('All acceptance criteria met.\n**[STATUS:REVIEW]**');
+  assert.equal(bolded.status, 'review', 'bold-wrapped tag on its own line honored');
+
+  const backticked = parseGroupTaskTags('[STATUS:EXECUTING]\nWork assigned.\n`[STATUS:REVIEW]`');
+  assert.equal(backticked.status, 'review', 'backtick-wrapped tag honored');
+
+  const italic = parseGroupTaskTags('*[STATUS:REVIEW]*');
+  assert.equal(italic.status, 'review');
+
+  // Prose-embedded mentions stay inert: edge stripping never rescues them.
+  const prose = parseGroupTaskTags('下一步是汇总 [STATUS:REVIEW]，先别动。');
+  assert.equal(prose.status, null, 'mid-prose mention with trailing text still inert');
+  const inline = parseGroupTaskTags('结果见上。 **[STATUS:REVIEW]** 等 owner 确认。');
+  assert.equal(inline.status, null, 'trailing prose after the tag stays inert');
+});
+
+test('parseGroupTaskTags: [DEADLINE: Nm] parses in minutes (en/zh)', () => {
+  assert.equal(parseGroupTaskTags('draft it [DEADLINE: 30m]').deadlineMinutes, 30);
+  assert.equal(parseGroupTaskTags('draft it [DEADLINE:45min]').deadlineMinutes, 45);
+  assert.equal(parseGroupTaskTags('draft it [DEADLINE: 20分钟]').deadlineMinutes, 20);
+  assert.equal(parseGroupTaskTags('no deadline here').deadlineMinutes, null);
+  assert.equal(parseGroupTaskTags('[DEADLINE: 0m]').deadlineMinutes, 1, 'floored at one minute');
+  assert.equal(parseGroupTaskTags('[DEADLINE: 9999m]').deadlineMinutes, 9999);
+});
+
 test('parseGroupTaskTags: checkpoint open vs resolved are distinct', () => {
   const open = parseGroupTaskTags('[CHECKPOINT: budget approval needed]');
   assert.equal(open.checkpointTopic, 'budget approval needed');
@@ -195,6 +223,22 @@ test('decide: unaddressed worker chatter gives the chair floor control', () => {
     message: { content: 'I think we should split the work', senderGlobalMetaId: 'gmid-alpha' },
   });
   assert.deepEqual(decisions, [{ slug: 'twin', role: 'chair', reason: 'chair_floor_control' }]);
+});
+
+test('decide: a ceremony-shaped worker ACK pulls NO chair turn (entropy floor)', () => {
+  // Bare [WORKING]/[STANDBY] progress notes: no chair floor-control turn.
+  for (const content of ['[WORKING] drafting, ETA 20 min', '[STANDBY]', '[WORKING long-task, ETA 45 min]']) {
+    assert.deepEqual(
+      decide({ message: { content, senderGlobalMetaId: 'gmid-alpha' } }),
+      [],
+      `no chair turn for ceremony line: ${content}`,
+    );
+  }
+  // Questions and deliverables still reach the chair through their own reasons.
+  const question = decide({ message: { content: '[WORKING] blocked — which font should I use?', senderGlobalMetaId: 'gmid-alpha' } });
+  assert.deepEqual(question, [{ slug: 'twin', role: 'chair', reason: 'chair_floor_control' }]);
+  const delivered = decide({ message: { content: '[DELIVERABLE] pin://abc', senderGlobalMetaId: 'gmid-alpha' } });
+  assert.deepEqual(delivered, [{ slug: 'twin', role: 'chair', reason: 'chair_deliverable' }]);
 });
 
 test('decide: human gate silences workers and non-owner chair turns', () => {

@@ -1,12 +1,24 @@
 /**
- * Group Task engine — the OAC port of the IDBots groupTaskDaemon: a 5-second
- * tick loop that drives every non-terminal task chaired by a local profile.
- * Per task and per tick it (1) claims the kv driver mutex, (2) stamps the
- * stall heartbeat, (3) syncs the transcript from the chain indexers,
- * (4) runs the one-shot chair planning turn, and (5) processes new messages
- * after the cursor: idempotent tag side effects, then turn-taking LLM replies
- * under cooldowns/budgets. Chain history is the only truth — the engine's own
- * posts are processed when they round-trip through the indexer sync.
+ * Group Task engine — the OAC port of the IDBots groupTaskDaemon (single-
+ * commander contract): a 5-second tick loop that drives every non-terminal
+ * task chaired by a local profile. Per task and per tick it (1) claims the kv
+ * driver mutex, (2) stamps the stall heartbeat, (3) syncs the transcript from
+ * the chain indexers, (4) runs the one-shot chair planning turn, and (5)
+ * processes new messages after the cursor: idempotent tag side effects, then
+ * turn-taking LLM replies under cooldowns/budgets. Chain history is the only
+ * truth — the engine's own posts are processed when they round-trip through
+ * the indexer sync.
+ *
+ * SINGLE COMMANDER: the host is the environment, never a speaker — it never
+ * posts into the group under any identity (the chair is the only coordinator;
+ * workers and the human owner are the other participants). Host observations
+ * (missing ACKs, rung deadlines, joins, parser verdicts, chain health) are
+ * recorded as HOST NOTES (store.recordHostNote) and delivered to the chair in
+ * ONE dedicated turn; the chair decides what the group needs to hear in its
+ * own voice. Extension rule: if a change would make the host post into the
+ * group, it is wrong by construction — record a host note and let the chair
+ * decide. The single remaining host-directed group post is the deterministic
+ * owner-confirmed kick moderation notice (service.kickGroupTaskMember).
  *
  * All seams (profiles, signers, stores, indexer fetch, LLM runner, persona
  * loader, clock) are injected so tests run fully offline.
@@ -16,19 +28,23 @@ export declare const GROUP_TASK_DRIVER_KV_PREFIX = "group_task_driver:";
 export declare const GROUP_TASK_PLANNED_KV_PREFIX = "group_task_chair_planned:";
 export declare const GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = "group_task_chair_plan_attempts:";
 export declare const GROUP_TASK_MSG_RETRY_KV_PREFIX = "group_task_msg_retry:";
-export declare const GROUP_TASK_DEP_WAIT_KV_PREFIX = "group_task_dep_wait:";
 export declare const GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = "group_task_planning_deferred:";
-export declare const GROUP_TASK_ROSTER_WAKE_KV_PREFIX = "group_task_roster_wake:";
-export declare const GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = "group_task_nudge_attempts:";
 export declare const GROUP_TASK_WORK_REQ_KV_PREFIX = "group_task_work_req:";
 /** Deliverable re-verification cadence (indexer lag absorption). */
 export declare const GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = "group_task_deliverable_verify:";
 export declare const GROUP_TASK_ACK_PENDING_KV_PREFIX = "group_task_ack_pending:";
 export declare const GROUP_TASK_ACK_REMINDED_KV_PREFIX = "group_task_ack_reminded:";
 export declare const GROUP_TASK_ACK_SEEN_KV_PREFIX = "group_task_ack_seen:";
-export declare const GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = "group_task_expected_delivery:";
-export declare const GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = "group_task_timeout_hint:";
 export declare const GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = "group_task_timeout_owner:";
+/**
+ * Chair-stated step deadlines (single clock — IDBots single-commander): the
+ * chair's [DEADLINE: Nm] tag on a dispatch arms one entry per mentioned worker
+ * when that worker ACKs; a passed deadline without a [DELIVERABLE] records ONE
+ * `deadline` host note (chasing/extending/re-assigning is the chair's call).
+ */
+export declare const GROUP_TASK_DEADLINE_KV_PREFIX = "group_task_deadline:";
+/** Consecutive-failure budget for the host-notes delivery chair turn. */
+export declare const GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX = "group_task_host_note_attempts:";
 export declare const GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = "group_task_review_summary:";
 export declare const GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = "openteam_self_check:";
 export interface GroupTaskLlmTurn {

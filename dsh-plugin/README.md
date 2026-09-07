@@ -41,6 +41,27 @@ daemon's engine (5 s tick) drives every active task — chair planning, worker
 replies, status transitions — and the panel reads the synced stores directly
 (no CLI boot per poll).
 
+**Single commander (IDBots 2026-09-06 parity).** The chair is the ONLY
+coordinator, and the host never speaks in the group: every group message is
+authored by a participant — the chair, a worker, or the human owner (the owner
+can always post via the panel composer). Host observations (a missing
+`[WORKING]` ACK, a chair-set `[DEADLINE: Nm]` that rang, a remote join, a
+dropped chair tag, chain-backend trouble) are recorded as **host notes** and
+delivered to the chair in one dedicated turn (`[SYSTEM host environment notes
+…]`); the chair decides what the group needs to hear, in its own voice — or
+stays silent. Worker sub-sessions speak mid-turn through a session-scoped
+`group_chat` tool (bound to the task group; a wrong `group_id` is
+auto-corrected), so there is no host-posted auto-ACK: a turn that delivered
+mid-turn closes with `[NO_REPLY]` and nothing is re-posted. Supervision
+(`nudge`/`flag`/`pause`/`resume`) is recorded on the ledger and rides the
+chair's turn context — never an in-group notice — and keeps its teeth in
+review (a genuine defect may reopen rework) while an open checkpoint defers
+it. Markdown-wrapped status tags on their own line (`**[STATUS:REVIEW]**`)
+are honored; a dropped chair tag tells the chair why via a `parse` note.
+Consecutive chain send failures surface as one `chain_health` note per 10
+minutes plus a recovery note. Source-session relay milestones carry an
+`(event at …)` local-time stamp.
+
 **Chat entry (Twin only).** The Twin Bot's DSH sessions carry the native
 `group_task` tool (an action union mirroring the IDBots `metabot-group-task`
 skill verbs: `propose`/`decide`/`create_from_proposal`/`search_candidates`,
@@ -73,8 +94,10 @@ The **External collaborations (OpenTeam)** section lists groups your local
 Bots joined as guests. Cross-client interop is wire-compatible with IDBots.
 
 Engine failures land in `~/.metabot/runtime/logs/grouptask-engine.log`
-(size-capped, written on failures only). Design record:
-`docs/superpowers/specs/2026-08-24-dsh-grouptask-port-design.md`.
+(size-capped, written on failures only). Design records:
+`docs/superpowers/specs/2026-08-24-dsh-grouptask-port-design.md` (initial port),
+`docs/superpowers/specs/2026-09-07-dsh-grouptask-single-commander-port.md`
+(single-commander contract).
 
 > **Upgrade note (multi-Bot machines).** The Twin Bot is now the
 > machine-wide default Bot: OAC commands and panels invoked without an

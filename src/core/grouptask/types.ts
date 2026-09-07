@@ -87,6 +87,33 @@ export interface GroupTaskSupervisorSignal {
   createdAt: number;
 }
 
+/**
+ * Host→chair one-way environment channel (single-commander contract): the
+ * host NEVER posts into the group — every group message is authored by a
+ * participant (chair, worker, or the human owner). When the host observes a
+ * fact the chair should know (a missing ACK, a deadline that rang, a join, a
+ * dropped chair tag, chain-backend trouble), it records a host note here; the
+ * engine delivers pending notes to the chair in ONE dedicated turn and the
+ * chair decides what the group needs to hear, in its own voice.
+ *
+ * Kinds are open strings; the engine currently records: `no_ack`,
+ * `deadline`, `long_turn`, `join`, `parse`, `chain_health`.
+ */
+export interface GroupTaskHostNote {
+  id: number;
+  taskId: number;
+  kind: string;
+  /** Member/subject the note is about (display name), null when task-wide. */
+  target: string | null;
+  body: string;
+  /** One unconsumed note per (taskId, dedupeKey); null = never deduped. */
+  dedupeKey: string | null;
+  consumedAt: number | null;
+  /** Chair reply pin that consumed the note (null for silent consumption). */
+  chairResponsePinId: string | null;
+  createdAt: number;
+}
+
 /** Milestone kinds the source-session relay forwards to the origin chat. */
 export type GroupTaskRelayKind =
   | 'created'
@@ -95,7 +122,8 @@ export type GroupTaskRelayKind =
   | 'review'
   | 'closed'
   | 'paused'
-  | 'resumed';
+  | 'resumed'
+  | 'alert';
 
 export interface GroupTaskRelayRow {
   id: number;

@@ -1,7 +1,8 @@
 /**
  * Group Task store: file-backed CRUD for tasks / members / deliverables /
  * transitions / status events / checkpoints / integrity events / plan changes
- * / acceptance summaries, plus the task status state machine and an engine kv.
+ * / acceptance summaries / host notes (the single-commander host→chair
+ * one-way channel), plus the task status state machine and an engine kv.
  *
  * Layout (storage layout v2, all under the CHAIR profile's runtime root):
  *   .runtime/grouptask/state.json            — entities + kv + id sequence
@@ -26,6 +27,7 @@ import {
   type GroupTaskDeliverableStatus,
   type GroupTaskIntegrityEvent,
   type GroupTaskIntegrityEventType,
+  type GroupTaskHostNote,
   type GroupTaskMember,
   type GroupTaskMemberRole,
   type GroupTaskMemberStatus,
@@ -55,6 +57,7 @@ export interface GroupTaskStateFile {
   supervisorSignals: GroupTaskSupervisorSignal[];
   workRequests: GroupTaskWorkRequest[];
   acceptanceSummaries: GroupTaskAcceptanceSummary[];
+  hostNotes: GroupTaskHostNote[];
   kv: Record<string, string>;
 }
 
@@ -119,6 +122,7 @@ function emptyState(): GroupTaskStateFile {
     supervisorSignals: [],
     workRequests: [],
     acceptanceSummaries: [],
+    hostNotes: [],
     kv: {},
   };
 }
@@ -256,6 +260,31 @@ export interface GroupTaskStore {
   }): Promise<GroupTaskSupervisorSignal>;
   listSupervisorSignals(taskId: number): Promise<GroupTaskSupervisorSignal[]>;
 
+  // Host notes (single-commander host→chair one-way channel)
+  /**
+   * Record one environment fact for the chair. When `dedupeKey` is set and an
+   * UNCONSUMED note with the same (taskId, dedupeKey) already exists, the
+   * existing row is returned unchanged — the bell never rings twice for the
+   * same fact.
+   */
+  recordHostNote(input: {
+    taskId: number;
+    kind: string;
+    target?: string | null;
+    body: string;
+    dedupeKey?: string | null;
+  }): Promise<GroupTaskHostNote>;
+  /** Unconsumed notes of one task, oldest first. */
+  listPendingHostNotes(taskId: number): Promise<GroupTaskHostNote[]>;
+  /** All notes of one task, oldest first (inspection/tests). */
+  listHostNotes(taskId: number): Promise<GroupTaskHostNote[]>;
+  /** Mark notes consumed by a chair turn; returns how many were marked. */
+  markHostNotesConsumed(
+    taskId: number,
+    ids: number[],
+    chairResponsePinId: string | null,
+  ): Promise<number>;
+
   // Worker work requests (Phase 3: DSH sub-session turns)
   createWorkRequest(input: {
     taskId: number;
@@ -341,6 +370,7 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       acceptanceSummaries: Array.isArray(parsed.acceptanceSummaries)
         ? parsed.acceptanceSummaries
         : base.acceptanceSummaries,
+      hostNotes: Array.isArray(parsed.hostNotes) ? parsed.hostNotes : base.hostNotes,
       kv: parsed.kv && typeof parsed.kv === 'object' && !Array.isArray(parsed.kv)
         ? parsed.kv as Record<string, string>
         : {},
@@ -913,6 +943,63 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
         .filter((entry) => entry.taskId === taskId)
         .sort((left, right) => left.createdAt - right.createdAt);
     },
+
+    recordHostNote: (input) => enqueue(async () => {
+      const state = await readState();
+      requireTask(state, input.taskId);
+      const dedupeKey = input.dedupeKey?.trim() || null;
+      if (dedupeKey) {
+        const existing = state.hostNotes.find(
+          (entry) => entry.taskId === input.taskId
+            && entry.dedupeKey === dedupeKey
+            && entry.consumedAt == null,
+        );
+        if (existing) return existing;
+      }
+      const note: GroupTaskHostNote = {
+        id: nextId(state),
+        taskId: input.taskId,
+        kind: input.kind.trim() || 'fact',
+        target: input.target?.trim() || null,
+        body: input.body.trim().slice(0, 600),
+        dedupeKey,
+        consumedAt: null,
+        chairResponsePinId: null,
+        createdAt: Date.now(),
+      };
+      state.hostNotes.push(note);
+      await writeState(state);
+      return note;
+    }),
+
+    listPendingHostNotes: async (taskId) => {
+      const state = await readState();
+      return state.hostNotes
+        .filter((entry) => entry.taskId === taskId && entry.consumedAt == null)
+        .sort((left, right) => left.createdAt - right.createdAt);
+    },
+
+    listHostNotes: async (taskId) => {
+      const state = await readState();
+      return state.hostNotes
+        .filter((entry) => entry.taskId === taskId)
+        .sort((left, right) => left.createdAt - right.createdAt);
+    },
+
+    markHostNotesConsumed: (taskId, ids, chairResponsePinId) => enqueue(async () => {
+      const wanted = new Set(ids);
+      if (wanted.size === 0) return 0;
+      const state = await readState();
+      let marked = 0;
+      for (const note of state.hostNotes) {
+        if (note.taskId !== taskId || !wanted.has(note.id) || note.consumedAt != null) continue;
+        note.consumedAt = Date.now();
+        note.chairResponsePinId = chairResponsePinId;
+        marked += 1;
+      }
+      if (marked > 0) await writeState(state);
+      return marked;
+    }),
 
     createWorkRequest: (input) => enqueue(async () => {
       const state = await readState();

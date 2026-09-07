@@ -23,6 +23,12 @@ export interface SyncGroupMessagesInput {
   groupId: string;
   /** Active (non-removed) member GlobalMetaIDs plus the owner's, lowercase. */
   trustedGlobalMetaIds: Set<string>;
+  /**
+   * Canonical sender display names by lowercase GlobalMetaID (IDBots R-04):
+   * names resolve by IDENTITY (roster/profile/owner), never by the chain
+   * nickname — a spoofed `userName` cannot impersonate a member.
+   */
+  senderNames?: Map<string, string>;
   transport?: GroupTaskTransportOptions;
   pageSize?: number;
   maxRows?: number;
@@ -65,7 +71,7 @@ export async function syncGroupMessages(input: SyncGroupMessagesInput): Promise<
         txId: item.txId || null,
         senderMetaId: item.metaId || item.globalMetaId || item.address || '',
         senderGlobalMetaId: item.globalMetaId || null,
-        senderName: item.userName || item.nickName || null,
+        senderName: (gmid && input.senderNames?.get(gmid)) || item.userName || item.nickName || null,
         senderAvatar: item.userAvatar || null,
         content,
         contentType: item.contentType || null,

@@ -5,9 +5,14 @@
  * store and the chain.
  *
  * Tag emitters: chair-only tags are [STATUS:...], [CHECKPOINT:...],
- * [CHECKPOINT_RESOLVED...], [PLAN_CHANGE:...]; worker tags are [DELIVERABLE],
- * [WORKING], [STANDBY]; [NO_REPLY] is an LLM-output escape hatch (never sent
- * on-chain); [DEPENDS_ON:...] rides on chair dispatch messages.
+ * [CHECKPOINT_RESOLVED...], [PLAN_CHANGE:...], [DEADLINE:...]; worker tags are
+ * [DELIVERABLE], [WORKING], [STANDBY]; [NO_REPLY] is an LLM-output escape
+ * hatch (never sent on-chain); [DEPENDS_ON:...] rides on chair dispatch
+ * messages as a DECLARATIVE marker (single-commander: it gates nothing).
+ *
+ * Single-commander note: the host never produces [GROUP_TASK_NOTICE:...]
+ * messages anymore — the prefix matcher below survives so HISTORICAL notices
+ * on old transcripts stay inert (never trigger replies).
  */
 
 import type { GroupTaskMessage, GroupTaskStatus } from './types';
@@ -35,6 +40,8 @@ export const NO_REPLY_TAG = /^\[NO_REPLY\]/i;
 export const WORKING_TAG = /\[WORKING\]/i;
 export const STANDBY_TAG = /\[STANDBY\]/i;
 export const DEPENDS_ON_TAG = /\[DEPENDS_ON:\s*([^\]]+)\]/i;
+/** Chair-stated step deadline in minutes: `[DEADLINE: 30m]` / `[DEADLINE: 30分钟]`. */
+export const DEADLINE_TAG = /\[DEADLINE:\s*(\d{1,4})\s*(?:m(?:in)?|分钟)\s*\]/i;
 /** Strips every checkpoint-family tag for display summaries. */
 export const CHECKPOINT_ANY_TAG = /\[CHECKPOINT(?:_[A-Z]+)?(?::[^\]]*)?\]/gi;
 /** Host-generated notice prefix (welcome / pause / resume / review lines). */
@@ -83,6 +90,8 @@ export interface ParsedGroupTaskTags {
   standby: boolean;
   /** [DEPENDS_ON: token] token, null when absent. */
   dependsOn: string | null;
+  /** Chair-stated [DEADLINE: Nm] in minutes, null when absent. */
+  deadlineMinutes: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,23 +176,28 @@ export function parseWorkingAck(content: string): GroupTaskWorkingAck | null {
 /**
  * The last protocol-position [STATUS:…] tag in the body: line-start anywhere,
  * or the tail of the final line. Null when none.
+ *
+ * Markdown adjudication (IDBots 4b996374 parity): markdown emphasis/backtick
+ * wrapping around an otherwise bare tag line is stripped before matching, so
+ * a chair's `**[STATUS:REVIEW]**` or `` `[STATUS:EXECUTING]` `` verdict on its
+ * own line still applies — silently dropping it parked live tasks in
+ * executing. Prose-embedded mentions stay inert: stripping only touches line
+ * edges, so "→ 汇总 [STATUS:REVIEW]" still fails line-start matching.
  */
 function lastHonoredStatusTag(content: string): RegExpExecArray | null {
   const lines = content.split(/\r?\n/);
-  let best: { exec: RegExpExecArray; index: number } | null = null;
-  let offset = 0;
+  let best: RegExpExecArray | null = null;
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!;
+    const cleaned = lines[i]!.trim().replace(/^[*_`]+/u, '').replace(/[*_`]+$/u, '');
     const isFinalLine = i === lines.length - 1;
-    const startMatch = STATUS_LINE_START_TAG.exec(line);
-    const tailMatch = isFinalLine ? STATUS_LINE_TAIL_TAG.exec(line) : null;
+    const startMatch = STATUS_LINE_START_TAG.exec(cleaned);
+    const tailMatch = isFinalLine ? STATUS_LINE_TAIL_TAG.exec(cleaned) : null;
     const candidate = (tailMatch && (!startMatch || tailMatch.index >= startMatch.index))
       ? tailMatch
       : startMatch;
-    if (candidate) best = { exec: candidate, index: offset + candidate.index };
-    offset += line.length + 1;
+    if (candidate) best = candidate;
   }
-  return best?.exec ?? null;
+  return best;
 }
 
 /** Parse every engine-relevant tag of one message body. */
@@ -192,6 +206,7 @@ export function parseGroupTaskTags(content: string): ParsedGroupTaskTags {
   const checkpointMatch = content.match(CHECKPOINT_OPEN_TAG);
   const resolvedMatch = content.match(CHECKPOINT_RESOLVED_TAG);
   const dependsMatch = content.match(DEPENDS_ON_TAG);
+  const deadlineMatch = content.match(DEADLINE_TAG);
 
   const planChanges: string[] = [];
   PLAN_CHANGE_TAG.lastIndex = 0;
@@ -199,6 +214,10 @@ export function parseGroupTaskTags(content: string): ParsedGroupTaskTags {
     const line = (match[1] ?? '').trim().slice(0, PLAN_CHANGE_MAX_CHARS);
     if (line && !planChanges.includes(line)) planChanges.push(line);
   }
+
+  const deadlineMinutes = deadlineMatch
+    ? Math.max(1, Number.parseInt(deadlineMatch[1]!, 10))
+    : null;
 
   return {
     deliverables: parseDeliverableCandidates(content),
@@ -210,6 +229,7 @@ export function parseGroupTaskTags(content: string): ParsedGroupTaskTags {
     working: parseWorkingAck(content),
     standby: STANDBY_TAG.test(content),
     dependsOn: dependsMatch ? dependsMatch[1]!.trim() : null,
+    deadlineMinutes: deadlineMinutes != null && Number.isFinite(deadlineMinutes) ? deadlineMinutes : null,
   };
 }
 
@@ -221,6 +241,19 @@ export function isNoReplyResponse(reply: string): boolean {
 /** True for host-generated notice lines (never trigger engine replies). */
 export function isHostNotice(content: string): boolean {
   return content.trimStart().startsWith(HOST_NOTICE_PREFIX);
+}
+
+/**
+ * Ceremony-shaped worker lines (a bare [WORKING]/[STANDBY] progress or
+ * presence note — no question, no deliverable) never warrant a chair
+ * floor-control turn (IDBots entropy-floor gate). Questions and deliverables
+ * still reach the chair through their own reasons.
+ */
+export function isCeremonyAckMessage(content: string): boolean {
+  const text = content.trim();
+  if (!text || text.length > 240) return false;
+  if (DELIVERABLE_TAG.test(text) || text.includes('?') || text.includes('？')) return false;
+  return /^\[(WORKING|STANDBY)[\s\]]/i.test(text);
 }
 
 /** [DEPENDS_ON] token is enforceable only when it names a pin or txid. */
@@ -353,7 +386,10 @@ export function decideGroupTaskResponders(input: DecideRespondersInput): GroupTa
       decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_owner_message' });
     } else if (DELIVERABLE_TAG.test(content)) {
       decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_deliverable' });
-    } else if (!anyoneAddressed) {
+    } else if (!anyoneAddressed && !isCeremonyAckMessage(content)) {
+      // Entropy floor: ceremony-shaped worker ACKs ([WORKING]/[STANDBY]
+      // progress notes with no question) never pull a chair floor-control
+      // turn — mid-turn speech would otherwise tax every progress line.
       decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_floor_control' });
     }
   }
