@@ -66,7 +66,13 @@ The **A2A Chat** sidebar-footer panel has a second tab, **Group Tasks**: one
 on-chain MetaWeb group chat per task, chaired by your Twin Bot. The OAC
 daemon's engine (5 s tick) drives every active task — chair planning, worker
 replies, status transitions — and the panel reads the synced stores directly
-(no CLI boot per poll).
+(no CLI boot per poll). The thread head's **Task panel** toggle opens a
+floating drawer (the IDBots group-task right rail, ported to the narrower
+panel): members with work/state badges, collapsible status history,
+transitions, integrity events (click to jump to the source message), and the
+deliverables list — kind pill, acceptance status, on-chain
+confirmation/verification pill, copyable/clickable URI, author — all read from
+the host-recorded task ledgers and refreshed by the 15 s detail poll.
 
 **Single commander (IDBots 2026-09-06 parity).** The chair is the ONLY
 coordinator, and the host never speaks in the group: every group message is
