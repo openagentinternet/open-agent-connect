@@ -37,7 +37,9 @@ export function enhanceConversationLinks(): void {
 
 function isSkippable(el: Element): boolean {
   if (SKIP_WRAP.has(el.tagName)) return true
-  if (el.closest('a, code, pre, textarea, .oac-browser-shell')) return true
+  // .oac-a2a-list is the A2A Chat / Group Tasks left column: navigation rows
+  // whose name/summary text must stay plain — never linkify pinIDs/URIs there.
+  if (el.closest('a, code, pre, textarea, .oac-browser-shell, .oac-a2a-list')) return true
   return false
 }
 
