@@ -24,7 +24,7 @@ function execFor(slug, homeDir) {
   }
 }
 
-test('bindKnowledgeBaseToolInstall registers all four tools', () => {
+test('bindKnowledgeBaseToolInstall registers all tools incl. the qa-surf pair', () => {
   const host = fakeHost()
   plugin.bindKnowledgeBaseToolInstall(host.ctx)
   assert.deepEqual(
@@ -34,6 +34,8 @@ test('bindKnowledgeBaseToolInstall registers all four tools', () => {
       'knowledge_base_learn',
       'knowledge_base_list',
       'knowledge_base_query',
+      'metaweb_qa_surf_disable',
+      'metaweb_qa_surf_enqueue',
       'metaweb_study_enqueue',
       'metaweb_study_status',
       'procedure_archive',
@@ -41,6 +43,34 @@ test('bindKnowledgeBaseToolInstall registers all four tools', () => {
       'procedure_save',
     ],
   )
+})
+
+test('qa-surf enqueue/dedup/disable roundtrip with the recurring status label', async () => {
+  const base = mkdtempSync(path.join(tmpdir(), 'kb-qa-surf-'))
+  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
+  mkdirSync(homeDir, { recursive: true })
+  const host = fakeHost()
+  plugin.bindKnowledgeBaseToolInstall(host.ctx, 'test-bot')
+  const byName = new Map(host.tools.map((tool) => [tool.name, tool]))
+  const exec = execFor('test-bot', homeDir)
+
+  const enabled = await byName.get('metaweb_qa_surf_enqueue').execute({ nightly_budget: 5 }, exec)
+  assert.match(String(enabled), /Nightly Q&A surfing enabled \(nightly budget: 5 pins\/run\)\./)
+  assert.match(String(enabled), /metaweb_qa_surf_disable/)
+
+  const dup = await byName.get('metaweb_qa_surf_enqueue').execute({}, exec)
+  assert.match(String(dup), /already pending for this bot/)
+  assert.match(String(dup), /no duplicate was created/)
+
+  const status = await byName.get('metaweb_study_status').execute({}, exec)
+  assert.match(String(status), /"On-chain Q&A surfing" \[recurring Q&A surfing\] \[pending\]/)
+  assert.match(String(status), /pins handled: 0\/5 per night/)
+
+  const disabled = await byName.get('metaweb_qa_surf_disable').execute({}, exec)
+  assert.match(String(disabled), /Nightly Q&A surfing disabled\./)
+
+  const again = await byName.get('metaweb_qa_surf_disable').execute({}, exec)
+  assert.match(String(again), /not active for this bot/)
 })
 
 test('add -> learn -> query roundtrip through the native tools against a temp profile', async () => {
