@@ -22,11 +22,13 @@
  * `~/.metabot/runtime/daemon.json` — the file `metabot daemon start` writes,
  * so the CLI and this bridge always agree on the running daemon.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { readdirSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
+import { resolveMetabotCliPath } from './cli-bridge.js'
 import {
   normalizeBotBrowserUri,
   resolveBrowserPath,
@@ -64,17 +66,92 @@ function systemMetabotRoot(env: NodeJS.ProcessEnv): string {
   return join(env.HOME ?? homedir(), '.metabot')
 }
 
+// ---------------------------------------------------------------------------
+// Daemon-record trust (task-67 lesson): a stale or FOREIGN daemon record —
+// e.g. an old global `metabot` install auto-starting its own daemon and
+// overwriting ~/.metabot/runtime/daemon.json — makes pinned pollers talk to a
+// daemon that lacks the current routes ("No route matched"). The record's
+// runtimeFingerprint identifies the build that started the daemon; a mismatch
+// with the local CLI build means the record is not ours — fail closed.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirror of the CLI's getDaemonRuntimeFingerprint (src/cli/runtime.ts):
+ * sha256 over sorted "relpath:size:mtimeFloor" entries for every .js file
+ * under the resolved CLI's dist root. MUST stay algorithm-identical — a
+ * drifted copy fails closed (pollers skip every tick). Exported so tests can
+ * mint records that match a fixture dist tree.
+ */
+export function computeDaemonRuntimeFingerprint(distRoot: string): string {
+  const entries: string[] = []
+  const walk = (directory: string): void => {
+    for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = join(directory, dirent.name)
+      if (dirent.isDirectory()) {
+        walk(absolutePath)
+        continue
+      }
+      if (!dirent.isFile() || !absolutePath.endsWith('.js')) continue
+      const stat = statSync(absolutePath)
+      entries.push(`${relative(distRoot, absolutePath)}:${stat.size}:${Math.floor(stat.mtimeMs)}`)
+    }
+  }
+  walk(distRoot)
+  entries.sort()
+  return createHash('sha256').update(entries.join('\n')).digest('hex')
+}
+
+const FINGERPRINT_CACHE_MS = 60_000
+let fingerprintCache: { key: string; value: string | null; computedAt: number } | null = null
+
+/** Fingerprint of the dist tree the plugin's CLI resolution points at (cached 60s per dist root). */
+function localDaemonRuntimeFingerprint(env: NodeJS.ProcessEnv): string | null {
+  let cliPath: string | undefined
+  try {
+    cliPath = resolveMetabotCliPath(env)
+  } catch {
+    return null
+  }
+  if (!cliPath) return null
+  const distRoot = resolve(dirname(dirname(cliPath)))
+  const now = Date.now()
+  if (fingerprintCache && fingerprintCache.key === distRoot && now - fingerprintCache.computedAt < FINGERPRINT_CACHE_MS) {
+    return fingerprintCache.value
+  }
+  let value: string | null = null
+  try {
+    value = computeDaemonRuntimeFingerprint(distRoot)
+  } catch {
+    value = null
+  }
+  fingerprintCache = { key: distRoot, value, computedAt: now }
+  return value
+}
+
 /**
  * Best-effort daemon base URL: the explicit env override wins, then the
- * daemon record `metabot daemon start` writes.
+ * daemon record `metabot daemon start` writes. A record whose
+ * runtimeFingerprint does not match the local CLI build is rejected (foreign
+ * or stale daemon) — onReject explains the refusal for host-side logs.
  */
-export async function resolveDaemonBaseUrl(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+export async function resolveDaemonBaseUrl(
+  env: NodeJS.ProcessEnv = process.env,
+  options: { onReject?: (reason: string) => void } = {},
+): Promise<string | null> {
   const explicit = (env.METABOT_DAEMON_BASE_URL ?? '').trim()
   if (explicit) return normalizeBaseUrl(explicit)
   try {
     const raw = await readFile(join(systemMetabotRoot(env), 'runtime', 'daemon.json'), 'utf8')
-    const record = JSON.parse(raw) as { baseUrl?: unknown }
+    const record = JSON.parse(raw) as { baseUrl?: unknown; runtimeFingerprint?: unknown }
     if (typeof record.baseUrl === 'string' && record.baseUrl.trim() !== '') {
+      const recorded = typeof record.runtimeFingerprint === 'string' ? record.runtimeFingerprint : ''
+      const local = localDaemonRuntimeFingerprint(env)
+      if (local && recorded !== local) {
+        options.onReject?.(
+          `daemon record was written by a different OAC build (recorded fingerprint ${recorded.slice(0, 12) || 'none'}…, local ${local.slice(0, 12)}…) — refusing to pin to it`,
+        )
+        return null
+      }
       return normalizeBaseUrl(record.baseUrl)
     }
   } catch {

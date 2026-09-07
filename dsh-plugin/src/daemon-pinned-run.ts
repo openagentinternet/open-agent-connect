@@ -30,9 +30,26 @@ export async function runMetabotPinned(
   args: string[],
   options: Omit<RunMetabotOptions, 'env'> = {},
   spawnCli: typeof runMetabot = runMetabot,
+  onReject?: (reason: string) => void,
 ): Promise<MetabotCommandResult> {
-  const baseUrl = await resolveDaemonBaseUrl()
-  if (!baseUrl) return DAEMON_PINNED_SKIP
+  let rejection: string | null = null
+  const baseUrl = await resolveDaemonBaseUrl(process.env, {
+    onReject: (reason) => {
+      rejection = reason
+      onReject?.(reason)
+    },
+  })
+  if (!baseUrl) {
+    if (rejection) {
+      return {
+        ok: false,
+        state: 'failed',
+        code: 'daemon_record_rejected',
+        message: `OAC daemon record rejected: ${rejection}`,
+      }
+    }
+    return DAEMON_PINNED_SKIP
+  }
   return spawnCli(args, {
     ...options,
     env: { ...process.env, METABOT_DAEMON_BASE_URL: baseUrl },

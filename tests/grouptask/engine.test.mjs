@@ -447,6 +447,61 @@ test('engine: local-file deliverables upgrade to metafile URIs through the uploa
   assert.equal(rows[0].kind, 'metafile');
 });
 
+test('engine: an on-chain pin deliverable is recorded WITHOUT touching the upload seam', async () => {
+  const h = createHarness('metabot-gt-engine-pinuri-');
+  const uploads = [];
+  const task = await h.seedTask('executing');
+  const { createGroupTaskEngine } = require('../../dist/core/grouptask/engine.js');
+  const engine = createGroupTaskEngine({
+    ctx: h.ctx,
+    runLlmTurn: async () => '',
+    loadPersona: async () => ({}),
+    uploadDeliverableFile: async ({ slug, filePath }) => {
+      uploads.push({ slug, filePath });
+      return { metafileUri: 'metafile://never', pinId: 'never' };
+    },
+  });
+  // Task-67 regression: "pin://<id>" stripped to "//<id>" used to fake an
+  // absolute local path and hit the workspace upload gate.
+  const pinId = `${'a'.repeat(64)}i0`;
+  h.pushHistory('IDWORKER1', `[DELIVERABLE] pin://${pinId} 《脚本》已上链`);
+  await engine.tick();
+  assert.equal(uploads.length, 0, 'pin:// deliverable never enters the upload seam');
+  const rows = await h.chairStore.listDeliverables(task.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, 'pin');
+  assert.ok(rows[0].uri?.includes(pinId), 'row keeps the pin uri');
+});
+
+test('engine: a plan that never mentions a seated worker raises a plan_coverage host note', async () => {
+  const h = createHarness('metabot-gt-engine-coverage-');
+  const task = await h.seedTask('planning');
+  await h.chairStore.addMember({ taskId: task.id, slug: 'worker-2', globalMetaId: 'IDWORKER2', role: 'worker' });
+  h.pushHistory('IDTWIN', '[GROUP TASK] Engine test task');
+  // The chair plan assigns ONLY worker 1 — worker-2 is never named.
+  h.llmTurns.push('@worker 1 does everything\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+  const coverage = (await h.chairStore.listHostNotes(task.id))
+    .filter((note) => note.kind === 'plan_coverage');
+  assert.equal(coverage.length, 1, 'uncovered worker raised exactly one plan_coverage note');
+  assert.match(coverage[0].body, /worker-2/, 'the missing worker is named');
+  assert.ok(!coverage[0].body.includes('worker 1'), 'the covered worker is not flagged');
+  assert.equal(coverage[0].consumedAt, null, 'note pending for the chair');
+});
+
+test('engine: a plan covering every seated worker raises no plan_coverage note', async () => {
+  const h = createHarness('metabot-gt-engine-coverage-ok-');
+  const task = await h.seedTask('planning');
+  await h.chairStore.addMember({ taskId: task.id, slug: 'worker-2', globalMetaId: 'IDWORKER2', role: 'worker' });
+  h.pushHistory('IDTWIN', '[GROUP TASK] Engine test task');
+  h.llmTurns.push('@worker 1 ships content; @worker-2 you are [STANDBY] for design\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+  const coverage = (await h.chairStore.listHostNotes(task.id))
+    .filter((note) => note.kind === 'plan_coverage');
+  assert.equal(coverage.length, 0, 'full coverage records nothing');
+});
+
+
 // ---------------------------------------------------------------------------
 // Roster-settle gate + OpenTeam join wake (live DSH round-trip 2026-09-05)
 // ---------------------------------------------------------------------------
