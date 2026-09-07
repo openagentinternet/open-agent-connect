@@ -380,6 +380,7 @@ export interface CliDependencies {
     removeBinding?: (input: { from?: string; bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     getPreferredRuntime?: (input?: { from?: string; slug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     setPreferredRuntime?: (input: { from?: string; slug?: string; runtimeId: string | null }) => Awaitable<MetabotCommandResult<unknown>>;
+    hostExecutorStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
   bot?: {
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;

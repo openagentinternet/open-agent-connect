@@ -19,7 +19,7 @@ import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { bindQaToolInstall } from './qa-tools.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
-import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
+import { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import {
   daemonConversationsList,
@@ -45,6 +45,7 @@ import { dispatchMemoryRoutes } from './memory-routes.js'
 import { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyScheduleScheduler } from './schedule-scheduler.js'
+import { HostLlmExecutor } from './host-llm-executor.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
@@ -169,6 +170,9 @@ async function dispatchPost(
       : ''
     if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
     return getAutoReplyStatus(from)
+  }
+  if (method === 'llm/host-status') {
+    return getLlmHostStatus()
   }
   if (method === 'chat/auto-reply/config') {
     const body = payload as { from?: unknown; enabled?: unknown; maxTurns?: unknown; cooldownMs?: unknown }
@@ -399,6 +403,19 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       browserHub.start()
       return () => { browserHub.stop() }
     }, 'oac-dsh: browser event hub')
+    // Host LLM executor: same lifecycle as the browser hub — one long-lived
+    // daemon SSE lease, retrying across daemon restart windows.
+    if (config.llmExecutor?.enabled !== false) {
+      const hostLlmExecutor = new HostLlmExecutor({
+        llm: ctx.llm as unknown as import('./llm-generate.js').LlmStreamLike | undefined,
+        env: process.env,
+        log: (message) => warn(ctx, message),
+      })
+      ctx.effect(() => {
+        hostLlmExecutor.start()
+        return () => { hostLlmExecutor.stop() }
+      }, 'oac-dsh: host LLM executor')
+    }
   }
   if (config.skipBootstrap) {
     health.error = 'bootstrap skipped'
@@ -608,7 +625,8 @@ export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
 export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
-export { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
+export { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
+export { HostLlmExecutor } from './host-llm-executor.js'
 export { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 export { validateCreatePayload } from './bots-input.js'
 export { sortBotsTwinFirst, pickDefaultBotSlug, type BotOrderFields } from './bot-order.js'

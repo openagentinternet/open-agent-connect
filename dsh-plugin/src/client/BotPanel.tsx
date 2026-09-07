@@ -9,7 +9,7 @@ import {
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
-import type { BotRow, LlmDirectory, AutoReplyConfig, ChatSkillsPayload } from './api.ts'
+import type { BotRow, LlmDirectory, LlmHostStatus, AutoReplyConfig, ChatSkillsPayload } from './api.ts'
 import { sortBotsTwinFirst } from '../bot-order.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
@@ -24,6 +24,7 @@ export interface BotPanelInjected {
   update: (slug: string, patch: Record<string, unknown>) => Promise<BotRow>
   remove: (slug: string) => Promise<void>
   llmDirectory: () => Promise<LlmDirectory>
+  llmHostStatus: () => Promise<LlmHostStatus | null>
   chatSkills: (from: string) => Promise<ChatSkillsPayload>
   loadAutoReplyStatus: (from: string) => Promise<AutoReplyConfig>
   autoReplyConfig: (
@@ -40,6 +41,7 @@ export function BotPanel({
   update,
   remove,
   llmDirectory,
+  llmHostStatus,
   chatSkills,
   loadAutoReplyStatus,
   autoReplyConfig,
@@ -94,6 +96,7 @@ export function BotPanel({
         hasOtherTwin={Boolean(otherTwin)}
         otherTwinName={otherTwin?.name ?? ''}
         directory={directory}
+        llmHostStatus={llmHostStatus}
         t={t}
         busy={busy}
         error={error}

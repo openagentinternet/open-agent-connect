@@ -3795,6 +3795,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'unbind', summary: 'Remove a specific LLM binding by id.' },
       { name: 'set-preferred', summary: 'Set the preferred LLM runtime for a MetaBot profile.' },
       { name: 'get-preferred', summary: 'Get the preferred LLM runtime for a MetaBot profile.' },
+      { name: 'host-executor', summary: 'Show whether a host LLM executor (e.g. the DSH plugin) is connected to the daemon.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
     examples: [
@@ -3898,6 +3899,16 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot llm get-preferred --from my-bot',
       'metabot llm get-preferred',
+    ],
+  },
+  {
+    commandPath: ['llm', 'host-executor'],
+    summary: 'Show the daemon host LLM executor status: how many hosts (e.g. the DSH plugin) are connected to answer delegated generations.',
+    usage: 'metabot llm host-executor',
+    optionalFlags: [HELP_JSON_FLAG],
+    successFields: ['connected', 'lastConnectedAt'],
+    examples: [
+      'metabot llm host-executor',
     ],
   },
 ];

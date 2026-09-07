@@ -249,6 +249,11 @@ import {
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
 import { createLlmAvailabilityRecovery } from '../core/llm/llmAvailabilityRecovery';
 import type { LlmAvailabilityRecovery } from '../core/llm/llmAvailabilityRecovery';
+import {
+  createDshPairHostLlmGenerate,
+  createHostLlmExecutorBridge,
+  setActiveHostLlmExecutorBridge,
+} from '../core/llm/hostLlmExecutorBridge';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import {
   LlmExecutor,
@@ -1761,6 +1766,7 @@ export function createPrivateChatReplyRunnerForProfile(input: {
     runtimeResolver: input.runtimeResolver,
     llmExecutor: input.llmExecutor,
     metaBotSlug: input.metaBotSlug,
+    hostLlmGenerate: createDshPairHostLlmGenerate({ dshLlmPath: input.paths.dshLlmPath }),
     chatWorkspaceDir: path.join(input.paths.profileRoot, '.runtime', 'private-chat-work'),
     requestAvailabilityRecovery: () => {
       activeLlmAvailabilityRecovery?.requestSoon(input.paths.profileRoot);
@@ -5097,6 +5103,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           { runtimeId: input.runtimeId },
         );
       },
+      hostExecutorStatus: async () => requestJson(context, 'GET', '/api/llm/host-executor/status'),
     },
     bot: {
       listProfiles: async () => requestJson(context, 'GET', '/api/bot/profiles'),
@@ -5537,6 +5544,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     runtimeResolver: daemonRuntimeResolver,
     llmExecutor,
     metaBotSlug: daemonMetaBotSlug,
+    hostLlmGenerate: createDshPairHostLlmGenerate({ dshLlmPath: paths.dshLlmPath }),
   });
   const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? buyerRatingHostReplyRunner;
   const orderProtocolTextGenerator = createLlmOrderProtocolTextGenerator({
@@ -5566,9 +5574,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   };
   const scheduleHostLeases = new Map<string, { host: string; expiresAtMs: number }>();
 
+  // Host LLM executor bridge: the DSH host leases generation work from the
+  // daemon over the /api/llm/host-executor/* routes; the private-chat reply
+  // runners consult it (per Bot DSH pair) before falling back to templates.
+  const hostLlmExecutorBridge = createHostLlmExecutorBridge();
+  setActiveHostLlmExecutorBridge(hostLlmExecutorBridge);
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
+    hostLlmExecutorBridge,
     getDaemonRecord: () => daemonRecord,
     secretStore,
     signer,

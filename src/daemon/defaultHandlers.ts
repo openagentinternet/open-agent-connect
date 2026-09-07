@@ -182,6 +182,8 @@ import { sendPrivateChat } from '../core/chat/privateChat';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createDefaultChatReplyRunner } from '../core/chat/defaultChatReplyRunner';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import type { HostLlmExecutorBridge, HostLlmGenerateRequest } from '../core/llm/hostLlmExecutorBridge';
+import { createDshPairHostLlmGenerate } from '../core/llm/hostLlmExecutorBridge';
 import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
@@ -5062,6 +5064,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   createSignerForHome?: (homeDir: string) => Signer;
   autoReplyConfig?: PrivateChatAutoReplyConfig;
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
+  /** Host LLM executor bridge (DSH host delegation); shared with the private-chat reply runners. */
+  hostLlmExecutorBridge?: HostLlmExecutorBridge;
   providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
   /** Scheduled-task verbs: shared per-profile store instances + host leases
    *  owned by the daemon process (the tick and the routes must mutate the
@@ -6788,6 +6792,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           llmExecutor: input.llmExecutor,
           metaBotSlug: profileMetaBotSlug,
           allowTemplateFallback: false,
+          hostLlmGenerate: input.hostLlmExecutorBridge
+            ? createDshPairHostLlmGenerate({ dshLlmPath: profileRuntimeStateStore.paths.dshLlmPath })
+            : undefined,
           chatWorkspaceDir: path.join(profileRuntimeStateStore.paths.profileRoot, '.runtime', 'private-chat-work'),
           allowedChatSkillsResolver: createPrivateChatAllowedSkillsResolver({
             paths: profileRuntimeStateStore.paths,
@@ -18517,6 +18524,71 @@ export function createDefaultMetabotDaemonHandlers(input: {
         await fs.mkdir(path.dirname(paths.preferredLlmRuntimePath), { recursive: true });
         await fs.writeFile(paths.preferredLlmRuntimePath, JSON.stringify({ runtimeId }, null, 2) + '\n', 'utf8');
         return commandSuccess({ runtimeId });
+      },
+      hostExecutorStatus: async () => {
+        if (!input.hostLlmExecutorBridge) {
+          return commandFailed('host_executor_not_configured', 'Host LLM executor bridge is not configured.');
+        }
+        return commandSuccess(input.hostLlmExecutorBridge.status());
+      },
+      hostExecutorSubmitResult: async (body) => {
+        if (!input.hostLlmExecutorBridge) {
+          return commandFailed('host_executor_not_configured', 'Host LLM executor bridge is not configured.');
+        }
+        const requestId = normalizeText(body.requestId);
+        if (!requestId) {
+          return commandFailed('missing_request_id', 'requestId is required.');
+        }
+        const accepted = input.hostLlmExecutorBridge.submitResult({
+          requestId,
+          ok: body.ok === true,
+          ...(typeof body.output === 'string' ? { output: body.output } : {}),
+          ...(typeof body.error === 'string' ? { error: body.error } : {}),
+        });
+        if (!accepted) {
+          return commandFailed('host_executor_result_unknown', `No pending host LLM request: ${requestId}`);
+        }
+        return commandSuccess({ accepted: true });
+      },
+      hostExecutorEvents: () => {
+        const bridge = input.hostLlmExecutorBridge;
+        if (!bridge) return Promise.resolve(null);
+        // Pushable queue: the bridge sink fills it, the SSE route drains it.
+        // The periodic wake bounds how long a queued generator return() (route
+        // disconnect) can stay parked on the wait promise before the finally
+        // detach runs — a bare await would leak the sink forever.
+        const HOST_EXECUTOR_STREAM_WAKE_MS = 20_000;
+        return Promise.resolve((async function* hostExecutorEventStream(): AsyncGenerator<HostLlmGenerateRequest> {
+          const queue: HostLlmGenerateRequest[] = [];
+          let wake: (() => void) | null = null;
+          const detach = bridge.attach((request) => {
+            queue.push(request);
+            try {
+              wake?.();
+            } catch {
+              // A dead wake must not break the broadcast.
+            }
+          });
+          try {
+            for (;;) {
+              while (queue.length > 0) {
+                const next = queue.shift();
+                if (next) yield next;
+              }
+              await new Promise<void>((resolve) => {
+                let timer: NodeJS.Timeout | undefined = setTimeout(resolve, HOST_EXECUTOR_STREAM_WAKE_MS);
+                wake = () => {
+                  clearTimeout(timer);
+                  timer = undefined;
+                  resolve();
+                };
+              });
+              wake = null;
+            }
+          } finally {
+            detach();
+          }
+        })());
       },
     },
   };

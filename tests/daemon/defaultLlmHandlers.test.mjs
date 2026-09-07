@@ -206,3 +206,83 @@ test('llm discoverRuntimes background mode mirrors the bot handler behavior', as
     'a provider-subset sweep must not retire runtimes of other providers',
   );
 });
+
+test('llm host-executor handlers expose status, accept results, and stream requests', async (t) => {
+  const homeDir = await createProfileHome('metabot-llm-host-executor-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const {
+    createHostLlmExecutorBridge,
+  } = require('../../dist/core/llm/hostLlmExecutorBridge.js');
+  const bridge = createHostLlmExecutorBridge();
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+    hostLlmExecutorBridge: bridge,
+  });
+
+  const before = await handlers.llm.hostExecutorStatus();
+  assert.equal(before.ok, true);
+  assert.equal(before.data.connected, 0);
+  assert.equal(before.data.lastConnectedAt, null);
+
+  // Attach through the events stream (the SSE route's iterable), then run one
+  // generation end to end through the bridge.
+  const stream = await handlers.llm.hostExecutorEvents();
+  const drained = [];
+  let connectedDuringStream = 0;
+  const drainPromise = (async () => {
+    for await (const event of stream) {
+      drained.push(event);
+      connectedDuringStream = bridge.status().connected;
+      if (drained.length === 1) break;
+    }
+  })();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const generatePromise = bridge.generate({
+    botSlug: 'alice',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    system: 'sys',
+    prompt: 'prompt',
+    timeoutMs: 2_000,
+  });
+  await waitForCondition(() => drained.length === 1, 'generation request to reach the stream');
+  const result = await handlers.llm.hostExecutorSubmitResult({
+    requestId: drained[0].requestId,
+    ok: true,
+    output: 'daemon-side reply',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(await generatePromise, { ok: true, output: 'daemon-side reply' });
+  await drainPromise;
+
+  assert.equal(connectedDuringStream, 1);
+  const after = await handlers.llm.hostExecutorStatus();
+  // Breaking the for-await detaches the stream (the SSE route does the same on
+  // disconnect), so the executor count returns to zero.
+  assert.equal(after.data.connected, 0);
+  assert.equal(typeof after.data.lastConnectedAt, 'string');
+
+  const unknown = await handlers.llm.hostExecutorSubmitResult({ requestId: 'missing', ok: true, output: 'x' });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.code, 'host_executor_result_unknown');
+});
+
+test('llm host-executor handlers fail closed without a bridge', async (t) => {
+  const homeDir = await createProfileHome('metabot-llm-host-executor-none-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+  const status = await handlers.llm.hostExecutorStatus();
+  assert.equal(status.ok, false);
+  assert.equal(status.code, 'host_executor_not_configured');
+  const events = await handlers.llm.hostExecutorEvents();
+  assert.equal(events, null);
+});

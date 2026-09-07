@@ -265,4 +265,12 @@ export interface OacDshConfig {
   user?: {
     enabled?: boolean
   }
+  /**
+   * Host LLM executor: leases private-chat reply generations from the OAC
+   * daemon over the /api/llm/host-executor/* SSE channel and runs them on
+   * the DSH llm service with each Bot's DSH LLM pair.
+   */
+  llmExecutor?: {
+    enabled?: boolean
+  }
 }
