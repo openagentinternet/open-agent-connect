@@ -23,6 +23,8 @@ import {
 const CURSOR_STATE_VERSION = 1;
 const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_RECENT_LIMIT = 100;
+/** Ceiling for the quiet-pass backoff (15s → 30 → 60 → 120 → 240 → 300s). */
+const DEFAULT_MAX_IDLE_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_STARTUP_CATCH_UP_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS = 3;
 const DEFAULT_PEER_CONCURRENCY = 4;
@@ -75,6 +77,8 @@ export interface PrivateChatAutoReplyBackfillDependencies {
 
 export interface PrivateChatAutoReplyBackfillOptions {
   intervalMs?: number;
+  /** Ceiling for the quiet-pass backoff delay; defaults to 5 minutes. */
+  maxIdleIntervalMs?: number;
   recentLimit?: number;
   startupCatchUpMs?: number;
   outboundRecoveryDelayMs?: number;
@@ -529,8 +533,20 @@ export function createPrivateChatAutoReplyBackfillLoop(
     fetchImpl: deps.fetchImpl,
   });
   const getNow = deps.now ?? (() => Date.now());
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let syncing = false;
+  let running = false;
+  // Idle backoff: one daemon runs this loop per profile, and each pass polls
+  // the chain history for every known peer. On multi-Bot machines (80+ live
+  // profiles) a flat 15s cadence means dozens of chain requests per second,
+  // with per-message ECDH decryption — enough to starve the whole machine.
+  // Quiet passes (nothing processed, nothing recovered) double the next delay
+  // up to a cap; any activity returns to the base cadence immediately.
+  let idleStreak = 0;
+  const maxIdleIntervalMs = Math.max(
+    intervalMs,
+    normalizePositiveInteger(options.maxIdleIntervalMs, DEFAULT_MAX_IDLE_INTERVAL_MS),
+  );
 
   const syncOnce = async (): Promise<PrivateChatAutoReplyBackfillSyncResult> => {
     const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
@@ -731,35 +747,56 @@ export function createPrivateChatAutoReplyBackfillLoop(
   };
 
   const runBackgroundSync = (): void => {
-    if (syncing) return;
+    if (syncing) {
+      scheduleNext();
+      return;
+    }
     syncing = true;
     void syncOnce()
+      .then((result) => {
+        const idle = result.processed === 0 && result.recovered === 0;
+        idleStreak = idle ? idleStreak + 1 : 0;
+      })
       .catch((error) => {
+        // A failing pass (e.g. chain API unreachable) backs off like a quiet
+        // one instead of hammering the endpoint at the base cadence.
+        idleStreak += 1;
         deps.onError?.(error instanceof Error ? error : new Error(String(error)));
       })
       .finally(() => {
         syncing = false;
+        scheduleNext();
       });
+  };
+
+  const scheduleNext = (): void => {
+    if (!timer && !running) return;
+    const delay = idleStreak === 0
+      ? intervalMs
+      : Math.min(intervalMs * 2 ** Math.min(idleStreak, 6), maxIdleIntervalMs);
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(runBackgroundSync, delay);
+    timer.unref?.();
   };
 
   return {
     syncOnce,
 
     start() {
-      if (timer) return;
+      if (running) return;
+      running = true;
       runBackgroundSync();
-      timer = setInterval(runBackgroundSync, intervalMs);
-      timer.unref?.();
     },
 
     stop() {
+      running = false;
       if (!timer) return;
-      clearInterval(timer);
+      clearTimeout(timer);
       timer = null;
     },
 
     isRunning() {
-      return timer !== null;
+      return running;
     },
   };
 }

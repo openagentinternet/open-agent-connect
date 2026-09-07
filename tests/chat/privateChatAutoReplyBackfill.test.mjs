@@ -812,3 +812,68 @@ test('auto-reply backfill profile manager starts and stops an isolated loop for 
   assert.equal(manager.isRunning(), false);
   assert.deepEqual(events, ['start:alpha', 'start:beta', 'stop:alpha', 'stop:beta']);
 });
+
+test('auto-reply backfill loop backs off on quiet passes and stops cleanly', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1quietbot00000000000000000000000000';
+  const peerGlobalMetaId = 'idq1quietpeer0000000000000000000000000';
+  let fetches = 0;
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async () => undefined,
+    listPeerGlobalMetaIds: async () => [peerGlobalMetaId],
+    historyClient: {
+      async fetchRecent() {
+        fetches += 1;
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 0,
+          serverTime: 1_770_008_000_000,
+          messages: [],
+        };
+      },
+      async fetchAfter() {
+        fetches += 1;
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 0,
+          serverTime: 1_770_008_000_000,
+          messages: [],
+        };
+      },
+    },
+    now: () => 1_770_008_000_000,
+  }, {
+    intervalMs: 20,
+    maxIdleIntervalMs: 120,
+  });
+
+  loop.start();
+  assert.equal(loop.isRunning(), true);
+  // Quiet passes double the delay (20→40→80→120→120…): over 500ms that is
+  // at most ~7 passes, where a flat 20ms interval would have run ~25.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  loop.stop();
+  assert.equal(loop.isRunning(), false);
+  assert.ok(fetches > 0, 'at least one pass ran');
+  assert.ok(fetches <= 10, `quiet passes should back off, got ${fetches} fetches in 500ms`);
+
+  // After stop() the loop must stay silent.
+  const afterStop = fetches;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(fetches, afterStop);
+});
