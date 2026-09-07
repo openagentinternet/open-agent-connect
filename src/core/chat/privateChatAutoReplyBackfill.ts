@@ -25,6 +25,8 @@ const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_RECENT_LIMIT = 100;
 /** Ceiling for the quiet-pass backoff (15s → 30 → 60 → 120 → 240 → 300s). */
 const DEFAULT_MAX_IDLE_INTERVAL_MS = 5 * 60_000;
+/** Max peers swept per pass (0 = unlimited); bounds hub Bots with 100+ peers. */
+const DEFAULT_PEER_SWEEP_CAP = 32;
 const DEFAULT_STARTUP_CATCH_UP_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS = 3;
 const DEFAULT_PEER_CONCURRENCY = 4;
@@ -79,6 +81,8 @@ export interface PrivateChatAutoReplyBackfillOptions {
   intervalMs?: number;
   /** Ceiling for the quiet-pass backoff delay; defaults to 5 minutes. */
   maxIdleIntervalMs?: number;
+  /** Max peers polled per pass with rotation; 0 disables the cap. Default 32. */
+  peerSweepCap?: number;
   recentLimit?: number;
   startupCatchUpMs?: number;
   outboundRecoveryDelayMs?: number;
@@ -137,8 +141,16 @@ function normalizeGlobalMetaId(value: unknown): string {
 }
 
 function normalizePositiveInteger(value: unknown, fallback: number): number {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0 || Math.floor(parsed) !== parsed) {
+    return fallback;
+  }
+  return parsed;
+}
+
+/** Like normalizePositiveInteger but also accepts 0 (cap disabled). */
+function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
+  return value === 0 ? 0 : normalizePositiveInteger(value, fallback);
 }
 
 function normalizeEpochSeconds(value: unknown): number {
@@ -536,6 +548,9 @@ export function createPrivateChatAutoReplyBackfillLoop(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let syncing = false;
   let running = false;
+  // Rotating offset into the (sorted) peer list for the per-pass sweep cap.
+  let sweepRotation = 0;
+  const peerSweepCap = normalizeNonNegativeInteger(options.peerSweepCap, DEFAULT_PEER_SWEEP_CAP);
   // Idle backoff: one daemon runs this loop per profile, and each pass polls
   // the chain history for every known peer. On multi-Bot machines (80+ live
   // profiles) a flat 15s cadence means dozens of chain requests per second,
@@ -577,7 +592,33 @@ export function createPrivateChatAutoReplyBackfillLoop(
       return Number(leftHasCursor) - Number(rightHasCursor);
     });
 
-    await runWithConcurrency(orderedPeers, peerConcurrency, async (peerGlobalMetaId) => {
+    // Sweep cap with rotation: bound the work per pass independently of how
+    // many peers a Bot knows. Continuously-active hub Bots never idle-backoff
+    // (every pass has new messages), and without a cap one 150-peer hub meant
+    // 150 chain requests back-to-back forever. Cursor-less peers (first sight)
+    // are always swept so bootstrapping is never delayed; the rotation windows
+    // over the cursor-carrying rest in key-stable order, covering all peers
+    // across successive passes. Realtime delivery still comes from the
+    // simplemsg socket push — this loop is the missed-push safety net.
+    const cursorlessPeers = orderedPeers.filter((peer) => !cursorState.peers[normalizeGlobalMetaId(peer)]);
+    const cursoredPeers = orderedPeers
+      .filter((peer) => cursorState.peers[normalizeGlobalMetaId(peer)])
+      .sort((left, right) => normalizeGlobalMetaId(left).localeCompare(normalizeGlobalMetaId(right)));
+    const cappedCursored = peerSweepCap > 0 && cursoredPeers.length > peerSweepCap
+      ? (() => {
+        const offset = sweepRotation % cursoredPeers.length;
+        sweepRotation = offset + peerSweepCap;
+        return [
+          ...cursoredPeers.slice(offset, offset + peerSweepCap),
+          ...(offset + peerSweepCap > cursoredPeers.length
+            ? cursoredPeers.slice(0, (offset + peerSweepCap) % cursoredPeers.length)
+            : []),
+        ];
+      })()
+      : cursoredPeers;
+    const cappedPeers = [...cursorlessPeers, ...cappedCursored];
+
+    await runWithConcurrency(cappedPeers, peerConcurrency, async (peerGlobalMetaId) => {
       const peerKey = normalizeGlobalMetaId(peerGlobalMetaId);
       const peerChatPublicKey = normalizeText(await deps.resolvePeerChatPublicKey(peerGlobalMetaId));
       if (!peerChatPublicKey) {
@@ -738,7 +779,7 @@ export function createPrivateChatAutoReplyBackfillLoop(
     }
 
     return {
-      peers: peers.length,
+      peers: cappedPeers.length,
       processed,
       skipped,
       failed,

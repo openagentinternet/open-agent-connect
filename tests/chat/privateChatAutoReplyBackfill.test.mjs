@@ -877,3 +877,52 @@ test('auto-reply backfill loop backs off on quiet passes and stops cleanly', asy
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(fetches, afterStop);
 });
+
+test('auto-reply backfill caps peers per pass and rotates through the full set', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1capbot0000000000000000000000000000';
+  const swept = [];
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async () => undefined,
+    listPeerGlobalMetaIds: async () => Array.from({ length: 40 }, (_, i) => `idq1peer${String(i).padStart(3, '0')}0000000000000000000000000`),
+    historyClient: {
+      async fetchRecent(input) {
+        swept.push(input.peerGlobalMetaId);
+        return { ok: true, selfGlobalMetaId, peerGlobalMetaId: input.peerGlobalMetaId, nextPollAfterIndex: 0, serverTime: 1_770_008_000_000, messages: [] };
+      },
+      async fetchAfter(input) {
+        swept.push(input.peerGlobalMetaId);
+        return { ok: true, selfGlobalMetaId, peerGlobalMetaId: input.peerGlobalMetaId, nextPollAfterIndex: 0, serverTime: 1_770_008_000_000, messages: [] };
+      },
+    },
+    now: () => 1_770_008_000_000,
+  }, {
+    intervalMs: 20,
+    peerSweepCap: 15,
+  });
+
+  // First sight: every peer is cursor-less, so the pass bootstraps all 40.
+  const first = await loop.syncOnce();
+  assert.equal(first.peers, 40, 'cursor-less peers are bootstrapped without the cap');
+
+  // Steady state: rotation windows of 15 cover all 40 peers in 3 passes.
+  const second = await loop.syncOnce();
+  assert.equal(second.peers, 15, 'cursored passes respect the cap');
+  const third = await loop.syncOnce();
+  assert.equal(third.peers, 15);
+  const fourth = await loop.syncOnce();
+  assert.equal(fourth.peers, 15);
+  const totalSwept = new Set(swept);
+  assert.equal(totalSwept.size, 40, 'rotation windows cover every peer');
+});
