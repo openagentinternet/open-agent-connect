@@ -754,6 +754,34 @@ function isDuplicateToolError(error: unknown): boolean {
   return error instanceof Error && /already registered/.test(error.message)
 }
 
+/**
+ * Resolve the acting agent's session workspace cwd, kernel-shape-agnostic.
+ *
+ * The DSH kernel keeps the validated session cwd on
+ * `agent.session.header.cwd`; an older shape exposed it as
+ * `agent.ctx.options.cwd`. `agent.ctx` is a Cordis context where reading an
+ * un-injected property THROWS (`cannot get property "options" without
+ * inject`), so every read must be guarded — a gated or missing shape
+ * degrades to "workspace unknown" (external-file tools then ask for owner
+ * approval), never kills the tool call.
+ */
+export function agentSessionCwd(agent: HostAgentLike | undefined): string | undefined {
+  if (!agent) return undefined
+  try {
+    const header = (agent as { session?: { header?: { cwd?: unknown } } }).session?.header
+    if (typeof header?.cwd === 'string' && header.cwd.trim()) return header.cwd
+  } catch {
+    // gated context shape — fall through to the legacy read
+  }
+  try {
+    const cwd = (agent as { ctx?: { options?: { cwd?: unknown } } }).ctx?.options?.cwd
+    if (typeof cwd === 'string' && cwd.trim()) return cwd
+  } catch {
+    // cordis inject check on ctx.options — workspace unknown on this kernel
+  }
+  return undefined
+}
+
 export function oacSlugOf(ctx: HostContext, agent: HostAgentLike): string | undefined {
   const preset = agent.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
   return preset ? slugFromPresetId(preset) : undefined

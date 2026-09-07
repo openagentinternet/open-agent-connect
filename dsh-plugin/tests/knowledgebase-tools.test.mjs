@@ -45,6 +45,28 @@ test('bindKnowledgeBaseToolInstall registers all tools incl. the qa-surf pair', 
   )
 })
 
+test('kb/study tools survive a cordis ctx that throws on gated reads (kernel regression)', async () => {
+  const base = mkdtempSync(path.join(tmpdir(), 'kb-ctx-guard-'))
+  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
+  mkdirSync(homeDir, { recursive: true })
+  const throwingCtx = new Proxy({}, {
+    get(target, prop) {
+      if (prop === 'then') return undefined
+      throw new Error(`cannot get property "${String(prop)}" without inject`)
+    },
+  })
+  const kernelAgent = { ctx: throwingCtx, session: { header: { cwd: homeDir } } }
+  const host = fakeHost()
+  plugin.bindKnowledgeBaseToolInstall(host.ctx, 'test-bot')
+  const byName = new Map(host.tools.map((tool) => [tool.name, tool]))
+  const exec = { agent: kernelAgent, callId: 'call-1' }
+
+  const enabled = await byName.get('metaweb_qa_surf_enqueue').execute({}, exec)
+  assert.match(String(enabled), /Nightly Q&A surfing enabled/)
+  const status = await byName.get('metaweb_study_status').execute({}, exec)
+  assert.match(String(status), /recurring Q&A surfing/)
+})
+
 test('qa-surf enqueue/dedup/disable roundtrip with the recurring status label', async () => {
   const base = mkdtempSync(path.join(tmpdir(), 'kb-qa-surf-'))
   const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')

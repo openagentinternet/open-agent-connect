@@ -7,7 +7,7 @@
  */
 import { core } from './local-read.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
-import { oacSlugOf } from './browser-tools.js'
+import { agentSessionCwd, oacSlugOf } from './browser-tools.js'
 
 export interface KnowledgebaseToolDeps {
   /** Resolve the acting bot slug for one tool exec; fallback when unknown. */
@@ -85,9 +85,8 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
   }
 
   const sessionOf = (exec: HostToolExec) => {
-    const agent = exec.agent as (HostAgentLike & { ctx?: { options?: { cwd?: string } } }) | undefined
-    const homeDir = agent?.ctx?.options?.cwd
-    return slugFor(exec, typeof homeDir === 'string' ? homeDir : undefined)
+    const agent = exec.agent as HostAgentLike | undefined
+    return slugFor(exec, agentSessionCwd(agent))
   }
 
   return [
@@ -289,8 +288,8 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
     { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
   ]
   const sessionOf = (exec: HostToolExec) => {
-    const agent = exec.agent as (HostAgentLike & { ctx?: { options?: { cwd?: string } } }) | undefined
-    const homeDir = agent?.ctx?.options?.cwd
+    const agent = exec.agent as HostAgentLike | undefined
+    const homeDir = agentSessionCwd(agent)
     const slug = (agent ? oacSlugOf(host, agent) : undefined) ?? input.fallbackSlug ?? ''
     if (!slug || typeof homeDir !== 'string') return null
     return { slug, homeDir }
@@ -430,8 +429,8 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
     { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
   ]
   const sessionOf = (exec: HostToolExec) => {
-    const agent = exec.agent as (HostAgentLike & { ctx?: { options?: { cwd?: string } } }) | undefined
-    const homeDir = agent?.ctx?.options?.cwd
+    const agent = exec.agent as HostAgentLike | undefined
+    const homeDir = agentSessionCwd(agent)
     const slug = (agent ? oacSlugOf(host, agent) : undefined) ?? input.fallbackSlug ?? ''
     if (!slug || typeof homeDir !== 'string') return null
     return { slug, homeDir }

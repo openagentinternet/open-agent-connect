@@ -6,6 +6,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const plugin = await import('../lib/qa-tools.js')
+const browserTools = await import('../lib/browser-tools.js')
 
 const require = createRequire(import.meta.url)
 
@@ -234,6 +235,45 @@ test('post_simplequestion: workspace files publish freely, external files need o
 
   const noTitle = await tool.execute({ title: '  ' }, {})
   assert.match(noTitle, /requires `title`/)
+})
+
+test('post_* survive a cordis ctx that throws on gated property reads (kernel regression)', async () => {
+  // Reproduces the live failure: cannot get property "options" without inject.
+  // The DSH kernel's agent.ctx is a cordis Context where reading an un-injected
+  // property throws; the session cwd lives on agent.session.header.cwd.
+  const throwingCtx = new Proxy({}, {
+    get(target, prop) {
+      if (prop === 'then') return undefined
+      throw new Error(`cannot get property "${String(prop)}" without inject`)
+    },
+  })
+  const kernelAgent = {
+    ctx: throwingCtx,
+    session: { header: { cwd: '/kernel/workspace' } },
+  }
+  const { run, calls } = fakeRun()
+  const host = fakeHost()
+  const [question, answer] = plugin.buildQaToolDefinitions({
+    host: host.ctx,
+    hostAgent: { ctx: host.ctx },
+    run,
+    getWorkspaceDir: (exec) => browserTools.agentSessionCwd(exec.agent),
+  })
+
+  // No attachments: the guard must not touch the workspace resolution at all.
+  const q = await question.execute({ title: 'T' }, { agent: kernelAgent })
+  assert.match(q, /Question published on-chain/)
+  const a = await answer.execute({ answer_to: 'q1', content: 'c' }, { agent: kernelAgent })
+  assert.equal(typeof a, 'string', 'the answer call survives the gated ctx (fakeRun default result)')
+  assert.ok(!a.includes('failed'), a)
+  assert.equal(calls.length, 2)
+
+  // With attachments inside the session workspace (session.header.cwd), no
+  // approval is needed and nothing throws.
+  const inside = '/kernel/workspace/shot.png'
+  const ok = await question.execute({ title: 'T2', attachments: [inside] }, { agent: kernelAgent })
+  assert.match(ok, /Question published on-chain/)
+  assert.equal(calls.length, 3, 'in-workspace attachment (session.header.cwd) publishes without approval')
 })
 
 test('post_simpleanswer passes answer fields through and renders the already-answered notice', async () => {
