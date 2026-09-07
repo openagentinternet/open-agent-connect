@@ -241,6 +241,19 @@ import {
   publishSimpleNote,
   type SimpleNoteNetwork,
 } from '../core/simplenote/publish';
+import {
+  formatLikePinResult,
+  formatSimpleAnswerResult,
+  formatSimpleQuestionResult,
+  publishLikePin,
+  publishSimpleAnswer,
+  publishSimpleQuestion,
+  QandaPublishError,
+  type QandaNetwork,
+} from '../core/qanda/publish';
+import { collectPriorAnswers, createQaAnswerLedger } from '../core/qanda/ledger';
+import { qaQuestionAnswers, QA_RECALL_BASE_URL_ENV } from '../core/qanda/recall';
+import { formatAlreadyAnsweredNotice } from '../core/qanda/format';
 import { createProfileScopedUpload } from '../core/files/profileUploadGate';
 import { ChainBroadcastUnknownError } from '../core/signing/localMnemonicSigner';
 import {
@@ -5121,6 +5134,27 @@ export function createDefaultMetabotDaemonHandlers(input: {
       );
     }
     return commandFailed(fallbackCode, error instanceof Error ? error.message : String(error));
+  }
+
+  /** Q&A write failure mapping: QandaPublishError codes ride through, broadcast-unknown stays protected. */
+  async function qandaFailedOrBroadcastUnknown(
+    error: unknown,
+    kind: string,
+    hashParts: string[],
+  ): Promise<MetabotCommandResult<never>> {
+    const fallbackCode = error instanceof QandaPublishError ? error.code : `${kind}_failed`;
+    return await commandFailedOrBroadcastUnknown(
+      error,
+      kind,
+      stableChainWriteHash(kind, hashParts),
+      fallbackCode,
+    );
+  }
+
+  /** Q&A recall options from the daemon process env (test/staging override). */
+  function qaRecallOptionsForDaemon(): { baseUrl?: string } {
+    const override = normalizeText(process.env[QA_RECALL_BASE_URL_ENV]);
+    return override ? { baseUrl: override } : {};
   }
 
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
@@ -13750,6 +13784,189 @@ export function createDefaultMetabotDaemonHandlers(input: {
               return typeof code === 'string' ? code : 'simplenote_post_failed';
             })(),
           );
+        }
+      },
+    },
+    qanda: {
+      // post_simplequestion: publish one on-chain question end to end.
+      question: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing a question.');
+        }
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const gatedUpload = createProfileScopedUpload({
+            profileHomeDir: async () => actor.homeDir,
+            signerForSlug: async () => actor.signer,
+            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+          });
+          const result = await publishSimpleQuestion(
+            actor.signer,
+            async ({ filePath, network: uploadNetwork }) => gatedUpload({
+              slug: normalizeText(rawInput.from) || 'actor',
+              filePath,
+              network: uploadNetwork,
+            }),
+            {
+              title: normalizeText(rawInput.title),
+              content: typeof rawInput.content === 'string' ? rawInput.content : undefined,
+              contentType: normalizeText(typeof rawInput.contentType === 'string' ? rawInput.contentType : rawInput.content_type) || undefined,
+              tags: readStringArray(rawInput.tags),
+              attachments: readStringArray(rawInput.attachments),
+              network: network as QandaNetwork,
+            },
+          );
+          return commandSuccess({
+            ...result,
+            formatted: formatSimpleQuestionResult(result),
+            localUiUrl: buildDaemonLocalUiUrl(
+              input.getDaemonRecord(),
+              '/ui/qanda/app/index.html',
+              { q: result.pinId },
+            ) ?? `/ui/qanda/app/index.html?q=${encodeURIComponent(result.pinId)}`,
+          });
+        } catch (error) {
+          return qandaFailedOrBroadcastUnknown(error, 'qanda_question', [
+            normalizeText(rawInput.title),
+            await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+            ...readStringArray(rawInput.attachments).sort(),
+          ]);
+        }
+      },
+      // post_simpleanswer: fact-first repeat notice before spending sats, then
+      // publish + record into the local ledger.
+      answer: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing an answer.');
+        }
+        const slug = normalizeText(rawInput.from) || 'actor';
+        const questionPinId = normalizeText(rawInput.answerTo ?? rawInput.answer_to);
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const ledger = createQaAnswerLedger(resolveMetabotPaths(actor.homeDir));
+          // Fact-first repeat notice (host bookkeeping only, never a protocol
+          // constraint): surface prior answers BEFORE spending sats; the bot
+          // decides whether to proceed with allowRepeat=true.
+          if (questionPinId && rawInput.allowRepeat !== true && rawInput.allow_repeat !== true) {
+            const publisher = normalizeText(state.identity.globalMetaId);
+            const { answers: priorAnswers, source: priorSource } = await collectPriorAnswers({
+              local: await ledger.listAnswers(slug, questionPinId),
+              fetchRemote: publisher
+                ? () => qaQuestionAnswers(
+                  { pinId: questionPinId, publisher },
+                  qaRecallOptionsForDaemon(),
+                ).then((page) => page.items)
+                : null,
+            });
+            if (priorAnswers.length) {
+              return commandSuccess({
+                published: false,
+                alreadyAnswered: true,
+                notice: formatAlreadyAnsweredNotice(questionPinId, priorAnswers, priorSource),
+                priorAnswerCount: priorAnswers.length,
+              });
+            }
+          }
+          const gatedUpload = createProfileScopedUpload({
+            profileHomeDir: async () => actor.homeDir,
+            signerForSlug: async () => actor.signer,
+            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+          });
+          const result = await publishSimpleAnswer(
+            actor.signer,
+            async ({ filePath, network: uploadNetwork }) => gatedUpload({
+              slug,
+              filePath,
+              network: uploadNetwork,
+            }),
+            {
+              answerTo: questionPinId,
+              content: normalizeText(rawInput.content),
+              contentType: normalizeText(typeof rawInput.contentType === 'string' ? rawInput.contentType : rawInput.content_type) || undefined,
+              tags: readStringArray(rawInput.tags),
+              attachments: readStringArray(rawInput.attachments),
+              network: network as QandaNetwork,
+            },
+          );
+          await ledger.recordAnswer(slug, result.questionPinId, {
+            answerPinId: result.pinId,
+            content: result.content,
+            postedAt: Date.now(),
+            network: String(result.network),
+          });
+          return commandSuccess({
+            ...result,
+            formatted: formatSimpleAnswerResult({
+              pinId: result.pinId,
+              txids: result.txids,
+              totalCost: result.totalCost,
+              questionPinId: result.questionPinId,
+              attachments: result.attachments,
+              priorAnswerCount: 0,
+            }),
+            localUiUrl: buildDaemonLocalUiUrl(
+              input.getDaemonRecord(),
+              '/ui/qanda/app/index.html',
+              { q: result.questionPinId },
+            ) ?? `/ui/qanda/app/index.html?q=${encodeURIComponent(result.questionPinId)}`,
+          });
+        } catch (error) {
+          return qandaFailedOrBroadcastUnknown(error, 'qanda_answer', [
+            questionPinId,
+            normalizeText(rawInput.content),
+            await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+            ...readStringArray(rawInput.attachments).sort(),
+          ]);
+        }
+      },
+      // like_pin: one paylike reaction pin (payload-only write, no upload).
+      like: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing a reaction.');
+        }
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const isLikeRaw = rawInput.isLike ?? rawInput.is_like;
+          const isLike = isLikeRaw === 1 || isLikeRaw === '1' ? 1
+            : isLikeRaw === -1 || isLikeRaw === '-1' ? -1
+              : isLikeRaw === 0 || isLikeRaw === '0' ? 0
+                : NaN;
+          const result = await publishLikePin(actor.signer, {
+            pinId: normalizeText(rawInput.pinId ?? rawInput.pin_id),
+            isLike: isLike as 1 | -1 | 0,
+            network: network as QandaNetwork,
+          });
+          return commandSuccess({
+            ...result,
+            formatted: formatLikePinResult({
+              reactionPinId: result.pinId,
+              txids: result.txids,
+              totalCost: result.totalCost,
+              targetPinId: result.targetPinId,
+              isLike: result.isLike,
+            }),
+          });
+        } catch (error) {
+          return qandaFailedOrBroadcastUnknown(error, 'qanda_like', [
+            normalizeText(rawInput.pinId ?? rawInput.pin_id),
+            String(rawInput.isLike ?? rawInput.is_like ?? ''),
+            await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+          ]);
         }
       },
     },

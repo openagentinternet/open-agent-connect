@@ -17,6 +17,7 @@ import {
 import { bindMetawebToolInstall } from './metaweb-tools.js'
 import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
+import { bindQaToolInstall } from './qa-tools.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
@@ -510,6 +511,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindMetawebToolInstall(ctx)
   bindSkillToolInstall(ctx)
   bindSimpleNoteToolInstall(ctx)
+  bindQaToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
 
   // Source-session relay: drain group-task milestones back into the chat that

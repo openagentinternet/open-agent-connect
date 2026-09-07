@@ -14,6 +14,7 @@ const config_1 = require("./routes/config");
 const traffic_1 = require("./routes/traffic");
 const buzz_1 = require("./routes/buzz");
 const simplenote_1 = require("./routes/simplenote");
+const qanda_1 = require("./routes/qanda");
 const chain_1 = require("./routes/chain");
 const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
@@ -39,6 +40,7 @@ const ROUTES = [
     traffic_1.handleTrafficRoutes,
     buzz_1.handleBuzzRoutes,
     simplenote_1.handleSimpleNoteRoutes,
+    qanda_1.handleQandaRoutes,
     chain_1.handleChainRoutes,
     daemon_1.handleDaemonRoutes,
     chat_1.handleChatRoutes,

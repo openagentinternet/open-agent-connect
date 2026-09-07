@@ -18,6 +18,15 @@ export interface CliDependencies {
   simplenote?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  qanda?: {
+    question?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    answer?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    like?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    search?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    latest?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    answers?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   browser?: {
     open?: (input: { uri?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     /** Ask every currently-open Browser page to open a URI in a new tab. */

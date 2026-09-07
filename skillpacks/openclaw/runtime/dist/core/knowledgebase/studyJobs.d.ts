@@ -15,10 +15,15 @@ export declare const STUDY_WINDOW: {
     readonly endHour: 6;
 };
 export declare const STUDY_TICK_INTERVAL_MINUTES = 30;
+/** Default nightly budget for a recurring Q&A-surf job (pins handled: answered or saved). */
+export declare const DEFAULT_QA_SURF_BUDGET_PER_NIGHT = 10;
 export type StudyJobStatus = 'pending' | 'running' | 'done' | 'failed';
+export type StudyJobKind = 'topic' | 'qa-surf';
 export interface StudyJobRecord {
     id: string;
     metabotSlug: string;
+    /** 'topic' = owner-assigned study topic (spans nights, completes); 'qa-surf' = recurring nightly Q&A surfing. */
+    kind: StudyJobKind;
     topic: string;
     topicFingerprint: string;
     status: StudyJobStatus;
@@ -47,6 +52,14 @@ export interface StudyJobStore {
         job: StudyJobRecord;
         created: boolean;
     }>;
+    enqueueQaSurfJob(input: {
+        metabotSlug: string;
+        budgetPins?: number;
+    }): Promise<{
+        job: StudyJobRecord;
+        created: boolean;
+    }>;
+    disableQaSurfJob(metabotSlug: string): Promise<boolean>;
     listStudyJobs(metabotSlug?: string): Promise<StudyJobRecord[]>;
     listPending(): Promise<StudyJobRecord[]>;
     getStudyJob(id: string): Promise<StudyJobRecord | null>;
@@ -69,6 +82,13 @@ export declare function buildStudySessionPrompt(input: {
     budgetPins: number;
 }): string;
 /**
+ * The unattended nightly Q&A surfing prompt (job kind 'qa-surf', IDBots
+ * feat/metaweb-qa parity, rebuilt for OAC's json-fence tool loop): browse the
+ * on-chain Q&A, answer what fits the bot's persona, save what its role should
+ * keep, react honestly. Same final-report contract as topic study.
+ */
+export declare function buildQaSurfSessionPrompt(job: Pick<StudyJobRecord, 'processedPinIds' | 'budgetPins'>): string;
+/**
  * Parse the study run report: the LAST json fence wins; a prose-only reply
  * throws (the job fails rather than guessing).
  */
@@ -80,6 +100,7 @@ export interface StudyDrainDeps {
     /** Runs one unattended study turn: prompt in, final report out. */
     runStudyTurn(input: {
         slug: string;
+        kind?: StudyJobKind;
         prompt: string;
         budgetPins: number;
     }): Promise<string>;
@@ -130,6 +151,38 @@ export interface StudyToolSet {
         query?: string;
         kind?: string;
     }): Promise<string>;
+    /** Q&A recall + write seam for qa-surf jobs (optional: topic jobs never call these). */
+    searchQa?(args: {
+        query: string;
+        tags?: string[];
+        answered?: boolean;
+        sort?: string;
+        size?: number;
+        cursor?: string;
+    }): Promise<string>;
+    listLatestQuestions?(args: {
+        tags?: string[];
+        minAnswers?: number;
+        maxAnswers?: number;
+        sort?: string;
+        size?: number;
+        cursor?: string;
+    }): Promise<string>;
+    getQuestionAnswers?(args: {
+        questionPinId: string;
+        publisher?: string;
+        size?: number;
+        cursor?: string;
+    }): Promise<string>;
+    postSimpleAnswer?(args: {
+        answerTo: string;
+        content: string;
+        tags?: string[];
+    }): Promise<string>;
+    likePin?(args: {
+        pinId: string;
+        isLike: number;
+    }): Promise<string>;
 }
 export interface StudyLoopDeps {
     /** One LLM completion over the conversation so far; returns model text. */
@@ -141,6 +194,8 @@ export interface StudyLoopDeps {
     maxSteps?: number;
     /** Max chars of a tool result fed back into the conversation. */
     maxResultChars?: number;
+    /** 'qa-surf' selects the Q&A surfing allowlist (default: the topic set). */
+    kind?: StudyJobKind;
 }
 /**
  * The study turn as a bounded tool loop with a HARD executor-side allowlist:

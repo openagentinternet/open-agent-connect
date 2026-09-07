@@ -8,6 +8,7 @@ import { handleConfigRoutes } from './routes/config';
 import { handleTrafficRoutes } from './routes/traffic';
 import { handleBuzzRoutes } from './routes/buzz';
 import { handleSimpleNoteRoutes } from './routes/simplenote';
+import { handleQandaRoutes } from './routes/qanda';
 import { handleChainRoutes } from './routes/chain';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
@@ -36,6 +37,7 @@ const ROUTES: RouteHandler[] = [
   handleTrafficRoutes,
   handleBuzzRoutes,
   handleSimpleNoteRoutes,
+  handleQandaRoutes,
   handleChainRoutes,
   handleDaemonRoutes,
   handleChatRoutes,

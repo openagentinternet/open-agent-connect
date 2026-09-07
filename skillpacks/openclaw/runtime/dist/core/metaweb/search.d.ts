@@ -13,8 +13,8 @@
 export declare const DEFAULT_METAWEB_SEARCH_BASE_URL = "https://so.metaid.io";
 /** Production wiring override: METABOT_METAWEB_API_BASE_URL. */
 export declare const METAWEB_API_BASE_URL_ENV = "METABOT_METAWEB_API_BASE_URL";
-/** Protocol keys the unified search can filter by (phase-1 coverage). */
-export type MetawebSearchProtocol = 'simplenote' | 'simplebuzz' | 'metaapp' | 'metabot-skill' | 'skill-service' | 'metaprotocol';
+/** Protocol keys the unified search can filter by (phase-1 coverage + Q&A). */
+export type MetawebSearchProtocol = 'simplenote' | 'simplebuzz' | 'metaapp' | 'metabot-skill' | 'skill-service' | 'metaprotocol' | 'simplequestion' | 'simpleanswer';
 export type MetawebSearchPublisher = {
     globalMetaId: string;
     metaid: string;

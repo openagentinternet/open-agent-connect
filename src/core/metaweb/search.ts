@@ -16,14 +16,16 @@ export const DEFAULT_METAWEB_SEARCH_BASE_URL = 'https://so.metaid.io';
 export const METAWEB_API_BASE_URL_ENV = 'METABOT_METAWEB_API_BASE_URL';
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-/** Protocol keys the unified search can filter by (phase-1 coverage). */
+/** Protocol keys the unified search can filter by (phase-1 coverage + Q&A). */
 export type MetawebSearchProtocol =
   | 'simplenote'
   | 'simplebuzz'
   | 'metaapp'
   | 'metabot-skill'
   | 'skill-service'
-  | 'metaprotocol';
+  | 'metaprotocol'
+  | 'simplequestion'
+  | 'simpleanswer';
 
 export type MetawebSearchPublisher = {
   globalMetaId: string;

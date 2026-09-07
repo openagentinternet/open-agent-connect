@@ -1,0 +1,237 @@
+:root {
+  --ink: #303133;
+  --ink-soft: #6b6e76;
+  --line: #e4e6eb;
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --accent: #1d4ed8;
+  --accent-soft: #eef2ff;
+  --good: #047857;
+  --badge: #f1f2f4;
+  font-size: 15px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.6;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.logo {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+
+.brand-name { font-weight: 600; }
+
+.tabs { display: flex; gap: 4px; }
+
+.tabs a {
+  padding: 6px 14px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+.tabs a:hover { background: var(--badge); color: var(--ink); }
+
+.tabs a.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.state {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.q-title {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.q-title a { color: var(--ink); text-decoration: none; }
+.q-title a:hover { color: var(--accent); }
+
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  margin-top: 6px;
+}
+
+.meta-row .sep::before { content: "·"; margin-right: 12px; color: var(--line); }
+
+.tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--badge);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.count-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.count-pill.zero { background: var(--badge); color: var(--ink-soft); }
+
+.mempool-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #b45309;
+  font-size: 0.78rem;
+}
+
+.top-answer {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--line);
+  background: var(--bg);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.92rem;
+}
+
+.top-answer .ta-label {
+  color: var(--good);
+  font-weight: 600;
+  font-size: 0.78rem;
+  margin-right: 8px;
+}
+
+.question-body {
+  margin: 14px 0 4px;
+  padding: 14px 16px;
+  background: var(--bg);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.answer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.answer-rank { font-weight: 700; color: var(--ink-soft); }
+
+.score {
+  font-weight: 700;
+  color: var(--good);
+}
+
+.answer-summary {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+
+details.full-answer { margin-top: 8px; }
+
+details.full-answer summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.88rem;
+  user-select: none;
+}
+
+details.full-answer .full-body {
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.load-more {
+  display: block;
+  width: 100%;
+  margin: 6px 0 20px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.load-more:hover { background: var(--accent-soft); }
+
+.error-box {
+  padding: 14px 16px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+  border-radius: 10px;
+}
+
+.foot {
+  padding: 18px 16px 26px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}

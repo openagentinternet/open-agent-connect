@@ -38,6 +38,7 @@ const metaapp_1 = require("./commands/metaapp");
 const metaid_1 = require("./commands/metaid");
 const metaweb_1 = require("./commands/metaweb");
 const simplenote_1 = require("./commands/simplenote");
+const qanda_1 = require("./commands/qanda");
 const helpers_1 = require("./commands/helpers");
 const commandHelp_1 = require("./commandHelp");
 const types_1 = require("./types");
@@ -179,6 +180,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'simplenote':
                     result = await (0, simplenote_1.runSimpleNoteCommand)(rest, context);
+                    break;
+                case 'qanda':
+                    result = await (0, qanda_1.runQandaCommand)(rest, context);
                     break;
                 case undefined:
                     result = (0, commandResult_1.commandFailed)('missing_command', 'No command provided.');

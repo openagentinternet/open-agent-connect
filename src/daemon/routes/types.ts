@@ -73,6 +73,11 @@ export interface MetabotDaemonHttpHandlers {
   simplenote?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  qanda?: {
+    question?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    answer?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    like?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   skills?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
