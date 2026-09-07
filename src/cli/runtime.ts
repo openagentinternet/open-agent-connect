@@ -137,6 +137,14 @@ import { readMetawebPin, MetawebPinNotFoundError } from '../core/metaweb/pinRead
 import { formatMetawebPinDetail, formatMetawebSearchBullets } from '../core/metaweb/format';
 import { METAWEB_CITATION_RULE } from '../core/metaweb/uri';
 import {
+  qaLatestQuestions,
+  qaQuestionAnswers,
+  qaQuestionDetail,
+  qaSearch,
+  QaRecallNotFoundError,
+} from '../core/qanda/recall';
+import { formatQaAnswerBullets, formatQaQuestionBullets, formatQaQuestionDetail } from '../core/qanda/format';
+import {
   extractSkillPinDescriptor,
   installSkillFromReference,
   listInstalledSkills,
@@ -2864,6 +2872,98 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     }
   }
 
+  // `metabot qanda search|latest|detail|answers` — read-only Q&A recall over
+  // the metaso-p2p Q&A APIs, in-process like `metaweb search/read`. The data
+  // envelope carries the raw rows plus a model-ready `formatted` block (the
+  // same renderer the DSH tools use).
+  async function runQandaSearch(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const q = normalizeEnvText(typeof input.query === 'string' ? input.query : undefined);
+      if (!q) return commandFailed('missing_query', '--query is required.');
+      const page = await qaSearch({
+        q,
+        ...(Array.isArray(input.tags) ? { tags: input.tags.map((tag) => String(tag ?? '')) } : {}),
+        ...(normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) ? { publisher: normalizeEnvText(input.publisher as string) } : {}),
+        ...(input.answered === true || input.answered === false ? { answered: input.answered } : {}),
+        ...(input.sort === 'newest' ? { sort: 'newest' as const } : {}),
+        ...(readPositiveField(input.size) ? { size: readPositiveField(input.size) } : {}),
+        ...(normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) ? { cursor: normalizeEnvText(input.cursor as string) } : {}),
+      }, metawebServiceOptions());
+      const bullets = formatQaQuestionBullets(page.items);
+      const ordering = input.sort === 'newest' ? 'newest first' : 'best match first';
+      const formatted = bullets
+        ? `${page.items.length} on-chain question(s) matching "${q}", ${ordering}:\n${bullets}`
+        : `No on-chain Q&A matched "${q}".`;
+      return commandSuccess({ ...page, formatted });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('qanda_search_failed', message);
+    }
+  }
+
+  async function runQandaLatest(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const page = await qaLatestQuestions({
+        ...(Array.isArray(input.tags) ? { tags: input.tags.map((tag) => String(tag ?? '')) } : {}),
+        ...(readPositiveField(input.minAnswers) != null ? { minAnswers: readPositiveField(input.minAnswers) } : {}),
+        ...(Number.isFinite(Number(input.maxAnswers)) && Number(input.maxAnswers) >= 0 ? { maxAnswers: Number(input.maxAnswers) } : {}),
+        ...(input.sort === 'hot' ? { sort: 'hot' as const } : {}),
+        ...(readPositiveField(input.size) ? { size: readPositiveField(input.size) } : {}),
+        ...(normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) ? { cursor: normalizeEnvText(input.cursor as string) } : {}),
+      }, metawebServiceOptions());
+      const bullets = formatQaQuestionBullets(page.items);
+      const formatted = bullets
+        ? `${page.items.length} on-chain question(s), ${input.sort === 'hot' ? 'hot-ranked (last 7 days)' : 'newest first'}:\n${bullets}`
+        : 'No on-chain questions matched this filter.';
+      return commandSuccess({ ...page, formatted });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('qanda_latest_failed', message);
+    }
+  }
+
+  async function runQandaDetail(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+      if (!pinId) return commandFailed('missing_pin', '--pin is required.');
+      const detail = await qaQuestionDetail(pinId, metawebServiceOptions());
+      return commandSuccess({
+        ...detail,
+        formatted: formatQaQuestionDetail({ question: detail.question, answers: detail.answers }),
+      });
+    } catch (error) {
+      if (error instanceof QaRecallNotFoundError) {
+        return commandFailed('question_not_found', error.message);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('qanda_detail_failed', message);
+    }
+  }
+
+  async function runQandaAnswers(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+      if (!pinId) return commandFailed('missing_pin', '--pin is required.');
+      const page = await qaQuestionAnswers({
+        pinId,
+        ...(normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) ? { publisher: normalizeEnvText(input.publisher as string) } : {}),
+        ...(readPositiveField(input.size) ? { size: readPositiveField(input.size) } : {}),
+        ...(normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) ? { cursor: normalizeEnvText(input.cursor as string) } : {}),
+      }, metawebServiceOptions());
+      const bullets = formatQaAnswerBullets(page.items);
+      return commandSuccess({
+        ...page,
+        formatted: bullets || 'No answers matched this filter.',
+      });
+    } catch (error) {
+      if (error instanceof QaRecallNotFoundError) {
+        return commandFailed('question_not_found', error.message);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('qanda_answers_failed', message);
+    }
+  }
+
   function sharedSkillsRoot(): string {
     return path.join(normalizeSystemHomeDir(context.env, context.cwd), '.metabot', 'skills');
   }
@@ -3332,6 +3432,30 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         typeof input.from === 'string' ? input.from : undefined,
         input,
       ),
+    },
+    qanda: {
+      question: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/qanda/question',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      answer: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/qanda/answer',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      like: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/qanda/like',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      search: async (input) => runQandaSearch(input),
+      latest: async (input) => runQandaLatest(input),
+      detail: async (input) => runQandaDetail(input),
+      answers: async (input) => runQandaAnswers(input),
     },
     browser: {
       open: async (input) => openLocalBrowserPage(input),
@@ -5245,6 +5369,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     metaid: { ...defaults.metaid, ...provided.metaid },
     metaweb: { ...defaults.metaweb, ...provided.metaweb },
     simplenote: { ...defaults.simplenote, ...provided.simplenote },
+    qanda: { ...defaults.qanda, ...provided.qanda },
     chain: { ...defaults.chain, ...provided.chain },
     traffic: { ...defaults.traffic, ...provided.traffic },
     daemon: { ...defaults.daemon, ...provided.daemon },

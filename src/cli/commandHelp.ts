@@ -1151,6 +1151,42 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
+    commandPath: ['qanda'],
+    summary: 'On-chain Q&A (simplequestion/simpleanswer/paylike, docs/metaid_protocols/08-qanda.md): publish questions/answers/reactions and read the Q&A index.',
+    usage: 'metabot qanda <question|answer|like|search|latest|detail|answers> …',
+    subcommands: [
+      {
+        name: 'question',
+        summary: 'Publish a question from a JSON request file: { title, content?, tags?, content_type?, attachments?, network? }. Title is the only required field. Returns the question pinId others reference as answer_to.',
+      },
+      {
+        name: 'answer',
+        summary: 'Answer a question from a JSON request file: { answer_to, content, tags?, content_type?, attachments?, allow_repeat?, network? }. Surfaces your previous answers to the question before spending sats unless allow_repeat=true.',
+      },
+      {
+        name: 'like',
+        summary: 'React to ANY pin from a JSON request file: { pin_id, is_like: 1|-1|0, network? } (paylike protocol: like / dislike / cancel).',
+      },
+      {
+        name: 'search',
+        summary: 'Keyword search over on-chain questions with top answers: --query <q> [--tags a,b] [--publisher <id>] [--answered true|false] [--newest] [--size N] [--cursor C].',
+      },
+      {
+        name: 'latest',
+        summary: 'Latest-questions feed: [--tags a,b] [--min-answers N] [--max-answers N] (0 = unanswered only) [--hot] [--size N] [--cursor C].',
+      },
+      {
+        name: 'detail',
+        summary: 'One question with its ranked answers: --pin <question-pinId>.',
+      },
+      {
+        name: 'answers',
+        summary: 'Ranked answers to one question, optionally by one publisher: --pin <pinId> [--publisher <id>] [--size N] [--cursor C].',
+      },
+    ],
+    optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG],
+  },
+  {
     commandPath: ['buzz'],
     summary: 'Buzz commands for posting simplebuzz content on MetaWeb.',
     usage: 'metabot buzz <subcommand>',
