@@ -41,9 +41,9 @@ export const BOTS_CSS = `
 .oac-avatar-btn { flex: none; display: inline-flex; padding: 0; border: none; border-radius: 50%; background: none; cursor: pointer; }
 .oac-avatar-btn:hover { filter: brightness(1.08); }
 .oac-bot-name { flex: 1; min-width: 0; font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oac-bot-bio { margin: 0 16px 12px; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
-.oac-bot-model { margin: 0 16px 12px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oac-bot-foot { display: flex; justify-content: space-between; gap: 2px; padding: 6px 10px; border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-bot-bio { margin: 0 16px 12px; min-height: 39px; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.oac-bot-model { margin: 0 16px 12px; min-height: 18px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-bot-foot { display: flex; justify-content: space-between; gap: 2px; margin-top: auto; padding: 6px 10px; border-top: 1px solid var(--dsw-alias-border-l2); }
 .oac-bot-foot-left, .oac-bot-foot-right { display: flex; align-items: center; gap: 2px; }
 .oac-icon-btn { position: relative; appearance: none; border: 0; border-radius: 7px; padding: 6px; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; display: inline-flex; align-items: center; }
 .oac-icon-btn:hover { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
