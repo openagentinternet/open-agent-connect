@@ -837,7 +837,7 @@ detected platform homes.
 To update to a pinned package version:
 
 ```bash
-metabot system update --target-version v0.4.0
+metabot system update --target-version v0.5.0
 ```
 
 Notes:

@@ -5,7 +5,7 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
-## Unreleased
+## 0.5.0 - 2026-09-08
 
 ### Added
 
