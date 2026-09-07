@@ -43,6 +43,26 @@ test('deriveIdentity preserves the existing deterministic wallet identity semant
   assert.deepEqual(second, FIXTURE_IDENTITY);
 });
 
+test('deriveIdentity memoizes repeated derivations without leaking cache mutations', async () => {
+  const first = await deriveIdentity({ mnemonic: FIXTURE_MNEMONIC, path: FIXTURE_PATH });
+  // Callers must not be able to poison the memoized entry through the
+  // returned object (they get a shallow copy per call).
+  first.mvcAddress = 'mutated';
+  first.addresses.mvc = 'mutated';
+
+  const second = await deriveIdentity({ mnemonic: FIXTURE_MNEMONIC, path: FIXTURE_PATH });
+  assert.equal(second.mvcAddress, FIXTURE_IDENTITY.mvcAddress);
+  assert.equal(second.addresses.mvc, FIXTURE_IDENTITY.addresses.mvc);
+  assert.equal(second.globalMetaId, FIXTURE_IDENTITY.globalMetaId);
+
+  const { derivePrivateKeyHex } = require('../../dist/core/identity/deriveIdentity.js');
+  const pk1 = await derivePrivateKeyHex({ mnemonic: FIXTURE_MNEMONIC, path: FIXTURE_PATH });
+  const pk2 = await derivePrivateKeyHex({ mnemonic: FIXTURE_MNEMONIC, path: FIXTURE_PATH });
+  assert.equal(typeof pk1, 'string');
+  assert.equal(pk1, pk2);
+  assert.notEqual(pk1, '');
+});
+
 test('normalizeGlobalMetaId preserves the existing globalMetaId normalization contract', () => {
   assert.equal(
     normalizeGlobalMetaId(`  ${FIXTURE_IDENTITY.globalMetaId.toUpperCase()}  `),
