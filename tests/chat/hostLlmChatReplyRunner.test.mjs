@@ -1867,3 +1867,10 @@ test('skill-scoped host failure falls through to the local runtime chain', async
   assert.equal(result.content, 'Local runtime reply.');
   assert.equal(host.calls.length, 1);
 });
+
+test('buildChatPrompt carries the full-form MetaWeb URI rule', () => {
+  const prompt = buildChatPrompt(makeInput());
+  assert.match(prompt, /MetaWeb URIs \(metaid:\/\/, pin:\/\/, metafile:\/\/, metaapp:\/\/, map:\/\/\) in FULL/);
+  assert.match(prompt, /never abbreviated or truncated with an ellipsis/);
+  assert.match(prompt, /64 lowercase hex chars/);
+});

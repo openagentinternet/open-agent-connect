@@ -54,6 +54,7 @@ test('group_task tool shape: one action-union tool plus the SOP section', () => 
   assert.match(plugin.GROUP_TASK_SOP_TEXT, /pendingRemoteSeats/)
   assert.match(plugin.GROUP_TASK_SOP_TEXT, /直接开始/, 'the auto-start waiver must cover the Chinese phrases')
   assert.match(plugin.GROUP_TASK_SOP_TEXT, /planning, executing, review, done, cancelled/)
+  assert.match(plugin.GROUP_TASK_SOP_TEXT, /always shown in FULL/, 'the SOP must carry the never-abbreviate MetaWeb URI rule')
 })
 
 test('installGroupTaskOnAgent registers the SOP section and the group_task tool', () => {

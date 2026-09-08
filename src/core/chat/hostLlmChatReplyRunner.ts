@@ -320,6 +320,7 @@ function buildChatPrompt(
   sections.push([
     '## Format Rules',
     '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
+    '- Write MetaWeb URIs (metaid://, pin://, metafile://, metaapp://, map://) in FULL — never abbreviated or truncated with an ellipsis; the pinId part is exactly 64 lowercase hex chars + `i0`. A shortened URI is neither clickable nor copyable.',
     '- Do NOT open with a plan sentence (for example: "先读…技能，再…"). Start directly with the in-character answer.',
     '- Reply in the same language the other party is using.',
     ...(conversationCloseAllowed
