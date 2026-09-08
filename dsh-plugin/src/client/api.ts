@@ -62,6 +62,7 @@ export type BotRow = {
   primaryProvider?: string | null
   botType?: 'twin' | 'worker' | null
   ownerGlobalMetaId?: string | null
+  isAvailable?: boolean
   setup?: BotSetupStatus | null
 }
 
