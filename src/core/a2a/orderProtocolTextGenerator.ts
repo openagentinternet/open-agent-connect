@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatPersona } from '../chat/privateChatTypes';
 import type { LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
+import { createHostFirstCompletion } from '../llm/hostLlmExecutorBridge';
 import { createLlmBindingStore } from '../llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import { createLlmRuntimeStore } from '../llm/llmRuntimeStore';
@@ -280,6 +281,24 @@ export function createLlmOrderProtocolTextGenerator(options: {
     allowUrls?: boolean;
     allowTables?: boolean;
   }): Promise<string | null> {
+    // Unified passive-LLM priority: the Bot's DSH pair (through a connected
+    // host executor) takes the first attempt; the local chain below follows.
+    const hostText = await createHostFirstCompletion({
+      dshLlmPath: input.paths.dshLlmPath,
+      timeoutMs,
+    })({
+      botSlug: path.basename(input.paths.profileRoot),
+      system: buildSystemPrompt(input.persona),
+      user: input.prompt,
+    });
+    if (hostText !== null) {
+      const generated = normalizeGeneratedOrderProtocolText(hostText, {
+        maxChars: input.maxChars,
+        allowUrls: input.allowUrls,
+        allowTables: input.allowTables,
+      });
+      if (generated) return generated;
+    }
     const runtimeResolver = createLlmRuntimeResolver({
       runtimeStore: createLlmRuntimeStore(input.paths),
       bindingStore: createLlmBindingStore(input.paths),

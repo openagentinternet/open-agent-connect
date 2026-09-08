@@ -41,6 +41,7 @@ interface GenerateRequest {
   timeoutMs: number
   skills?: GenerateRequestSkill[]
   cwd?: string
+  maxTokens?: number
 }
 
 /** One agent-mode turn: run the prompt in a real DSH session, return the final text. */
@@ -118,6 +119,9 @@ function parseGenerateRequest(data: string): GenerateRequest | null {
       : 60_000,
     ...(skills.length > 0 ? { skills } : {}),
     ...(typeof record.cwd === 'string' && record.cwd ? { cwd: record.cwd } : {}),
+    ...(typeof record.maxTokens === 'number' && Number.isFinite(record.maxTokens) && record.maxTokens > 0
+      ? { maxTokens: Math.floor(record.maxTokens) }
+      : {}),
   }
 }
 
@@ -248,7 +252,7 @@ export class HostLlmExecutor {
         ...(target.reasoningEffort ? { reasoningEffort: target.reasoningEffort } : {}),
         system: generateRequest.system,
         user: generateRequest.prompt,
-        maxTokens: GENERATE_MAX_TOKENS,
+        maxTokens: generateRequest.maxTokens ?? GENERATE_MAX_TOKENS,
         purpose: 'oac-a2a-reply',
         timeoutMs: idleTimeoutMs,
       })

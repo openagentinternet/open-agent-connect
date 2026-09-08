@@ -2219,6 +2219,7 @@ export function createPrivateChatAutoReplyProfileDispatcher(
         runtimeResolver: profileRuntimeResolver,
         llmExecutor: input.llmExecutor,
         metaBotSlug,
+        dshLlmPath: profilePaths.dshLlmPath,
       }),
     }, profileAutoReplyConfig);
 
@@ -4629,6 +4630,20 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           backends: createRegistryBackendFactories(),
         });
         const complete = async (request: { system: string; user: string; maxOutputTokens: number }): Promise<string> => {
+          // Unified passive-LLM priority: the Bot's DSH pair first (manual
+          // `dream run` while DSH is open), then the local chain below.
+          const hostText = await createHostFirstCompletion({
+            dshLlmPath: paths.dshLlmPath,
+            timeoutMs: 180_000,
+          })({
+            botSlug: slug,
+            system: request.system,
+            user: request.user,
+            ...(Number.isFinite(request.maxOutputTokens) && request.maxOutputTokens > 0
+              ? { maxTokens: request.maxOutputTokens }
+              : {}),
+          });
+          if (hostText !== null) return hostText;
           const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
           if (!resolved.runtime) {
             throw new Error(
@@ -5832,6 +5847,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       runtimeResolver: llmResolver,
       llmExecutor,
       metaBotSlug,
+      dshLlmPath: paths.dshLlmPath,
     }),
   }, sharedAutoReplyConfig);
   const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
