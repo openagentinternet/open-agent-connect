@@ -411,6 +411,16 @@ Include local assets needed by the page. Avoid absolute local filesystem paths. 
 
 All packaged CSS, JS, image, font, document, JSON, and Markdown asset references must stay relative to the package entry or the referencing file. Do not publish a MetaApp that depends on site-root paths such as `/assets/...`, because Browser resolves those against the host origin instead of the packaged ZIP.
 
+## Scaffold a New Project
+
+Start a new MetaApp from the built-in scaffold instead of hand-rolling the files:
+
+```bash
+$HOME/.metabot/bin/metabot metaapp new <dir> [--template blank|demo] [--title "My App"] [--app-name my-app]
+```
+
+The scaffold writes a publish-ready static project: an `index.html` entry with relative asset references, the `APP.md` documentation file, and a `.metaapp.json` manifest. `blank` is a single-file starter; `demo` adds `style.css`/`app.js` and demonstrates the relative-reference and localStorage conventions. The command runs fully local (no daemon, identity, or confirmation needed). After scaffolding, preview and publish as usual; re-running on a non-empty directory requires `--force` and only overwrites the template files.
+
 ## Local Preview
 
 Preview a not-yet-published project before any chain write. Preview serves files live from the workspace, so reloads pick up edits without republishing.
@@ -622,6 +632,13 @@ $HOME/.metabot/bin/metabot metaapp update-project --target-pin-id <pinid> --proj
 ```
 
 Add `--manifest-file <path>` when publishable fields live outside `.metaapp.json`. Add `--chain mvc|btc|opcat` only when the human explicitly chooses a supported write or upload network. Without `--confirm`, project packaging returns a confirmation package and does not write.
+
+## Unknown Broadcast Outcomes
+
+Every MetaApp chain write (publish, update, delete, publish-project, update-project) is protected against the "error shown → retry → duplicate on-chain app" trap:
+
+- `chain_broadcast_unknown` means the signed transactions left the wallet but the node never confirmed. The app may already be on-chain. Never retry blindly — verify the candidate txids in the message on an explorer or with `metaapp list --from <bot-slug>` first.
+- After an unknown outcome, an identical retry within 24 hours is refused with `chain_write_attempt_pending` (recorded before any upload spends fees). Editing the content — or verifying that the first attempt never landed — produces a different write that goes through normally.
 
 ## Direct CLI Shortcuts
 

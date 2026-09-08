@@ -1,5 +1,6 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import { normalizeMetaAppPinIdOrUri } from '../../core/metaapp/pinId';
+import { scaffoldMetaAppProject } from '../../core/metaapp/scaffold';
 import {
   commandMissingFlag,
   commandUnknownSubcommand,
@@ -95,6 +96,37 @@ function readSearchLimitFlag(args: string[]): {
 
 export async function runMetaAppCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
+
+  if (subcommand === 'new') {
+    const positionalDir = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
+    const dirFlag = readOptionalValueFlag(args, '--dir');
+    if (!dirFlag.ok) {
+      return dirFlag.result;
+    }
+    if (positionalDir && dirFlag.value) {
+      return commandInvalidFlag('Pass the target directory either positionally or via --dir, not both.');
+    }
+    const projectDir = positionalDir ?? dirFlag.value;
+    if (!projectDir) {
+      return commandInvalidFlag('metabot metaapp new requires a target directory: metabot metaapp new <dir> [--template demo].');
+    }
+
+    const template = readOptionalValueFlag(args, '--template');
+    if (!template.ok) {
+      return template.result;
+    }
+
+    // Scaffolding is a pure local filesystem operation: it runs in the CLI
+    // process (no daemon round-trip) so paths resolve against the user cwd.
+    return scaffoldMetaAppProject({
+      projectDir,
+      cwd: context.cwd,
+      title: readOptionalFlag(args, '--title'),
+      appName: readOptionalFlag(args, '--app-name'),
+      ...(template.value ? { template: template.value } : {}),
+      force: hasFlag(args, '--force'),
+    });
+  }
 
   if (subcommand === 'preview') {
     const projectDir = readRequiredFlag(args, '--project-dir');

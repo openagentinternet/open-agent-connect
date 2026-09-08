@@ -836,3 +836,124 @@ test('updateMetaApp with a write guard replays an identical confirmed update ins
   assert.equal(deps.calls.filter((call) => call.type === 'upload').length, 1);
   assert.equal(deps.calls.filter((call) => call.type === 'write').length, 1);
 });
+
+const { ChainBroadcastUnknownError } = require('../../dist/core/signing/localMnemonicSigner.js');
+
+function createWriteAttemptsFake() {
+  const records = [];
+  return {
+    records,
+    async findRecent(contentHash) {
+      const found = [...records].reverse().find((row) => row.contentHash === contentHash);
+      return found ?? null;
+    },
+    async record(input) {
+      records.push({ ...input, at: 1_700_000_100_000 });
+    },
+  };
+}
+
+test('publishMetaApp surfaces ChainBroadcastUnknownError as chain_broadcast_unknown and records the attempt', async () => {
+  const projectDir = await makeStaticProject('broadcast-unknown');
+  const writeAttempts = createWriteAttemptsFake();
+  let writeCount = 0;
+  const deps = createDeps({
+    writeAttempts,
+    async writeChain() {
+      writeCount += 1;
+      throw new ChainBroadcastUnknownError({
+        candidateTxids: ['candidate-tx-1'],
+        confirmedTxids: [],
+        cause: new Error('socket timeout'),
+      });
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'manual_action_required');
+  assert.equal(result.code, 'chain_broadcast_unknown');
+  assert.match(result.message, /candidate-tx-1/);
+  assert.equal(result.data.archive.sha256.length, 64);
+  assert.equal(writeAttempts.records.length, 1);
+  assert.equal(writeAttempts.records[0].kind, 'metaapp-create');
+  assert.deepEqual(writeAttempts.records[0].candidateTxids, ['candidate-tx-1']);
+});
+
+test('publishMetaApp refuses an identical retry within 24h of an unknown broadcast before uploading', async () => {
+  const projectDir = await makeStaticProject('broadcast-unknown-retry');
+  const writeAttempts = createWriteAttemptsFake();
+  let writeCount = 0;
+  const deps = createDeps({
+    writeAttempts,
+    async writeChain() {
+      writeCount += 1;
+      throw new ChainBroadcastUnknownError({
+        candidateTxids: ['candidate-tx-2'],
+        confirmedTxids: [],
+        cause: new Error('socket timeout'),
+      });
+    },
+  });
+
+  const first = await publishMetaApp({ projectDir, confirm: true }, deps);
+  assert.equal(first.code, 'chain_broadcast_unknown');
+
+  const retry = await publishMetaApp({ projectDir, confirm: true }, deps);
+  assert.equal(retry.ok, false);
+  assert.equal(retry.state, 'manual_action_required');
+  assert.equal(retry.code, 'chain_write_attempt_pending');
+  assert.match(retry.message, /candidate-tx-2/);
+  assert.equal(writeCount, 1, 'identical retry never reaches the chain');
+  assert.equal(
+    deps.calls.filter((call) => call.type === 'upload').length,
+    1,
+    'retry stops before the fee-spending upload',
+  );
+});
+
+test('publishMetaApp keeps ordinary write failures as metaapp_publish_failed without recording an attempt', async () => {
+  const projectDir = await makeStaticProject('write-failed');
+  const writeAttempts = createWriteAttemptsFake();
+  const deps = createDeps({
+    writeAttempts,
+    async writeChain() {
+      throw new Error('insufficient balance');
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'metaapp_publish_failed');
+  assert.equal(writeAttempts.records.length, 0);
+});
+
+test('updateMetaApp records unknown broadcasts under metaapp-modify and blocks identical retries', async () => {
+  const projectDir = await makeStaticProject('update-broadcast-unknown');
+  const writeAttempts = createWriteAttemptsFake();
+  let writeCount = 0;
+  const deps = createDeps({
+    writeAttempts,
+    async writeChain() {
+      writeCount += 1;
+      throw new ChainBroadcastUnknownError({
+        candidateTxids: ['candidate-tx-3'],
+        confirmedTxids: ['confirmed-tx-1'],
+        cause: new Error('socket timeout'),
+      });
+    },
+  });
+
+  const first = await updateMetaApp({ projectDir, targetPinId: UPDATE_TARGET_PIN, confirm: true }, deps);
+  assert.equal(first.code, 'chain_broadcast_unknown');
+  assert.equal(writeAttempts.records.length, 1);
+  assert.equal(writeAttempts.records[0].kind, 'metaapp-modify');
+  assert.deepEqual(writeAttempts.records[0].candidateTxids, ['confirmed-tx-1', 'candidate-tx-3']);
+
+  const retry = await updateMetaApp({ projectDir, targetPinId: UPDATE_TARGET_PIN, confirm: true }, deps);
+  assert.equal(retry.code, 'chain_write_attempt_pending');
+  assert.equal(writeCount, 1, 'identical update retry never reaches the chain');
+});

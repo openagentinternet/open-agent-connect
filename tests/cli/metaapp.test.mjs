@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 
-async function runMetaAppCli(args, dependencies = {}) {
+async function runMetaAppCli(args, dependencies = {}, cwd) {
   const stdout = [];
   const exitCode = await runCli(args, {
+    ...(cwd ? { cwd } : {}),
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
     dependencies,
@@ -433,4 +437,35 @@ test('runCli keeps `metabot ui open --page metaapps` compatibility', async () =>
   assert.deepEqual(calls, [{ page: 'metaapps' }]);
   assert.equal(envelope.ok, true);
   assert.equal(envelope.data.page, 'metaapps');
+});
+
+test('runCli scaffolds a MetaApp project locally with `metabot metaapp new`', async () => {
+  const cwd = await mkdtempTempRoot('metabot-cli-metaapp-new-');
+
+  const { exitCode, envelope } = await runMetaAppCli([
+    'metaapp',
+    'new',
+    'my-app',
+    '--title',
+    'My App',
+    '--template',
+    'demo',
+  ], {}, cwd);
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.template, 'demo');
+  assert.equal(envelope.data.appName, 'my-app');
+  const manifest = JSON.parse(await readFile(path.join(cwd, 'my-app', '.metaapp.json'), 'utf8'));
+  assert.equal(manifest.title, 'My App');
+  assert.equal(manifest.appName, 'my-app');
+  assert.ok(envelope.data.files.includes('APP.md'));
+});
+
+test('runCli rejects `metabot metaapp new` without a target directory', async () => {
+  const { exitCode, envelope } = await runMetaAppCli(['metaapp', 'new']);
+
+  assert.equal(exitCode, 1);
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.code, 'invalid_flag');
 });
