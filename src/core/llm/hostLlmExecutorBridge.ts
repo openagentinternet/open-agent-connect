@@ -251,7 +251,7 @@ export function createHostFirstCompletion(options: {
   resolveBridge?: () => HostLlmExecutorBridge | null;
   timeoutMs?: number;
   logWarning?: (scope: string, message: string) => void;
-}): (request: { botSlug?: string; system: string; user: string }) => Promise<string | null> {
+}): (request: { botSlug?: string; system: string; user: string; maxTokens?: number }) => Promise<string | null> {
   const generate = createDshPairHostLlmGenerate({
     dshLlmPath: options.dshLlmPath,
     ...(options.resolveBridge ? { resolveBridge: options.resolveBridge } : {}),
@@ -263,6 +263,7 @@ export function createHostFirstCompletion(options: {
         ...(request.botSlug ? { metaBotSlug: request.botSlug } : {}),
         prompt: request.user,
         systemPrompt: request.system,
+        ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
       });
       if (outcome && outcome.ok && typeof outcome.output === 'string' && outcome.output.trim()) {
         return outcome.output;

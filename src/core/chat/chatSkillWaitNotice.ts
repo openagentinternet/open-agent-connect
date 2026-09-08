@@ -1,4 +1,5 @@
 import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
+import { createHostFirstCompletion } from '../llm/hostLlmExecutorBridge';
 import type { LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import type {
   ChatPersona,
@@ -101,18 +102,37 @@ export function createChatSkillWaitNoticeGenerator(options?: {
   metaBotSlug?: string;
   timeoutMs?: number;
   pollIntervalMs?: number;
+  /**
+   * DSH LLM pair path: while a host executor is connected, the notice is
+   * generated through the Bot's DSH pair first (unified passive-LLM
+   * priority); the local chain below follows.
+   */
+  dshLlmPath?: string;
 }): ChatSkillWaitNoticeGenerator | null {
   const runtimeResolver = options?.runtimeResolver;
   const llmExecutor = options?.llmExecutor;
   if (!runtimeResolver || !llmExecutor) {
     return null;
   }
+  const hostComplete = options?.dshLlmPath
+    ? createHostFirstCompletion({ dshLlmPath: options.dshLlmPath, timeoutMs: options?.timeoutMs })
+    : null;
   const metaBotSlug = options?.metaBotSlug;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 
   return async (input: ChatSkillWaitNoticeInput): Promise<string> => {
     try {
+      if (hostComplete) {
+        const hostText = await hostComplete({
+          ...(metaBotSlug ? { botSlug: metaBotSlug } : {}),
+          system: buildWaitNoticeSystemPrompt(input),
+          user: buildWaitNoticePrompt(input),
+        });
+        if (hostText !== null) {
+          return normalizeChatSkillWaitNoticeText(hostText) || DEFAULT_CHAT_SKILL_WAIT_NOTICE;
+        }
+      }
       const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
       if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
         return DEFAULT_CHAT_SKILL_WAIT_NOTICE;
