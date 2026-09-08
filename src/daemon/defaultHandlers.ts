@@ -1122,6 +1122,12 @@ function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotI
   if (hasOwnField(input, 'ownerGlobalMetaId')) {
     update.ownerGlobalMetaId = normalizeOptionalGlobalMetaId(input.ownerGlobalMetaId);
   }
+  if (hasOwnField(input, 'isAvailable')) {
+    if (typeof input.isAvailable !== 'boolean') {
+      throw new Error('isAvailable must be a boolean.');
+    }
+    update.isAvailable = input.isAvailable;
+  }
   return update;
 }
 

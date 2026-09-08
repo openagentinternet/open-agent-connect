@@ -364,6 +364,35 @@ test('demoting the twin leaves the machine twin-less until another Bot is promot
   assert.equal(await resolveCurrentTwinSlug(systemHomeDir), eric.slug);
 });
 
+test('default bot handlers persist Bot availability with a true default', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-availability-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const bot = await createMetabotProfile(systemHomeDir, { name: 'Available Bot' });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const initial = await handlers.bot.getProfile({ slug: bot.slug });
+  assert.equal(initial.ok, true);
+  assert.equal(initial.data.profile.isAvailable, true);
+
+  const disabled = await handlers.bot.updateProfile({ slug: bot.slug, isAvailable: false });
+  assert.equal(disabled.ok, true);
+  assert.equal(disabled.data.profile.isAvailable, false);
+  assert.equal((await readBotRoleInfo(resolveMetabotPaths(bot.homeDir).botRoleStatePath)).isAvailable, false);
+
+  const reenabled = await handlers.bot.updateProfile({ slug: bot.slug, isAvailable: true });
+  assert.equal(reenabled.ok, true);
+  assert.equal(reenabled.data.profile.isAvailable, true);
+  assert.equal((await readBotRoleInfo(resolveMetabotPaths(bot.homeDir).botRoleStatePath)).isAvailable, true);
+});
+
 test('default bot config handlers persist chain config per MetaBot profile', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
