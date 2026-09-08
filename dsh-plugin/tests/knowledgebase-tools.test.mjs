@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 const plugin = await import('../lib/knowledgebase-tools.js')
+const localRead = await import('../lib/local-read.js')
 
 function fakeHost() {
   const tools = []
@@ -15,13 +16,27 @@ function fakeHost() {
   return { tools, ctx }
 }
 
-function execFor(slug, homeDir) {
-  return {
-    agent: {
-      ctx: { options: { cwd: homeDir } },
-    },
-    callId: 'call-1',
-  }
+/**
+ * Production-shaped fixture: the Bot's profile home lives under
+ * `<base>/.metabot/profiles/<slug>`, while the DSH session workspace cwd is a
+ * plain directory elsewhere (DSH-DEFECT-KB-001: the tools must not treat the
+ * session cwd as the profile home). `resolve` is the injected homeDir resolver.
+ */
+function profileSetup(prefix) {
+  const base = mkdtempSync(path.join(tmpdir(), prefix))
+  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
+  mkdirSync(homeDir, { recursive: true })
+  const workspace = mkdtempSync(path.join(tmpdir(), 'kb-workspace-'))
+  const exec = { agent: { ctx: { options: { cwd: workspace } } }, callId: 'call-1' }
+  const resolve = async () => homeDir
+  return { base, homeDir, workspace, exec, resolve }
+}
+
+function createKb(homeDir, name) {
+  const paths = localRead.core('core/state/paths.js').resolveMetabotPaths(homeDir)
+  return localRead.core('core/knowledgebase/store.js')
+    .createKnowledgeBaseStore(paths)
+    .createKnowledgeBase({ metabotSlug: 'test-bot', name })
 }
 
 test('bindKnowledgeBaseToolInstall registers all tools incl. the qa-surf pair', () => {
@@ -46,9 +61,7 @@ test('bindKnowledgeBaseToolInstall registers all tools incl. the qa-surf pair', 
 })
 
 test('kb/study tools survive a cordis ctx that throws on gated reads (kernel regression)', async () => {
-  const base = mkdtempSync(path.join(tmpdir(), 'kb-ctx-guard-'))
-  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
-  mkdirSync(homeDir, { recursive: true })
+  const { homeDir, resolve } = profileSetup('kb-ctx-guard-')
   const throwingCtx = new Proxy({}, {
     get(target, prop) {
       if (prop === 'then') return undefined
@@ -57,7 +70,7 @@ test('kb/study tools survive a cordis ctx that throws on gated reads (kernel reg
   })
   const kernelAgent = { ctx: throwingCtx, session: { header: { cwd: homeDir } } }
   const host = fakeHost()
-  plugin.bindKnowledgeBaseToolInstall(host.ctx, 'test-bot')
+  plugin.bindKnowledgeBaseToolInstall(host.ctx, 'test-bot', resolve)
   const byName = new Map(host.tools.map((tool) => [tool.name, tool]))
   const exec = { agent: kernelAgent, callId: 'call-1' }
 
@@ -68,13 +81,10 @@ test('kb/study tools survive a cordis ctx that throws on gated reads (kernel reg
 })
 
 test('qa-surf enqueue/dedup/disable roundtrip with the recurring status label', async () => {
-  const base = mkdtempSync(path.join(tmpdir(), 'kb-qa-surf-'))
-  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
-  mkdirSync(homeDir, { recursive: true })
+  const { exec, resolve } = profileSetup('kb-qa-surf-')
   const host = fakeHost()
-  plugin.bindKnowledgeBaseToolInstall(host.ctx, 'test-bot')
+  plugin.bindKnowledgeBaseToolInstall(host.ctx, 'test-bot', resolve)
   const byName = new Map(host.tools.map((tool) => [tool.name, tool]))
-  const exec = execFor('test-bot', homeDir)
 
   const enabled = await byName.get('metaweb_qa_surf_enqueue').execute({ nightly_budget: 5 }, exec)
   assert.match(String(enabled), /Nightly Q&A surfing enabled \(nightly budget: 5 pins\/run\)\./)
@@ -95,17 +105,22 @@ test('qa-surf enqueue/dedup/disable roundtrip with the recurring status label', 
   assert.match(String(again), /not active for this bot/)
 })
 
-test('add -> learn -> query roundtrip through the native tools against a temp profile', async () => {
-  const base = mkdtempSync(path.join(tmpdir(), 'kb-tools-'))
-  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
-  mkdirSync(homeDir, { recursive: true })
+// DSH-DEFECT-KB-001 acceptance smoke: add -> learn -> query -> list on a
+// never-initialized (A-class) profile from a plain workspace session cwd.
+test('add -> learn -> query -> list closed loop on a fresh profile (DSH-DEFECT-KB-001)', async () => {
+  const { homeDir, exec, resolve } = profileSetup('kb-tools-')
 
   const host = fakeHost()
-  const [list, query, add, learn] = plugin.buildKnowledgeBaseToolDefinitions({ host: host.ctx, fallbackSlug: 'test-bot' })
-  const exec = execFor('test-bot', homeDir)
+  const defs = plugin.buildKnowledgeBaseToolDefinitions({
+    host: host.ctx,
+    fallbackSlug: 'test-bot',
+    resolveHomeDir: resolve,
+  })
+  const [list, query, add, learn] = defs
 
   const empty = await list.execute({}, exec)
-  assert.match(String(empty), /No knowledge bases yet/)
+  assert.equal(typeof empty, 'string')
+  assert.match(empty, /No knowledge bases yet/)
 
   const saved = await add.execute({
     title: '塔罗入门',
@@ -113,37 +128,112 @@ test('add -> learn -> query roundtrip through the native tools against a temp pr
     sourceType: 'manual',
     tags: ['divination'],
   }, exec)
+  assert.equal(typeof saved, 'string')
   assert.match(saved, /Saved "塔罗入门"/)
 
+  // Duplicate write of the same title+content stays idempotent (same corpus file).
+  const again = await add.execute({
+    title: '塔罗入门',
+    content: '塔罗牌大阿卡纳共二十二张。占卜流程：洗牌、切牌、抽牌、解读。',
+  }, exec)
+  assert.match(String(again), /Saved "塔罗入门"/)
+
   const learned = await learn.execute({}, exec)
-  assert.match(learned, /1 docs, \d+ chunks indexed/)
+  assert.match(String(learned), /1 docs, \d+ chunks indexed/)
 
   const hits = await query.execute({ query: '塔罗 占卜' }, exec)
   assert.match(String(hits), /塔罗入门/)
   assert.match(String(hits), /Default/)
 
   const miss = await query.execute({ query: 'quantum crochet' }, exec)
-  assert.match(String(miss), /No knowledge-base evidence/)
+  assert.equal(typeof miss, 'string')
+  assert.match(miss, /No knowledge-base evidence/)
+
+  const second = await add.execute({
+    title: 'Style prompts',
+    content: 'The zzqx-nebula watermark token marks this reference document.',
+  }, exec)
+  assert.match(String(second), /Saved "Style prompts"/)
+  const relearned = await learn.execute({}, exec)
+  assert.match(String(relearned), /2 docs, \d+ chunks indexed/)
+
+  const listed = await list.execute({}, exec)
+  assert.match(String(listed), /Default \(id: default\) \[default\]/)
+  assert.match(String(listed), /docs: 2, chunks: \d+/)
+
+  const unique = await query.execute({ query: 'zzqx-nebula watermark' }, exec)
+  assert.match(String(unique), /Style prompts/)
 })
 
-test('missing session context returns a readable error', async () => {
+test('non-default knowledge base: add/learn/query scoped by knowledgeBaseId', async () => {
+  const { homeDir, exec, resolve } = profileSetup('kb-nondefault-')
+  const kb = await createKb(homeDir, 'Research')
+  assert.equal(kb.id, 'research')
+
   const host = fakeHost()
-  const [query] = plugin.buildKnowledgeBaseToolDefinitions({ host: host.ctx })
+  const defs = plugin.buildKnowledgeBaseToolDefinitions({
+    host: host.ctx,
+    fallbackSlug: 'test-bot',
+    resolveHomeDir: resolve,
+  })
+  const [list, query, add, learn] = defs
+
+  const saved = await add.execute({
+    title: '链上问答协议笔记',
+    content: 'simplequestion 只需要标题；simpleanswer 需要 answer_to 与正文。',
+    knowledgeBaseId: 'research',
+  }, exec)
+  assert.match(String(saved), /Saved "链上问答协议笔记"/)
+
+  const learned = await learn.execute({ knowledgeBaseId: 'research' }, exec)
+  assert.match(String(learned), /Learned "Research": 1 docs, \d+ chunks indexed/)
+
+  const hits = await query.execute({ query: 'simpleanswer 正文', knowledgeBaseId: 'research' }, exec)
+  assert.match(String(hits), /链上问答协议笔记/)
+  assert.match(String(hits), /Research \(research\)/)
+
+  const listed = await list.execute({}, exec)
+  assert.match(String(listed), /Research \(id: research\)/)
+})
+
+test('tool failures return locatable strings that satisfy the string output schema', async () => {
+  const { exec, resolve } = profileSetup('kb-errors-')
+  const host = fakeHost()
+  const defs = plugin.buildKnowledgeBaseToolDefinitions({
+    host: host.ctx,
+    fallbackSlug: 'test-bot',
+    resolveHomeDir: resolve,
+  })
+  const [, query, add, learn] = defs
+
+  const unknownKb = await learn.execute({ knowledgeBaseId: 'nope' }, exec)
+  assert.equal(typeof unknownKb, 'string')
+  assert.match(unknownKb, /^knowledge_base_learn failed: /)
+  assert.match(unknownKb, /nope/)
+
+  const noFields = await add.execute({ title: '', content: '' }, exec)
+  assert.equal(typeof noFields, 'string')
+  assert.match(noFields, /^knowledge_base_add_document failed: title and content are required\./)
+
+  const noQuery = await query.execute({}, exec)
+  assert.equal(typeof noQuery, 'string')
+  assert.match(noQuery, /^knowledge_base_query failed: query is required\./)
+})
+
+test('missing session context returns a readable string error', async () => {
+  const host = fakeHost()
+  const [, query] = plugin.buildKnowledgeBaseToolDefinitions({ host: host.ctx })
   const result = await query.execute({ query: 'x' }, {})
-  assert.match(String(result.error), /acting Bot profile/)
+  assert.equal(typeof result, 'string')
+  assert.match(result, /^knowledge_base_query failed: /)
+  assert.match(result, /acting Bot profile/)
 })
 
 test('procedure_save -> recall -> archive roundtrip with colloquial matching', async () => {
-  const base = mkdtempSync(path.join(tmpdir(), 'kb-proc-'))
-  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
-  mkdirSync(homeDir, { recursive: true })
-  const host = fakeHost()
-  const tools = plugin.buildKnowledgeBaseToolDefinitions({ host: host.ctx, fallbackSlug: 'test-bot' })
-  // The procedure tools are reached through the bound install.
+  const { exec, resolve } = profileSetup('kb-proc-')
   const bound = fakeHost()
-  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot')
+  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot', resolve)
   const byName = new Map(bound.tools.map((tool) => [tool.name, tool]))
-  const exec = execFor('test-bot', homeDir)
 
   const saved = await byName.get('procedure_save').execute({
     title: '发布链上文章',
@@ -169,13 +259,10 @@ test('procedure_save -> recall -> archive roundtrip with colloquial matching', a
 })
 
 test('metaweb_study_enqueue dedupes and status reports', async () => {
-  const base = mkdtempSync(path.join(tmpdir(), 'kb-study-'))
-  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
-  mkdirSync(homeDir, { recursive: true })
+  const { exec, resolve } = profileSetup('kb-study-')
   const bound = fakeHost()
-  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot')
+  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot', resolve)
   const byName = new Map(bound.tools.map((tool) => [tool.name, tool]))
-  const exec = execFor('test-bot', homeDir)
 
   const empty = await byName.get('metaweb_study_status').execute({}, exec)
   assert.match(String(empty), /No study jobs yet/)
