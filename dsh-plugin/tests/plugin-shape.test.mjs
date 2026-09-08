@@ -186,6 +186,21 @@ test('bootstrapHealth records CLI/daemon/bind failures without throwing', async 
   assert.match(health.error, /skillBind/)
 })
 
+// Regression: apply() crashed the whole plugin tree with "cannot get property
+// agents without inject" because createHostAgentTurnRunner read ctx.agents
+// directly. `agents` is deliberately NOT in the inject list (asserted above),
+// so the read must go through ctx.get like every other optional service.
+test('createHostAgentTurnRunner survives the Cordis inject fence on agents', () => {
+  const fenced = {
+    get agents() { throw new Error('cannot get property "agents" without inject') },
+    get: () => undefined,
+  }
+  assert.equal(plugin.createHostAgentTurnRunner(fenced), undefined)
+  const registry = { create: async () => ({ agent: {}, dispose: () => {} }) }
+  const provided = { get: (key) => (key === 'agents' ? registry : undefined) }
+  assert.equal(typeof plugin.createHostAgentTurnRunner(provided), 'function')
+})
+
 function request(method, url, headers) {
   return {
     method,
