@@ -117,3 +117,11 @@ export function BotPresetSeat({
     />
   )
 }
+
+
+export function SessionIdHeader({ useBotPresetSeat }: BotPresetSeatProps): ReactNode {
+  const state = useBotPresetSeat((snapshot) => snapshot)
+  if (!state.sessionId) return null
+  const short = state.sessionId.length > 16 ? `${state.sessionId.slice(0, 8)}…${state.sessionId.slice(-6)}` : state.sessionId
+  return <span className="oac-session-id-header" title={state.sessionId}><code>{short}</code><CopyIconButton value={state.sessionId} label="Copy session ID" copiedLabel="Copied" /></span>
+}
