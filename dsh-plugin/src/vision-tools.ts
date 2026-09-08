@@ -90,7 +90,19 @@ function unavailable(): MediaDescriptionControl {
 }
 
 export function bindMediaDescriptionTools(ctx: HostContext): void {
-  const control = (ctx as HostContext & { mediaDescription?: MediaDescriptionControl }).mediaDescription ?? relayFromEnvironment()
+  // Cordis contexts are guarded proxies: reading an undeclared service
+  // property directly throws before the fallback can run. Use the optional
+  // service lookup first, then retain a guarded direct read for plain-object
+  // test contexts and hosts that explicitly inject this service.
+  let control = ctx.get?.('mediaDescription') as MediaDescriptionControl | undefined
+  if (!control) {
+    try {
+      control = (ctx as HostContext & { mediaDescription?: MediaDescriptionControl }).mediaDescription
+    } catch {
+      control = undefined
+    }
+  }
+  control ??= relayFromEnvironment()
   for (const definition of buildMediaDescriptionToolDefinitions(control)) {
     try { ctx.tools?.register(definition) } catch (error) {
       if (!(error instanceof Error && /already.*(registered|exists)|duplicate/i.test(error.message))) ctx.logger?.warn?.(`[oac-dsh] media tool install failed: ${error instanceof Error ? error.message : String(error)}`)
