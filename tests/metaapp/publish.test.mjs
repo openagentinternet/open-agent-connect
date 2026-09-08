@@ -16,6 +16,7 @@ const {
   shareMetaApp,
   updateMetaApp,
 } = require('../../dist/core/metaapp/publish.js');
+const { createMetaAppWriteGuard } = require('../../dist/core/metaapp/writeGuard.js');
 
 const CREATE_PIN = `${'a'.repeat(64)}i0`;
 const UPDATE_TARGET_PIN = `${'b'.repeat(64)}i0`;
@@ -735,4 +736,56 @@ test('publishMetaApp confirmation preview removes the staging directory', async 
   assert.equal(result.state, 'awaiting_confirmation');
   const leftover = listMetabotMetaappTmpdirEntries().filter((entry) => !beforeEntries.has(entry));
   assert.equal(leftover.length, 0, `confirmation preview leaked staging dirs: ${leftover.join(', ')}`);
+});
+
+test('publishMetaApp with a write guard replays an identical confirmed publish inside the window', async () => {
+  const projectDir = await makeStaticProject('idem');
+  const deps = createDeps({ writeGuard: createMetaAppWriteGuard(), actorKey: 'home-a' });
+  const first = await publishMetaApp({ projectDir, confirm: true }, deps);
+  const second = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(second.data.idempotent, true);
+  assert.equal(second.data.pinId, first.data.pinId);
+  assert.equal(deps.calls.filter((call) => call.type === 'upload').length, 1);
+  assert.equal(deps.calls.filter((call) => call.type === 'write').length, 1);
+});
+
+test('publishMetaApp idempotency keys are scoped per actor', async () => {
+  const projectDir = await makeStaticProject('idem-actor');
+  const writeGuard = createMetaAppWriteGuard();
+  const depsA = createDeps({ writeGuard, actorKey: 'home-a' });
+  const depsB = createDeps({ writeGuard, actorKey: 'home-b' });
+  await publishMetaApp({ projectDir, confirm: true }, depsA);
+  const second = await publishMetaApp({ projectDir, confirm: true }, depsB);
+
+  assert.equal(second.ok, true);
+  assert.equal(second.data.idempotent, undefined);
+  assert.equal(depsB.calls.filter((call) => call.type === 'write').length, 1);
+});
+
+test('updateMetaApp with a write guard replays an identical confirmed update inside the window', async () => {
+  const projectDir = await makeStaticProject('idem-update');
+  const previous = {
+    pinId: UPDATE_TARGET_PIN,
+    firstPinId: UPDATE_TARGET_PIN,
+    title: 'Previous Title',
+    appName: 'previous-app',
+    tags: ['game'],
+  };
+  const deps = createDeps({
+    writeGuard: createMetaAppWriteGuard(),
+    actorKey: 'home-a',
+    readExistingMetaApp: async () => previous,
+  });
+  const input = { projectDir, targetPinId: UPDATE_TARGET_PIN, confirm: true };
+  const first = await updateMetaApp(input, deps);
+  const second = await updateMetaApp(input, deps);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.data.idempotent, true);
+  assert.equal(second.data.firstPinId, UPDATE_TARGET_PIN);
+  assert.equal(deps.calls.filter((call) => call.type === 'upload').length, 1);
+  assert.equal(deps.calls.filter((call) => call.type === 'write').length, 1);
 });

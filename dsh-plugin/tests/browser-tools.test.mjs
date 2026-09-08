@@ -242,12 +242,16 @@ test('bot_browser_publish_app under policy never requires a same-session preview
   assert.equal(calls.length, 0)
 
   // Preview in the same session unlocks the publish (policy never: no dialog).
+  // The flow dry-runs the project WITHOUT --confirm first, then writes with it.
   const preview = tools.find((tool) => tool.name === 'bot_browser_preview_local')
   await preview.execute({ path: dir }, { agent })
   const text = await publish.execute({ dir, title: 'Test App' }, { agent })
   assert.equal(asked.length, 0)
-  assert.equal(calls.length, 1)
+  assert.equal(calls.length, 2)
   assert.match(calls[0].join(' '), /publish-project/)
+  assert.ok(!calls[0].includes('--confirm'))
+  assert.match(calls[1].join(' '), /publish-project/)
+  assert.ok(calls[1].includes('--confirm'))
   assert.match(text, new RegExp(`metaapp://${PIN}`))
 
   // A DIFFERENT directory still needs its own preview.
@@ -256,7 +260,7 @@ test('bot_browser_publish_app under policy never requires a same-session preview
   await writeFile(join(otherDir, 'index.html'), '<html></html>\n', 'utf8')
   const refused2 = await publish.execute({ dir: otherDir, title: 'Other' }, { agent })
   assert.match(refused2, /was not previewed here/)
-  assert.equal(calls.length, 1)
+  assert.equal(calls.length, 2)
 })
 
 test('bot_browser_publish_app asks DSH approval and skips CLI when cancelled', async () => {
@@ -289,7 +293,9 @@ test('bot_browser_publish_app asks DSH approval and skips CLI when cancelled', a
     { agent },
   )
   assert.match(text, /cancelled/)
-  assert.equal(calls.length, 0)
+  // Only the no-confirm preflight ran; the chain write was never attempted.
+  assert.equal(calls.length, 1)
+  assert.ok(!calls[0].includes('--confirm'))
 })
 
 test('bot_browser_publish_app refuses to publish without APP.md', async () => {
@@ -529,3 +535,227 @@ function capture() {
   }
   return box
 }
+
+test('bot_browser_publish_app shows entry file, package size, and fork provenance in the approval dialog', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-publish-reason-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  await writeFile(join(dir, '.metaapp-fork.json'), JSON.stringify({ sourcePinId: PIN, sourceUri: `metaapp://${PIN}` }), 'utf8')
+  const calls = []
+  const asked = []
+  const { agent, tools } = fakeAgent()
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub: fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    approval: {
+      async request(req) {
+        asked.push(req)
+        return 'allowed-once'
+      },
+    },
+    run: async (args) => {
+      calls.push(args)
+      if (!args.includes('--confirm')) {
+        return {
+          ok: true,
+          state: 'awaiting_confirmation',
+          data: {
+            plan: { indexFile: 'index.html' },
+            manifest: { title: 'Test App' },
+            archivePreview: { bytes: 4321, sha256: 'deadbeef', entries: ['index.html'] },
+          },
+        }
+      }
+      return { ok: true, state: 'success', data: { firstPinId: PIN, metaappUri: `metaapp://${PIN}`, totalCost: 7 } }
+    },
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const text = await tools.find((tool) => tool.name === 'bot_browser_publish_app').execute(
+    { dir, title: 'Test App' },
+    { agent },
+  )
+  assert.equal(asked.length, 1)
+  assert.match(asked[0].reason, /Entry file: index\.html/)
+  assert.match(asked[0].reason, /Package size: 4321 bytes/)
+  assert.match(asked[0].reason, new RegExp(`Forked from: metaapp://${PIN}`))
+  assert.match(asked[0].reason, /APP\.md: present/)
+  assert.match(text, /Cost: 7 sats/)
+  assert.equal(calls.length, 2)
+  assert.ok(calls[1].includes('--confirm'))
+})
+
+test('bot_browser_publish_app surfaces project inspection failures before any approval dialog', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-publish-broken-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  const asked = []
+  const { agent, tools } = fakeAgent()
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub: fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    approval: {
+      async request(req) {
+        asked.push(req)
+        return 'allowed-once'
+      },
+    },
+    run: async () => ({ ok: false, state: 'manual_action_required', code: 'metaapp_artifact_missing', message: 'The project does not have a detected runtime artifact directory.' }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  await assert.rejects(
+    () => tools.find((tool) => tool.name === 'bot_browser_publish_app').execute({ dir, title: 'Broken' }, { agent }),
+    /runtime artifact directory/,
+  )
+  assert.equal(asked.length, 0)
+})
+
+const UPDATE_PIN = `${'e'.repeat(64)}i0`
+
+function updateToolRun(calls, { owned = true, listFails = false } = {}) {
+  return async (args) => {
+    calls.push(args)
+    if (args[1] === 'list') {
+      if (listFails) return { ok: false, state: 'failed', code: 'metaapp_list_failed', message: 'index unreachable' }
+      return {
+        ok: true,
+        state: 'success',
+        data: { records: owned ? [{ pinId: PIN, firstPinId: PIN, title: 'My App' }] : [], nextCursor: '' },
+      }
+    }
+    if (!args.includes('--confirm')) {
+      return {
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: { plan: { indexFile: 'index.html' }, manifest: { title: 'My App' }, archivePreview: { bytes: 2048 } },
+      }
+    }
+    return { ok: true, state: 'success', data: { pinId: UPDATE_PIN, firstPinId: PIN, totalCost: 9 } }
+  }
+}
+
+function registerUpdateTools({ run, approval, agentSession } = {}) {
+  const { agent, tools } = fakeAgent()
+  if (agentSession) agent.session = agentSession
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub: fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    approval: approval ?? { async request() { return 'allowed-once' } },
+    run,
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  return { agent, tools }
+}
+
+test('bot_browser_update_app refuses to update without APP.md', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-update-empty-'))
+  const calls = []
+  const { agent, tools } = registerUpdateTools({ run: updateToolRun(calls) })
+  await assert.rejects(
+    () => tools.find((tool) => tool.name === 'bot_browser_update_app').execute({ dir, targetPinId: PIN }, { agent }),
+    /APP\.md is required/,
+  )
+  assert.equal(calls.length, 0)
+})
+
+test('bot_browser_update_app needs a target when neither targetPinId nor a fork marker exists', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-update-notarget-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const calls = []
+  const { agent, tools } = registerUpdateTools({ run: updateToolRun(calls) })
+  await assert.rejects(
+    () => tools.find((tool) => tool.name === 'bot_browser_update_app').execute({ dir }, { agent }),
+    /needs the target app/,
+  )
+  assert.equal(calls.length, 0)
+})
+
+test('bot_browser_update_app resolves the target from the fork marker and refuses apps the Bot does not own', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-update-notowned-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  await writeFile(join(dir, '.metaapp-fork.json'), JSON.stringify({ sourcePinId: PIN }), 'utf8')
+  const calls = []
+  const { agent, tools } = registerUpdateTools({ run: updateToolRun(calls, { owned: false }) })
+  const text = await tools.find((tool) => tool.name === 'bot_browser_update_app').execute({ dir }, { agent })
+  assert.match(text, /not among this Bot's published apps/)
+  assert.match(text, /bot_browser_publish_app/)
+  // Only the ownership check ran — no preflight, no write.
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0][1], 'list')
+})
+
+test('bot_browser_update_app refuses while ownership is unverifiable', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-update-unverifiable-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const calls = []
+  const { agent, tools } = registerUpdateTools({ run: updateToolRun(calls, { listFails: true }) })
+  await assert.rejects(
+    () => tools.find((tool) => tool.name === 'bot_browser_update_app').execute({ dir, targetPinId: PIN }, { agent }),
+    /Unable to verify that this Bot owns/,
+  )
+})
+
+test('bot_browser_update_app cancels cleanly in the approval dialog', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-update-cancel-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const calls = []
+  const asked = []
+  const { agent, tools } = registerUpdateTools({
+    run: updateToolRun(calls),
+    approval: {
+      async request(req) {
+        asked.push(req)
+        return 'rejected'
+      },
+    },
+  })
+  const text = await tools.find((tool) => tool.name === 'bot_browser_update_app').execute(
+    { dir, targetPinId: PIN, title: 'My App' },
+    { agent },
+  )
+  assert.match(text, /cancelled/)
+  assert.match(text, /Do not retry/)
+  assert.equal(asked.length, 1)
+  assert.match(asked[0].reason, /new version of MetaApp "My App"/)
+  assert.match(asked[0].reason, new RegExp(`Target app: metaapp://${PIN}`))
+  assert.match(asked[0].reason, /Package size: 2048 bytes/)
+  // list + preflight ran; the --confirm write did not.
+  assert.equal(calls.length, 2)
+  assert.ok(!calls.some((args) => args.includes('--confirm')))
+})
+
+test('bot_browser_update_app publishes a new version under the stable app URI', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-update-ok-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const calls = []
+  const { agent, tools } = registerUpdateTools({
+    run: updateToolRun(calls),
+    agentSession: { events: [{ type: 'approval/policy', data: { policy: 'never' } }] },
+  })
+  // policy never: same-session preview is the gate.
+  const update = tools.find((tool) => tool.name === 'bot_browser_update_app')
+  const refused = await update.execute({ dir, targetPinId: PIN }, { agent })
+  assert.match(refused, /was not previewed here/)
+  await tools.find((tool) => tool.name === 'bot_browser_preview_local').execute({ path: dir }, { agent })
+  const text = await update.execute({ dir, targetPinId: PIN }, { agent })
+  assert.match(text, new RegExp(`Updated on-chain: metaapp://${PIN}`))
+  assert.match(text, new RegExp(`new version pin ${UPDATE_PIN}`))
+  assert.match(text, /Cost: 9 sats/)
+  const confirm = calls.find((args) => args.includes('--confirm'))
+  assert.ok(confirm)
+  assert.deepEqual(confirm.slice(0, 4), ['metaapp', 'update-project', '--project-dir', dir])
+  assert.ok(confirm.includes('--target-pin-id'))
+  assert.ok(confirm.includes(PIN))
+})

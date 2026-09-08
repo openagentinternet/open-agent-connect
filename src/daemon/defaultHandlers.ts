@@ -265,6 +265,7 @@ import {
 } from '../core/chain/writeAttempts';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
 import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
+import { createMetaAppWriteGuard } from '../core/metaapp/writeGuard';
 import {
   deleteMetaAppPin,
   listOwnerMetaApps,
@@ -12404,6 +12405,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry({
     resolveMetafileContentBaseUrl: async () => (await infrastructureConfigStore.read()).metafileContentBaseUrl,
   });
+  // One daemon-wide guard: 60 s idempotency window + per-app write locks
+  // shared by every metaapp publish/update/delete path (payload and project).
+  const metaAppWriteGuard = createMetaAppWriteGuard();
   let daemonHandlers: MetabotDaemonHttpHandlers | null = null;
   function safeBrowserBridgeErrorMessage(error: unknown, fallback: string): string {
     const message = error instanceof Error ? error.message : normalizeText(error);
@@ -13374,6 +13378,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 };
               },
               readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+              actorKey: actor.homeDir,
+              writeGuard: metaAppWriteGuard,
               now: Date.now,
             },
           );
@@ -13456,6 +13462,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 };
               },
               readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+              actorKey: actor.homeDir,
+              writeGuard: metaAppWriteGuard,
               now: Date.now,
             },
           );
@@ -13493,6 +13501,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const result = await publishMetaAppPayload(
             createMetaAppOwnerServiceActor(rawInput, actor),
             rawInput,
+            metaAppWriteGuard,
           );
           return addMetaAppOwnerLocalUiUrl(result);
         } catch (error) {
@@ -13512,6 +13521,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const result = await updateMetaAppPayload(
             createMetaAppOwnerServiceActor(rawInput, actor),
             rawInput,
+            metaAppWriteGuard,
           );
           return addMetaAppOwnerLocalUiUrl(result);
         } catch (error) {
@@ -13531,6 +13541,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const result = await deleteMetaAppPin(
             createMetaAppOwnerServiceActor(rawInput, actor),
             rawInput,
+            metaAppWriteGuard,
           );
           await upsertMetaAppLocalRevoke({ actor, rawInput, result }).catch(() => undefined);
           return result;
