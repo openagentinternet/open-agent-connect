@@ -29,14 +29,19 @@ export const BOTS_CSS = `
 .oac-bot-card:hover { border-color: var(--dsw-alias-label-dimmed); }
 .oac-bot-main { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 14px 16px 12px; }
 .oac-bot-avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
-.oac-bot-avatar-sm { width: 28px; height: 28px; }
-.oac-bot-avatar-lg { width: 64px; height: 64px; font-size: 20px; }
+.oac-bot-avatar-sm { width: 28px; height: 28px; font-size: 11px; }
+.oac-bot-avatar-lg { width: 64px; height: 64px; font-size: 18px; }
 /* Avatar editor in the Basic tab (OAC /ui/bot layout): preview left,
    Upload/Replace + Remove actions right, note line underneath. */
 .oac-avatar-section { display: flex; align-items: center; gap: 14px; }
 .oac-avatar-actions { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .oac-avatar-buttons { display: flex; gap: 8px; }
-.oac-bot-avatar-fallback { display: inline-flex; align-items: center; justify-content: center; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); font-size: 14px; font-weight: 600; }
+/* Initials fallback (the name's first two chars): one notch below the old
+   14px so two CJK glyphs never wrap/overflow the circle; the nowrap +
+   overflow guard keeps odd glyphs clipped instead of growing the row. Size
+   variants scale the font with the circle (40px→12px base, 32px→12px,
+   28px→11px, 24px→10px, 64px→18px). */
+.oac-bot-avatar-fallback { display: inline-flex; align-items: center; justify-content: center; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 1; font-weight: 600; white-space: nowrap; overflow: hidden; }
 /* Clickable avatar (opens the Bot's page in the right-sidebar Bot Browser). */
 .oac-avatar-btn { flex: none; display: inline-flex; padding: 0; border: none; border-radius: 50%; background: none; cursor: pointer; }
 .oac-avatar-btn:hover { filter: brightness(1.08); }
@@ -210,20 +215,20 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-a2a-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
 .oac-a2a-list-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-.oac-a2a-bot-avatar { flex: none; width: 32px; height: 32px; }
+.oac-a2a-bot-avatar { flex: none; width: 32px; height: 32px; font-size: 12px; }
 .oac-a2a-list-head .oac-input { flex: 0 1 auto; min-width: 0; height: auto; padding-top: 5px; padding-bottom: 5px; }
 .oac-a2a-list-rows { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
 .oac-a2a-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 8px; box-sizing: border-box; border: none; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .oac-a2a-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .oac-a2a-row.active { background: var(--dsw-alias-interactive-bg-active); }
-.oac-a2a-row-avatar { flex: none; width: 28px; height: 28px; }
+.oac-a2a-row-avatar { flex: none; width: 28px; height: 28px; font-size: 11px; }
 .oac-a2a-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .oac-a2a-row-name { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-a2a-row-text { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-a2a-row-time { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
 .oac-a2a-thread { position: relative; min-width: 0; display: flex; flex-direction: column; }
 .oac-a2a-thread-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-.oac-a2a-thread-avatar { flex: none; width: 32px; height: 32px; }
+.oac-a2a-thread-avatar { flex: none; width: 32px; height: 32px; font-size: 12px; }
 .oac-a2a-participants { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; }
 .oac-a2a-participant { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .oac-a2a-participant-local { align-items: flex-end; text-align: right; }
@@ -236,7 +241,7 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-a2a-msg { display: flex; gap: 10px; max-width: min(560px, 86%); }
 .oac-a2a-msg-peer { align-self: flex-start; }
 .oac-a2a-msg-local { align-self: flex-end; flex-direction: row-reverse; }
-.oac-a2a-msg-avatar { flex: none; width: 28px; height: 28px; }
+.oac-a2a-msg-avatar { flex: none; width: 28px; height: 28px; font-size: 11px; }
 .oac-a2a-msg-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .oac-a2a-msg-local .oac-a2a-msg-body { align-items: flex-end; }
 .oac-a2a-msg-head { display: flex; align-items: baseline; gap: 10px; }
@@ -460,7 +465,7 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-local-actions { display: flex; align-items: center; gap: 14px; }
 .oac-gt-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .oac-gt-member { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; }
-.oac-gt-member-avatar { flex: none; width: 24px; height: 24px; }
+.oac-gt-member-avatar { flex: none; width: 24px; height: 24px; font-size: 10px; }
 .oac-gt-member-main { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .oac-gt-member-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; line-height: 18px; color: var(--dsw-alias-label-primary); }
 .oac-gt-member-work { flex: none; font-size: 11px; line-height: 16px; }
