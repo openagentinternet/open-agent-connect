@@ -20,6 +20,7 @@ import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { bindQaToolInstall } from './qa-tools.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
+import { bindMediaDescriptionTools } from './vision-tools.js'
 import { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import {
@@ -613,6 +614,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindSimpleNoteToolInstall(ctx)
   bindQaToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
+  bindMediaDescriptionTools(ctx)
 
   // Source-session relay: drain group-task milestones back into the chat that
   // originated each task ("哪里发起哪里结束"), on a host-lifetime timer.
@@ -773,6 +775,7 @@ export {
 export { applyGroupTaskRelayDrain } from './group-task-relay.js'
 export { applyGroupTaskWorkerSessions, GROUP_TASK_WORK_SYSTEM_PROMPT } from './group-task-worker.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
+export { bindMediaDescriptionTools, buildMediaDescriptionToolDefinitions, type MediaDescriptionControl } from './vision-tools.js'
 export {
   buildChainHistoryRecallToolDefinitions,
   DEFAULT_CHAIN_HISTORY_RECALL_LIMIT,
