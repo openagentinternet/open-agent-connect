@@ -18,6 +18,7 @@ import {
   type BotBackupPayload,
   type BotHomepageUploadPayload,
   type BotRow,
+  type BotUpdateResult,
   type BotWalletPayload,
   type ChatSkillsPayload,
   type LlmDirectory
@@ -45,7 +46,7 @@ type CreatePhase =
 export interface BotPanelInjected {
   list: () => Promise<BotRow[]>
   create: (input: CreateBotInput) => Promise<BotRow>
-  update: (slug: string, patch: Record<string, unknown>) => Promise<BotRow>
+  update: (slug: string, patch: Record<string, unknown>) => Promise<BotUpdateResult>
   remove: (slug: string) => Promise<void>
   llmDirectory: () => Promise<LlmDirectory>
   chatSkills: (from: string) => Promise<ChatSkillsPayload>
@@ -330,9 +331,14 @@ export function BotPanel({
           setError(null)
           try {
             const next = await update(editing.slug, patch)
-            setEditing(next)
+            setEditing(next.profile)
+            if (next.chainSync?.ok === false) {
+              throw new Error(`${t('saveLocalChainFailed')}: ${next.chainSync.error ?? ''}`)
+            }
+            return next
           } catch (cause) {
             setError(errorText(cause))
+            throw cause
           } finally {
             setBusy(false)
           }

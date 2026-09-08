@@ -65,6 +65,12 @@ export type BotRow = {
   setup?: BotSetupStatus | null
 }
 
+export type BotUpdateResult = {
+  profile: BotRow
+  chainWrites?: Array<{ path: string; pinId: string; network?: string }>
+  chainSync?: { ok: boolean; error?: string }
+}
+
 export type LlmDirectory = {
   providers: Array<{ id: string; name: string }>
   modelsByProvider: Record<string, Array<{ id: string; name: string }>>
@@ -548,8 +554,8 @@ export const api = {
     dshLlmFallbackModel?: string
     dshLlmFallbackReasoningEffort?: string
   }): Promise<BotRow> => profileOf(await post('bots/create', input)),
-  update: async (slug: string, patch: Record<string, unknown>): Promise<BotRow> =>
-    profileOf(await post('bots/update', { slug, patch })),
+  update: async (slug: string, patch: Record<string, unknown>): Promise<BotUpdateResult> =>
+    post('bots/update', { slug, patch }),
   remove: async (slug: string): Promise<void> => {
     await post('bots/delete', { slug })
   },
