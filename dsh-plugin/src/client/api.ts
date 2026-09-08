@@ -870,16 +870,19 @@ export const api = {
       total: typeof data.total === 'number' ? data.total : records.length,
     }
   },
-  metaappPublish: async (from: string, payload: Record<string, unknown>): Promise<CommandEnvelope> =>
-    postEnvelope('metaapp/publish', { from, payload, confirm: true }),
+  metaappPublish: async (from: string, payload: Record<string, unknown>, opId?: string): Promise<CommandEnvelope> =>
+    postEnvelope('metaapp/publish', { from, payload, confirm: true, ...(opId ? { opId } : {}) }),
   metaappUpdate: async (
     from: string,
     targetPinId: string,
     payload: Record<string, unknown>,
+    opId?: string,
   ): Promise<CommandEnvelope> =>
-    postEnvelope('metaapp/update', { from, targetPinId, payload, confirm: true }),
+    postEnvelope('metaapp/update', { from, targetPinId, payload, confirm: true, ...(opId ? { opId } : {}) }),
   metaappDelete: async (from: string, targetPinId: string): Promise<CommandEnvelope> =>
     postEnvelope('metaapp/delete', { from, targetPinId, confirm: true }),
+  metaappFork: async (from: string, pinId: string, title?: string): Promise<CommandEnvelope> =>
+    postEnvelope('metaapp/fork', { from, pinId, ...(title ? { title } : {}) }),
   /** Raw file upload → metafile reference. The browser sends the file bytes directly. */
   metaappUpload: async (from: string, file: File): Promise<{ metafileUri?: string; pinId?: string }> => {
     const response = await fetch('/oac/api/file/upload', {

@@ -357,6 +357,7 @@ for (const [method, pathname, key] of [
   ['POST', '/api/metaapp/update-project', 'updateProject'],
   ['POST', '/api/metaapp/share', 'share'],
   ['POST', '/api/metaapp/comment', 'comment'],
+  ['POST', '/api/metaapp/fork', 'fork'],
 ] ) {
   test(`${method} ${pathname} forwards the JSON body to metaapp.${key}`, async (t) => {
     const calls = [];
@@ -715,6 +716,86 @@ test('default metaapp owner publish and update accept empty optional asset field
   assert.equal(Object.prototype.hasOwnProperty.call(publishedPayload, 'coverImg'), false);
   assert.deepEqual(publishedPayload.introImgs, []);
   assert.equal(publishedPayload.content, `metafile://${TARGET_PIN_ID}`);
+});
+
+test('default metaapp fork materializes the app source into the Bot workspace out dir', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const calls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+    metaAppSourceMaterialize: async (sourceInput, deps) => {
+      calls.push({ sourceInput, deps });
+      return commandSuccess({
+        dir: sourceInput.outDir,
+        indexFile: 'index.html',
+        title: 'Forked App',
+        sourcePinId: sourceInput.pinId,
+        sourceUri: `metaapp://${sourceInput.pinId}`,
+      });
+    },
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const { payload } = await fetchJson(server.baseUrl, '/api/metaapp/fork', {
+    method: 'POST',
+    body: { from: 'alice', pinId: `metaapp://${TARGET_PIN_ID}`, title: 'My Cool App!' },
+  });
+
+  assert.equal(payload.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].sourceInput.pinId, TARGET_PIN_ID);
+  assert.equal(calls[0].deps.homeDir, fixture.homeDir);
+  const expectedPrefix = path.join(
+    fixture.homeDir,
+    'workspace',
+    'metaapps',
+    `my-cool-app-${TARGET_PIN_ID.slice(0, 8)}-`,
+  );
+  assert.ok(
+    calls[0].sourceInput.outDir.startsWith(expectedPrefix),
+    `out dir ${calls[0].sourceInput.outDir} should start with ${expectedPrefix}`,
+  );
+  assert.match(calls[0].sourceInput.outDir, /-\d+$/);
+  assert.equal(payload.data.dir, calls[0].sourceInput.outDir);
+  assert.equal(payload.data.indexFile, 'index.html');
+  assert.equal(payload.data.sourceUri, `metaapp://${TARGET_PIN_ID}`);
+});
+
+test('default metaapp fork fails before materializing for an unknown actor or a bad pin', async (t) => {
+  const fixture = await createAliceFixture(t);
+  let materializeCalls = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+    metaAppSourceMaterialize: async () => {
+      materializeCalls += 1;
+      return commandSuccess({});
+    },
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const unknownActor = await fetchJson(server.baseUrl, '/api/metaapp/fork', {
+    method: 'POST',
+    body: { from: 'nobody', pinId: TARGET_PIN_ID },
+  });
+  assert.equal(unknownActor.payload.ok, false);
+  assert.equal(unknownActor.payload.code, 'profile_not_found');
+
+  const badPin = await fetchJson(server.baseUrl, '/api/metaapp/fork', {
+    method: 'POST',
+    body: { from: 'alice', pinId: 'not-a-pin' },
+  });
+  assert.equal(badPin.payload.ok, false);
+  assert.equal(badPin.payload.code, 'invalid_argument');
+
+  assert.equal(materializeCalls, 0);
 });
 
 test('default metaapp owner list returns identity_missing when selected Bot has no runtime identity', async (t) => {

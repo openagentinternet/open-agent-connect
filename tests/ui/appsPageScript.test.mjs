@@ -417,6 +417,21 @@ function createAppsPageContext(options = {}) {
             data: { pinId: `${'b'.repeat(64)}i0` },
           }).then((payload) => response(payload));
         }
+        if (String(url) === '/api/metaapp/fork') {
+          const forkPayload = typeof options.forkResponse === 'function'
+            ? options.forkResponse(urlText, bodyPayload)
+            : options.forkResponse;
+          return Promise.resolve(forkPayload ?? {
+            ok: true,
+            state: 'success',
+            data: {
+              dir: '/home/alice/workspace/metaapps/fork-me-6ea8a0bd-1700000000000',
+              indexFile: 'index.html',
+              title: 'Fork Me',
+              sourceUri: `metaapp://${PIN}`,
+            },
+          }).then((payload) => response(payload));
+        }
         if (isFileUpload) {
           const uploadPayload = typeof options.uploadResponse === 'function'
             ? options.uploadResponse(urlText, bodyPayload, fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload') || entry.url.startsWith('/api/file/upload-large')).length)
@@ -909,6 +924,72 @@ test('apps page delete flow posts revoke request and hides the record', async ()
   });
   assert.doesNotMatch(context.elements['[data-apps-grid]'].innerHTML, /Delete Me/);
   assert.match(context.elements['[data-apps-grid]'].innerHTML, /No apps yet/);
+});
+
+test('apps page fork action posts to /api/metaapp/fork and shows the forked directory', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Fork Me',
+        appName: 'Fork Me',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Fork Me'), 'render forkable app');
+  await context.clickGridAction(`[data-apps-fork="${PIN}"]`);
+
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/fork'), 'fork request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/fork').body;
+  assert.deepEqual(request, {
+    from: 'alice',
+    pinId: PIN,
+    title: 'Fork Me',
+  });
+
+  await context.waitFor(
+    () => context.elements['[data-apps-modal-root]'].innerHTML.includes('/workspace/metaapps/'),
+    'fork result',
+  );
+  const html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, /fork-me-6ea8a0bd-1700000000000/);
+  assert.match(html, /index\.html/);
+  assert.match(html, new RegExp(`metaapp://${PIN}`.replace(/\//gu, '\\/')));
+  assert.match(html, /\.metaapp-fork\.json/);
+});
+
+test('apps page fork failure shows the error inside the modal', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Fork Fail',
+        appName: 'Fork Fail',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+    forkResponse: {
+      ok: false,
+      state: 'failed',
+      code: 'metaapp_source_failed',
+      message: 'MAN offline',
+    },
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Fork Fail'), 'render failing app');
+  await context.clickGridAction(`[data-apps-fork="${PIN}"]`);
+
+  await context.waitFor(
+    () => context.elements['[data-apps-modal-root]'].innerHTML.includes('MAN offline'),
+    'fork error',
+  );
+  assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /Unable to fork MetaAPP/);
 });
 
 test('apps page focusable card opens details with keyboard activation', async () => {

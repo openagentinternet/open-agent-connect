@@ -28,6 +28,7 @@ import {
   proxyDaemonAvatar,
   streamDaemonConversationEvents,
 } from './conversation-bridge.js'
+import { streamDaemonMetaAppEvents } from './metaapp-bridge.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import {
@@ -337,6 +338,19 @@ function registerApi(
           return
         }
         await streamDaemonConversationEvents(req, res, from)
+        return
+      }
+      if (method === 'metaapp/events') {
+        if (req.method !== 'GET') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+          return
+        }
+        const op = new URL(req.url ?? '/', 'http://dsh.internal').searchParams.get('op')?.trim() ?? ''
+        if (!op) {
+          writeJson(res, 400, { ok: false, error: { code: 'missing_op', message: 'op is required' } })
+          return
+        }
+        await streamDaemonMetaAppEvents(req, res, op)
         return
       }
       if (method === 'file/avatar') {

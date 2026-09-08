@@ -4,6 +4,9 @@
  * calls may first return `awaiting_confirmation`; a second call with
  * `confirm: true` sets `confirmed` on the CLI request.
  */
+import { mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import {
   isConfirmed,
@@ -15,11 +18,15 @@ import {
   runMetabotWithPayloadFile,
   type RunFn,
 } from './cli-payload.js'
+import { parseMetaAppPinIdFromUri, slugifyTitle } from './browser-protocol.js'
+import { localActorHomeDir, localTwinCurrent } from './local-read.js'
 import { normalizeTrafficApiBase } from './traffic.js'
 
 const LIST_TIMEOUT_MS = 30_000
 /** Account creation + binding + redeem sign and hit the assist service. */
 const TRAFFIC_MUTATION_TIMEOUT_MS = 60_000
+/** Forking downloads the app's zip package through MAN + the metafile indexer. */
+const FORK_TIMEOUT_MS = 90_000
 
 function objectOf(payload: unknown, key: string): Record<string, unknown> | undefined {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return undefined
@@ -89,11 +96,12 @@ async function handleMetaappPublish(payload: unknown, run: RunFn): Promise<Metab
   if (typeof from !== 'string') return from
   const body = objectOf(payload, 'payload')
   if (body === undefined) return missing('missing_payload', 'payload is required')
+  const opId = readTrimmed(payload, 'opId')
   return runMetabotWithPayloadFile(
     ['metaapp', 'publish', '--from', from],
     body,
     '--payload-file',
-    ['--confirm'],
+    opId ? ['--confirm', '--op-id', opId] : ['--confirm'],
     run,
   )
 }
@@ -120,12 +128,44 @@ async function handleMetaappUpdate(payload: unknown, run: RunFn): Promise<Metabo
   if (!targetPinId) return missing('missing_target_pin_id', 'targetPinId is required')
   const body = objectOf(payload, 'payload')
   if (body === undefined) return missing('missing_payload', 'payload is required')
+  const opId = readTrimmed(payload, 'opId')
   return runMetabotWithPayloadFile(
     ['metaapp', 'update', '--from', from, '--target-pin-id', targetPinId],
     body,
     '--payload-file',
-    ['--confirm'],
+    opId ? ['--confirm', '--op-id', opId] : ['--confirm'],
     run,
+  )
+}
+
+/**
+ * Fork an on-chain MetaApp into the acting Bot's workspace, mirroring the
+ * `bot_browser_fork_current_app` native tool: materialize the source under
+ * `<profileHome>/workspace/metaapps/<slug>-<pin8>-<timestamp>` via
+ * `metabot metaapp source` (which writes the `.metaapp-fork.json` provenance
+ * marker). Local copy only — no chain write, so no confirm gate.
+ */
+async function handleMetaappFork(payload: unknown, run: RunFn): Promise<MetabotCommandResult> {
+  const pinId = parseMetaAppPinIdFromUri(readTrimmed(payload, 'pinId'))
+  if (!pinId) return missing('invalid_pin_id', 'pinId must be a MetaApp pin id or a metaapp://<pinId> URI')
+  let from = readFrom(payload)
+  if (!from) {
+    // Mirror the CLI's default actor: the current Twin Bot.
+    const twin = await localTwinCurrent()
+    const twinSlug = twin && twin.ok === true && twin.data && typeof twin.data === 'object'
+      ? (twin.data as { twinSlug?: unknown }).twinSlug
+      : null
+    from = typeof twinSlug === 'string' ? twinSlug.trim() : ''
+  }
+  if (!from) return missing('missing_from', 'from is required')
+  const home = (await localActorHomeDir(from)) ?? join(homedir(), '.metabot', 'profiles', from)
+  const parent = join(home, 'workspace', 'metaapps')
+  await mkdir(parent, { recursive: true })
+  const title = readTrimmed(payload, 'title') || pinId
+  const outDir = join(parent, `${slugifyTitle(title)}-${pinId.slice(0, 8)}-${Date.now()}`)
+  return run(
+    ['metaapp', 'source', '--pin-id', pinId, '--out', outDir, '--from', from],
+    { timeoutMs: FORK_TIMEOUT_MS },
   )
 }
 
@@ -186,6 +226,7 @@ export async function dispatchSection(
   if (method === 'metaapp/publish') return handleMetaappPublish(payload, run)
   if (method === 'metaapp/update') return handleMetaappUpdate(payload, run)
   if (method === 'metaapp/delete') return handleMetaappDelete(payload, run)
+  if (method === 'metaapp/fork') return handleMetaappFork(payload, run)
   if (method === 'traffic/status') {
     return run(['traffic', 'status'], { timeoutMs: LIST_TIMEOUT_MS })
   }

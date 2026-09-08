@@ -258,11 +258,13 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
     }
 
     const from = readFromFlag(args);
+    const opId = readOptionalFlag(args, '--op-id');
     const payload = await readJsonFile(context, payloadFile.value);
     return handler({
       ...payload,
       ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
       ...(from ? { from } : {}),
+      ...(opId ? { opId } : {}),
       confirm: true,
     });
   }
@@ -297,12 +299,14 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
     }
 
     const from = readFromFlag(args);
+    const opId = readOptionalFlag(args, '--op-id');
     const payload = await readJsonFile(context, payloadFile.value);
     return handler({
       ...payload,
       targetPinId: targetPinId.value,
       ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
       ...(from ? { from } : {}),
+      ...(opId ? { opId } : {}),
       confirm: true,
     });
   }
@@ -354,11 +358,13 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
 
     const from = readFromFlag(args);
     const manifestFile = readOptionalFlag(args, '--manifest-file');
+    const opId = readOptionalFlag(args, '--op-id');
     return handler({
       projectDir: projectDir.value,
       ...(manifestFile ? { manifestFile } : {}),
       ...(from ? { from } : {}),
       ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+      ...(opId ? { opId } : {}),
       confirm: hasFlag(args, '--confirm'),
     });
   }
@@ -386,12 +392,14 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
 
     const from = readFromFlag(args);
     const manifestFile = readOptionalFlag(args, '--manifest-file');
+    const opId = readOptionalFlag(args, '--op-id');
     return handler({
       projectDir: projectDir.value,
       targetPinId: targetPinId.value,
       ...(manifestFile ? { manifestFile } : {}),
       ...(from ? { from } : {}),
       ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+      ...(opId ? { opId } : {}),
       confirm: hasFlag(args, '--confirm'),
     });
   }

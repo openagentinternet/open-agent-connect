@@ -294,6 +294,34 @@ export function chainTxids(record: unknown): string[] {
   return txids
 }
 
+/**
+ * Publish progress stages streamed by the daemon's `/api/metaapp/events`
+ * (`assets` is client-side: the form uploads asset files before the publish
+ * POST fires). Returns null for unknown stage names.
+ */
+export type MetaAppPublishStage = 'assets' | 'archive' | 'upload' | 'write' | 'done' | 'error'
+
+export function metaAppPublishStage(value: unknown): MetaAppPublishStage | null {
+  const stage = textOf(value)
+  return stage === 'assets' || stage === 'archive' || stage === 'upload'
+    || stage === 'write' || stage === 'done' || stage === 'error'
+    ? stage
+    : null
+}
+
+/** Locale key for one in-flight publish stage; terminal stages map to null. */
+export function metaAppPublishStageLocaleKey(
+  stage: MetaAppPublishStage,
+): 'chainStageAssets' | 'chainStageArchive' | 'chainStageUpload' | 'chainStageWrite' | null {
+  switch (stage) {
+    case 'assets': return 'chainStageAssets'
+    case 'archive': return 'chainStageArchive'
+    case 'upload': return 'chainStageUpload'
+    case 'write': return 'chainStageWrite'
+    default: return null
+  }
+}
+
 function stripMetafilePrefix(value: string): string {
   const text = textOf(value)
   return text.toLowerCase().startsWith('metafile://') ? text.slice('metafile://'.length).trim() : text
@@ -349,4 +377,24 @@ export function metadataToInput(record: MetaAppRecord | undefined | null): strin
   const metadata = record?.metadata
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return ''
   return JSON.stringify(metadata, null, 2)
+}
+
+/** Normalized `metaapp/fork` route data payload shown by the fork dialog. */
+export interface MetaAppForkResult {
+  dir: string
+  indexFile: string
+  title: string
+  sourceUri: string
+}
+
+export function normalizeMetaAppForkResult(data: unknown): MetaAppForkResult {
+  const record = data !== null && typeof data === 'object' && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {}
+  return {
+    dir: textOf(record.dir),
+    indexFile: textOf(record.indexFile) || 'index.html',
+    title: textOf(record.title),
+    sourceUri: textOf(record.sourceUri),
+  }
 }

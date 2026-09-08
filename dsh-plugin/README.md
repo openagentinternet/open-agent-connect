@@ -353,9 +353,11 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/chat/*` | `metabot chat conversations`, `messages`, `private` |
 | POST | `/oac/api/llm/host-status` | daemon `/api/llm/host-executor/status` (connected-executor count) for the Bot editor's reply-model lines |
 | GET | `/oac/api/chat/events?from=<slug>` | SSE proxy of the daemon's `/api/conversations/events` (`conversation-update` on stored-row changes and chain-profile warm-up completions) |
+| GET | `/oac/api/metaapp/events?op=<id>` | SSE proxy of the daemon's `/api/metaapp/events` (per-op publish stage events: `archive`/`upload`/`write` then `done`/`error`) |
 | GET | `/oac/api/file/avatar?ref=<pin>` | same-origin proxy of the daemon's `/api/file/avatar`, so chain avatar pin references render in the panels |
 | POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |
 | POST | `/oac/api/metaapp/*` | `metabot metaapp list`, `publish`, `delete` |
+| POST | `/oac/api/metaapp/fork` | fork an on-chain MetaApp's source into the acting Bot's workspace via `metabot metaapp source` (writes the `.metaapp-fork.json` provenance marker; no chain write, no confirm gate) |
 | POST | `/oac/api/traffic/*` | `metabot traffic status`, `mode`, `balance`, `ledger`, `usage`, `claim`, `redeem`, `api-base` |
 | POST | `/oac/api/memory/*` | `metabot memory` verbs (list/add/update/delete/scopes/stats/policy/*, knowledge/*, impressions/*, recall, chats, search, transcript/append) |
 | POST | `/oac/api/kb/*` | `metabot knowledge-base` verbs (list/create/update/remove/learn) backing the bot-editor Knowledge tab; list + `study/list` read in-process, `kb/import` is a raw-byte document upload into a KB's raw corpus (IDBots `importFiles` parity) |
