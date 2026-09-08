@@ -33,19 +33,27 @@ Two LLM chains coexist, and every generation site uses exactly one of them:
   auto-discovered at Bot create and bound per Bot. Used by group-task chair
   turns, memory deep consolidation, and headless scheduled tasks.
 
-**A2A private-chat replies (and guided turns, buyer-rating replies) bridge the
-two:** the daemon's reply runner tries the Bot's DSH pair first through the
-**host LLM executor** — the plugin holds one long-lived SSE lease on the
-daemon's `/api/llm/host-executor/events` stream, executes each pushed
-`generate` request via `ctx.llm` (primary pair, fallback pair retried once),
-and POSTs the result back. If no executor is connected (DSH closed) or the
-pair is unset, resolution continues down the daemon chain — per-Bot bindings,
-then any healthy local runtime, then fixed template replies. One exception: a
-Bot with allowed **chat skills** keeps the local CLI chain first (only a local
-runtime can execute skills); the DSH pair is its fallback. The Bot editor
-shows both lines ("私聊回复（A2A）"); `metabot llm host-executor` reports the
-connected-executor count. Gate the executor with the cordis.yml config toggle
-`llmExecutor.enabled` (default on).
+**Unified passive-LLM priority.** Every daemon-side passive turn — A2A
+private-chat replies (plus guided turns and buyer-rating replies), group-task
+chair turns, nightly study/Q&A-surf drains, memory deep consolidation, and
+headless scheduled-task runs — resolves its LLM in the same order:
+
+1. The Bot's DSH pair, when set **and** a host executor is connected (DSH
+   running). The plugin holds one long-lived SSE lease on the daemon's
+   `/api/llm/host-executor/events` stream, executes each pushed `generate`
+   request, and POSTs the result back. Plain turns run via `ctx.llm`
+   (primary pair, fallback pair retried once); skill-scoped turns run in
+   **agent mode** — a real, ephemeral DSH session that reads and executes
+   the allowed skill documents (`~/.dsh/skills` + `.dsh/skills` +
+   `~/.agents/skills`, which is also exactly what the Bot editor's
+   chat-skills picker lists).
+2. Else the Bot's local CLI bindings.
+3. Else any healthy local runtime in the shared store.
+4. Else fixed template replies.
+
+No scenario prefers the local CLI over the DSH pair. `metabot llm
+host-executor` reports the connected-executor count; gate the executor with
+the cordis.yml config toggle `llmExecutor.enabled` (default on).
 
 The **Bots → edit** dialog gains a **Knowledge** tab (a DSH port of IDBots'
 `KnowledgeBasePanel`): one card per document knowledge base — name with a

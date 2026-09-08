@@ -6,17 +6,17 @@ runtime. Conversation models on DSH come from DSH `ctx.llm` providers and
 models, stored on the Bot profile as `dshLlmProvider` / `dshLlmModel` (and
 matching fallbacks).
 
-**LLM resolution on DSH (two chains, one rule of thumb).** Daemon-side replies
-(A2A private chats, guided turns, buyer-rating replies) resolve an LLM in this
-order: the Bot's DSH pair — generated through the running DSH host via the
-host-executor bridge — then local CLI runtimes (per-Bot bindings, then any
-healthy runtime in the shared store), and finally fixed template replies. The
-one exception: a Bot with allowed chat skills keeps the local CLI chain first,
-because only a local runtime can execute skills; the DSH pair is its fallback.
-So a Bot created and configured entirely inside DSH (DSH pair set, no local
-LLM CLIs) now replies with its DeepSeek brain instead of degrading to the
-template. `metabot llm host-executor` reports whether a DSH host executor is
-connected to the daemon.
+**LLM resolution on DSH (one unified priority).** Every passive Bot turn —
+A2A private-chat replies, group-task chair turns, nightly study/Q&A-surf
+drains, memory deep consolidation, and headless scheduled-task runs — resolves
+its LLM the same way: (1) the Bot's DSH pair when set and DSH is running
+(skill-scoped turns execute in a real DSH session through the host-executor
+bridge; the Bot editor's chat-skills picker lists exactly the skills a DSH
+session can run — `~/.dsh/skills` + `.dsh/skills` + `~/.agents/skills`),
+then (2) the Bot's local CLI bindings, then (3) any healthy local runtime,
+and finally (4) fixed template replies. No scenario prefers the local CLI
+over the DSH pair. `metabot llm host-executor` reports whether a DSH host
+executor is connected to the daemon.
 
 The unified OAC runtime install is still:
 

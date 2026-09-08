@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { LlmBindingStore } from '../llm/llmBindingStore';
 import type { LlmRuntimeStore } from '../llm/llmRuntimeStore';
 import type { LlmRuntime } from '../llm/llmTypes';
-import type { PlatformDefinition } from '../platform/platformRegistry';
+import type { PlatformDefinition, PlatformId } from '../platform/platformRegistry';
 import {
   createPlatformSkillCatalog,
   isSafeProviderSkillName,
@@ -286,4 +286,48 @@ export async function readChatSkillResolution(filePath: string): Promise<ChatSki
   } catch {
     return null;
   }
+}
+
+/**
+ * Platform-scoped variant of {@link resolveAllowChatSkillsForRuntime}: maps
+ * the Bot's allowed chat skills against one platform's skill roots (plus the
+ * ~/.agents/skills shared standard) instead of the primary runtime's
+ * platform. The DSH host uses this while a host executor is connected, so
+ * reply turns resolve exactly the skill surface a DSH session executes.
+ */
+export async function resolveAllowChatSkillsForPlatform(
+  input: ChatSkillPolicyInput & { platformId: PlatformId },
+): Promise<ChatSkillPolicySuccess> {
+  let allowChatSkills: string[];
+  try {
+    allowChatSkills = normalizeAllowChatSkills(input.allowChatSkills);
+  } catch (error) {
+    return createEmptySuccess({
+      warning: error instanceof Error
+        ? `Ignoring invalid allowChatSkills: ${error.message}`
+        : 'Ignoring invalid allowChatSkills.',
+    });
+  }
+
+  if (allowChatSkills.length === 0) {
+    return createEmptySuccess();
+  }
+
+  const catalog = createPlatformSkillCatalog({
+    runtimeStore: input.runtimeStore,
+    bindingStore: input.bindingStore,
+    systemHomeDir: input.systemHomeDir,
+    projectRoot: input.projectRoot,
+    env: input.env,
+  });
+  const catalogResult = await catalog.listSkillsForPlatform({ platformId: input.platformId });
+
+  const resolved = mapResolvedSkills({
+    allowChatSkills,
+    catalogSkills: catalogResult.skills,
+  });
+  return createEmptySuccess({
+    ...resolved,
+    rootDiagnostics: catalogResult.rootDiagnostics,
+  });
 }

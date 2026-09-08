@@ -46,11 +46,11 @@ import { dispatchMemoryRoutes } from './memory-routes.js'
 import { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyScheduleScheduler } from './schedule-scheduler.js'
-import { HostLlmExecutor } from './host-llm-executor.js'
+import { HostLlmExecutor, type HostAgentTurnRunner } from './host-llm-executor.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
-import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
+import { errorFromTurnEvents, installTwinOnAgent, liveOacAgents, textFromAssistantEvents } from './twin-tools.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
 import { applyGroupTaskRelayDrain } from './group-task-relay.js'
 import { applyGroupTaskWorkerSessions } from './group-task-worker.js'
@@ -400,6 +400,65 @@ function registerApi(
  * Plugin body: resolve CLI, bind skills, mount `/oac/api/*`. Failures stay on
  * the health payload — they must not take down `dsh web`.
  */
+/**
+ * Agent-mode turn runner for the host LLM executor: one private-chat reply
+ * (with allowed skills) as an ephemeral real DSH session — the session can
+ * read and execute the skill documents, unlike a plain completion. The
+ * session is disposed after the turn: private chats are far more frequent
+ * than scheduled tasks, so unlike those the conversation row is not kept.
+ */
+function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner | undefined {
+  const agents = ctx.agents
+  if (!agents) return undefined
+  return async (input) => {
+    const { randomUUID } = await import('node:crypto')
+    const sessionId = randomUUID()
+    let handle: { agent: HostAgentLike; dispose(): Promise<void> | void } | undefined
+    try {
+      handle = await agents.create({
+        sessionId,
+        meta: { cwd: input.cwd || process.cwd() },
+        agentOptions: {
+          provider: input.provider,
+          model: input.model,
+          ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+        },
+      })
+      const agent = handle.agent
+      agent.followup?.({
+        id: randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text: input.prompt }],
+        source: { kind: 'plugin', plugin: 'oac-dsh', form: 'a2a-reply' },
+      })
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+      const timeout = new Promise<'timed_out'>((resolve) => {
+        timeoutTimer = setTimeout(() => resolve('timed_out'), input.timeoutMs)
+      })
+      const idle = Promise.resolve(agent.whenIdle?.()).then(() => 'idle' as const)
+      const outcome = await Promise.race([timeout, idle])
+      clearTimeout(timeoutTimer)
+      if (outcome === 'timed_out') {
+        try {
+          agent.cancel?.({ kind: 'timeout' })
+        } catch {
+          // session may already be gone
+        }
+        throw new Error(`DSH agent turn timed out after ${Math.round(input.timeoutMs / 1000)}s`)
+      }
+      const events = agent.session?.snapshotEvents?.() ?? []
+      const text = textFromAssistantEvents(events)
+      if (!text.trim()) {
+        const turnError = errorFromTurnEvents(events)
+        throw new Error(`DSH agent turn produced no reply${turnError ? ` — ${turnError}` : ''}`)
+      }
+      return text
+    } finally {
+      void Promise.resolve(handle?.dispose()).catch(() => undefined)
+    }
+  }
+}
+
 export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promise<void> {
   let health: HealthPayload = emptyHealth()
   const browserHub = new BrowserEventHub()
@@ -414,6 +473,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     if (config.llmExecutor?.enabled !== false) {
       const hostLlmExecutor = new HostLlmExecutor({
         llm: ctx.llm as unknown as import('./llm-generate.js').LlmStreamLike | undefined,
+        runAgentTurn: createHostAgentTurnRunner(ctx),
         env: process.env,
         log: (message) => warn(ctx, message),
       })

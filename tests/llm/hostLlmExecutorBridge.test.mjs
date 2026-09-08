@@ -128,3 +128,24 @@ test('createDshPairHostLlmGenerate reads a fallback pair when present', async ()
   assert.equal(seen[0].reasoningEffort, 'high');
   assert.deepEqual(seen[0].fallback, { provider: 'deepseek', model: 'reasoner', reasoningEffort: 'low' });
 });
+
+test('generate request carries skills and cwd for agent-mode turns', async () => {
+  const bridge = createHostLlmExecutorBridge();
+  const seen = [];
+  bridge.attach((request) => {
+    seen.push(request);
+    void bridge.submitResult({ requestId: request.requestId, ok: true, output: 'ok' });
+  });
+  const outcome = await bridge.generate({
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    system: 's',
+    prompt: 'p',
+    skills: [{ name: 'dsh-greet', description: 'Say hello.', location: '/sk/SKILL.md' }],
+    cwd: '/workspace/chat',
+  });
+  assert.deepEqual(outcome, { ok: true, output: 'ok' });
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].skills, [{ name: 'dsh-greet', description: 'Say hello.', location: '/sk/SKILL.md' }]);
+  assert.equal(seen[0].cwd, '/workspace/chat');
+});

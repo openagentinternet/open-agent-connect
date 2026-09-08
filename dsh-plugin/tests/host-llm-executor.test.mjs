@@ -316,3 +316,153 @@ test('malformed SSE frames are ignored without breaking the subscription', async
     await new Promise((resolve) => server.close(resolve))
   }
 })
+
+test('skill-scoped requests run in agent mode through runAgentTurn', async () => {
+  const posted = []
+  const request = {
+    type: 'generate',
+    requestId: 'req-agent-1',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    system: 'sys',
+    prompt: 'prompt',
+    timeoutMs: 5_000,
+    skills: [{ name: 'dsh-greet', description: 'Say hello.', location: '/sk/DASH.md' }],
+    cwd: '/workspace/chat',
+  }
+  const server = createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/api/llm/host-executor/events') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('retry: 3000\n\n')
+      res.write(`data: ${JSON.stringify(request)}\n\n`)
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/llm/host-executor/result') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        posted.push(JSON.parse(body))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, state: 'success', data: { accepted: true } }))
+      })
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+
+  const agentTurns = []
+  const llm = { stream() { throw new Error('plain stream must not run in agent mode') } }
+  const executor = new HostLlmExecutor({
+    env: { METABOT_DAEMON_BASE_URL: `http://127.0.0.1:${port}` },
+    llm,
+    runAgentTurn: async (input) => {
+      agentTurns.push(input)
+      return 'Agent-mode reply.'
+    },
+  })
+  executor.start()
+  try {
+    await waitFor(() => posted.length === 1)
+    assert.equal(agentTurns.length, 1)
+    assert.equal(agentTurns[0].provider, 'deepseek')
+    assert.equal(agentTurns[0].model, 'deepseek-chat')
+    assert.equal(agentTurns[0].system, 'sys')
+    assert.equal(agentTurns[0].prompt, 'prompt')
+    assert.deepEqual(agentTurns[0].skills, [{ name: 'dsh-greet', description: 'Say hello.', location: '/sk/DASH.md' }])
+    assert.equal(agentTurns[0].cwd, '/workspace/chat')
+    assert.deepEqual(posted[0], { requestId: 'req-agent-1', ok: true, output: 'Agent-mode reply.' })
+  } finally {
+    executor.stop()
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('agent mode retries on the fallback pair and reports failure without a runner', async () => {
+  const posted = []
+  const makeServerWithRequest = async (request) => {
+    const server = createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/api/llm/host-executor/events') {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.write('retry: 3000\n\n')
+        res.write(`data: ${JSON.stringify(request)}\n\n`)
+        return
+      }
+      if (req.method === 'POST' && req.url === '/api/llm/host-executor/result') {
+        let body = ''
+        req.on('data', (chunk) => { body += chunk })
+        req.on('end', () => {
+          posted.push(JSON.parse(body))
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, state: 'success', data: { accepted: true } }))
+        })
+        return
+      }
+      res.writeHead(404)
+      res.end()
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    return server
+  }
+
+  // Fallback-pair retry in agent mode.
+  const serverA = await makeServerWithRequest({
+    type: 'generate',
+    requestId: 'req-agent-2',
+    provider: 'bad',
+    model: 'one',
+    fallback: { provider: 'good', model: 'two' },
+    system: 's',
+    prompt: 'p',
+    timeoutMs: 5_000,
+    skills: [{ name: 'x' }],
+  })
+  const agentTurns = []
+  const executorA = new HostLlmExecutor({
+    env: { METABOT_DAEMON_BASE_URL: `http://127.0.0.1:${serverA.address().port}` },
+    llm: {},
+    runAgentTurn: async (input) => {
+      agentTurns.push(input)
+      if (input.provider === 'bad') throw new Error('primary agent turn exploded')
+      return 'Fallback agent reply.'
+    },
+  })
+  executorA.start()
+  try {
+    await waitFor(() => posted.length === 1)
+    assert.equal(agentTurns.length, 2)
+    assert.deepEqual([agentTurns[0].provider, agentTurns[1].provider], ['bad', 'good'])
+    assert.deepEqual(posted[0], { requestId: 'req-agent-2', ok: true, output: 'Fallback agent reply.' })
+  } finally {
+    executorA.stop()
+    await new Promise((resolve) => serverA.close(resolve))
+  }
+
+  // Skills present but no agent runner: explicit failure, never a silent plain completion.
+  posted.length = 0
+  const serverB = await makeServerWithRequest({
+    type: 'generate',
+    requestId: 'req-agent-3',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    system: 's',
+    prompt: 'p',
+    timeoutMs: 5_000,
+    skills: [{ name: 'x' }],
+  })
+  const executorB = new HostLlmExecutor({
+    env: { METABOT_DAEMON_BASE_URL: `http://127.0.0.1:${serverB.address().port}` },
+    llm: {},
+  })
+  executorB.start()
+  try {
+    await waitFor(() => posted.length === 1)
+    assert.equal(posted[0].ok, false)
+    assert.match(posted[0].error, /agents service/)
+  } finally {
+    executorB.stop()
+    await new Promise((resolve) => serverB.close(resolve))
+  }
+})
