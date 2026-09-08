@@ -50,7 +50,7 @@ import { HostLlmExecutor, type HostAgentTurnRunner } from './host-llm-executor.j
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
-import { errorFromTurnEvents, installTwinOnAgent, liveOacAgents, textFromAssistantEvents } from './twin-tools.js'
+import { agentsRegistryOf, errorFromTurnEvents, installTwinOnAgent, liveOacAgents, textFromAssistantEvents } from './twin-tools.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
 import { applyGroupTaskRelayDrain } from './group-task-relay.js'
 import { applyGroupTaskWorkerSessions } from './group-task-worker.js'
@@ -407,8 +407,11 @@ function registerApi(
  * session is disposed after the turn: private chats are far more frequent
  * than scheduled tasks, so unlike those the conversation row is not kept.
  */
-function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner | undefined {
-  const agents = ctx.agents
+export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner | undefined {
+  // `agents` stays OUT of the plugin inject list, so a direct `ctx.agents`
+  // read hits the Cordis inject fence ("cannot get property without inject").
+  // Read it through the shared optional-service helper instead.
+  const agents = agentsRegistryOf(ctx)
   if (!agents) return undefined
   return async (input) => {
     const { randomUUID } = await import('node:crypto')
