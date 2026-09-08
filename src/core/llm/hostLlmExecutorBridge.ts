@@ -26,12 +26,26 @@ export interface HostLlmGenerateRequest {
   system: string;
   prompt: string;
   timeoutMs: number;
+  skills?: HostLlmGenerateSkill[];
+  cwd?: string;
 }
 
 export interface HostLlmGenerateFallback {
   provider: string;
   model: string;
   reasoningEffort?: string | null;
+}
+
+/**
+ * One allowed private-chat skill traveling to the host executor. Present
+ * skills switch the host side into agent mode: the generation runs as a real
+ * DSH sub-session (which can read the SKILL.md at `location` and execute it)
+ * instead of a plain completion.
+ */
+export interface HostLlmGenerateSkill {
+  name: string;
+  description?: string | null;
+  location?: string | null;
 }
 
 export interface HostLlmGenerateOutcome {
@@ -49,6 +63,8 @@ export interface HostLlmGenerateInput {
   system: string;
   prompt: string;
   timeoutMs?: number;
+  skills?: HostLlmGenerateSkill[];
+  cwd?: string;
 }
 
 export interface HostLlmExecutorStatus {
@@ -120,6 +136,8 @@ export function createHostLlmExecutorBridge(options?: {
         system: input.system,
         prompt: input.prompt,
         timeoutMs: input.timeoutMs ?? defaultTimeoutMs,
+        ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+        ...(input.cwd ? { cwd: input.cwd } : {}),
       };
       return new Promise<HostLlmGenerateOutcome>((resolve) => {
         const timer = setTimeout(() => {
@@ -173,6 +191,8 @@ export type HostLlmGenerateForRunner = (input: {
   metaBotSlug?: string;
   prompt: string;
   systemPrompt: string;
+  skills?: HostLlmGenerateSkill[];
+  cwd?: string;
 }) => Promise<HostLlmGenerateOutcome | null>;
 
 export function createDshPairHostLlmGenerate(options: {
@@ -211,6 +231,8 @@ export function createDshPairHostLlmGenerate(options: {
         : {}),
       system: input.systemPrompt,
       prompt: input.prompt,
+      ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+      ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     });
   };

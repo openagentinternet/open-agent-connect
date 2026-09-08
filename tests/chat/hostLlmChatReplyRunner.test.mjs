@@ -1799,3 +1799,71 @@ test('without a resolver or host LLM, the template fallback stays', async () => 
   assert.equal(result.state, 'reply');
   assert.match(result.content, /Thanks for/);
 });
+
+test('skill-scoped turns also prefer the host LLM (agent mode) over the local chain', async () => {
+  const resolverCalls = {};
+  const host = createHostGenerate([{ ok: true, output: 'Host agent reply with skill.' }]);
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver({
+      id: 'llm-runtime-1',
+      provider: 'codex',
+      health: 'healthy',
+    }, resolverCalls),
+    llmExecutor: {
+      async execute() { throw new Error('local executor must not run'); },
+      async getSession() { return null; },
+    },
+    metaBotSlug: 'alice',
+    hostLlmGenerate: host.generate,
+    allowedChatSkillsResolver: async () => ({
+      skills: ['dsh-greet'],
+      skillSourcePaths: { 'dsh-greet': '/home/u/.dsh/skills/dsh-greet/SKILL.md' },
+      skillDetails: [{
+        name: 'dsh-greet',
+        description: 'Say hello.',
+        location: '/home/u/.dsh/skills/dsh-greet/SKILL.md',
+      }],
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Host agent reply with skill.');
+  assert.equal(host.calls.length, 1);
+  assert.deepEqual(host.calls[0].skills, [{
+    name: 'dsh-greet',
+    description: 'Say hello.',
+    location: '/home/u/.dsh/skills/dsh-greet/SKILL.md',
+  }]);
+  assert.match(host.calls[0].prompt, /dsh-greet/);
+  assert.equal(resolverCalls.resolveRuntime, undefined);
+});
+
+test('skill-scoped host failure falls through to the local runtime chain', async () => {
+  const runtime = { id: 'llm-runtime-1', provider: 'codex', health: 'healthy' };
+  const host = createHostGenerate([{ ok: false, error: 'agent session failed' }]);
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor: {
+      async execute() { return 's1'; },
+      async getSession() {
+        return { sessionId: 's1', status: 'completed', result: { status: 'completed', output: 'Local runtime reply.' } };
+      },
+    },
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    hostLlmGenerate: host.generate,
+    allowedChatSkillsResolver: async () => ({
+      skills: ['dsh-greet'],
+      skillSourcePaths: { 'dsh-greet': '/sk.md' },
+      skillDetails: [{ name: 'dsh-greet', description: null, location: '/sk.md' }],
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Local runtime reply.');
+  assert.equal(host.calls.length, 1);
+});

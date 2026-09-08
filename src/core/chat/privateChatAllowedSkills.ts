@@ -2,7 +2,12 @@ import type { LlmBindingStore } from '../llm/llmBindingStore';
 import type { LlmRuntimeStore } from '../llm/llmRuntimeStore';
 import type { MetabotPaths } from '../state/paths';
 import { getMetabotProfile } from '../bot/metabotProfileManager';
-import { resolveAllowChatSkillsForRuntime, writeChatSkillResolution } from '../services/chatSkillPolicy';
+import {
+  resolveAllowChatSkillsForPlatform,
+  resolveAllowChatSkillsForRuntime,
+  writeChatSkillResolution,
+} from '../services/chatSkillPolicy';
+import { getActiveHostLlmExecutorBridge } from '../llm/hostLlmExecutorBridge';
 
 export interface PrivateChatAllowedSkillDetail {
   name: string;
@@ -39,7 +44,16 @@ export function createPrivateChatAllowedSkillsResolver(input: {
   bindingStore: LlmBindingStore;
   env?: NodeJS.ProcessEnv;
   logWarning?: (scope: string, message: string) => void;
+  /**
+   * While a host executor is connected, allowed skills resolve against the
+   * DSH platform scope (~/.dsh/skills + ~/.agents/skills) — the surface the
+   * reply turn actually executes on in host agent mode — instead of the
+   * primary local runtime's platform. Defaults to the active bridge.
+   */
+  hostExecutorConnected?: () => boolean;
 }): PrivateChatAllowedSkillsResolver {
+  const hostExecutorConnected = input.hostExecutorConnected
+    ?? (() => (getActiveHostLlmExecutorBridge()?.connectedExecutors() ?? 0) > 0);
   // Persist the last resolution outcome so operators can see configured
   // skills that no longer resolve. Strictly best-effort: a failed write must
   // never affect the chat turn.
@@ -61,7 +75,7 @@ export function createPrivateChatAllowedSkillsResolver(input: {
       return emptyScope;
     }
 
-    const result = await resolveAllowChatSkillsForRuntime({
+    const policyInput = {
       metaBotSlug: input.metaBotSlug,
       allowChatSkills: profile.allowChatSkills,
       runtimeStore: input.runtimeStore,
@@ -69,7 +83,10 @@ export function createPrivateChatAllowedSkillsResolver(input: {
       systemHomeDir: input.paths.systemHomeDir,
       projectRoot: input.paths.profileRoot,
       env: input.env,
-    });
+    };
+    const result = hostExecutorConnected()
+      ? await resolveAllowChatSkillsForPlatform({ ...policyInput, platformId: 'dsh' })
+      : await resolveAllowChatSkillsForRuntime(policyInput);
 
     if (result.warning) {
       input.logWarning?.('[private chat allowed skills]', result.warning);

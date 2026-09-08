@@ -611,19 +611,33 @@ export function createHostLlmChatReplyRunner(options?: {
     },
   };
 
-  // Host-executor attempt (DSH LLM pair): one plain completion per turn. The
-  // prompt is built with an empty skill scope — host generation cannot
-  // execute chat skills — and any failure falls through to the caller's
-  // normal chain.
+  // Host-executor attempt (DSH LLM pair): one generation per turn. With
+  // allowed skills present the host runs it in agent mode — a real DSH
+  // sub-session that can read and execute the skill documents — and the
+  // wait notice fires optimistically (the daemon cannot see host-side tool
+  // events, and a skill-scoped agent turn is long by construction). Any
+  // failure falls through to the caller's normal chain.
   const runHostGeneration = async (
     input: ChatReplyRunnerInput,
+    allowedSkillScope: PrivateChatAllowedSkillScope,
+    notifySkillExecutionStart?: () => void,
   ): Promise<ChatReplyRunnerResult | null> => {
     if (!hostLlmGenerate) return null;
+    const hostSkills = allowedSkillScope.skillDetails.map((skill) => ({
+      name: skill.name,
+      ...(skill.description ? { description: skill.description } : {}),
+      ...(skill.location ? { location: skill.location } : {}),
+    }));
+    if (hostSkills.length > 0) {
+      notifySkillExecutionStart?.();
+    }
     try {
       const outcome = await hostLlmGenerate({
         ...(metaBotSlug ? { metaBotSlug } : {}),
-        prompt: buildChatPrompt(input, emptyPrivateChatAllowedSkillScope(), { metaBotSlug }),
+        prompt: buildChatPrompt(input, allowedSkillScope, { metaBotSlug }),
         systemPrompt: buildChatSystemPrompt(input),
+        ...(hostSkills.length > 0 ? { skills: hostSkills } : {}),
+        ...(chatWorkspaceDir ? { cwd: chatWorkspaceDir } : {}),
       });
       if (outcome && outcome.ok && typeof outcome.output === 'string') {
         const parsed = parseRunnerOutput(outcome.output);
@@ -641,7 +655,7 @@ export function createHostLlmChatReplyRunner(options?: {
   // template-only replies or skip.
   if (!runtimeResolver || !llmExecutor) {
     return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => {
-      const hostResult = await runHostGeneration(input);
+      const hostResult = await runHostGeneration(input, emptyPrivateChatAllowedSkillScope());
       if (hostResult) return hostResult;
       return allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
         ? fallbackRunner(input)
@@ -688,17 +702,16 @@ export function createHostLlmChatReplyRunner(options?: {
       }
       : undefined;
 
-    // Try up to MAX_FALLBACK_ATTEMPTS different runtimes. Plain turns with a
-    // usable host LLM (DSH pair + connected executor) prefer it first — it is
-    // the Bot's explicitly configured brain; turns with an allowed-skill
-    // scope keep the local-runtime chain first (only it can execute skills)
-    // and fall back to the host LLM after it.
-    let hostGenerationAttempted = false;
-    if (hostLlmGenerate && allowedSkillScope.skills.length === 0) {
-      hostGenerationAttempted = true;
-      const hostResult = await runHostGeneration(input);
+    // Unified passive-LLM priority: the DSH pair (the Bot's configured
+    // brain, through the connected host executor) always takes the first
+    // attempt — with or without allowed skills (skill turns run as DSH
+    // agent sessions). A host failure falls through to the local-runtime
+    // chain below.
+    {
+      const hostResult = await runHostGeneration(input, allowedSkillScope, notifySkillExecutionStart);
       if (hostResult) return hostResult;
     }
+    // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
     for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
       const outcome = await tryExecute(
         runtimeResolver,
@@ -737,12 +750,7 @@ export function createHostLlmChatReplyRunner(options?: {
       }
     }
 
-    // All runtimes failed — give the host LLM its skill-turn fallback slot,
-    // then either fall back to template-only reply or skip.
-    if (!hostGenerationAttempted) {
-      const hostResult = await runHostGeneration(input);
-      if (hostResult) return hostResult;
-    }
+    // All runtimes failed — either fall back to template-only reply or skip.
     return templateFallbackAllowedForTurn ? fallbackRunner(input) : { state: 'skip' };
   };
 }
