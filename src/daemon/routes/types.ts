@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Buffer } from 'node:buffer';
 import type { BrowserHttpHandlers } from '../../browser/http';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
+import type { MetaAppStageEvent } from '../../core/metaapp/stageEvents';
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -91,10 +92,16 @@ export interface MetabotDaemonHttpHandlers {
     updateProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    fork?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     previewAsset?: (input: { previewId: string; assetPath?: string }) => Awaitable<{
       body: Buffer | string;
       contentType: string;
     } | MetabotCommandResult<unknown>>;
+    /** Op-keyed publish progress stages; replays the buffer then streams live events. */
+    stageEvents?: (input: {
+      op: string;
+      listener: (event: MetaAppStageEvent) => void;
+    }) => () => void;
   };
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

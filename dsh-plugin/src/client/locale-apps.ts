@@ -86,6 +86,10 @@ export const appEn = {
   chainUpdatePendingTitle: 'Updating MetaApp',
   chainPublishPending: 'Broadcasting {name} to the MetaWeb chain…',
   chainUpdatePending: 'Broadcasting the {name} update to the MetaWeb chain…',
+  chainStageAssets: 'Uploading assets…',
+  chainStageArchive: 'Packaging project…',
+  chainStageUpload: 'Uploading archive…',
+  chainStageWrite: 'Writing to chain…',
   chainPublishSuccessTitle: 'MetaApp published',
   chainUpdateSuccessTitle: 'MetaApp updated',
   chainPublishSuccess: '{name} is now on chain.',
@@ -123,6 +127,16 @@ export const appEn = {
   deleteConfirm: 'Delete',
   removing: 'Deleting…',
   deleteFailed: 'Delete failed: {message}',
+
+  fork: 'Fork',
+  forkTitle: 'Fork MetaApp',
+  forkDescription: 'Copy this MetaApp\'s source into the Bot\'s workspace as an editable remix.',
+  forkPending: 'Forking {name} into the workspace…',
+  forkFailed: 'Fork failed: {message}',
+  forkDirectory: 'Directory',
+  forkEntryFile: 'Entry file',
+  forkSourceUri: 'Source URI',
+  forkHint: 'Ask your Bot to edit the files in this directory, then publish or update the app. The .metaapp-fork.json marker records where this fork came from.',
 }
 
 export const appZh = {
@@ -210,6 +224,10 @@ export const appZh = {
   chainUpdatePendingTitle: '正在更新 MetaApp',
   chainPublishPending: '正在把 {name} 广播到 MetaWeb 链上…',
   chainUpdatePending: '正在把 {name} 的更新广播到 MetaWeb 链上…',
+  chainStageAssets: '正在上传资源…',
+  chainStageArchive: '正在打包项目…',
+  chainStageUpload: '正在上传归档…',
+  chainStageWrite: '正在写入链上…',
   chainPublishSuccessTitle: 'MetaApp 已发布',
   chainUpdateSuccessTitle: 'MetaApp 已更新',
   chainPublishSuccess: '{name} 已上链。',
@@ -247,6 +265,16 @@ export const appZh = {
   deleteConfirm: '删除',
   removing: '删除中…',
   deleteFailed: '删除失败：{message}',
+
+  fork: '复刻',
+  forkTitle: '复刻 MetaApp',
+  forkDescription: '将该 MetaApp 的源码复制到 Bot 的工作区，成为可编辑的复刻版本。',
+  forkPending: '正在把 {name} 复刻到工作区…',
+  forkFailed: '复刻失败：{message}',
+  forkDirectory: '目录',
+  forkEntryFile: '入口文件',
+  forkSourceUri: '来源 URI',
+  forkHint: '让你的 Bot 编辑该目录中的文件，然后发布或更新应用。.metaapp-fork.json 标记文件记录了此次复刻的来源。',
 }
 
 export type AppsLocaleKey = keyof typeof appEn

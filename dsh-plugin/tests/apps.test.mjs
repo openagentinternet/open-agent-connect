@@ -114,3 +114,53 @@ test('imageUrlCandidates resolves pin refs to indexer URLs and passes http throu
   assert.equal(apps.imageUrlForReference(`metafile://${pin}`),
     `https://file.metaid.io/metafile-indexer/api/v1/files/content/${pin}`)
 })
+
+test('metaAppPublishStage normalizes known stage names and rejects garbage', () => {
+  assert.deepEqual(
+    ['assets', 'archive', 'upload', 'write', 'done', 'error'].map((stage) => apps.metaAppPublishStage(stage)),
+    ['assets', 'archive', 'upload', 'write', 'done', 'error'],
+  )
+  assert.equal(apps.metaAppPublishStage(' write '), 'write')
+  assert.equal(apps.metaAppPublishStage('packaging'), null)
+  assert.equal(apps.metaAppPublishStage(''), null)
+  assert.equal(apps.metaAppPublishStage(undefined), null)
+  assert.equal(apps.metaAppPublishStage({ stage: 'write' }), null)
+})
+
+test('metaAppPublishStageLocaleKey maps in-flight stages to locale keys', () => {
+  assert.equal(apps.metaAppPublishStageLocaleKey('assets'), 'chainStageAssets')
+  assert.equal(apps.metaAppPublishStageLocaleKey('archive'), 'chainStageArchive')
+  assert.equal(apps.metaAppPublishStageLocaleKey('upload'), 'chainStageUpload')
+  assert.equal(apps.metaAppPublishStageLocaleKey('write'), 'chainStageWrite')
+  assert.equal(apps.metaAppPublishStageLocaleKey('done'), null)
+  assert.equal(apps.metaAppPublishStageLocaleKey('error'), null)
+})
+
+test('normalizeMetaAppForkResult reads the fork route data payload', () => {
+  const pin = 'a'.repeat(64) + 'i0'
+  assert.deepEqual(apps.normalizeMetaAppForkResult({
+    dir: '/home/alice/workspace/metaapps/desk-abcd1234-1700000000000',
+    indexFile: 'app.html',
+    title: 'Desk',
+    sourceUri: `metaapp://${pin}`,
+  }), {
+    dir: '/home/alice/workspace/metaapps/desk-abcd1234-1700000000000',
+    indexFile: 'app.html',
+    title: 'Desk',
+    sourceUri: `metaapp://${pin}`,
+  })
+  // Missing payload fields degrade to empty strings with an index.html default.
+  assert.deepEqual(apps.normalizeMetaAppForkResult(null), {
+    dir: '',
+    indexFile: 'index.html',
+    title: '',
+    sourceUri: '',
+  })
+  assert.deepEqual(apps.normalizeMetaAppForkResult(['not', 'an', 'object']), {
+    dir: '',
+    indexFile: 'index.html',
+    title: '',
+    sourceUri: '',
+  })
+  assert.equal(apps.normalizeMetaAppForkResult({ dir: ' /x ' }).dir, '/x')
+})

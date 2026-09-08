@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   Button,
+  IconBranchOutline16,
   IconCheckOutline16,
   IconCopyOutline16,
   IconEditOutline16,
@@ -21,8 +22,11 @@ import {
   chainTxids,
   displayValue,
   formatTimestamp,
+  metaAppPublishStage,
+  metaAppPublishStageLocaleKey,
   metaAppUriFor,
   metaWebUrlFor,
+  normalizeMetaAppForkResult,
   recordImage,
   recordIntroImages,
   recordName,
@@ -31,6 +35,8 @@ import {
   recordTags,
   recordText,
   runUrlFor,
+  type MetaAppForkResult,
+  type MetaAppPublishStage,
 } from '../apps.ts'
 import { AssetImage } from './AssetImage.tsx'
 import type { AppsLocaleKey } from './locale-apps.ts'
@@ -42,9 +48,10 @@ type Translate = (key: AppsLocaleKey | CommonKeyOf, vars?: Record<string, string
 export interface AppsPanelInjected {
   bots: () => Promise<BotRow[]>
   list: (from: string, size?: number, cursor?: string) => Promise<MetaAppListPayload>
-  publish: (from: string, payload: Record<string, unknown>) => Promise<CommandEnvelope>
-  update: (from: string, targetPinId: string, payload: Record<string, unknown>) => Promise<CommandEnvelope>
+  publish: (from: string, payload: Record<string, unknown>, opId?: string) => Promise<CommandEnvelope>
+  update: (from: string, targetPinId: string, payload: Record<string, unknown>, opId?: string) => Promise<CommandEnvelope>
   remove: (from: string, targetPinId: string) => Promise<CommandEnvelope>
+  fork: (from: string, pinId: string, title?: string) => Promise<CommandEnvelope>
   upload: (from: string, file: File) => Promise<{ metafileUri?: string; pinId?: string }>
 }
 
@@ -54,12 +61,20 @@ type ModalState =
   | { kind: 'detail'; record: MetaAppRecord }
   | { kind: 'share'; record: MetaAppRecord }
   | { kind: 'delete'; record: MetaAppRecord }
+  | { kind: 'fork'; record: MetaAppRecord }
   | null
+
+type ForkState = {
+  phase: 'pending' | 'success' | 'error'
+  result?: MetaAppForkResult
+  errorText?: string
+} | null
 
 type ChainState = {
   mode: 'publish' | 'edit'
   phase: 'pending' | 'success' | 'error'
   displayName: string
+  stage?: MetaAppPublishStage | null
   result?: CommandEnvelope
   errorText?: string
 } | null
@@ -88,6 +103,7 @@ export function AppsPanel({
   publish,
   update,
   remove,
+  fork,
   upload,
   t,
 }: AppsPanelInjected & { t: Translate }): ReactNode {
@@ -101,11 +117,20 @@ export function AppsPanel({
   const [error, setError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState>(null)
   const [chain, setChain] = useState<ChainState>(null)
+  const [forkState, setForkState] = useState<ForkState>(null)
   const [formBusy, setFormBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [copied, setCopied] = useState('')
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const chainSourceRef = useRef<EventSource | null>(null)
+
+  const closeChainSource = (): void => {
+    chainSourceRef.current?.close()
+    chainSourceRef.current = null
+  }
+
+  useEffect(() => () => closeChainSource(), [])
 
   useEffect(() => {
     let current = true
@@ -202,13 +227,38 @@ export function AppsPanel({
     const displayName = String(payload.title || payload.appName || 'MetaApp')
     setChain({ mode, phase: 'pending', displayName })
     setModal(null)
+    // Subscribe to the daemon's per-op stage stream BEFORE firing the publish
+    // POST so no stage event is missed; the POST response still owns the
+    // terminal state (it carries the full result with txids).
+    const opId = typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : ''
+    closeChainSource()
+    if (opId && typeof EventSource === 'function') {
+      const source = new EventSource(`/oac/api/metaapp/events?op=${encodeURIComponent(opId)}`)
+      chainSourceRef.current = source
+      source.onmessage = (event) => {
+        let stage: MetaAppPublishStage | null = null
+        try {
+          stage = metaAppPublishStage((JSON.parse(String(event.data)) as { stage?: unknown })?.stage)
+        } catch {
+          stage = null
+        }
+        if (!stage) return
+        if (stage === 'done' || stage === 'error') {
+          closeChainSource()
+          return
+        }
+        setChain((current) => (current && current.phase === 'pending' ? { ...current, stage } : current))
+      }
+    }
     try {
       const result = mode === 'edit'
-        ? await update(from, target, payload)
-        : await publish(from, payload)
+        ? await update(from, target, payload, opId || undefined)
+        : await publish(from, payload, opId || undefined)
+      closeChainSource()
       setChain({ mode, phase: 'success', displayName, result })
       reloadFirstPage()
     } catch (cause) {
+      closeChainSource()
       const message = errorText(cause)
       setChain({
         mode,
@@ -232,6 +282,21 @@ export function AppsPanel({
       setDeleteError(interpolate(t('deleteFailed'), { message: errorText(cause) }))
     } finally {
       setDeleteBusy(false)
+    }
+  }
+
+  const startFork = async (record: MetaAppRecord): Promise<void> => {
+    if (!from) return
+    const pinId = recordPinId(record)
+    if (!pinId) return
+    const name = recordName(record, t('untitled'))
+    setModal({ kind: 'fork', record })
+    setForkState({ phase: 'pending' })
+    try {
+      const envelope = await fork(from, pinId, name)
+      setForkState({ phase: 'success', result: normalizeMetaAppForkResult(envelope.data) })
+    } catch (cause) {
+      setForkState({ phase: 'error', errorText: interpolate(t('forkFailed'), { message: errorText(cause) }) })
     }
   }
 
@@ -311,6 +376,15 @@ export function AppsPanel({
             onClick={(event) => { event.stopPropagation(); setModal({ kind: 'edit', record }) }}
           >
             <IconEditOutline16 />
+          </button>
+          <button
+            type="button"
+            className="oac-icon-btn"
+            data-tip={t('fork')}
+            aria-label={`${t('fork')}: ${name}`}
+            onClick={(event) => { event.stopPropagation(); void startFork(record) }}
+          >
+            <IconBranchOutline16 />
           </button>
           <button
             type="button"
@@ -499,6 +573,58 @@ export function AppsPanel({
     )
   }
 
+  const renderForkModal = (record: MetaAppRecord): ReactNode => {
+    const name = recordName(record, t('untitled'))
+    const state = forkState
+    const result = state?.phase === 'success' ? state.result : undefined
+    const rows: Array<[string, string]> = result
+      ? [
+        [t('forkDirectory'), result.dir],
+        [t('forkEntryFile'), result.indexFile],
+        [t('forkSourceUri'), result.sourceUri],
+      ].filter(([, value]) => value) as Array<[string, string]>
+      : []
+    return (
+      <Modal
+        closeLabel={t('close')}
+        open
+        onClose={() => setModal(null)}
+        title={t('forkTitle')}
+        description={t('forkDescription')}
+        className="oac-apps-dialog-sm"
+        footer={(
+          <Button type="button" variant="primary" onClick={() => setModal(null)}>{t('close')}</Button>
+        )}
+      >
+        <div className="oac-apps-form" style={{ gap: 8 }}>
+          {!state || state.phase === 'pending' ? (
+            <p className="oac-apps-chain-note">
+              <IconLoadingOutline16 /> {interpolate(t('forkPending'), { name })}
+            </p>
+          ) : null}
+          {state?.phase === 'error' ? (
+            <p className="oac-apps-field-error" role="alert">{state.errorText}</p>
+          ) : null}
+          {rows.map(([label, value]) => (
+            <div className="oac-apps-share-row" key={label}>
+              <span>{label}</span>
+              <code>{value}</code>
+              <Button
+                type="button"
+                size="sm"
+                icon={<IconCopyOutline16 />}
+                onClick={() => { void copyText(value, value) }}
+              >
+                {copied === value ? t('copied') : t('shareCopyLink')}
+              </Button>
+            </div>
+          ))}
+          {result ? <p className="oac-apps-chain-note">{t('forkHint')}</p> : null}
+        </div>
+      </Modal>
+    )
+  }
+
   const renderDeleteModal = (record: MetaAppRecord): ReactNode => {
     const name = recordName(record, t('untitled'))
     return (
@@ -586,8 +712,11 @@ export function AppsPanel({
         ? (isEdit ? t('chainUpdateSuccessTitle') : t('chainPublishSuccessTitle'))
         : t('chainErrorTitle')
     const txids = chain.phase === 'success' && chain.result ? chainTxids(chain.result.data) : []
+    const stageKey = pending && chain.stage ? metaAppPublishStageLocaleKey(chain.stage) : null
     const bodyText = pending
-      ? interpolate(isEdit ? t('chainUpdatePending') : t('chainPublishPending'), { name: chain.displayName })
+      ? stageKey
+        ? t(stageKey)
+        : interpolate(isEdit ? t('chainUpdatePending') : t('chainPublishPending'), { name: chain.displayName })
       : chain.phase === 'success'
         ? interpolate(isEdit ? t('chainUpdateSuccess') : t('chainPublishSuccess'), { name: chain.displayName })
         : chain.errorText ?? ''
@@ -648,6 +777,7 @@ export function AppsPanel({
 
   const closeChain = (): void => {
     if (chain?.phase === 'pending') return
+    closeChainSource()
     setChain(null)
   }
 
@@ -739,6 +869,7 @@ export function AppsPanel({
       {modal?.kind === 'detail' ? renderDetailModal(modal.record) : null}
       {modal?.kind === 'share' ? renderShareModal(modal.record) : null}
       {modal?.kind === 'delete' ? renderDeleteModal(modal.record) : null}
+      {modal?.kind === 'fork' ? renderForkModal(modal.record) : null}
       {chain !== null ? renderChainModal() : null}
     </div>
   )

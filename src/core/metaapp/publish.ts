@@ -87,6 +87,8 @@ export interface MetaAppPublishDependencies {
   actorKey?: string;
   /** Optional 60 s idempotency window + per-app write lock for chain writes. */
   writeGuard?: MetaAppWriteGuard;
+  /** Optional progress callback: archive → upload → write during a confirmed write. */
+  onStage?: (stage: string, detail?: Record<string, unknown>) => void;
   now?: () => number;
   makeTempDir?: () => Promise<string>;
 }
@@ -516,6 +518,10 @@ async function writePublishedMetaApp(input: {
     }));
 
     const execute = async (): Promise<MetabotCommandResult<Record<string, unknown>>> => {
+      // The archive is staged before execute() because the write guard needs
+      // its hash; report it here so a guard replay (which skips execute)
+      // emits no stages at all.
+      input.deps.onStage?.('archive', { bytes: archive.bytes, sha256: archive.sha256 });
       let upload: UploadLikeResult;
       try {
         upload = await input.deps.uploadFile({
@@ -534,6 +540,7 @@ async function writePublishedMetaApp(input: {
       }
 
       const artifactUri = uploadArtifactUri(upload);
+      input.deps.onStage?.('upload', { artifactUri });
       const manifest = finalizeManifestForWrite({
         plan: input.plan,
         manifest: input.manifest,
@@ -566,6 +573,7 @@ async function writePublishedMetaApp(input: {
       const firstPinId = input.operation === 'modify'
         ? normalizeText(chainWrite.firstPinId) || normalizeText(input.firstPinIdFallback) || input.targetPinId || pinId
         : normalizeText(chainWrite.firstPinId) || pinId;
+      input.deps.onStage?.('write', { pinId, firstPinId, totalCost: chainWrite.totalCost });
       const now = input.deps.now ? input.deps.now() : Date.now();
       const record = buildGalleryRecord({
         operation: input.operation,

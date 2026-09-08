@@ -215,6 +215,53 @@ test('publishMetaApp uploads the ZIP before writing create payload and upserting
   assert.equal(deps.upserts[0].content, 'metafile://upload-pin.zip');
 });
 
+test('publishMetaApp reports archive, upload, and write stages through onStage', async () => {
+  const projectDir = await makeProject('publish-stages', {
+    title: 'Stage App',
+    appName: 'stage-app',
+  });
+  const stages = [];
+  const deps = createDeps({
+    onStage: (stage, detail) => {
+      stages.push({ stage, detail });
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'success');
+  assert.deepEqual(stages.map((entry) => entry.stage), ['archive', 'upload', 'write']);
+  assert.ok(stages[0].detail.bytes > 0);
+  assert.match(stages[0].detail.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(stages[1].detail.artifactUri, 'metafile://upload-pin.zip');
+  assert.equal(stages[2].detail.pinId, CREATE_PIN);
+  assert.equal(stages[2].detail.firstPinId, CREATE_PIN);
+  assert.equal(stages[2].detail.totalCost, 1);
+});
+
+test('publishMetaApp emits no stages on a write-guard replay', async () => {
+  const projectDir = await makeProject('publish-stages-replay', {
+    title: 'Stage Replay App',
+    appName: 'stage-replay-app',
+  });
+  const stages = [];
+  const writeGuard = createMetaAppWriteGuard();
+  const deps = createDeps({
+    writeGuard,
+    onStage: (stage) => {
+      stages.push(stage);
+    },
+  });
+
+  const first = await publishMetaApp({ projectDir, confirm: true }, deps);
+  const second = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(first.state, 'success');
+  assert.equal(second.state, 'success');
+  assert.equal(second.data.idempotent, true);
+  assert.deepEqual(stages, ['archive', 'upload', 'write'], 'the replayed publish emits nothing');
+});
+
 test('publishMetaApp derives a zip metafile URI when upload returns only pinId', async () => {
   const projectDir = await makeProject('publish-pinid-only');
   const deps = createDeps({

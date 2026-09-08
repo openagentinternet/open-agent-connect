@@ -256,10 +256,12 @@ export function apply(ctx: ClientContext): void {
     inject: () => ({
       bots: () => api.list(),
       list: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
-      publish: (from: string, payload: Record<string, unknown>) => api.metaappPublish(from, payload),
-      update: (from: string, targetPinId: string, payload: Record<string, unknown>) =>
-        api.metaappUpdate(from, targetPinId, payload),
+      publish: (from: string, payload: Record<string, unknown>, opId?: string) =>
+        api.metaappPublish(from, payload, opId),
+      update: (from: string, targetPinId: string, payload: Record<string, unknown>, opId?: string) =>
+        api.metaappUpdate(from, targetPinId, payload, opId),
       remove: (from: string, targetPinId: string) => api.metaappDelete(from, targetPinId),
+      fork: (from: string, pinId: string, title?: string) => api.metaappFork(from, pinId, title),
       upload: (from: string, file: File) => api.metaappUpload(from, file),
     }),
   }, AppsPanel))

@@ -183,6 +183,12 @@ const FILE_UPLOAD_CHAIN_FLAG: CommandHelpFlag = {
   description: `Optional chain network override: mvc, btc, or opcat. ${CONFIGURED_WRITE_NETWORK_TEXT} DOGE is not supported for file upload.`,
 };
 
+const METAAPP_OP_ID_FLAG: CommandHelpFlag = {
+  flag: '--op-id',
+  value: '<id>',
+  description: 'Optional publish op id; stage events stream on GET /api/metaapp/events?op=<id>.',
+};
+
 const VERIFY_FLAG: CommandHelpFlag = {
   flag: '--verify',
   description: 'Verify file availability after upload when supported by the daemon path.',
@@ -1474,6 +1480,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [
       FROM_BOT_FLAG,
       CHAIN_WRITE_FLAG,
+      METAAPP_OP_ID_FLAG,
       HELP_JSON_FLAG,
     ],
   },
@@ -1511,6 +1518,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [
       FROM_BOT_FLAG,
       CHAIN_WRITE_FLAG,
+      METAAPP_OP_ID_FLAG,
       HELP_JSON_FLAG,
     ],
   },
@@ -1580,6 +1588,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--manifest-file', value: '<path>', description: 'Optional user-edited manifest JSON file.' },
       FILE_UPLOAD_CHAIN_FLAG,
       { flag: '--confirm', description: 'Confirm the MetaApp upload and on-chain publish write.' },
+      METAAPP_OP_ID_FLAG,
       HELP_JSON_FLAG,
     ],
   },
@@ -1622,6 +1631,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--manifest-file', value: '<path>', description: 'Optional user-edited manifest JSON file.' },
       FILE_UPLOAD_CHAIN_FLAG,
       { flag: '--confirm', description: 'Confirm the MetaApp upload and on-chain update write.' },
+      METAAPP_OP_ID_FLAG,
       HELP_JSON_FLAG,
     ],
   },
