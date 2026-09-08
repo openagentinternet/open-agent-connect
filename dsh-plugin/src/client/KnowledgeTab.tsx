@@ -95,6 +95,8 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editError, setEditError] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [panelNotice, setPanelNotice] = useState('')
   const [notices, setNotices] = useState<Record<string, Notice>>({})
   const [jobs, setJobs] = useState<StudyJob[]>([])
   const [jobsLoaded, setJobsLoaded] = useState(false)
@@ -108,6 +110,7 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
     const timers = noticeTimersRef.current
     const existing = timers.get(kbId)
     if (existing) clearTimeout(existing)
+    if (notice.kind === 'error') return
     timers.set(kbId, setTimeout(() => {
       timers.delete(kbId)
       setNotices((prev) => {
@@ -190,6 +193,7 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
     setCreateError('')
     try {
       await kbCreate(bot.slug, name, description, createRawDir.trim() || undefined)
+      setPanelNotice(t('kbLocalCreated'))
       setCreateOpen(false)
       setCreateName('')
       setCreateDescription('')
@@ -206,7 +210,7 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
     if (autoLearnSavingIds.has(kb.id)) return
     setAutoLearnSavingIds((prev) => new Set(prev).add(kb.id))
     void kbUpdate(bot.slug, kb.id, { autoLearn: !kb.autoLearn })
-      .then(() => loadKbs(bot.slug))
+      .then(() => { loadKbs(bot.slug); showNotice(kb.id, { kind: 'success', text: t('kbLocalSaved') }) })
       .catch((cause) => showNotice(kb.id, { kind: 'error', text: errorText(cause) || t('kbUpdateFailed') }))
       .finally(() => {
         setAutoLearnSavingIds((prev) => {
@@ -279,6 +283,7 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
   }
 
   const handleSaveEdit = (kb: KbRecord): void => {
+    if (editSaving) return
     const name = editName.trim()
     const description = editDescription.trim()
     if (!name) {
@@ -289,12 +294,16 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
       setEditError(t('kbDescriptionRequired'))
       return
     }
+    setEditSaving(true)
+    setEditError('')
     void kbUpdate(bot.slug, kb.id, { name, description })
       .then(() => {
         setEditingId(null)
+        showNotice(kb.id, { kind: 'success', text: t('kbLocalSaved') })
         loadKbs(bot.slug)
       })
       .catch((cause) => setEditError(errorText(cause) || t('kbUpdateFailed')))
+      .finally(() => setEditSaving(false))
   }
 
   const handleRemove = (kb: KbRecord): void => {
@@ -342,7 +351,7 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
           {`${interpolate(t('kbStatsDocs'), { count: kb.docCount })} · ${interpolate(t('kbStatsChunks'), { count: kb.chunkCount })} · ${formatLastLearnedAt(t, kb.lastLearnedAt)}`}
         </p>
 
-        {notice ? <div className="oac-kb-notice" data-kind={notice.kind}>{notice.text}</div> : null}
+        {notice ? <div className="oac-kb-notice" role={notice.kind === 'error' ? 'alert' : 'status'} data-kind={notice.kind}>{notice.text}</div> : null}
 
         {editing ? (
           <div className="oac-kb-card" style={{ padding: 0, border: 'none', gap: 8 }} data-slot={`knowledge-base-edit-form-${kb.id}`}>
@@ -360,11 +369,11 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
             />
             {editError ? <div className="oac-kb-error">{editError}</div> : null}
             <div className="oac-kb-row" style={{ justifyContent: 'flex-end' }}>
-              <Button type="button" variant="outline" onClick={() => setEditingId(null)}>
+              <Button type="button" variant="outline" disabled={editSaving} onClick={() => setEditingId(null)}>
                 {t('cancel')}
               </Button>
-              <Button type="button" variant="primary" onClick={() => handleSaveEdit(kb)}>
-                {t('save')}
+              <Button type="button" variant="primary" disabled={editSaving} onClick={() => handleSaveEdit(kb)}>
+                {editSaving ? t('saving') : t('save')}
               </Button>
             </div>
           </div>
@@ -461,6 +470,7 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
         </div>
         <p className="oac-kb-hint">{interpolate(t('kbFormatsHint'), { formats: KB_IMPORT_FILE_EXTENSIONS.join(' ') })}</p>
 
+        {panelNotice ? <p className="oac-note success" role="status">{panelNotice}</p> : null}
         {panelError ? <div className="oac-kb-error">{panelError}</div> : null}
 
         {createOpen ? (

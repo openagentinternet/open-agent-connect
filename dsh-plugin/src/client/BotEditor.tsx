@@ -18,6 +18,7 @@ import {
   type BotBackupPayload,
   type BotHomepageUploadPayload,
   type BotRow,
+  type BotUpdateResult,
   type BotWalletPayload,
   type ChatSkillsPayload,
   type LlmDirectory,
@@ -106,7 +107,7 @@ export function BotEditor({
   ) => Promise<BotHomepageUploadPayload>
   metaappList: (from: string, size?: number, cursor?: string) => Promise<MetaAppListPayload>
   onBack: () => void
-  onSave: (patch: Record<string, unknown>) => Promise<void>
+  onSave: (patch: Record<string, unknown>) => Promise<BotUpdateResult>
   onDelete: () => Promise<void>
 }): ReactNode {
   const [tab, setTab] = useState<TabKey>('basic')
@@ -143,6 +144,7 @@ export function BotEditor({
   const [picked, setPicked] = useState('')
   const [allowed, setAllowed] = useState<string[]>(bot.allowChatSkills ?? [])
   const [chatNote, setChatNote] = useState<{ tone: NoteTone; text: string } | null>(null)
+  const [saveFeedback, setSaveFeedback] = useState<{ tone: NoteTone; text: string; result?: BotUpdateResult } | null>(null)
   const [autoReply, setAutoReply] = useState<AutoReplyConfig | null>(null)
   const [autoReplyStatus, setAutoReplyStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [autoReplyError, setAutoReplyError] = useState('')
@@ -171,7 +173,17 @@ export function BotEditor({
     reader.readAsDataURL(file)
   }
 
-  const saveBasic = (): Promise<void> => onSave({
+  const runSave = async (patch: Record<string, unknown>): Promise<void> => {
+    setSaveFeedback({ tone: 'saving', text: t('saveWorking') })
+    try {
+      const result = await onSave(patch)
+      setSaveFeedback({ tone: 'success', text: t(result.chainWrites?.length ? 'saveChainDone' : 'saveLocalDone'), result })
+    } catch (cause) {
+      setSaveFeedback({ tone: 'error', text: errorText(cause) })
+      throw cause
+    }
+  }
+  const saveBasic = (): Promise<void> => runSave({
     name,
     bio,
     avatarDataUrl: avatarDraft,
@@ -182,7 +194,7 @@ export function BotEditor({
     dshLlmFallbackModel: fallbackModel || null,
     dshLlmFallbackReasoningEffort: fallbackReasoningEffort || null,
   })
-  const saveBehavior = (): Promise<void> => onSave({ role, soul, goal })
+  const saveBehavior = (): Promise<void> => runSave({ role, soul, goal })
 
   // Twin/Worker role (IDBots parity). The switch shows only on the current
   // Twin's own page (so it can step down) or, on any Bot's page, while no
@@ -198,13 +210,13 @@ export function BotEditor({
     } else if (hasOtherTwin) {
       setTwinAction('promote')
     } else {
-      void onSave({ botType: 'twin' })
+      void runSave({ botType: 'twin' }).catch(() => undefined)
     }
   }
   const confirmTwin = (): void => {
     const target = twinAction === 'demote' ? 'worker' : 'twin'
     setTwinAction(null)
-    void onSave({ botType: target })
+    void runSave({ botType: target }).catch(() => undefined)
   }
 
   // Refresh the skill catalog and the auto-reply state on every chat-tab
@@ -300,7 +312,7 @@ export function BotEditor({
   }
 
   const toggleAutoReply = (): void => {
-    if (autoReply === null || autoReplyStatus !== 'ready') return
+    if (autoReply === null || autoReplyStatus !== 'ready' || autoReplyNote?.tone === 'saving') return
     const next = !autoReply.enabled
     setAutoReply({ ...autoReply, enabled: next })
     setAutoReplyNote({ tone: 'saving', text: t('autoReplySaving') })
@@ -317,7 +329,7 @@ export function BotEditor({
   }
 
   const saveAutoReplyParam = (key: 'maxTurns' | 'cooldownMs', value: number): void => {
-    if (autoReply === null) return
+    if (autoReply === null || autoReplyNote?.tone === 'saving') return
     const previousValue = autoReply[key]
     setAutoReply({ ...autoReply, [key]: value })
     setAutoReplyNote({ tone: 'saving', text: t('autoReplySaving') })
@@ -347,7 +359,7 @@ export function BotEditor({
   const saveSkills = async (): Promise<void> => {
     setChatNote({ tone: 'saving', text: t('savingChatSkills') })
     try {
-      await onSave({ allowChatSkills: allowed })
+      await runSave({ allowChatSkills: allowed })
       setChatNote({ tone: 'success', text: t('savedChatSkills') })
     } catch (cause) {
       setChatNote({ tone: 'error', text: errorText(cause) })
@@ -380,6 +392,20 @@ export function BotEditor({
 
   return (
     <div className="oac-panel">
+      <Modal open={saveFeedback !== null} title={t('saveResultTitle')} closeLabel={t('close')}
+        onClose={() => { if (saveFeedback?.tone !== 'saving') setSaveFeedback(null) }} className="oac-dialog">
+        <div role={saveFeedback?.tone === 'error' ? 'alert' : 'status'} aria-live="polite">
+          <p className={`oac-note ${saveFeedback?.tone ?? ''}`}>{saveFeedback?.text}</p>
+          {saveFeedback?.tone === 'error' ? <p className="oac-hint">{t('saveFailureHint')}</p> : null}
+          {saveFeedback?.result?.chainWrites?.map((write) => (
+            <div className="oac-section-card" key={write.pinId}>
+              <strong>{write.path}</strong>
+              <code style={{ overflowWrap: 'anywhere' }}>{write.pinId}</code>
+            </div>
+          ))}
+        </div>
+        <Button disabled={saveFeedback?.tone === 'saving'} onClick={() => setSaveFeedback(null)}>{t('close')}</Button>
+      </Modal>
       <div className="oac-row">
         <Button type="button" icon={<IconChevronLeftOutline14 />} onClick={onBack}>{t('back')}</Button>
         <div className="oac-editor-title">
@@ -559,7 +585,7 @@ export function BotEditor({
               </div>
             ) : null}
             <div className="oac-form-actions">
-              <Button type="button" variant="primary" disabled={busy} onClick={() => { void saveBasic() }}>
+              <Button type="button" variant="primary" disabled={busy} onClick={() => { void saveBasic().catch(() => undefined) }}>
                 {busy ? t('saving') : t('save')}
               </Button>
             </div>
@@ -582,7 +608,7 @@ export function BotEditor({
               <textarea className="oac-input" value={goal} onChange={(event) => setGoal(event.target.value)} rows={3} />
             </label>
             <div className="oac-form-actions">
-              <Button type="button" variant="primary" disabled={busy} onClick={() => { void saveBehavior() }}>
+              <Button type="button" variant="primary" disabled={busy} onClick={() => { void saveBehavior().catch(() => undefined) }}>
                 {busy ? t('saving') : t('save')}
               </Button>
             </div>
@@ -603,7 +629,7 @@ export function BotEditor({
                   role="switch"
                   aria-checked={autoReply?.enabled === true}
                   className={autoReply?.enabled === true ? 'oac-switch on' : 'oac-switch'}
-                  disabled={!autoReplyReady}
+                  disabled={!autoReplyReady || autoReplyNote?.tone === 'saving'}
                   onClick={toggleAutoReply}
                 >
                   <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
@@ -758,7 +784,7 @@ export function BotEditor({
               botBackup={botBackup}
               botHomepageUpload={botHomepageUpload}
               metaappList={metaappList}
-              onSave={onSave}
+              onSave={runSave}
               onRequestDelete={() => setConfirmDelete(true)}
             />
           </div>
