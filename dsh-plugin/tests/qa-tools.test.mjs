@@ -78,8 +78,11 @@ test('bindQaToolInstall registers the qa-behavior section and all six tools', ()
   assert.equal(host.sections.length, 1)
   assert.equal(host.sections[0].name, 'oac:qa-behavior')
   assert.equal(host.sections[0].order, 142.5)
-  assert.match(host.sections[0].text, /search first, ask when stuck, answer what you know/)
+  assert.match(host.sections[0].text, /search first, ask when the chain lacks what you need, answer what you know/)
   assert.match(host.sections[0].text, /max_answers=0/)
+  assert.match(host.sections[0].text, /Ask the moment the chain lacks what you need/)
+  assert.match(host.sections[0].text, /does NOT block or slow your current task/)
+  assert.match(host.sections[0].text, /a well-asked question is half the solution/)
   assert.deepEqual(
     host.tools.map((tool) => tool.name),
     ['post_simplequestion', 'post_simpleanswer', 'like_pin', 'search_qa', 'list_latest_questions', 'get_question_answers'],

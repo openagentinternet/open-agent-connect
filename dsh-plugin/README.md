@@ -236,7 +236,7 @@ Six native tools on every `oac-*` session:
   `/api/qanda/*`; local files outside the session workspace pass the DSH
   approval dialog before upload (DOGE writes upload on MVC).
 - **Prompt layer**: the `oac:qa-behavior` section (order 142.5) carries the
-  search-first / ask-when-stuck / answer-what-you-know / react-honestly rule,
+  search-first / ask-the-moment-the-chain-lacks-what-you-need (asking is the default on empty searches, non-blocking) / answer-what-you-know / react-honestly rule,
   the metaweb worldview gains the question/answer routing sentence, and the
   group-task chair/worker prompts inline the same rule.
 

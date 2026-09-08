@@ -142,7 +142,7 @@ in-process), and `post_simplequestion`, `post_simpleanswer`, `like_pin`
 (on-chain writes through `metabot qanda question|answer|like`, with the
 already-answered notice before repeat answers and the external-file approval
 gate before uploads). The `oac:qa-behavior` prompt section carries the
-search-before-ask loop; group-task chairs get the same rule.
+search-first loop — and asking is the DEFAULT the moment on-chain searches for something the task needs come up empty (cheap, non-blocking, and how the early Q&A commons bootstraps); group-task chairs get the same rule.
 
 Nightly **Q&A surfing** (`metaweb_qa_surf_enqueue` / `metaweb_qa_surf_disable`
 in chat): every night (00:00–06:00) the daemon drains a background session

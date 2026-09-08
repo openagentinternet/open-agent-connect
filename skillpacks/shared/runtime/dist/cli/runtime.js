@@ -2215,6 +2215,7 @@ function createDefaultCliDependencies(context) {
                 'If the results look thin, retry with broader or synonym keywords — the corpus is Chinese-heavy, so also try Chinese terms.'
                     + (asciiOnly ? ' (Your query was pure ASCII — a Chinese retry is especially likely to help.)' : ''),
                 'Never invent pin ids or content.',
+                'If the results are empty for something the owner actually needs, publish the gap on the on-chain Q&A (post_simplequestion / metabot qanda question) — asking is cheap and does not block the task.',
             ].join('\n');
             return (0, commandResult_1.commandSuccess)({
                 items: page.items.map((item) => ({
