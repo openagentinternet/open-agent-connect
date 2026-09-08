@@ -383,6 +383,7 @@ export function BotPanel({
           <ul className="oac-bot-grid">
             {bots.map((bot) => {
               const setupPending = bot.setup != null && bot.setup.state !== 'ready'
+              const llmUnset = !bot.dshLlmProvider?.trim() || !bot.dshLlmModel?.trim()
               return (
                 <li className="oac-bot-card" key={bot.slug}>
                   <div className="oac-bot-main">
@@ -397,7 +398,11 @@ export function BotPanel({
                   </div>
                   <p className="oac-bot-bio">{bot.bio ?? ''}</p>
                   <div className="oac-bot-model">
-                    {bot.dshLlmProvider && bot.dshLlmModel ? `${bot.dshLlmProvider}/${bot.dshLlmModel}` : ''}
+                    {llmUnset ? (
+                      <span className="oac-memory-badge oac-llm-unset-badge" title={t('cardLlmUnsetHint')}>
+                        {t('cardLlmUnsetBadge')}
+                      </span>
+                    ) : `${bot.dshLlmProvider}/${bot.dshLlmModel}`}
                   </div>
                   <div className="oac-bot-foot">
                     <div className="oac-bot-foot-left">
