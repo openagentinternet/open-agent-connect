@@ -20,6 +20,7 @@ import { AppsPanel } from './AppsPanel.tsx'
 import { BotBrowserBoundary, BotBrowserSidebar, type BrowserLocaleFace } from './BotBrowserSidebar.tsx'
 import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
+import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
@@ -284,6 +285,9 @@ export function apply(ctx: ClientContext): void {
 
   ctx.inject(['slots', 'conversation', 'sessions'], (scope: ClientContext) => {
     const remote = ctx.remote
+    // Captured once while the context is active: re-resolving `scope.sessions`
+    // after the context retires throws "inactive context" inside subscriptions.
+    const sessionsList = scope.sessions.list
     const seat = new BotPresetSeatController(
       {
         agentPresets: {
@@ -310,7 +314,7 @@ export function apply(ctx: ClientContext): void {
         ...(bot.role === undefined || bot.role === null ? {} : { role: bot.role }),
       })),
       (): SeatSessionSummary | undefined => {
-        const state = scope.sessions.list.getSnapshot()
+        const state = sessionsList.getSnapshot()
         const summary = state.current === undefined ? undefined : state.byId[state.current]
         if (summary === undefined) return undefined
         const agentPreset = summary.projectionValues?.agentPreset
@@ -329,13 +333,14 @@ export function apply(ctx: ClientContext): void {
     })
 
     scope.effect(() => {
-      const stop = scope.sessions.list.subscribe(() => { seat.syncSession(); void seat.apply() })
-      const sessionId = scope.slots.register({
+      const stop = sessionsList.subscribe(() => { void seat.apply() })
+      const headerId = scope.slots.register({
         name: 'conversation.session.header.actions',
         id: 'oac-session-id',
         order: -9,
-        locale: 'settings.agentPreset',
-        inject: seatInjected,
+        locale: CONV_NS,
+        // Session-scoped slots hand the factory the rendered session's id.
+        inject: (sessionId: string) => ({ sessionId }),
       }, SessionIdHeader)
       const chip = scope.slots.register({
         name: 'conversation.hero.agentPreset',
@@ -346,6 +351,7 @@ export function apply(ctx: ClientContext): void {
       return () => {
         stop()
         chip()
+        headerId()
       }
     }, 'oac-dsh: preset chip')
   })
