@@ -522,6 +522,7 @@ function createGroupTaskEngine(options) {
                         'First line must be exactly 【结论】followed by a one-sentence verdict (max 120 chars).',
                         'Then 3-6 bullet lines: goal, deliverables with their verification labels, member contributions, plan changes.',
                         'Facts only — every claim must come from the record below; never invent outcomes or ratings.',
+                        'Every MetaWeb URI (metaid://, pin://, metafile://, metaapp://, map://) must appear in FULL — never abbreviated or truncated with an ellipsis; a shortened URI is neither clickable nor copyable.',
                         JSON.stringify(record),
                     ].join('\n'),
                 })).trim();

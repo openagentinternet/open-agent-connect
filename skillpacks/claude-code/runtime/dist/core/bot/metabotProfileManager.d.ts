@@ -27,6 +27,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
     dshLlmFallbackReasoningEffort?: string | null;
     botType?: MetabotBotType | null;
     ownerGlobalMetaId?: string | null;
+    isAvailable?: boolean;
 }
 export interface CreateMetabotInput {
     name: string;
@@ -46,6 +47,7 @@ export interface CreateMetabotInput {
     dshLlmFallbackReasoningEffort?: string | null;
     botType?: MetabotBotType | null;
     ownerGlobalMetaId?: string | null;
+    isAvailable?: boolean;
 }
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
     homeDir: string;
@@ -73,6 +75,7 @@ export interface UpdateMetabotInfoInput {
     dshLlmFallbackReasoningEffort?: string | null;
     botType?: MetabotBotType | null;
     ownerGlobalMetaId?: string | null;
+    isAvailable?: boolean;
 }
 export interface SyncMetabotInfoToChainOptions {
     delayMs?: number;

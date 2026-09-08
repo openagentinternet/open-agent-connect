@@ -1,7 +1,7 @@
 import type { LlmBindingStore } from '../llm/llmBindingStore';
 import type { LlmRuntimeStore } from '../llm/llmRuntimeStore';
 import type { LlmRuntime } from '../llm/llmTypes';
-import type { PlatformDefinition } from '../platform/platformRegistry';
+import type { PlatformDefinition, PlatformId } from '../platform/platformRegistry';
 import { type PlatformSkillCatalogEntry, type PlatformSkillRootDiagnostic } from './platformSkillCatalog';
 export type ChatSkillPolicyFailureCode = 'invalid_allow_chat_skills' | 'primary_runtime_missing' | 'primary_runtime_unavailable' | 'primary_runtime_provider_unsupported' | 'chat_skill_missing';
 export interface ChatSkillPolicyInput {
@@ -46,3 +46,13 @@ export interface ChatSkillResolutionRecord {
 }
 export declare function writeChatSkillResolution(filePath: string, record: ChatSkillResolutionRecord): Promise<void>;
 export declare function readChatSkillResolution(filePath: string): Promise<ChatSkillResolutionRecord | null>;
+/**
+ * Platform-scoped variant of {@link resolveAllowChatSkillsForRuntime}: maps
+ * the Bot's allowed chat skills against one platform's skill roots (plus the
+ * ~/.agents/skills shared standard) instead of the primary runtime's
+ * platform. The DSH host uses this while a host executor is connected, so
+ * reply turns resolve exactly the skill surface a DSH session executes.
+ */
+export declare function resolveAllowChatSkillsForPlatform(input: ChatSkillPolicyInput & {
+    platformId: PlatformId;
+}): Promise<ChatSkillPolicySuccess>;

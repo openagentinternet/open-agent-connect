@@ -66,6 +66,15 @@ function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
         emptyMessage: tx('apps.emptyMessage'),
         emptyTitle: tx('apps.emptyTitle'),
         formErrorTitle: tx('apps.form.errorTitle'),
+        fork: tx('apps.fork'),
+        forkDirectory: tx('apps.fork.directory'),
+        forkEntryFile: tx('apps.fork.entryFile'),
+        forkErrorTitle: tx('apps.fork.errorTitle'),
+        forkHint: tx('apps.fork.hint'),
+        forkModalDescription: tx('apps.fork.description'),
+        forkModalTitle: tx('apps.fork.title'),
+        forkPending: tx('apps.fork.pending'),
+        forkSourceUri: tx('apps.fork.sourceUri'),
         iconLabel: tx('apps.form.icon'),
         imageManualPinHelp: tx('apps.form.imageManualPinHelp'),
         imageMultiPinPlaceholder: tx('apps.form.imageMultiPinPlaceholder'),
@@ -206,6 +215,7 @@ function buildAppsPageRuntimeSource(text, options) {
     loading: false,
     botMenuOpen: false,
     modal: null,
+    fork: null,
   };
   const elements = {
     shell: document.querySelector('[data-apps-shell]'),
@@ -905,6 +915,37 @@ function buildAppsPageRuntimeSource(text, options) {
     );
   };
 
+  const renderForkModal = (record) => {
+    const pinId = recordPinId(record);
+    const fork = state.fork && state.fork.pinId === pinId ? state.fork : null;
+    let content;
+    if (!fork || fork.phase === 'pending') {
+      content = '<p>' + escapeHtml(uiText('apps.fork.pending', UI_TEXT.forkPending)) + '</p>';
+    } else if (fork.phase === 'error') {
+      content = '<p class="apps-form-error" role="alert">' + escapeHtml(uiText('apps.fork.errorTitle', UI_TEXT.forkErrorTitle) + ' ' + fork.error) + '</p>';
+    } else {
+      const rows = [
+        [uiText('apps.fork.directory', UI_TEXT.forkDirectory), normalizeText(fork.result && fork.result.dir)],
+        [uiText('apps.fork.entryFile', UI_TEXT.forkEntryFile), normalizeText(fork.result && fork.result.indexFile)],
+        [uiText('apps.fork.sourceUri', UI_TEXT.forkSourceUri), normalizeText(fork.result && fork.result.sourceUri)],
+      ].filter((row) => row[1]);
+      content = '<div class="apps-share-list">'
+        + rows.map((row) => renderShareLinkRow(row[0], row[1])).join('')
+        + '</div>'
+        + '<p>' + escapeHtml(uiText('apps.fork.hint', UI_TEXT.forkHint)) + '</p>';
+    }
+    const body = '<div class="apps-detail-body">' +
+      '<section class="apps-detail-section">' + content + '</section>' +
+    '</div>';
+    const actions = '<button class="btn" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '</button>';
+    return renderModalShell(
+      uiText('apps.fork.title', UI_TEXT.forkModalTitle),
+      uiText('apps.fork.description', UI_TEXT.forkModalDescription),
+      body,
+      actions,
+    );
+  };
+
   const renderDeleteModal = (record) => {
     const pinId = recordPinId(record);
     const title = normalizeText(record && (record.title || record.appName)) || pinId;
@@ -930,6 +971,7 @@ function buildAppsPageRuntimeSource(text, options) {
   const renderAppsModalContent = (mode, record) => {
     if (mode === 'detail') return renderDetailModal(record);
     if (mode === 'share') return renderShareModal(record);
+    if (mode === 'fork') return renderForkModal(record);
     if (mode === 'delete') return renderDeleteModal(record);
     return renderMetaAppForm(mode, record);
   };
@@ -979,6 +1021,7 @@ function buildAppsPageRuntimeSource(text, options) {
 
   const closeAppsModal = () => {
     state.modal = null;
+    state.fork = null;
     if (!elements.modalRoot) return;
     elements.modalRoot.hidden = true;
     elements.modalRoot.innerHTML = '';
@@ -986,7 +1029,7 @@ function buildAppsPageRuntimeSource(text, options) {
 
   const openAppsModal = (mode, record) => {
     if (!elements.modalRoot) return;
-    const needsRecord = mode === 'edit' || mode === 'detail' || mode === 'share' || mode === 'delete';
+    const needsRecord = mode === 'edit' || mode === 'detail' || mode === 'share' || mode === 'delete' || mode === 'fork';
     const resolvedRecord = needsRecord ? record : null;
     if (needsRecord && !resolvedRecord) {
       closeAppsModal();
@@ -1139,6 +1182,27 @@ function buildAppsPageRuntimeSource(text, options) {
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       setDeleteFormError(uiText('apps.delete.errorTitle', UI_TEXT.deleteErrorTitle) + ' ' + message);
+    }
+  };
+
+  const startFork = async (record) => {
+    const pinId = recordPinId(record);
+    if (!pinId) return;
+    state.fork = { pinId, phase: 'pending', result: null, error: '' };
+    openAppsModal('fork', record);
+    try {
+      const result = await postJson('/api/metaapp/fork', {
+        from: state.selectedSlug,
+        pinId,
+        title: normalizeText(record && (record.title || record.appName)),
+      });
+      state.fork = { pinId, phase: 'success', result, error: '' };
+    } catch (error) {
+      state.fork = { pinId, phase: 'error', result: null, error: error && error.message ? error.message : String(error) };
+    }
+    // Re-render only when the user is still looking at this fork's modal.
+    if (state.modal && state.modal.mode === 'fork' && state.modal.targetPinId === pinId) {
+      openAppsModal('fork', record);
     }
   };
 
@@ -1302,6 +1366,7 @@ function buildAppsPageRuntimeSource(text, options) {
         '<div class="apps-card-actions">' +
           '<button class="btn btn-primary" type="button" data-apps-run="' + escapeHtml(pinId) + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(uiText('apps.run', UI_TEXT.run)) + '</button>' +
           '<button class="btn" type="button" data-apps-edit="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.edit', UI_TEXT.edit)) + '</button>' +
+          '<button class="btn" type="button" data-apps-fork="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.fork', UI_TEXT.fork)) + '</button>' +
           '<button class="btn" type="button" data-apps-share="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.share', UI_TEXT.share)) + '</button>' +
           '<button class="btn" type="button" data-apps-detail="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.details', UI_TEXT.details)) + '</button>' +
         '</div>' +
@@ -1420,7 +1485,7 @@ function buildAppsPageRuntimeSource(text, options) {
   document.addEventListener('click', async (event) => {
     const eventTarget = event.target instanceof Element ? event.target : null;
     if (!eventTarget) return;
-    const target = eventTarget.closest('[data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-copy-value], [data-apps-run], [data-apps-share], [data-apps-detail], [data-apps-edit], [data-apps-delete-open], [data-apps-card]');
+    const target = eventTarget.closest('[data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-copy-value], [data-apps-run], [data-apps-share], [data-apps-detail], [data-apps-edit], [data-apps-fork], [data-apps-delete-open], [data-apps-card]');
     if (!target) {
       if (state.botMenuOpen && !eventTarget.closest('[data-apps-bot-picker]')) {
         state.botMenuOpen = false;
@@ -1471,6 +1536,11 @@ function buildAppsPageRuntimeSource(text, options) {
     if (target.matches('[data-apps-share]')) {
       const record = findRecordByPinId(target.getAttribute('data-apps-share') || '');
       if (record) openAppsModal('share', record);
+      return;
+    }
+    if (target.matches('[data-apps-fork]')) {
+      const record = findRecordByPinId(target.getAttribute('data-apps-fork') || '');
+      if (record) await startFork(record);
       return;
     }
     if (target.matches('[data-apps-detail]')) {

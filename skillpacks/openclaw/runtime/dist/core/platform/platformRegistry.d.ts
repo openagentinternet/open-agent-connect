@@ -55,6 +55,8 @@ export interface PlatformSkillRoot {
 export type InstallSkillRoot = PlatformSkillRoot & {
     platformId: PlatformId | 'shared-agents';
 };
+/** The ~/.agents/skills shared standard root (DSH sessions load it natively). */
+export declare function getSharedAgentsSkillRoot(): PlatformSkillRoot;
 export declare const PLATFORM_DEFINITIONS: PlatformDefinition[];
 export declare const SUPPORTED_PLATFORM_IDS: PlatformId[];
 export declare const RUNTIME_PLATFORM_IDS: RuntimePlatformId[];

@@ -1,5 +1,6 @@
 import { type MetabotCommandResult } from '../contracts/commandResult';
 import type { MetaAppGalleryRecord } from './types';
+import { type MetaAppWriteGuard } from './writeGuard';
 export interface UploadLikeResult {
     pinId?: string;
     txids?: string[];
@@ -51,6 +52,16 @@ export interface MetaAppPublishDependencies {
         localPreviewUrl: string;
     };
     readExistingMetaApp?: (pinId: string) => Promise<MetaAppGalleryRecord | null>;
+    /**
+     * Stable identity of the writing actor (profile homeDir or MVC address),
+     * mixed into the idempotency key so two local Bots publishing identical
+     * content never replay each other's chain writes.
+     */
+    actorKey?: string;
+    /** Optional 60 s idempotency window + per-app write lock for chain writes. */
+    writeGuard?: MetaAppWriteGuard;
+    /** Optional progress callback: archive → upload → write during a confirmed write. */
+    onStage?: (stage: string, detail?: Record<string, unknown>) => void;
     now?: () => number;
     makeTempDir?: () => Promise<string>;
 }

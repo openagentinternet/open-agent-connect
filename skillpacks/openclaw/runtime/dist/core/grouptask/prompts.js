@@ -19,6 +19,7 @@ exports.buildMinimalPlanningDirective = buildMinimalPlanningDirective;
 exports.buildHostNotesDirective = buildHostNotesDirective;
 exports.buildSupervisorWakeDirective = buildSupervisorWakeDirective;
 const behaviorPrompt_1 = require("../qanda/behaviorPrompt");
+const uri_1 = require("../metaweb/uri");
 exports.GROUP_TASK_CONTEXT_MESSAGE_COUNT = 20;
 const FIELD_CAP = 200;
 function cap(text, max = FIELD_CAP) {
@@ -142,6 +143,10 @@ function buildGroupTaskSystemPrompt(input) {
     // Q&A behavior rule (IDBots feat/metaweb-qa parity): group-task turns get
     // the same search-before-ask self-discipline as cowork sessions.
     sections.push(behaviorPrompt_1.QA_BEHAVIOR_RULE);
+    // Full-form MetaWeb URI rule (IDBots chain-identifier parity): truncated
+    // URIs are unclickable, uncopyable, and break the host's exact-match
+    // deliverable ledger — one shared standing rule for chair AND workers.
+    sections.push(uri_1.METAWEB_URI_FULL_FORM_RULE);
     return sections.join('\n\n');
 }
 function transcriptLine(message) {

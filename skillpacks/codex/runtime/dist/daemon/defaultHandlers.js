@@ -89,8 +89,12 @@ const localMnemonicSigner_2 = require("../core/signing/localMnemonicSigner");
 const writeAttempts_1 = require("../core/chain/writeAttempts");
 const previewSessions_1 = require("../core/metaapp/previewSessions");
 const localCache_1 = require("../core/metaapp/localCache");
+const writeGuard_1 = require("../core/metaapp/writeGuard");
+const stageEvents_1 = require("../core/metaapp/stageEvents");
 const ownerService_1 = require("../core/metaapp/ownerService");
 const manOwnerList_1 = require("../core/metaapp/manOwnerList");
+const metaAppSource_1 = require("../core/metaapp/metaAppSource");
+const pinId_1 = require("../core/metaapp/pinId");
 const publish_3 = require("../core/metaapp/publish");
 const skillPublish_1 = require("../core/skills/skillPublish");
 const share_1 = require("../core/metaapp/share");
@@ -738,6 +742,12 @@ function buildMetabotUpdateInput(input) {
     }
     if (hasOwnField(input, 'ownerGlobalMetaId')) {
         update.ownerGlobalMetaId = (0, botRole_1.normalizeOptionalGlobalMetaId)(input.ownerGlobalMetaId);
+    }
+    if (hasOwnField(input, 'isAvailable')) {
+        if (typeof input.isAvailable !== 'boolean') {
+            throw new Error('isAvailable must be a boolean.');
+        }
+        update.isAvailable = input.isAvailable;
     }
     return update;
 }
@@ -1446,6 +1456,19 @@ function metaAppPreviewAssetErrorCode(error) {
     ].includes(code)
         ? code
         : 'metaapp_preview_failed';
+}
+/**
+ * Mirror of the DSH `slugifyTitle` (dsh-plugin/src/browser-protocol.ts) so a
+ * forked MetaApp lands in the same `<slug>-<pin8>-<timestamp>` workspace
+ * directory shape whichever surface forks it.
+ */
+function slugifyMetaAppForkTitle(title) {
+    const slug = title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40);
+    return slug || 'metaapp';
 }
 function summarizeService(record) {
     const chainPinIds = [...new Set([
@@ -10291,7 +10314,37 @@ function createDefaultMetabotDaemonHandlers(input) {
     const metaAppPreviewSessions = (0, previewSessions_1.createMetaAppPreviewSessionRegistry)({
         resolveMetafileContentBaseUrl: async () => (await infrastructureConfigStore.read()).metafileContentBaseUrl,
     });
+    // One daemon-wide guard: 60 s idempotency window + per-app write locks
+    // shared by every metaapp publish/update/delete path (payload and project).
+    const metaAppWriteGuard = (0, writeGuard_1.createMetaAppWriteGuard)();
+    // Op-keyed publish progress hub: publish/update handlers report stages
+    // (archive → upload → write → done|error) that /api/metaapp/events streams.
+    const metaAppStageHub = (0, stageEvents_1.createMetaAppStageHub)();
     let daemonHandlers = null;
+    function emitMetaAppOpTerminal(opId, result) {
+        if (!opId)
+            return;
+        if (result.state === 'success') {
+            const data = result.data && typeof result.data === 'object' ? result.data : {};
+            const pinId = normalizeText(data.pinId);
+            const firstPinId = normalizeText(data.firstPinId);
+            metaAppStageHub.publish(opId, {
+                stage: 'done',
+                ...(pinId ? { pinId } : {}),
+                ...(firstPinId ? { firstPinId } : {}),
+            });
+            return;
+        }
+        if (result.state === 'failed') {
+            metaAppStageHub.publish(opId, {
+                stage: 'error',
+                code: normalizeText(result.code),
+                message: normalizeText(result.message),
+            });
+        }
+        // awaiting_confirmation / manual_action_required: no chain write ran, so
+        // there is no terminal stage to report.
+    }
     function safeBrowserBridgeErrorMessage(error, fallback) {
         const message = error instanceof Error ? error.message : normalizeText(error);
         if (!message)
@@ -10583,7 +10636,63 @@ function createDefaultMetabotDaemonHandlers(input) {
     async function readMetaAppRecordForUpdate(actorHomeDir, targetPinId) {
         const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actorHomeDir);
         const localRecords = await cache.listMerged().catch(() => []);
-        return localRecords.find((record) => record.pinId === targetPinId) ?? null;
+        const local = localRecords.find((record) => record.pinId === targetPinId || record.firstPinId === targetPinId);
+        if (local)
+            return local;
+        // Chain fallback: a fresh machine has no local cache, so update-project
+        // would silently drop the previous title/icon/tags. The MAN owner list
+        // folds create+modify pins into the latest record per firstPinId group.
+        const state = await (0, runtimeStateStore_1.createRuntimeStateStore)(actorHomeDir).readState().catch(() => null);
+        const mvcAddress = normalizeText(state?.identity?.addresses?.mvc) || normalizeText(state?.identity?.mvcAddress);
+        if (!mvcAddress)
+            return null;
+        let cursor = '';
+        for (let page = 0; page < 3; page += 1) {
+            const result = await metaAppManClient.listByAddress({ address: mvcAddress, cursor, size: 100 }).catch(() => null);
+            if (!result || typeof result !== 'object')
+                return null;
+            const records = Array.isArray(result.records)
+                ? result.records
+                : [];
+            const match = records.find((record) => record.pinId === targetPinId || record.firstPinId === targetPinId);
+            if (match)
+                return galleryRecordFromOwnerListRecord(match);
+            cursor = normalizeText(result.nextCursor);
+            if (!cursor)
+                return null;
+        }
+        return null;
+    }
+    function galleryRecordFromOwnerListRecord(record) {
+        return {
+            pinId: record.pinId,
+            firstPinId: record.firstPinId || record.pinId,
+            operation: record.operation === 'modify' || record.operation === 'revoke' ? record.operation : 'create',
+            title: record.title,
+            appName: record.appName,
+            prompt: record.prompt,
+            icon: record.icon,
+            coverImg: record.coverImg,
+            introImgs: record.introImgs,
+            intro: record.intro,
+            version: record.version || '1.0.0',
+            runtime: record.runtime || 'browser',
+            indexFile: record.indexFile || 'index.html',
+            code: record.code ?? '',
+            content: record.content ?? '',
+            contentType: record.contentType || 'application/zip',
+            codeType: record.codeType || 'application/zip',
+            tags: Array.isArray(record.tags) ? record.tags : [],
+            ownerGlobalMetaId: '',
+            ownerAddress: record.ownerAddress,
+            network: 'mvc',
+            metawebUrl: record.metawebUrl,
+            runUrl: record.runUrl,
+            updatedAt: record.timestamp ?? Date.now(),
+            source: 'indexer',
+            disabled: record.disabled,
+            raw: record.raw,
+        };
     }
     async function upsertMetaAppLocalRevoke(input) {
         if (!input.result.ok || input.result.state !== 'success' || !input.result.data || typeof input.result.data !== 'object') {
@@ -11099,6 +11208,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         },
         metaapp: {
+            stageEvents: ({ op, listener }) => metaAppStageHub.subscribe(op, listener),
             preview: async (rawInput) => {
                 try {
                     const result = await (0, publish_3.previewMetaAppProject)({
@@ -11148,6 +11258,14 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before uploading files.');
                 }
                 const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actor.homeDir);
+                const opId = normalizeText(rawInput.opId);
+                const onStage = opId
+                    ? (stage, detail) => metaAppStageHub.publish(opId, { stage, ...detail })
+                    : undefined;
+                const finish = (result) => {
+                    emitMetaAppOpTerminal(opId, result);
+                    return result;
+                };
                 try {
                     const result = await (0, publish_3.publishMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
@@ -11189,7 +11307,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                             };
                         },
                         readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+                        actorKey: actor.homeDir,
+                        writeGuard: metaAppWriteGuard,
                         now: Date.now,
+                        ...(onStage ? { onStage } : {}),
                     });
                     if (result.ok && result.data && typeof result.data === 'object') {
                         const data = result.data;
@@ -11198,17 +11319,17 @@ function createDefaultMetabotDaemonHandlers(input) {
                             : (typeof data.pinId === 'string' ? data.pinId.trim() : '');
                         if (pinId) {
                             const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
-                            return (0, commandResult_1.commandSuccess)({
+                            return finish((0, commandResult_1.commandSuccess)({
                                 ...data,
                                 localUiUrl,
-                            });
+                            }));
                         }
                     }
-                    return result;
+                    return finish(result);
                 }
                 catch (error) {
                     const data = readLargeFileUploadFailureData(error);
-                    return (0, commandResult_1.commandFailed)('metaapp_publish_failed', error instanceof Error ? error.message : String(error), data ? { data } : undefined);
+                    return finish((0, commandResult_1.commandFailed)('metaapp_publish_failed', error instanceof Error ? error.message : String(error), data ? { data } : undefined));
                 }
             },
             updateProject: async (rawInput) => {
@@ -11221,6 +11342,14 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before uploading files.');
                 }
                 const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actor.homeDir);
+                const opId = normalizeText(rawInput.opId);
+                const onStage = opId
+                    ? (stage, detail) => metaAppStageHub.publish(opId, { stage, ...detail })
+                    : undefined;
+                const finish = (result) => {
+                    emitMetaAppOpTerminal(opId, result);
+                    return result;
+                };
                 try {
                     const result = await (0, publish_3.updateMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
@@ -11263,7 +11392,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                             };
                         },
                         readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+                        actorKey: actor.homeDir,
+                        writeGuard: metaAppWriteGuard,
                         now: Date.now,
+                        ...(onStage ? { onStage } : {}),
                     });
                     if (result.ok && result.data && typeof result.data === 'object') {
                         const data = result.data;
@@ -11272,17 +11404,17 @@ function createDefaultMetabotDaemonHandlers(input) {
                             : (typeof data.pinId === 'string' ? data.pinId.trim() : '');
                         if (pinId) {
                             const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
-                            return (0, commandResult_1.commandSuccess)({
+                            return finish((0, commandResult_1.commandSuccess)({
                                 ...data,
                                 localUiUrl,
-                            });
+                            }));
                         }
                     }
-                    return result;
+                    return finish(result);
                 }
                 catch (error) {
                     const data = readLargeFileUploadFailureData(error);
-                    return (0, commandResult_1.commandFailed)('metaapp_update_failed', error instanceof Error ? error.message : String(error), data ? { data } : undefined);
+                    return finish((0, commandResult_1.commandFailed)('metaapp_update_failed', error instanceof Error ? error.message : String(error), data ? { data } : undefined));
                 }
             },
             publish: async (rawInput) => {
@@ -11290,12 +11422,19 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if ('failure' in actor) {
                     return actor.failure;
                 }
+                const opId = normalizeText(rawInput.opId);
+                const finish = (result) => {
+                    emitMetaAppOpTerminal(opId, result);
+                    return result;
+                };
                 try {
-                    const result = await (0, ownerService_1.publishMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput);
-                    return addMetaAppOwnerLocalUiUrl(result);
+                    if (opId)
+                        metaAppStageHub.publish(opId, { stage: 'write' });
+                    const result = await (0, ownerService_1.publishMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput, metaAppWriteGuard);
+                    return finish(addMetaAppOwnerLocalUiUrl(result));
                 }
                 catch (error) {
-                    return (0, commandResult_1.commandFailed)('metaapp_publish_failed', error instanceof Error ? error.message : String(error));
+                    return finish((0, commandResult_1.commandFailed)('metaapp_publish_failed', error instanceof Error ? error.message : String(error)));
                 }
             },
             update: async (rawInput) => {
@@ -11303,12 +11442,19 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if ('failure' in actor) {
                     return actor.failure;
                 }
+                const opId = normalizeText(rawInput.opId);
+                const finish = (result) => {
+                    emitMetaAppOpTerminal(opId, result);
+                    return result;
+                };
                 try {
-                    const result = await (0, ownerService_1.updateMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput);
-                    return addMetaAppOwnerLocalUiUrl(result);
+                    if (opId)
+                        metaAppStageHub.publish(opId, { stage: 'write' });
+                    const result = await (0, ownerService_1.updateMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput, metaAppWriteGuard);
+                    return finish(addMetaAppOwnerLocalUiUrl(result));
                 }
                 catch (error) {
-                    return (0, commandResult_1.commandFailed)('metaapp_update_failed', error instanceof Error ? error.message : String(error));
+                    return finish((0, commandResult_1.commandFailed)('metaapp_update_failed', error instanceof Error ? error.message : String(error)));
                 }
             },
             delete: async (rawInput) => {
@@ -11317,7 +11463,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return actor.failure;
                 }
                 try {
-                    const result = await (0, ownerService_1.deleteMetaAppPin)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput);
+                    const result = await (0, ownerService_1.deleteMetaAppPin)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput, metaAppWriteGuard);
                     await upsertMetaAppLocalRevoke({ actor, rawInput, result }).catch(() => undefined);
                     return result;
                 }
@@ -11391,6 +11537,33 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 catch (error) {
                     return (0, commandResult_1.commandFailed)('metaapp_comment_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            fork: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const pinId = (0, pinId_1.normalizeMetaAppPinIdOrUri)(rawInput.pinId);
+                if (!pinId) {
+                    return (0, commandResult_1.commandFailed)('invalid_argument', 'pinId must be a MetaApp pin id or a metaapp://<pinId> URI.');
+                }
+                // Same out-dir convention as the DSH fork route and the
+                // bot_browser_fork_current_app native tool: the materializer creates
+                // the directory and writes the .metaapp-fork.json provenance marker.
+                const title = normalizeText(rawInput.title) || pinId;
+                const outDir = node_path_1.default.join(actor.homeDir, 'workspace', 'metaapps', `${slugifyMetaAppForkTitle(title)}-${pinId.slice(0, 8)}-${Date.now()}`);
+                try {
+                    const infrastructure = await infrastructureConfigStore.read();
+                    const materialize = input.metaAppSourceMaterialize ?? metaAppSource_1.materializeMetaAppSource;
+                    return await materialize({ pinId, outDir }, {
+                        homeDir: actor.homeDir,
+                        manApiBaseUrl: infrastructure.manApiBaseUrl,
+                        metafileContentBaseUrl: infrastructure.metafileContentBaseUrl,
+                    });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('metaapp_fork_failed', error instanceof Error ? error.message : String(error));
                 }
             },
             list: async (rawInput) => {

@@ -39,6 +39,7 @@ const metaid_1 = require("./commands/metaid");
 const metaweb_1 = require("./commands/metaweb");
 const simplenote_1 = require("./commands/simplenote");
 const qanda_1 = require("./commands/qanda");
+const media_1 = require("./commands/media");
 const helpers_1 = require("./commands/helpers");
 const commandHelp_1 = require("./commandHelp");
 const types_1 = require("./types");
@@ -93,6 +94,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'traffic':
                     result = await (0, traffic_1.runTrafficCommand)(rest, context);
+                    break;
+                case 'media':
+                    result = await (0, media_1.runMediaCommand)(rest, context);
                     break;
                 case 'daemon':
                     result = await (0, daemon_1.runDaemonCommand)(rest, context);

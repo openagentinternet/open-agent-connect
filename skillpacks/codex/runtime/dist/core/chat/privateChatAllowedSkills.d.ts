@@ -22,4 +22,11 @@ export declare function createPrivateChatAllowedSkillsResolver(input: {
     bindingStore: LlmBindingStore;
     env?: NodeJS.ProcessEnv;
     logWarning?: (scope: string, message: string) => void;
+    /**
+     * While a host executor is connected, allowed skills resolve against the
+     * DSH platform scope (~/.dsh/skills + ~/.agents/skills) — the surface the
+     * reply turn actually executes on in host agent mode — instead of the
+     * primary local runtime's platform. Defaults to the active bridge.
+     */
+    hostExecutorConnected?: () => boolean;
 }): PrivateChatAllowedSkillsResolver;

@@ -5,6 +5,7 @@ exports.createHostLlmExecutorBridge = createHostLlmExecutorBridge;
 exports.getActiveHostLlmExecutorBridge = getActiveHostLlmExecutorBridge;
 exports.setActiveHostLlmExecutorBridge = setActiveHostLlmExecutorBridge;
 exports.createDshPairHostLlmGenerate = createDshPairHostLlmGenerate;
+exports.createHostFirstCompletion = createHostFirstCompletion;
 /**
  * Host LLM executor bridge.
  *
@@ -57,6 +58,8 @@ function createHostLlmExecutorBridge(options) {
                 system: input.system,
                 prompt: input.prompt,
                 timeoutMs: input.timeoutMs ?? defaultTimeoutMs,
+                ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+                ...(input.cwd ? { cwd: input.cwd } : {}),
             };
             return new Promise((resolve) => {
                 const timer = setTimeout(() => {
@@ -133,7 +136,44 @@ function createDshPairHostLlmGenerate(options) {
                 : {}),
             system: input.systemPrompt,
             prompt: input.prompt,
+            ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+            ...(input.cwd ? { cwd: input.cwd } : {}),
             ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
         });
+    };
+}
+/**
+ * Host-first completion for daemon-side passive turns (group-task chair
+ * turns, study drains, memory deep consolidation, headless scheduled tasks):
+ * one plain completion through the connected host executor with the Bot's DSH
+ * pair. Returns the model text, or null when the host path is unusable (no
+ * executor connected, no pair, or a failed generation) so the caller falls
+ * through to its local-runtime chain unchanged.
+ */
+function createHostFirstCompletion(options) {
+    const generate = createDshPairHostLlmGenerate({
+        dshLlmPath: options.dshLlmPath,
+        ...(options.resolveBridge ? { resolveBridge: options.resolveBridge } : {}),
+        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    });
+    return async (request) => {
+        try {
+            const outcome = await generate({
+                ...(request.botSlug ? { metaBotSlug: request.botSlug } : {}),
+                prompt: request.user,
+                systemPrompt: request.system,
+                ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
+            });
+            if (outcome && outcome.ok && typeof outcome.output === 'string' && outcome.output.trim()) {
+                return outcome.output;
+            }
+            if (outcome && !outcome.ok) {
+                options.logWarning?.('[host llm completion]', outcome.error ?? 'Host LLM generation failed.');
+            }
+        }
+        catch (error) {
+            options.logWarning?.('[host llm completion]', error instanceof Error ? error.message : String(error));
+        }
+        return null;
     };
 }

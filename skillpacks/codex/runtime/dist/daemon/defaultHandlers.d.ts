@@ -14,6 +14,7 @@ import type { Signer } from '../core/signing/signer';
 import { uploadLargeFileToChain, type MvcSponsorV2DirectUploadClient, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
 import { type TrafficAccountService } from '../core/traffic/trafficAccountService';
 import { createMetaAppManOwnerClient } from '../core/metaapp/manOwnerList';
+import { materializeMetaAppSource } from '../core/metaapp/metaAppSource';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { type A2AConversationMessagePersister } from '../core/a2a/conversationPersistence';
@@ -120,6 +121,8 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     discoverLlmRuntimes?: typeof discoverLlmRuntimes;
     conversationGuidanceReplyRunner?: ChatReplyRunner;
     metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
+    /** Test seam for the metaapp fork handler; production uses the core materializer. */
+    metaAppSourceMaterialize?: typeof materializeMetaAppSource;
     conversationProfileFetch?: typeof fetch;
     env?: NodeJS.ProcessEnv;
 }): MetabotDaemonHttpHandlers & {

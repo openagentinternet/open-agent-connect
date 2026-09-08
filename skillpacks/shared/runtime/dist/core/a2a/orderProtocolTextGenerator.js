@@ -8,6 +8,7 @@ exports.createLlmOrderProtocolTextGenerator = createLlmOrderProtocolTextGenerato
 exports.compactProtocolTextForFallback = compactProtocolTextForFallback;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const hostLlmExecutorBridge_1 = require("../llm/hostLlmExecutorBridge");
 const llmBindingStore_1 = require("../llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../llm/llmRuntimeResolver");
 const llmRuntimeStore_1 = require("../llm/llmRuntimeStore");
@@ -182,6 +183,25 @@ function createLlmOrderProtocolTextGenerator(options) {
     const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 45_000));
     const pollIntervalMs = Math.max(1, Math.floor(options.pollIntervalMs ?? 500));
     async function run(input) {
+        // Unified passive-LLM priority: the Bot's DSH pair (through a connected
+        // host executor) takes the first attempt; the local chain below follows.
+        const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+            dshLlmPath: input.paths.dshLlmPath,
+            timeoutMs,
+        })({
+            botSlug: node_path_1.default.basename(input.paths.profileRoot),
+            system: buildSystemPrompt(input.persona),
+            user: input.prompt,
+        });
+        if (hostText !== null) {
+            const generated = normalizeGeneratedOrderProtocolText(hostText, {
+                maxChars: input.maxChars,
+                allowUrls: input.allowUrls,
+                allowTables: input.allowTables,
+            });
+            if (generated)
+                return generated;
+        }
         const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
             runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.paths),
             bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(input.paths),

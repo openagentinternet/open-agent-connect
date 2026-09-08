@@ -2,6 +2,7 @@ export type MetabotBotType = 'twin' | 'worker';
 export interface BotRoleInfo {
     botType?: MetabotBotType | null;
     ownerGlobalMetaId?: string | null;
+    isAvailable?: boolean;
 }
 export declare function normalizeBotType(value: unknown): MetabotBotType | null;
 export declare function normalizeOptionalGlobalMetaId(value: unknown): string | null;

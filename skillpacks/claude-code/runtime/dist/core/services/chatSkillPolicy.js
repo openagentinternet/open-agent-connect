@@ -8,6 +8,7 @@ exports.validateAllowChatSkills = validateAllowChatSkills;
 exports.resolveAllowChatSkillsForRuntime = resolveAllowChatSkillsForRuntime;
 exports.writeChatSkillResolution = writeChatSkillResolution;
 exports.readChatSkillResolution = readChatSkillResolution;
+exports.resolveAllowChatSkillsForPlatform = resolveAllowChatSkillsForPlatform;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const platformSkillCatalog_1 = require("./platformSkillCatalog");
@@ -200,4 +201,43 @@ async function readChatSkillResolution(filePath) {
     catch {
         return null;
     }
+}
+/**
+ * Platform-scoped variant of {@link resolveAllowChatSkillsForRuntime}: maps
+ * the Bot's allowed chat skills against one platform's skill roots (plus the
+ * ~/.agents/skills shared standard) instead of the primary runtime's
+ * platform. The DSH host uses this while a host executor is connected, so
+ * reply turns resolve exactly the skill surface a DSH session executes.
+ */
+async function resolveAllowChatSkillsForPlatform(input) {
+    let allowChatSkills;
+    try {
+        allowChatSkills = normalizeAllowChatSkills(input.allowChatSkills);
+    }
+    catch (error) {
+        return createEmptySuccess({
+            warning: error instanceof Error
+                ? `Ignoring invalid allowChatSkills: ${error.message}`
+                : 'Ignoring invalid allowChatSkills.',
+        });
+    }
+    if (allowChatSkills.length === 0) {
+        return createEmptySuccess();
+    }
+    const catalog = (0, platformSkillCatalog_1.createPlatformSkillCatalog)({
+        runtimeStore: input.runtimeStore,
+        bindingStore: input.bindingStore,
+        systemHomeDir: input.systemHomeDir,
+        projectRoot: input.projectRoot,
+        env: input.env,
+    });
+    const catalogResult = await catalog.listSkillsForPlatform({ platformId: input.platformId });
+    const resolved = mapResolvedSkills({
+        allowChatSkills,
+        catalogSkills: catalogResult.skills,
+    });
+    return createEmptySuccess({
+        ...resolved,
+        rootDiagnostics: catalogResult.rootDiagnostics,
+    });
 }

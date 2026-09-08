@@ -35,10 +35,11 @@ function normalizeBotRoleInfo(value) {
     return {
         botType: normalizeBotType(record.botType),
         ownerGlobalMetaId: normalizeOptionalGlobalMetaId(record.ownerGlobalMetaId),
+        isAvailable: record.isAvailable !== false,
     };
 }
 function hasAnyBotRoleValue(info) {
-    return Boolean(info.botType || info.ownerGlobalMetaId);
+    return Boolean(info.botType || info.ownerGlobalMetaId || info.isAvailable === false);
 }
 /** Field patch view: only keys present on the input are patched (null clears). */
 function botRolePatchFromInput(input) {
@@ -47,10 +48,12 @@ function botRolePatchFromInput(input) {
         patch.botType = input.botType;
     if (input.ownerGlobalMetaId !== undefined)
         patch.ownerGlobalMetaId = input.ownerGlobalMetaId;
+    if (input.isAvailable !== undefined)
+        patch.isAvailable = input.isAvailable;
     return patch;
 }
 function hasBotRolePatch(patch) {
-    return patch.botType !== undefined || patch.ownerGlobalMetaId !== undefined;
+    return patch.botType !== undefined || patch.ownerGlobalMetaId !== undefined || patch.isAvailable !== undefined;
 }
 function mergeBotRoleInfo(current, patch) {
     return {
@@ -58,6 +61,7 @@ function mergeBotRoleInfo(current, patch) {
         ownerGlobalMetaId: patch.ownerGlobalMetaId !== undefined
             ? patch.ownerGlobalMetaId
             : (current.ownerGlobalMetaId ?? null),
+        isAvailable: patch.isAvailable !== undefined ? patch.isAvailable : (current.isAvailable !== false),
     };
 }
 async function readBotRoleInfo(filePath) {
@@ -66,7 +70,7 @@ async function readBotRoleInfo(filePath) {
     }
     catch (error) {
         if (error.code === 'ENOENT') {
-            return { botType: null, ownerGlobalMetaId: null };
+            return { botType: null, ownerGlobalMetaId: null, isAvailable: true };
         }
         throw error;
     }
@@ -78,7 +82,7 @@ function readBotRoleInfoSync(filePath) {
     }
     catch (error) {
         if (error.code === 'ENOENT') {
-            return { botType: null, ownerGlobalMetaId: null };
+            return { botType: null, ownerGlobalMetaId: null, isAvailable: true };
         }
         throw error;
     }

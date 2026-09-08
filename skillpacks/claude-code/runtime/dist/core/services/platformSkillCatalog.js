@@ -176,6 +176,37 @@ async function scanRoot(input) {
 function createPlatformSkillCatalog(options) {
     const env = options.env ?? process.env;
     return {
+        async listSkillsForPlatform(input) {
+            const platform = (0, platformRegistry_1.getPlatformDefinition)(input.platformId);
+            const roots = [
+                ...(0, platformRegistry_1.getPlatformSkillRoots)(platform.id),
+                ...(input.includeSharedAgents !== false ? [(0, platformRegistry_1.getSharedAgentsSkillRoot)()] : []),
+            ];
+            const rootResults = await Promise.all(roots.map((root) => scanRoot({
+                platform,
+                root,
+                absolutePath: resolveCatalogRoot({
+                    root,
+                    systemHomeDir: options.systemHomeDir,
+                    projectRoot: options.projectRoot,
+                    env,
+                }),
+            })));
+            const byName = new Map();
+            for (const result of rootResults) {
+                for (const skill of result.skills) {
+                    if (!byName.has(skill.skillName)) {
+                        byName.set(skill.skillName, skill);
+                    }
+                }
+            }
+            return {
+                ok: true,
+                platformId: platform.id,
+                skills: [...byName.values()],
+                rootDiagnostics: rootResults.map((result) => result.diagnostic),
+            };
+        },
         async listPrimaryRuntimeSkills(input) {
             const metaBotSlug = normalizeText(input.metaBotSlug);
             const allowFallbackRuntime = input.allowFallbackRuntime !== false;

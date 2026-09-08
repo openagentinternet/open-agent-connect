@@ -323,6 +323,7 @@ async function buildMetabotProfileFull(profile) {
         // Unset reads as 'worker' (IDBots normalizes any non-twin bot to worker).
         botType: botRole.botType ?? 'worker',
         ownerGlobalMetaId: botRole.ownerGlobalMetaId ?? null,
+        isAvailable: botRole.isAvailable !== false,
     };
 }
 async function listMetabotProfiles(systemHomeDir) {

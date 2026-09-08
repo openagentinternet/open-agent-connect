@@ -147,6 +147,20 @@ async function runMemoryCommand(args, context) {
         }
         return handler({ from, payload });
     }
+    if (subcommand === 'transcript' && nested === 'read') {
+        const handler = requireMemoryHandler(context, 'transcriptRead');
+        if (isFailure(handler))
+            return handler;
+        const session = (0, helpers_1.readFlagValue)(args, '--session');
+        if (!session) {
+            return (0, helpers_1.commandMissingFlag)('--session');
+        }
+        const limit = readOptionalLimit(args);
+        if (limit === 'invalid') {
+            return (0, commandResult_1.commandFailed)('invalid_flag', '--limit must be a positive integer.');
+        }
+        return handler({ from, session, anyBot: args.includes('--any-bot'), ...(limit !== undefined ? { limit } : {}) });
+    }
     if (subcommand === 'chats') {
         const handler = requireMemoryHandler(context, 'chats');
         if (isFailure(handler))

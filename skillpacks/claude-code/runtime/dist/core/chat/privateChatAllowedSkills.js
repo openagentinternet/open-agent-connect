@@ -4,6 +4,7 @@ exports.emptyPrivateChatAllowedSkillScope = emptyPrivateChatAllowedSkillScope;
 exports.createPrivateChatAllowedSkillsResolver = createPrivateChatAllowedSkillsResolver;
 const metabotProfileManager_1 = require("../bot/metabotProfileManager");
 const chatSkillPolicy_1 = require("../services/chatSkillPolicy");
+const hostLlmExecutorBridge_1 = require("../llm/hostLlmExecutorBridge");
 function emptyPrivateChatAllowedSkillScope() {
     return {
         skills: [],
@@ -14,6 +15,8 @@ function emptyPrivateChatAllowedSkillScope() {
     };
 }
 function createPrivateChatAllowedSkillsResolver(input) {
+    const hostExecutorConnected = input.hostExecutorConnected
+        ?? (() => ((0, hostLlmExecutorBridge_1.getActiveHostLlmExecutorBridge)()?.connectedExecutors() ?? 0) > 0);
     // Persist the last resolution outcome so operators can see configured
     // skills that no longer resolve. Strictly best-effort: a failed write must
     // never affect the chat turn.
@@ -30,7 +33,7 @@ function createPrivateChatAllowedSkillsResolver(input) {
             await persistResolution(emptyScope);
             return emptyScope;
         }
-        const result = await (0, chatSkillPolicy_1.resolveAllowChatSkillsForRuntime)({
+        const policyInput = {
             metaBotSlug: input.metaBotSlug,
             allowChatSkills: profile.allowChatSkills,
             runtimeStore: input.runtimeStore,
@@ -38,7 +41,10 @@ function createPrivateChatAllowedSkillsResolver(input) {
             systemHomeDir: input.paths.systemHomeDir,
             projectRoot: input.paths.profileRoot,
             env: input.env,
-        });
+        };
+        const result = hostExecutorConnected()
+            ? await (0, chatSkillPolicy_1.resolveAllowChatSkillsForPlatform)({ ...policyInput, platformId: 'dsh' })
+            : await (0, chatSkillPolicy_1.resolveAllowChatSkillsForRuntime)(policyInput);
         if (result.warning) {
             input.logWarning?.('[private chat allowed skills]', result.warning);
         }

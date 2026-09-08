@@ -26,5 +26,11 @@ export declare function createChatSkillWaitNoticeGenerator(options?: {
     metaBotSlug?: string;
     timeoutMs?: number;
     pollIntervalMs?: number;
+    /**
+     * DSH LLM pair path: while a host executor is connected, the notice is
+     * generated through the Bot's DSH pair first (unified passive-LLM
+     * priority); the local chain below follows.
+     */
+    dshLlmPath?: string;
 }): ChatSkillWaitNoticeGenerator | null;
 export {};

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_CHAT_SKILL_WAIT_NOTICE = void 0;
 exports.normalizeChatSkillWaitNoticeText = normalizeChatSkillWaitNoticeText;
 exports.createChatSkillWaitNoticeGenerator = createChatSkillWaitNoticeGenerator;
+const hostLlmExecutorBridge_1 = require("../llm/hostLlmExecutorBridge");
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
 const MAX_NOTICE_CHARS = 180;
@@ -78,11 +79,24 @@ function createChatSkillWaitNoticeGenerator(options) {
     if (!runtimeResolver || !llmExecutor) {
         return null;
     }
+    const hostComplete = options?.dshLlmPath
+        ? (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({ dshLlmPath: options.dshLlmPath, timeoutMs: options?.timeoutMs })
+        : null;
     const metaBotSlug = options?.metaBotSlug;
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     return async (input) => {
         try {
+            if (hostComplete) {
+                const hostText = await hostComplete({
+                    ...(metaBotSlug ? { botSlug: metaBotSlug } : {}),
+                    system: buildWaitNoticeSystemPrompt(input),
+                    user: buildWaitNoticePrompt(input),
+                });
+                if (hostText !== null) {
+                    return normalizeChatSkillWaitNoticeText(hostText) || exports.DEFAULT_CHAT_SKILL_WAIT_NOTICE;
+                }
+            }
             const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
             if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
                 return exports.DEFAULT_CHAT_SKILL_WAIT_NOTICE;

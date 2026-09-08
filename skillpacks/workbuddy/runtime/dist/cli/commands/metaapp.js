@@ -202,11 +202,13 @@ async function runMetaAppCommand(args, context) {
             return commandNotImplemented('publish');
         }
         const from = (0, helpers_1.readFromFlag)(args);
+        const opId = readOptionalFlag(args, '--op-id');
         const payload = await (0, helpers_1.readJsonFile)(context, payloadFile.value);
         return handler({
             ...payload,
             ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
             ...(from ? { from } : {}),
+            ...(opId ? { opId } : {}),
             confirm: true,
         });
     }
@@ -234,12 +236,14 @@ async function runMetaAppCommand(args, context) {
             return commandNotImplemented('update');
         }
         const from = (0, helpers_1.readFromFlag)(args);
+        const opId = readOptionalFlag(args, '--op-id');
         const payload = await (0, helpers_1.readJsonFile)(context, payloadFile.value);
         return handler({
             ...payload,
             targetPinId: targetPinId.value,
             ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
             ...(from ? { from } : {}),
+            ...(opId ? { opId } : {}),
             confirm: true,
         });
     }
@@ -282,11 +286,13 @@ async function runMetaAppCommand(args, context) {
         }
         const from = (0, helpers_1.readFromFlag)(args);
         const manifestFile = readOptionalFlag(args, '--manifest-file');
+        const opId = readOptionalFlag(args, '--op-id');
         return handler({
             projectDir: projectDir.value,
             ...(manifestFile ? { manifestFile } : {}),
             ...(from ? { from } : {}),
             ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+            ...(opId ? { opId } : {}),
             confirm: (0, helpers_1.hasFlag)(args, '--confirm'),
         });
     }
@@ -309,12 +315,14 @@ async function runMetaAppCommand(args, context) {
         }
         const from = (0, helpers_1.readFromFlag)(args);
         const manifestFile = readOptionalFlag(args, '--manifest-file');
+        const opId = readOptionalFlag(args, '--op-id');
         return handler({
             projectDir: projectDir.value,
             targetPinId: targetPinId.value,
             ...(manifestFile ? { manifestFile } : {}),
             ...(from ? { from } : {}),
             ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+            ...(opId ? { opId } : {}),
             confirm: (0, helpers_1.hasFlag)(args, '--confirm'),
         });
     }

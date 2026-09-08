@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RUNTIME_PLATFORM_IDS = exports.SUPPORTED_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS = void 0;
+exports.getSharedAgentsSkillRoot = getSharedAgentsSkillRoot;
 exports.getPlatformDefinition = getPlatformDefinition;
 exports.getRuntimePlatformDefinition = getRuntimePlatformDefinition;
 exports.isPlatformId = isPlatformId;
@@ -28,6 +29,11 @@ const sharedAgentsSkillRoot = {
     autoBind: 'always',
     sharedStandard: true,
 };
+/** The ~/.agents/skills shared standard root (DSH sessions load it natively). */
+function getSharedAgentsSkillRoot() {
+    const { platformId: _platformId, ...root } = sharedAgentsSkillRoot;
+    return { ...root };
+}
 const metabotSharedSkillRoot = {
     platformId: 'shared-agents',
     id: 'metabot-shared',

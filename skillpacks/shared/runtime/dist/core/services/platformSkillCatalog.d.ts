@@ -41,11 +41,27 @@ export interface PrimaryRuntimeSkillCatalogFailure {
     rootDiagnostics: PlatformSkillRootDiagnostic[];
 }
 export type PrimaryRuntimeSkillCatalogResult = PrimaryRuntimeSkillCatalogSuccess | PrimaryRuntimeSkillCatalogFailure;
+export interface PlatformScopedSkillCatalogSuccess {
+    ok: true;
+    platformId: PlatformId;
+    skills: PlatformSkillCatalogEntry[];
+    rootDiagnostics: PlatformSkillRootDiagnostic[];
+}
 export interface PlatformSkillCatalog {
     listPrimaryRuntimeSkills(input: {
         metaBotSlug: string;
         allowFallbackRuntime?: boolean;
     }): Promise<PrimaryRuntimeSkillCatalogResult>;
+    /**
+     * Platform-scoped listing (no runtime involved): the given platform's skill
+     * roots plus, by default, the ~/.agents/skills shared standard. The DSH
+     * host uses this so the Bot editor's chat-skills picker offers exactly the
+     * skill surface a DSH session can execute.
+     */
+    listSkillsForPlatform(input: {
+        platformId: PlatformId;
+        includeSharedAgents?: boolean;
+    }): Promise<PlatformScopedSkillCatalogSuccess>;
 }
 export interface CreatePlatformSkillCatalogOptions {
     runtimeStore: LlmRuntimeStore;

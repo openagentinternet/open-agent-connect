@@ -1697,6 +1697,7 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
                 runtimeResolver: profileRuntimeResolver,
                 llmExecutor: input.llmExecutor,
                 metaBotSlug,
+                dshLlmPath: profilePaths.dshLlmPath,
             }),
         }, profileAutoReplyConfig);
         orchestrators.set(cacheKey, orchestrator);
@@ -3353,6 +3354,46 @@ function createDefaultCliDependencies(context) {
                 });
                 return (0, commandResult_1.commandSuccess)({ appended: true });
             },
+            transcriptRead: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const actorPaths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                let found = await (0, transcriptStore_1.readSessionMessages)(actorPaths, input.session);
+                let botSlug = node_path_1.default.basename(actorPaths.profileRoot);
+                if (!found && input.anyBot) {
+                    // The Twin reads across every local Bot's mirrored sessions (the
+                    // IDBots global-store contract); first hit wins, scan order is
+                    // irrelevant because session ids are unique.
+                    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+                    const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
+                    for (const profile of profiles) {
+                        const candidate = await (0, transcriptStore_1.readSessionMessages)((0, paths_1.resolveMetabotPaths)(profile.homeDir), input.session);
+                        if (candidate) {
+                            found = candidate;
+                            botSlug = profile.slug;
+                            break;
+                        }
+                    }
+                }
+                if (!found) {
+                    return (0, commandResult_1.commandFailed)('session_not_found', `No session found for id: ${input.session.trim()}`);
+                }
+                const turns = input.limit !== undefined ? found.turns.slice(-input.limit) : found.turns;
+                return (0, commandResult_1.commandSuccess)({
+                    session: {
+                        sessionId: found.sessionId,
+                        botSlug,
+                        channel: found.channel,
+                        peerGlobalMetaId: found.peerGlobalMetaId,
+                        peerName: found.peerName,
+                        messageCount: found.messageCount,
+                        firstMessageAt: found.firstMessageAt,
+                        lastMessageAt: found.lastMessageAt,
+                    },
+                    turns,
+                });
+            },
             chats: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
@@ -3593,6 +3634,13 @@ function createDefaultCliDependencies(context) {
                 // No healthy runtime binding = skip (null), never fail; a started run
                 // that errors mid-call lands in the run's error list via a throw.
                 const complete = async (request) => {
+                    // Unified passive-LLM priority: DSH pair first, then the local chain.
+                    const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                        dshLlmPath: paths.dshLlmPath,
+                        timeoutMs: 180_000,
+                    })({ botSlug: slug, system: request.system, user: request.user });
+                    if (hostText !== null)
+                        return hostText;
                     const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
                     if (!resolved.runtime)
                         return null;
@@ -3821,6 +3869,21 @@ function createDefaultCliDependencies(context) {
                     backends: (0, executor_1.createRegistryBackendFactories)(),
                 });
                 const complete = async (request) => {
+                    // Unified passive-LLM priority: the Bot's DSH pair first (manual
+                    // `dream run` while DSH is open), then the local chain below.
+                    const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                        dshLlmPath: paths.dshLlmPath,
+                        timeoutMs: 180_000,
+                    })({
+                        botSlug: slug,
+                        system: request.system,
+                        user: request.user,
+                        ...(Number.isFinite(request.maxOutputTokens) && request.maxOutputTokens > 0
+                            ? { maxTokens: request.maxOutputTokens }
+                            : {}),
+                    });
+                    if (hostText !== null)
+                        return hostText;
                     const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
                     if (!resolved.runtime) {
                         throw new Error('No LLM runtime binding available for this MetaBot. Bind one with "metabot llm" '
@@ -3984,6 +4047,13 @@ function createDefaultCliDependencies(context) {
                     executor: 'cli',
                 }, {
                     runLlm: async (turn) => {
+                        // Unified passive-LLM priority: DSH pair first, then the local chain.
+                        const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                            dshLlmPath: paths.dshLlmPath,
+                            timeoutMs: 30 * 60_000,
+                        })({ botSlug: slug, system: turn.systemPrompt, user: turn.prompt });
+                        if (hostText !== null)
+                            return { ok: true, output: hostText };
                         const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
                             runtimeResolver,
                             llmExecutor: executor,
@@ -4990,6 +5060,7 @@ async function serveCliDaemonProcess(context) {
             runtimeResolver: llmResolver,
             llmExecutor,
             metaBotSlug,
+            dshLlmPath: paths.dshLlmPath,
         }),
     }, sharedAutoReplyConfig);
     const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
@@ -5318,6 +5389,13 @@ async function serveCliDaemonProcess(context) {
         }),
         runLlmTurn: async (turn) => {
             const profilePaths = (0, paths_1.resolveMetabotPaths)(turn.profile.homeDir);
+            // Unified passive-LLM priority: DSH pair first (when a host executor is
+            // connected), then the local-runtime chain below.
+            const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                dshLlmPath: profilePaths.dshLlmPath,
+            })({ botSlug: turn.profile.slug, system: turn.systemPrompt, user: turn.prompt });
+            if (hostText !== null)
+                return hostText;
             const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
                 runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths),
                 bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(profilePaths),
@@ -5408,14 +5486,22 @@ async function serveCliDaemonProcess(context) {
                                 },
                             });
                             const llm = async (history) => {
+                                const historyText = history
+                                    .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
+                                    .join('\n\n---\n\n');
+                                const studySystemPrompt = 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.';
+                                // Unified passive-LLM priority: DSH pair first, then local chain.
+                                const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                                    dshLlmPath: profilePaths.dshLlmPath,
+                                })({ botSlug: slug, system: studySystemPrompt, user: historyText });
+                                if (hostText !== null)
+                                    return hostText;
                                 const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
                                     runtimeResolver,
                                     llmExecutor,
                                     metaBotSlug: slug,
-                                    prompt: history
-                                        .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
-                                        .join('\n\n---\n\n'),
-                                    systemPrompt: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
+                                    prompt: historyText,
+                                    systemPrompt: studySystemPrompt,
                                     timeoutMs: 30 * 60_000,
                                     pollIntervalMs: 5_000,
                                 });
@@ -5689,6 +5775,13 @@ async function serveCliDaemonProcess(context) {
                         },
                     });
                     const runLlm = async (turn) => {
+                        // Unified passive-LLM priority: DSH pair first, then the local chain.
+                        const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                            dshLlmPath: profilePaths.dshLlmPath,
+                            timeoutMs: 30 * 60_000,
+                        })({ botSlug: profile.slug, system: turn.systemPrompt, user: turn.prompt });
+                        if (hostText !== null)
+                            return { ok: true, output: hostText };
                         const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
                             runtimeResolver,
                             llmExecutor,

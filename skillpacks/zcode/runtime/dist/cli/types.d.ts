@@ -310,6 +310,12 @@ export interface CliDependencies {
             from?: string;
             payload: Record<string, unknown>;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        transcriptRead?: (input: {
+            from?: string;
+            session: string;
+            limit?: number;
+            anyBot?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         chats?: (input: {
             from?: string;
             limit?: number;
