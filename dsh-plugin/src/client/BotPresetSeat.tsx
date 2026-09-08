@@ -8,6 +8,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconAgentPresetOutline16, IconChevronDownOutline14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { CopyIconButton } from './CopyIconButton.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import { chipAvatar, chipDescription, slugFromPresetId, type ChipBot, type ChipPresetOption } from '../chip-logic.ts'
@@ -63,6 +64,7 @@ export function BotPresetSeat({
   const chosen = state.options.find((option) => option.id === state.current)
   const label = chosen === undefined ? state.current : optionLabel(chosen, state.botsBySlug, t)
   const ready = state.options.length > 0 && state.current !== ''
+  const shortSessionId = state.sessionId.length > 16 ? `${state.sessionId.slice(0, 8)}…${state.sessionId.slice(-6)}` : state.sessionId
   if (!ready) return null
 
   return (
@@ -108,6 +110,7 @@ export function BotPresetSeat({
             className="oac-preset-seat-icon"
           />
           {label}
+          {state.sessionId ? <span className="oac-session-id-seat" title={state.sessionId}><code>{shortSessionId}</code><CopyIconButton value={state.sessionId} label="Copy session ID" copiedLabel="Copied" /></span> : null}
           <IconChevronDownOutline14 className="oac-preset-seat-chevron" />
         </button>
       )}
