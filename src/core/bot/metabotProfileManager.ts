@@ -94,6 +94,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
   dshLlmFallbackReasoningEffort?: string | null;
   botType?: MetabotBotType | null;
   ownerGlobalMetaId?: string | null;
+  isAvailable?: boolean;
 }
 
 export interface CreateMetabotInput {
@@ -114,6 +115,7 @@ export interface CreateMetabotInput {
   dshLlmFallbackReasoningEffort?: string | null;
   botType?: MetabotBotType | null;
   ownerGlobalMetaId?: string | null;
+  isAvailable?: boolean;
 }
 
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
@@ -143,6 +145,7 @@ export interface UpdateMetabotInfoInput {
   dshLlmFallbackReasoningEffort?: string | null;
   botType?: MetabotBotType | null;
   ownerGlobalMetaId?: string | null;
+  isAvailable?: boolean;
 }
 
 export interface SyncMetabotInfoToChainOptions {
@@ -494,6 +497,7 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     // Unset reads as 'worker' (IDBots normalizes any non-twin bot to worker).
     botType: botRole.botType ?? 'worker',
     ownerGlobalMetaId: botRole.ownerGlobalMetaId ?? null,
+    isAvailable: botRole.isAvailable !== false,
   };
 }
 

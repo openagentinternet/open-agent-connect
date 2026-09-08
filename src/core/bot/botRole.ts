@@ -12,6 +12,7 @@ export type MetabotBotType = 'twin' | 'worker';
 export interface BotRoleInfo {
   botType?: MetabotBotType | null;
   ownerGlobalMetaId?: string | null;
+  isAvailable?: boolean;
 }
 
 export function normalizeBotType(value: unknown): MetabotBotType | null {
@@ -30,11 +31,12 @@ export function normalizeBotRoleInfo(value: unknown): BotRoleInfo {
   return {
     botType: normalizeBotType(record.botType),
     ownerGlobalMetaId: normalizeOptionalGlobalMetaId(record.ownerGlobalMetaId),
+    isAvailable: record.isAvailable !== false,
   };
 }
 
 function hasAnyBotRoleValue(info: BotRoleInfo): boolean {
-  return Boolean(info.botType || info.ownerGlobalMetaId);
+  return Boolean(info.botType || info.ownerGlobalMetaId || info.isAvailable === false);
 }
 
 /** Field patch view: only keys present on the input are patched (null clears). */
@@ -42,11 +44,12 @@ export function botRolePatchFromInput(input: BotRoleInfo): BotRoleInfo {
   const patch: BotRoleInfo = {};
   if (input.botType !== undefined) patch.botType = input.botType;
   if (input.ownerGlobalMetaId !== undefined) patch.ownerGlobalMetaId = input.ownerGlobalMetaId;
+  if (input.isAvailable !== undefined) patch.isAvailable = input.isAvailable;
   return patch;
 }
 
 export function hasBotRolePatch(patch: BotRoleInfo): boolean {
-  return patch.botType !== undefined || patch.ownerGlobalMetaId !== undefined;
+  return patch.botType !== undefined || patch.ownerGlobalMetaId !== undefined || patch.isAvailable !== undefined;
 }
 
 export function mergeBotRoleInfo(current: BotRoleInfo, patch: BotRoleInfo): BotRoleInfo {
@@ -55,6 +58,7 @@ export function mergeBotRoleInfo(current: BotRoleInfo, patch: BotRoleInfo): BotR
     ownerGlobalMetaId: patch.ownerGlobalMetaId !== undefined
       ? patch.ownerGlobalMetaId
       : (current.ownerGlobalMetaId ?? null),
+    isAvailable: patch.isAvailable !== undefined ? patch.isAvailable : (current.isAvailable !== false),
   };
 }
 

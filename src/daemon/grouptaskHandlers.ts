@@ -260,7 +260,9 @@ export function createGroupTaskServiceContext(
     listProfiles: async () => {
       const profiles = await listMetabotProfiles(input.systemHomeDir).catch(() => [] as MetabotProfileFull[]);
       return Promise.all(
-        profiles.map(async (profile) => toProfileRef(profile, await readProfileMetaId(profile.homeDir))),
+        profiles
+          .filter((profile) => profile.isAvailable !== false && Boolean(profile.dshLlmProvider?.trim() && profile.dshLlmModel?.trim()))
+          .map(async (profile) => toProfileRef(profile, await readProfileMetaId(profile.homeDir))),
       );
     },
     getProfile: async (slug) => {
@@ -637,7 +639,7 @@ export function createGroupTaskDaemonHandlers(
       const twinGmid = twin?.globalMetaId?.trim() || null;
       return searchGroupTaskSeatCandidates({
         listLocalWorkers: async () => profiles
-          .filter((profile) => profile.botType !== 'twin')
+          .filter((profile) => profile.botType !== 'twin' && profile.isAvailable !== false && Boolean(profile.dshLlmProvider?.trim() && profile.dshLlmModel?.trim()))
           .map((profile) => ({
             slug: profile.slug,
             name: profile.name,

@@ -452,6 +452,10 @@ export function BotPanel({
                       ) : null}
                     </div>
                     <div className="oac-bot-foot-right">
+                      <button type="button" role="switch" aria-checked={bot.isAvailable !== false} className={bot.isAvailable !== false ? 'oac-switch on oac-card-availability' : 'oac-switch oac-card-availability'} title={t('availabilityToggle')} onClick={() => { void update(bot.slug, { isAvailable: bot.isAvailable === false }) .then(() => reload()).catch((cause) => setError(errorText(cause))) }}>
+                        <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
+                        <span className="oac-switch-text">{bot.isAvailable !== false ? t('available') : t('unavailable')}</span>
+                      </button>
                       <button
                         type="button"
                         className="oac-icon-btn"
