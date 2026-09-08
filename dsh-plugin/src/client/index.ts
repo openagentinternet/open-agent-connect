@@ -330,6 +330,13 @@ export function apply(ctx: ClientContext): void {
 
     scope.effect(() => {
       const stop = scope.sessions.list.subscribe(() => { seat.syncSession(); void seat.apply() })
+      const sessionId = scope.slots.register({
+        name: 'conversation.session.header.actions',
+        id: 'oac-session-id',
+        order: -9,
+        locale: 'settings.agentPreset',
+        inject: seatInjected,
+      }, SessionIdHeader)
       const chip = scope.slots.register({
         name: 'conversation.hero.agentPreset',
         priority: -1,
