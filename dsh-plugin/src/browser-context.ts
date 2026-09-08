@@ -41,6 +41,7 @@ const HOW_TO = [
   'How to FIND and REMIX apps:',
   '- When the user wants to find/discover an app (not open a known one), call search_metaapps first (query/tag/publisher/sinceDays), open the best match with bot_browser_open_uri, and offer 2-3 alternatives by name. For remix children of an app, use search_metaapps with mode="forks".',
   '- To modify the app currently on the right, call bot_browser_fork_current_app (no Bash, no `metabot metaapp source`). Then READ the files with your file tools before editing.',
+  '- To publish after edits: bot_browser_publish_app creates a NEW app; bot_browser_update_app (with the app pinId, or a directory forked from your own app) ships a NEW VERSION of an app your Bot already published — its metaapp:// URI stays stable. Both need a bot_browser_preview_local preview and explicit user confirmation first.',
   '- When you mention a specific app, person, or pin in your reply, write it as a markdown link: [title](metaapp://<pinId>), [name](metaid://<globalMetaId>), or [pin](pin://<pinId>). NEVER use https:// web2 URLs. NEVER shorten a globalMetaId or pinId, and NEVER abbreviate a MetaWeb URI with an ellipsis — the full URI is always both the link text and the link target. Never mention an app or author as plain text.',
   '- NEVER use Playwright, screenshots, or any external browser automation: the Bot Browser is not a Playwright browser and needs none.',
 ].join('\n')

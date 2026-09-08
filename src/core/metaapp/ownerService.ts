@@ -7,6 +7,7 @@ import {
 } from './appsProtocol';
 import { normalizeMetaAppPinId } from './pinId';
 import { buildMetaAppCanonicalUrl, buildMetaAppUri } from './share';
+import { stableMetaAppWriteHash, type MetaAppWriteGuard } from './writeGuard';
 
 export interface MetaAppOwnerActor {
   from?: string;
@@ -51,57 +52,92 @@ export async function listOwnerMetaApps(
 export async function publishMetaAppPayload(
   actor: MetaAppOwnerActor,
   input: Record<string, unknown>,
+  writeGuard?: MetaAppWriteGuard,
 ): Promise<MetabotCommandResult<Record<string, unknown>>> {
   const missing = requireConfirm(input, 'publish');
   if (missing) return missing;
   const payload = buildMetaAppProtocolPayload(input);
   const write = buildMetaAppCreateWrite(payload);
-  const chainWrite = await actor.writePin({ ...write, network: input.network });
-  const pinId = requirePinIdFromWrite(chainWrite);
-  return commandSuccess({
-    pinId,
-    firstPinId: pinId,
-    chainWrite,
-    metaappUri: buildMetaAppUri(pinId),
-    metawebUrl: buildMetaAppCanonicalUrl(pinId),
+  const execute = async (): Promise<MetabotCommandResult<Record<string, unknown>>> => {
+    const chainWrite = await actor.writePin({ ...write, network: input.network });
+    const pinId = requirePinIdFromWrite(chainWrite);
+    return commandSuccess({
+      pinId,
+      firstPinId: pinId,
+      chainWrite,
+      metaappUri: buildMetaAppUri(pinId),
+      metawebUrl: buildMetaAppCanonicalUrl(pinId),
+    });
+  };
+  if (!writeGuard) return execute();
+  return writeGuard.run({
+    idemKey: stableMetaAppWriteHash('metaapp-create', [
+      actor.mvcAddress,
+      JSON.stringify(payload),
+      typeof input.network === 'string' ? input.network : undefined,
+    ]),
+    fn: execute,
   });
 }
 
 export async function updateMetaAppPayload(
   actor: MetaAppOwnerActor,
   input: Record<string, unknown>,
+  writeGuard?: MetaAppWriteGuard,
 ): Promise<MetabotCommandResult<Record<string, unknown>>> {
   const missing = requireConfirm(input, 'update');
   if (missing) return missing;
   const targetPinId = typeof input.targetPinId === 'string' ? input.targetPinId.trim() : '';
   const payload = buildMetaAppProtocolPayload(input);
   const write = buildMetaAppModifyWrite(targetPinId, payload);
-  const chainWrite = await actor.writePin({ ...write, network: input.network });
-  const pinId = requirePinIdFromWrite(chainWrite);
-  const firstPinId = normalizeMetaAppPinId(chainWrite.firstPinId) ?? targetPinId;
-  return commandSuccess({
-    pinId,
-    firstPinId,
-    targetPinId,
-    chainWrite,
-    metaappUri: buildMetaAppUri(pinId, firstPinId),
-    metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
+  const execute = async (): Promise<MetabotCommandResult<Record<string, unknown>>> => {
+    const chainWrite = await actor.writePin({ ...write, network: input.network });
+    const pinId = requirePinIdFromWrite(chainWrite);
+    const firstPinId = normalizeMetaAppPinId(chainWrite.firstPinId) ?? targetPinId;
+    return commandSuccess({
+      pinId,
+      firstPinId,
+      targetPinId,
+      chainWrite,
+      metaappUri: buildMetaAppUri(pinId, firstPinId),
+      metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
+    });
+  };
+  if (!writeGuard) return execute();
+  return writeGuard.run({
+    idemKey: stableMetaAppWriteHash('metaapp-modify', [
+      actor.mvcAddress,
+      targetPinId,
+      JSON.stringify(payload),
+      typeof input.network === 'string' ? input.network : undefined,
+    ]),
+    lockKey: `metaapp:${targetPinId}`,
+    fn: execute,
   });
 }
 
 export async function deleteMetaAppPin(
   actor: MetaAppOwnerActor,
   input: Record<string, unknown>,
+  writeGuard?: MetaAppWriteGuard,
 ): Promise<MetabotCommandResult<Record<string, unknown>>> {
   const missing = requireConfirm(input, 'delete');
   if (missing) return missing;
   const targetPinId = typeof input.targetPinId === 'string' ? input.targetPinId.trim() : '';
   const write = buildMetaAppRevokeWrite(targetPinId);
-  const chainWrite = await actor.writePin({ ...write, network: input.network });
-  const pinId = requirePinIdFromWrite(chainWrite);
-  return commandSuccess({
-    revokedPinId: targetPinId,
-    pinId,
-    chainWrite,
+  const execute = async (): Promise<MetabotCommandResult<Record<string, unknown>>> => {
+    const chainWrite = await actor.writePin({ ...write, network: input.network });
+    const pinId = requirePinIdFromWrite(chainWrite);
+    return commandSuccess({
+      revokedPinId: targetPinId,
+      pinId,
+      chainWrite,
+    });
+  };
+  if (!writeGuard) return execute();
+  return writeGuard.run({
+    idemKey: stableMetaAppWriteHash('metaapp-revoke', [actor.mvcAddress, targetPinId]),
+    lockKey: `metaapp:${targetPinId}`,
+    fn: execute,
   });
 }

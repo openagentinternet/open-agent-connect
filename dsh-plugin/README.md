@@ -454,10 +454,14 @@ Agent linkage is two layers:
   in the model's function list from the first turn, including after a blank
   session recomposes from `standard` to `oac-*`): `bot_browser_tabs`,
   `bot_browser_open_uri`, `bot_browser_preview_local`, `bot_browser_read_page`,
-  `search_metaapps`, `bot_browser_fork_current_app`, `bot_browser_publish_app`.
-  Tab control uses ABC `postMessage` from the DSH parent. Search/fork/publish
-  wrap the OAC CLI. Publish asks DSH `ctx.approval` (the native confirmation
-  dialog) before `publish-project --confirm`. Live page context injection stays
+  `search_metaapps`, `bot_browser_fork_current_app`, `bot_browser_publish_app`,
+  and `bot_browser_update_app` (new version of an app the Bot already owns —
+  ownership is verified against the owner list first; the metaapp:// URI stays
+  stable). Tab control uses ABC `postMessage` from the DSH parent.
+  Search/fork/publish/update wrap the OAC CLI. Publish and update first dry-run
+  the project without `--confirm`, then ask DSH `ctx.approval` (the native
+  confirmation dialog, with entry file, package size, and fork provenance)
+  before the `--confirm` write. Live page context injection stays
   `oac-*` only.
 
 Each `oac-*` turn also injects a live `<browser_context>` block at the

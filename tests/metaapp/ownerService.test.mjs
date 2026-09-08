@@ -9,6 +9,7 @@ const {
   updateMetaAppPayload,
   deleteMetaAppPin,
 } = require('../../dist/core/metaapp/ownerService.js');
+const { createMetaAppWriteGuard } = require('../../dist/core/metaapp/writeGuard.js');
 
 const PIN = 'f'.repeat(64) + 'i0';
 
@@ -162,5 +163,63 @@ test('deleteMetaAppPin rejects chain writes without pinId after attempting one w
     () => deleteMetaAppPin(ctx, { targetPinId: PIN, confirm: true }),
     /MetaAPP chain write did not return pinId\./,
   );
+  assert.equal(writes.length, 1);
+});
+
+test('publishMetaAppPayload replays an identical confirmed write inside the idempotency window', async () => {
+  const guard = createMetaAppWriteGuard();
+  const { ctx, writes } = actor();
+  const first = await publishMetaAppPayload(ctx, { ...payload(), confirm: true, network: 'mvc' }, guard);
+  const second = await publishMetaAppPayload(ctx, { ...payload(), confirm: true, network: 'mvc' }, guard);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(second.data.idempotent, true);
+  assert.equal(second.data.pinId, first.data.pinId);
+  assert.equal(writes.length, 1);
+});
+
+test('publishMetaAppPayload without a guard writes every time (legacy callers)', async () => {
+  const { ctx, writes } = actor();
+  await publishMetaAppPayload(ctx, { ...payload(), confirm: true, network: 'mvc' });
+  await publishMetaAppPayload(ctx, { ...payload(), confirm: true, network: 'mvc' });
+  assert.equal(writes.length, 2);
+});
+
+test('updateMetaAppPayload serializes guarded writes on the same target pin', async () => {
+  const guard = createMetaAppWriteGuard();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const order = [];
+  const writes = [];
+  const { ctx } = actor({
+    writePin: async (input) => {
+      const title = JSON.parse(input.payload).title;
+      order.push(`start:${title}`);
+      if (order.length === 1) await gate;
+      order.push(`end:${title}`);
+      writes.push(input);
+      return { pinId: `${'e'.repeat(64)}i0`, firstPinId: PIN, txids: ['tx'], network: input.network ?? 'mvc' };
+    },
+  });
+  const first = updateMetaAppPayload(ctx, { ...payload({ title: 'One' }), targetPinId: PIN, confirm: true }, guard);
+  const second = updateMetaAppPayload(ctx, { ...payload({ title: 'Two' }), targetPinId: PIN, confirm: true }, guard);
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(order, ['start:One', 'end:One', 'start:Two', 'end:Two']);
+  assert.equal(writes.length, 2);
+});
+
+test('deleteMetaAppPin replays an identical revoke inside the idempotency window', async () => {
+  const guard = createMetaAppWriteGuard();
+  const { ctx, writes } = actor();
+  const first = await deleteMetaAppPin(ctx, { targetPinId: PIN, confirm: true }, guard);
+  const second = await deleteMetaAppPin(ctx, { targetPinId: PIN, confirm: true }, guard);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.data.idempotent, true);
+  assert.equal(second.data.revokedPinId, PIN);
   assert.equal(writes.length, 1);
 });

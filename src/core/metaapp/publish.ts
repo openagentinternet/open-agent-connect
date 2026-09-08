@@ -27,6 +27,7 @@ import type {
   MetaAppPreviewPlan,
   MetaAppWarning,
 } from './types';
+import { stableMetaAppWriteHash, type MetaAppWriteGuard } from './writeGuard';
 import { writeMetaAppZipArchive } from './zipArchive';
 
 const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>.zip';
@@ -78,6 +79,14 @@ export interface MetaAppPublishDependencies {
     localPreviewUrl: string;
   };
   readExistingMetaApp?: (pinId: string) => Promise<MetaAppGalleryRecord | null>;
+  /**
+   * Stable identity of the writing actor (profile homeDir or MVC address),
+   * mixed into the idempotency key so two local Bots publishing identical
+   * content never replay each other's chain writes.
+   */
+  actorKey?: string;
+  /** Optional 60 s idempotency window + per-app write lock for chain writes. */
+  writeGuard?: MetaAppWriteGuard;
   now?: () => number;
   makeTempDir?: () => Promise<string>;
 }
@@ -495,89 +504,117 @@ async function writePublishedMetaApp(input: {
   });
 
   try {
-    let upload: UploadLikeResult;
-    try {
-      upload = await input.deps.uploadFile({
-        filePath: archive.filePath,
-        contentType: 'application/zip',
-        network: input.network,
-      });
-    } catch (error) {
-      const feeAssistData = readFeeAssistFailureData(error);
-      return commandFailed('metaapp_upload_failed', `Unable to upload MetaApp archive: ${errorMessage(error)}`, {
-        data: {
-          archive: publicArchive(archive),
-          ...(feeAssistData ?? {}),
-        },
-      });
-    }
-
-    const artifactUri = uploadArtifactUri(upload);
-    const manifest = finalizeManifestForWrite({
+    // Deterministic payload preview (placeholder artifact URI) lets the
+    // idempotency guard recognize a retried publish BEFORE the archive
+    // upload spends fees; the real artifact URI only lands inside execute().
+    const payloadPreview = cleanManifestForPayload(finalizeManifestForWrite({
       plan: input.plan,
       manifest: input.manifest,
-      artifactUri,
+      artifactUri: METAAPP_RUNTIME_URI_PREVIEW,
       contentHash: archive.sha256,
       compatibilityMirrorContent: input.compatibilityMirrorContent,
-    });
-    const payload = cleanManifestForPayload(manifest);
+    }));
 
-    let chainWrite: ChainLikeResult;
-    try {
-      chainWrite = await input.deps.writeChain({
+    const execute = async (): Promise<MetabotCommandResult<Record<string, unknown>>> => {
+      let upload: UploadLikeResult;
+      try {
+        upload = await input.deps.uploadFile({
+          filePath: archive.filePath,
+          contentType: 'application/zip',
+          network: input.network,
+        });
+      } catch (error) {
+        const feeAssistData = readFeeAssistFailureData(error);
+        return commandFailed('metaapp_upload_failed', `Unable to upload MetaApp archive: ${errorMessage(error)}`, {
+          data: {
+            archive: publicArchive(archive),
+            ...(feeAssistData ?? {}),
+          },
+        });
+      }
+
+      const artifactUri = uploadArtifactUri(upload);
+      const manifest = finalizeManifestForWrite({
+        plan: input.plan,
+        manifest: input.manifest,
+        artifactUri,
+        contentHash: archive.sha256,
+        compatibilityMirrorContent: input.compatibilityMirrorContent,
+      });
+      const payload = cleanManifestForPayload(manifest);
+
+      let chainWrite: ChainLikeResult;
+      try {
+        chainWrite = await input.deps.writeChain({
+          operation: input.operation,
+          path: input.path,
+          contentType: 'application/json',
+          payload: JSON.stringify(payload),
+          network: input.network,
+        });
+      } catch (error) {
+        return commandFailed('metaapp_publish_failed', `Unable to write MetaApp protocol payload: ${errorMessage(error)}`, {
+          data: {
+            archive: publicArchive(archive),
+            upload,
+            payload,
+          },
+        });
+      }
+
+      const pinId = assertMetaAppPinId(chainWrite.pinId, 'chain write pinId');
+      const firstPinId = input.operation === 'modify'
+        ? normalizeText(chainWrite.firstPinId) || normalizeText(input.firstPinIdFallback) || input.targetPinId || pinId
+        : normalizeText(chainWrite.firstPinId) || pinId;
+      const now = input.deps.now ? input.deps.now() : Date.now();
+      const record = buildGalleryRecord({
         operation: input.operation,
-        path: input.path,
-        contentType: 'application/json',
-        payload: JSON.stringify(payload),
-        network: input.network,
+        pinId,
+        firstPinId,
+        manifest,
+        chainWrite,
+        upload,
+        now,
       });
-    } catch (error) {
-      return commandFailed('metaapp_publish_failed', `Unable to write MetaApp protocol payload: ${errorMessage(error)}`, {
-        data: {
-          archive: publicArchive(archive),
-          upload,
-          payload,
-        },
+
+      const warnings = [...input.warnings];
+      try {
+        await input.deps.upsertLocal(record);
+      } catch (error) {
+        warnings.push({
+          code: 'metaapp_local_cache_upsert_failed',
+          message: `Unable to update local MetaApp cache: ${errorMessage(error)}`,
+        });
+      }
+
+      return commandSuccess({
+        pinId,
+        firstPinId,
+        metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
+        localUiUrl: buildLocalUiUrl(pinId, firstPinId),
+        hasAppDoc: await hasMetaAppDoc(input.plan.artifactDir),
+        archive: publicArchive(archive),
+        upload,
+        chainWrite,
+        record,
+        warnings,
+      });
+    };
+
+    if (input.deps.writeGuard) {
+      return await input.deps.writeGuard.run({
+        idemKey: stableMetaAppWriteHash(`metaapp-${input.operation}`, [
+          input.deps.actorKey,
+          input.path,
+          archive.sha256,
+          JSON.stringify(payloadPreview),
+          input.network,
+        ]),
+        lockKey: input.operation === 'modify' && input.targetPinId ? `metaapp:${input.targetPinId}` : undefined,
+        fn: execute,
       });
     }
-
-    const pinId = assertMetaAppPinId(chainWrite.pinId, 'chain write pinId');
-    const firstPinId = input.operation === 'modify'
-      ? normalizeText(chainWrite.firstPinId) || normalizeText(input.firstPinIdFallback) || input.targetPinId || pinId
-      : normalizeText(chainWrite.firstPinId) || pinId;
-    const now = input.deps.now ? input.deps.now() : Date.now();
-    const record = buildGalleryRecord({
-      operation: input.operation,
-      pinId,
-      firstPinId,
-      manifest,
-      chainWrite,
-      upload,
-      now,
-    });
-
-    const warnings = [...input.warnings];
-    try {
-      await input.deps.upsertLocal(record);
-    } catch (error) {
-      warnings.push({
-        code: 'metaapp_local_cache_upsert_failed',
-        message: `Unable to update local MetaApp cache: ${errorMessage(error)}`,
-      });
-    }
-
-    return commandSuccess({
-      pinId,
-      firstPinId,
-      metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
-      localUiUrl: buildLocalUiUrl(pinId, firstPinId),
-      hasAppDoc: await hasMetaAppDoc(input.plan.artifactDir),
-      archive: publicArchive(archive),
-      upload,
-      chainWrite,
-      record,
-      warnings,
-    });
+    return await execute();
   } finally {
     if (archive.ownsTempDir) {
       await fs.rm(archive.tempDir, { recursive: true, force: true }).catch(() => undefined);
