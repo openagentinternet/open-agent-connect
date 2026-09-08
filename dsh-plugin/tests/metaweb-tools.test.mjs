@@ -25,11 +25,15 @@ function fakeHostContext() {
 test('bindMetawebToolInstall registers the worldview section and both tools', () => {
   const host = fakeHostContext()
   plugin.bindMetawebToolInstall(host.ctx)
-  assert.equal(host.sections.length, 1)
+  assert.equal(host.sections.length, 2)
   assert.equal(host.sections[0].name, 'oac:metaweb-worldview')
   assert.match(host.sections[0].text, /Search first, don't guess/)
   assert.match(host.sections[0].text, /NEVER construct Web2 viewer URLs/)
   assert.match(host.sections[0].text, /ALWAYS shown in FULL/, 'the worldview must carry the never-abbreviate MetaWeb URI rule')
+  assert.equal(host.sections[1].name, 'oac:metaweb-uri-fullform')
+  assert.match(host.sections[1].text, /ALWAYS write them in FULL/)
+  assert.match(host.sections[1].text, /never abbreviated|NEVER abbreviate/i)
+  assert.match(host.sections[1].text, /64 lowercase hex characters/)
   assert.deepEqual(host.tools.map((tool) => tool.name).sort(), ['read_metaweb_pin', 'search_metaweb'])
 })
 

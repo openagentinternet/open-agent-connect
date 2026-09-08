@@ -15,6 +15,25 @@ import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } fro
 export const METAWEB_WORLDVIEW_SECTION = 'oac:metaweb-worldview'
 export const METAWEB_WORLDVIEW_ORDER = 142
 
+/**
+ * Standalone full-form identifier rule, registered on the GLOBAL layer so it
+ * reaches every session — plain new conversations included — instead of
+ * riding inside the search/linking worldview paragraph alone. Mirrors the OAC
+ * core METAWEB_URI_FULL_FORM_RULE (src/core/metaweb/uri.ts); keep both in sync.
+ */
+export const METAWEB_URI_FULLFORM_SECTION = 'oac:metaweb-uri-fullform'
+export const METAWEB_URI_FULLFORM_ORDER = 142.2
+export const METAWEB_URI_FULLFORM_TEXT = [
+  '## MetaWeb URIs and pinIds — ALWAYS write them in FULL',
+  '',
+  'Whenever your reply mentions a MetaWeb URI or a bare pinId — in chat, a task report, a plan, a summary, anywhere — write it out completely. NEVER abbreviate, truncate, or shorten it with an ellipsis: `pin://37da9088…` or `metaapp://285abab…` is broken output — neither clickable nor copyable, so it is useless to the user and breaks host tooling that matches identifiers exactly.',
+  '',
+  '- The five MetaWeb schemes: `metaid://`, `pin://` (alias `pinid://`), `metafile://`, `metaapp://`, `map://`.',
+  '- A pinId is exactly 64 lowercase hex characters + `i0` (66 chars total). Copy it VERBATIM from the tool result or document you are citing — never retype or shorten it.',
+  '- The rule also applies inside markdown links: the full URI is both the link target and the link text.',
+  '- For a short readable mention, add a label AROUND the full URI (e.g. `(pin 37da9088)` as plain text AFTER the full link) — never instead of it.',
+].join('\n')
+
 /** Static MetaWeb worldview (IDBots coworkRunner parity, cacheable head). */
 export const METAWEB_WORLDVIEW_TEXT = [
   '## MetaWeb — your external brain',
@@ -245,6 +264,11 @@ export function bindMetawebToolInstall(ctx: HostContext): void {
     name: METAWEB_WORLDVIEW_SECTION,
     order: METAWEB_WORLDVIEW_ORDER,
     text: METAWEB_WORLDVIEW_TEXT,
+  })
+  ctx.systemPrompt?.section({
+    name: METAWEB_URI_FULLFORM_SECTION,
+    order: METAWEB_URI_FULLFORM_ORDER,
+    text: METAWEB_URI_FULLFORM_TEXT,
   })
   for (const definition of buildMetawebToolDefinitions({ host: ctx, hostAgent: { ctx } })) {
     try {
