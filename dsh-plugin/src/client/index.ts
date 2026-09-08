@@ -329,7 +329,7 @@ export function apply(ctx: ClientContext): void {
     })
 
     scope.effect(() => {
-      const stop = scope.sessions.list.subscribe(() => { void seat.apply() })
+      const stop = scope.sessions.list.subscribe(() => { seat.syncSession(); void seat.apply() })
       const chip = scope.slots.register({
         name: 'conversation.hero.agentPreset',
         priority: -1,
