@@ -107,6 +107,7 @@ export function BotPanel({
   const [setupRetrying, setSetupRetrying] = useState(false)
   const [setupRetryError, setSetupRetryError] = useState<string | null>(null)
   const [resyncingSlug, setResyncingSlug] = useState<string | null>(null)
+  const [availabilitySavingSlug, setAvailabilitySavingSlug] = useState<string | null>(null)
   const [editing, setEditing] = useState<BotRow | null>(null)
   const [directory, setDirectory] = useState<LlmDirectory | null>(null)
   const [busy, setBusy] = useState(false)
@@ -214,6 +215,31 @@ export function BotPanel({
       setError(errorText(cause))
     } finally {
       setResyncingSlug(null)
+    }
+  }
+
+  const toggleAvailability = async (bot: BotRow): Promise<void> => {
+    if (availabilitySavingSlug !== null) return
+    const nextAvailable = bot.isAvailable === false
+    setAvailabilitySavingSlug(bot.slug)
+    setError(null)
+    setBots((current) => current?.map((row) => (
+      row.slug === bot.slug ? { ...row, isAvailable: nextAvailable } : row
+    )) ?? null)
+    try {
+      const result = await update(bot.slug, { isAvailable: nextAvailable })
+      if (result.profile) {
+        setBots((current) => current?.map((row) => (
+          row.slug === bot.slug ? result.profile : row
+        )) ?? null)
+      }
+    } catch (cause) {
+      setBots((current) => current?.map((row) => (
+        row.slug === bot.slug ? { ...row, isAvailable: !nextAvailable } : row
+      )) ?? null)
+      setError(errorText(cause))
+    } finally {
+      setAvailabilitySavingSlug(null)
     }
   }
 
@@ -450,12 +476,20 @@ export function BotPanel({
                           <IconRightUpOutline16 />
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={bot.isAvailable !== false}
+                        aria-label={`${t('availabilityToggle')}: ${bot.name}`}
+                        className={bot.isAvailable !== false ? 'oac-switch on oac-card-availability' : 'oac-switch oac-card-availability'}
+                        title={t('availabilityToggle')}
+                        disabled={availabilitySavingSlug === bot.slug}
+                        onClick={() => { void toggleAvailability(bot) }}
+                      >
+                        <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
+                      </button>
                     </div>
                     <div className="oac-bot-foot-right">
-                      <button type="button" role="switch" aria-checked={bot.isAvailable !== false} className={bot.isAvailable !== false ? 'oac-switch on oac-card-availability' : 'oac-switch oac-card-availability'} title={t('availabilityToggle')} onClick={() => { void update(bot.slug, { isAvailable: bot.isAvailable === false }) .then(() => reload()).catch((cause) => setError(errorText(cause))) }}>
-                        <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
-                        <span className="oac-switch-text">{bot.isAvailable !== false ? t('available') : t('unavailable')}</span>
-                      </button>
                       <button
                         type="button"
                         className="oac-icon-btn"

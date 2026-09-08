@@ -67,7 +67,7 @@ export async function readBotRoleInfo(filePath: string): Promise<BotRoleInfo> {
     return normalizeBotRoleInfo(JSON.parse(await fs.readFile(filePath, 'utf8')));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { botType: null, ownerGlobalMetaId: null };
+      return { botType: null, ownerGlobalMetaId: null, isAvailable: true };
     }
     throw error;
   }
@@ -79,7 +79,7 @@ export function readBotRoleInfoSync(filePath: string): BotRoleInfo {
     return normalizeBotRoleInfo(JSON.parse(readFileSync(filePath, 'utf8')));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { botType: null, ownerGlobalMetaId: null };
+      return { botType: null, ownerGlobalMetaId: null, isAvailable: true };
     }
     throw error;
   }
