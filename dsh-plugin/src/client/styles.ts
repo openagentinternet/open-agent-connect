@@ -588,6 +588,8 @@ export const USER_CSS = `
 `
 
 export const PRESETS_CSS = `
+.oac-session-id-seat { display: inline-flex; align-items: center; gap: 3px; margin-left: 4px; font-size: 11px; font-weight: 400; color: var(--dsw-alias-label-secondary); }
+.oac-session-id-seat code { font-family: inherit; }
 .oac-preset-seat { display: inline-flex; align-items: center; gap: 4px; max-width: min(100%, 240px); min-height: 28px; padding: 0 8px; border: none; border-radius: 16px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .oac-preset-seat:not(:disabled):hover, .oac-preset-seat[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); }
 .oac-preset-seat:disabled { cursor: default; color: var(--dsw-alias-label-quaternary); }

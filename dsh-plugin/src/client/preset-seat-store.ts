@@ -60,6 +60,7 @@ export type BotPresetSeatState = {
   error: string | null
   busy: boolean
   botsBySlug: Record<string, ChipBot>
+  sessionId: string
 }
 
 const INITIAL: BotPresetSeatState = {
@@ -68,6 +69,7 @@ const INITIAL: BotPresetSeatState = {
   error: null,
   busy: false,
   botsBySlug: {},
+  sessionId: '',
 }
 
 export class BotPresetSeatController {
@@ -105,6 +107,7 @@ export class BotPresetSeatController {
         // The Twin Bot leads the dropdown: new blank sessions default to it.
         options: orderPresetsTwinFirst(filterSelectablePresets(presets), botsBySlug),
         current: this.staged ?? this.currentSession()?.agentPreset ?? this.fallback,
+        sessionId: this.currentSession()?.id ?? '',
         error: null,
         botsBySlug,
       })
