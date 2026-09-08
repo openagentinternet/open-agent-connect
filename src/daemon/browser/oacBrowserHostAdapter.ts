@@ -48,6 +48,7 @@ import {
   browserSuccess,
   browserWaiting,
 } from '@openagentinternet/agent-browser-host-contract';
+import { qaQuestionDetail, QaRecallNotFoundError, type QaQuestionDetail } from '../../core/qanda/recall';
 import type {
   BrowserCommandFailure,
   BrowserCommandWaitingOptions,
@@ -122,6 +123,74 @@ export interface OacAppSessionHost {
     actorGlobalMetaId: string;
   }, options?: { releaseSeat?: boolean }): Promise<AppSessionPublic>;
 }
+
+/** Definitively non-question pinIds (40400 from the Q&A index), capped at 500. */
+const qaQuestionPinNegativeCache = new Set<string>();
+
+/**
+ * Question-pin probe for the Bot Browser resolver (exported for tests).
+ * Returns null to fall through to the generic pin resolver.
+ */
+export async function tryResolveQaQuestionResource(
+  rawUri: string,
+  metasoP2PBaseUrl: string | undefined,
+): Promise<BrowserCommandResult<BrowserResolveResult> | null> {
+  const match = /^(?:pin|pinid):\/\/([0-9a-f]{64}i0)$/iu.exec(rawUri.trim());
+  if (!match) return null;
+  const pinId = match[1]!.toLowerCase();
+  if (qaQuestionPinNegativeCache.has(pinId)) return null;
+  let detail: QaQuestionDetail;
+  try {
+    detail = await qaQuestionDetail(pinId, {
+      ...(metasoP2PBaseUrl ? { baseUrl: metasoP2PBaseUrl } : {}),
+      timeoutMs: 5_000,
+    });
+  } catch (error) {
+    if (error instanceof QaRecallNotFoundError) {
+      qaQuestionPinNegativeCache.add(pinId);
+      if (qaQuestionPinNegativeCache.size > 500) {
+        const oldest = qaQuestionPinNegativeCache.values().next().value;
+        if (oldest) qaQuestionPinNegativeCache.delete(oldest);
+      }
+    }
+    return null;
+  }
+  const question = detail.question;
+  const publisher = question.publisher;
+  return browserSuccess({
+    uri: rawUri,
+    normalizedUri: `pin://${pinId}`,
+    resourceType: 'metaapp',
+    title: question.title || pinId,
+    owner: {
+      kind: 'metaapp-publisher',
+      ...(publisher.globalMetaId ? { globalMetaId: publisher.globalMetaId } : {}),
+      name: publisher.name || publisher.globalMetaId || 'unknown',
+      verificationState: 'partial',
+    },
+    renderer: {
+      type: 'html-iframe',
+      contentType: 'text/html',
+      url: `/ui/qanda/app/index.html#q/${encodeURIComponent(pinId)}`,
+    },
+    status: { state: 'resolved', verificationState: 'partial', message: '' },
+    proof: {
+      pinId,
+      ...(publisher.globalMetaId ? { publisherGlobalMetaId: publisher.globalMetaId } : {}),
+      protocolPath: '/protocols/simplequestion',
+      verificationState: 'partial',
+      details: {
+        answerCount: question.answerCount,
+        likeCount: question.likeCount,
+        dislikeCount: question.dislikeCount,
+        chainName: question.chainName,
+      },
+    },
+    source: { resolver: 'oac-qanda' },
+    actions: [{ id: 'copy-uri', label: 'Copy URI', kind: 'copy', uri: `pin://${pinId}` }],
+  } satisfies BrowserResolveResult);
+}
+
 
 const DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 const LLM_COMPLETE_DEFAULT_TIMEOUT_MS = 120_000;
@@ -1730,6 +1799,16 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     };
   };
 
+  // -------------------------------------------------------------------------
+  // On-chain Q&A question routing (IDBots feat/metaweb-qa parity): a bare
+  // pin:// URI that IS a simplequestion pin resolves to the bundled qanda
+  // viewer (html-iframe renderer, same mechanism as MetaApp previews) instead
+  // of the generic pin reader. The probe checks the Q&A index: definitive
+  // negatives (40400) are cached — non-question pins skip re-probing;
+  // positives are NOT cached so the page always opens fresh counts/answers;
+  // indeterminate failures fall through to the generic resolver uncached.
+  // -------------------------------------------------------------------------
+
   async function resolveResource(resolveInput: BrowserResolveInput & { from?: string }): Promise<BrowserCommandResult<BrowserResolveResult>> {
     const actor = await resolveActor(resolveInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
@@ -1748,6 +1827,8 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
     });
     const artifactCache = createMetaAppArtifactCacheStore(actor.homeDir);
+    const qaQuestion = await tryResolveQaQuestionResource(resolveInput.uri, browserConfig.metasoP2PBaseUrl);
+    if (qaQuestion) return qaQuestion;
     return resolveBrowserResource({
       uri: resolveInput.uri,
       config: browserConfig,

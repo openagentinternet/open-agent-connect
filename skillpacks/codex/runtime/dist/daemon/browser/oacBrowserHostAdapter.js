@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.tryResolveQaQuestionResource = tryResolveQaQuestionResource;
 exports.createOacBrowserHostAdapter = createOacBrowserHostAdapter;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
@@ -12,12 +13,79 @@ const conversationUrl_1 = require("../../core/a2a/conversationUrl");
 const agent_browser_core_1 = require("@openagentinternet/agent-browser-core");
 const agent_browser_name_resolvers_1 = require("@openagentinternet/agent-browser-name-resolvers");
 const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
+const recall_1 = require("../../core/qanda/recall");
 const configStore_1 = require("../../core/config/configStore");
 const infrastructureConfigStore_1 = require("../../core/config/infrastructureConfigStore");
 const llmTypes_1 = require("../../core/llm/llmTypes");
 const artifactCache_1 = require("../../core/metaapp/artifactCache");
 const artifactDownload_1 = require("../../core/metaapp/artifactDownload");
 const types_1 = require("../../core/appSession/types");
+/** Definitively non-question pinIds (40400 from the Q&A index), capped at 500. */
+const qaQuestionPinNegativeCache = new Set();
+/**
+ * Question-pin probe for the Bot Browser resolver (exported for tests).
+ * Returns null to fall through to the generic pin resolver.
+ */
+async function tryResolveQaQuestionResource(rawUri, metasoP2PBaseUrl) {
+    const match = /^(?:pin|pinid):\/\/([0-9a-f]{64}i0)$/iu.exec(rawUri.trim());
+    if (!match)
+        return null;
+    const pinId = match[1].toLowerCase();
+    if (qaQuestionPinNegativeCache.has(pinId))
+        return null;
+    let detail;
+    try {
+        detail = await (0, recall_1.qaQuestionDetail)(pinId, {
+            ...(metasoP2PBaseUrl ? { baseUrl: metasoP2PBaseUrl } : {}),
+            timeoutMs: 5_000,
+        });
+    }
+    catch (error) {
+        if (error instanceof recall_1.QaRecallNotFoundError) {
+            qaQuestionPinNegativeCache.add(pinId);
+            if (qaQuestionPinNegativeCache.size > 500) {
+                const oldest = qaQuestionPinNegativeCache.values().next().value;
+                if (oldest)
+                    qaQuestionPinNegativeCache.delete(oldest);
+            }
+        }
+        return null;
+    }
+    const question = detail.question;
+    const publisher = question.publisher;
+    return (0, agent_browser_host_contract_1.browserSuccess)({
+        uri: rawUri,
+        normalizedUri: `pin://${pinId}`,
+        resourceType: 'metaapp',
+        title: question.title || pinId,
+        owner: {
+            kind: 'metaapp-publisher',
+            ...(publisher.globalMetaId ? { globalMetaId: publisher.globalMetaId } : {}),
+            name: publisher.name || publisher.globalMetaId || 'unknown',
+            verificationState: 'partial',
+        },
+        renderer: {
+            type: 'html-iframe',
+            contentType: 'text/html',
+            url: `/ui/qanda/app/index.html#q/${encodeURIComponent(pinId)}`,
+        },
+        status: { state: 'resolved', verificationState: 'partial', message: '' },
+        proof: {
+            pinId,
+            ...(publisher.globalMetaId ? { publisherGlobalMetaId: publisher.globalMetaId } : {}),
+            protocolPath: '/protocols/simplequestion',
+            verificationState: 'partial',
+            details: {
+                answerCount: question.answerCount,
+                likeCount: question.likeCount,
+                dislikeCount: question.dislikeCount,
+                chainName: question.chainName,
+            },
+        },
+        source: { resolver: 'oac-qanda' },
+        actions: [{ id: 'copy-uri', label: 'Copy URI', kind: 'copy', uri: `pin://${pinId}` }],
+    });
+}
 const DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 const LLM_COMPLETE_DEFAULT_TIMEOUT_MS = 120_000;
 const LLM_COMPLETE_MAX_TIMEOUT_MS = 180_000;
@@ -1298,6 +1366,15 @@ function createOacBrowserHostAdapter(input) {
             contentType: previewMetaAppContentType(indexFile),
         };
     };
+    // -------------------------------------------------------------------------
+    // On-chain Q&A question routing (IDBots feat/metaweb-qa parity): a bare
+    // pin:// URI that IS a simplequestion pin resolves to the bundled qanda
+    // viewer (html-iframe renderer, same mechanism as MetaApp previews) instead
+    // of the generic pin reader. The probe checks the Q&A index: definitive
+    // negatives (40400) are cached — non-question pins skip re-probing;
+    // positives are NOT cached so the page always opens fresh counts/answers;
+    // indeterminate failures fall through to the generic resolver uncached.
+    // -------------------------------------------------------------------------
     async function resolveResource(resolveInput) {
         const actor = await resolveActor(resolveInput);
         if ('failure' in actor)
@@ -1314,6 +1391,9 @@ function createOacBrowserHostAdapter(input) {
             ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
         });
         const artifactCache = (0, artifactCache_1.createMetaAppArtifactCacheStore)(actor.homeDir);
+        const qaQuestion = await tryResolveQaQuestionResource(resolveInput.uri, browserConfig.metasoP2PBaseUrl);
+        if (qaQuestion)
+            return qaQuestion;
         return (0, agent_browser_core_1.resolveBrowserResource)({
             uri: resolveInput.uri,
             config: browserConfig,

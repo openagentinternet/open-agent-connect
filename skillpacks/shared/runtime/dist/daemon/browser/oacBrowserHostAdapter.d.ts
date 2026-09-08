@@ -1,4 +1,4 @@
-import type { BrowserHostAdapter, BrowserLlmCompleteMessage, BrowserLlmCompleteResult } from '@openagentinternet/agent-browser-host-contract';
+import type { BrowserCommandResult, BrowserHostAdapter, BrowserResolveResult, BrowserLlmCompleteMessage, BrowserLlmCompleteResult } from '@openagentinternet/agent-browser-host-contract';
 import { type BrowserNameAliasProvider } from '@openagentinternet/agent-browser-core';
 import { type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
@@ -56,6 +56,11 @@ export interface OacAppSessionHost {
         releaseSeat?: boolean;
     }): Promise<AppSessionPublic>;
 }
+/**
+ * Question-pin probe for the Bot Browser resolver (exported for tests).
+ * Returns null to fall through to the generic pin resolver.
+ */
+export declare function tryResolveQaQuestionResource(rawUri: string, metasoP2PBaseUrl: string | undefined): Promise<BrowserCommandResult<BrowserResolveResult> | null>;
 export interface OacBrowserMetaAppBridgeActor {
     uri: string;
     globalMetaId: string;
