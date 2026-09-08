@@ -4,6 +4,7 @@ import {
   getPlatformDefinition,
   getMetabotSharedSkillRoot,
   getPlatformSkillRoots,
+  getSharedAgentsSkillRoot,
   isPlatformId,
   resolvePlatformSkillRootPath,
   type PlatformDefinition,
@@ -64,11 +65,28 @@ export type PrimaryRuntimeSkillCatalogResult =
   | PrimaryRuntimeSkillCatalogSuccess
   | PrimaryRuntimeSkillCatalogFailure;
 
+export interface PlatformScopedSkillCatalogSuccess {
+  ok: true;
+  platformId: PlatformId;
+  skills: PlatformSkillCatalogEntry[];
+  rootDiagnostics: PlatformSkillRootDiagnostic[];
+}
+
 export interface PlatformSkillCatalog {
   listPrimaryRuntimeSkills(input: {
     metaBotSlug: string;
     allowFallbackRuntime?: boolean;
   }): Promise<PrimaryRuntimeSkillCatalogResult>;
+  /**
+   * Platform-scoped listing (no runtime involved): the given platform's skill
+   * roots plus, by default, the ~/.agents/skills shared standard. The DSH
+   * host uses this so the Bot editor's chat-skills picker offers exactly the
+   * skill surface a DSH session can execute.
+   */
+  listSkillsForPlatform(input: {
+    platformId: PlatformId;
+    includeSharedAgents?: boolean;
+  }): Promise<PlatformScopedSkillCatalogSuccess>;
 }
 
 export interface CreatePlatformSkillCatalogOptions {
@@ -282,6 +300,37 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
   const env = options.env ?? process.env;
 
   return {
+    async listSkillsForPlatform(input) {
+      const platform = getPlatformDefinition(input.platformId);
+      const roots = [
+        ...getPlatformSkillRoots(platform.id),
+        ...(input.includeSharedAgents !== false ? [getSharedAgentsSkillRoot()] : []),
+      ];
+      const rootResults = await Promise.all(roots.map((root) => scanRoot({
+        platform,
+        root,
+        absolutePath: resolveCatalogRoot({
+          root,
+          systemHomeDir: options.systemHomeDir,
+          projectRoot: options.projectRoot,
+          env,
+        }),
+      })));
+      const byName = new Map<string, PlatformSkillCatalogEntry>();
+      for (const result of rootResults) {
+        for (const skill of result.skills) {
+          if (!byName.has(skill.skillName)) {
+            byName.set(skill.skillName, skill);
+          }
+        }
+      }
+      return {
+        ok: true as const,
+        platformId: platform.id,
+        skills: [...byName.values()],
+        rootDiagnostics: rootResults.map((result) => result.diagnostic),
+      };
+    },
     async listPrimaryRuntimeSkills(input) {
       const metaBotSlug = normalizeText(input.metaBotSlug);
       const allowFallbackRuntime = input.allowFallbackRuntime !== false;

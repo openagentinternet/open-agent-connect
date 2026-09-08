@@ -88,13 +88,14 @@ test('per-bot reads return null (CLI fallback) for an unknown profile', async ()
   }
 })
 
-test('localChatSkills returns null (CLI fallback) when the Bot has no primary runtime binding', async () => {
+test('localChatSkills lists the DSH skill scope even without a primary runtime binding', async () => {
   const home = await makeHome()
   process.env.HOME = home
   try {
     // Hand-written profile fixture (same pattern as the grouptask test): the
-    // identity exists, but no enabled primary LLM runtime binding does, so the
-    // catalog read must defer to the CLI, which renders the friendly error.
+    // identity exists, but no enabled primary LLM runtime binding does. The
+    // DSH-scoped listing no longer depends on any runtime — it must list the
+    // skills a DSH session can execute from ~/.dsh/skills and ~/.agents/skills.
     const profilesRoot = join(home, '.metabot', 'profiles')
     const homeDir = join(profilesRoot, 'skiller')
     const { mkdirSync, writeFileSync } = await import('node:fs')
@@ -123,12 +124,20 @@ test('localChatSkills returns null (CLI fallback) when the Bot has no primary ru
       },
     }))
 
-    assert.deepEqual(await localRead.localChatSkills('skiller'), {
-      ok: false,
-      state: 'failed',
-      code: 'primary_runtime_missing',
-      message: 'The selected MetaBot has no enabled primary runtime binding.',
-    })
+    // One skill under ~/.agents/skills and one under ~/.dsh/skills.
+    const agentsSkill = join(home, '.agents', 'skills', 'shared-lookup')
+    const dshSkill = join(home, '.dsh', 'skills', 'dsh-greet')
+    mkdirSync(agentsSkill, { recursive: true })
+    mkdirSync(dshSkill, { recursive: true })
+    writeFileSync(join(agentsSkill, 'SKILL.md'), '# Shared Lookup\nLook things up.\n')
+    writeFileSync(join(dshSkill, 'SKILL.md'), '# DSH Greet\nSay hello.\n')
+
+    const result = await localRead.localChatSkills('skiller')
+    assert.notEqual(result, null)
+    assert.equal(result.ok, true)
+    assert.equal(result.data.platform.id, 'dsh')
+    const names = result.data.skills.map((skill) => skill.skillName).sort()
+    assert.deepEqual(names, ['dsh-greet', 'shared-lookup'])
   } finally {
     process.env.HOME = ORIGINAL_HOME
     await rm(home, { recursive: true, force: true })
