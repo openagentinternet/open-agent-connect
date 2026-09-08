@@ -116,6 +116,11 @@ export class BotPresetSeatController {
     }
   }
 
+  syncSession(): void {
+    const session = this.currentSession()
+    this.set({ sessionId: session?.id ?? '' })
+  }
+
   async select(id: string): Promise<void> {
     if (this.store.getSnapshot().busy) return
     this.stage(id)
