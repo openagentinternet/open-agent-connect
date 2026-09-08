@@ -5,6 +5,34 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
+## 0.6.0 - 2026-09-09
+
+### Added
+
+- Added built-in media description tools backed by the free MetaID LLM relay
+  (`metabot media` — describe one local image/video/audio file through vision +
+  ASR), with a guarded media service lookup and regression coverage.
+- Added MetaApp publishing progress stages with `--op-id` stage events streamed
+  on `GET /api/metaapp/events?op=<id>`, chain-fallback update inheritance, and
+  UI fork buttons.
+- Added IDBots-parity cross-session memory read tools.
+- Strengthened the on-chain Q&A ask posture: publishing a question is the
+  default when on-chain searches come up empty (cheap, non-blocking, seeds the
+  Q&A commons), applied across the QA behavior rule, tool descriptions, and the
+  skill learning-loop SOP.
+- Unified passive-LLM priority (round A): engine sites resolve host-first and
+  DSH skills gained explicit scope handling.
+
+### Changed
+
+- DSH plugin ships in lockstep with the core from this release on: both
+  packages are versioned 0.6.0 (plugin was 0.5.0 while core was 0.5.1).
+- DSH: the Bot availability switch is clickable, unavailable Bots are filtered
+  from staffing, KB tool profile home resolves from the Bot slug with string
+  error contracts (DSH-DEFECT-KB-001), the working session id renders next to
+  the preset name, and streaming messages are no longer linkified mid-stream.
+- Regenerated all host skillpack dists to match main (48 new bundled modules).
+
 ## 0.5.1 - 2026-09-08
 
 ### Changed
