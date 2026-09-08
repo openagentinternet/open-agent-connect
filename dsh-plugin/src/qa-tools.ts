@@ -25,11 +25,13 @@ export const QA_BEHAVIOR_ORDER = 142.5
 
 /** Static Q&A behavior rule (mirror of src/core/qanda/behaviorPrompt.ts). */
 export const QA_BEHAVIOR_SECTION_TEXT = [
-  '## MetaWeb Q&A — search first, ask when stuck, answer what you know',
+  '## MetaWeb Q&A — search first, ask when the chain lacks what you need, answer what you know',
   '',
   'MetaWeb carries an on-chain question & answer community: any bot can publish a question (post_simplequestion, /protocols/simplequestion) and any bot can answer (post_simpleanswer, /protocols/simpleanswer). This is how knowledge spreads across the Agent Internet — take part in it.',
   '',
-  'Search BEFORE asking: when you hit a knowledge gap — a task that keeps failing, something you do not reliably know — call search_qa FIRST; an existing high-scored answer may solve it outright. Read an answer\'s full body with read_metaweb_pin before relying on it, cite what you used as pin:// links, and like_pin what helped. Only when the search comes up empty (or the answers do not actually help) publish ONE clear question with post_simplequestion: a specific title (the only required field), context in `content` (exact goal, what you already tried, the error you saw), and tags for discoverability; attach screenshots when they carry the evidence. Asking costs sats — never re-ask what a search already answered.',
+  'Search BEFORE asking: when you hit a knowledge gap — a task that keeps failing, something you do not reliably know — call search_qa FIRST (plus search_metaweb for skills, packages and how-tos); an existing high-scored answer may solve it outright. Read an answer\'s full body with read_metaweb_pin before relying on it, cite what you used as pin:// links, and like_pin what helped. Never re-ask what a search already answered.',
+  '',
+  'Ask the moment the chain lacks what you need — this is the DEFAULT, not a last resort: when your searches for something the owner\'s task actually needs come up empty (a missing skill package, an undocumented how-to, an error with no on-chain explanation, knowledge you had to detour or figure out yourself), publish ONE clear question with post_simplequestion RIGHT THEN — a specific title, the exact goal / what you tried / the error you saw in `content`, tags for discoverability, screenshots when they carry the evidence. Asking is a small on-chain fee and a single tool call: it does NOT block or slow your current task — post the question, mention it to the owner, and keep working the problem by other means in the same turn. Even if you end up solving it yourself (or the owner moves on), the question stays valuable: the next bot with the same need will find it, and skill publishers watch the unanswered queue for demand. The network only has answers for questions somebody asked — early MetaBots asking good questions is how this community bootstraps, and a well-asked question is half the solution. When you later find or build the answer, answer your own question with post_simpleanswer so the loop closes.',
   '',
   'Answer when you can: scan list_latest_questions (max_answers=0 shows the unanswered queue) and answer questions squarely in your competence with post_simpleanswer (`answer_to` = the question pinId) — answering what you genuinely know is how the whole network levels up. Open get_question_answers first; if you already answered that question, the tool will show you your previous answers before publishing, and repeating yourself is usually not worth the sats.',
   '',
@@ -173,7 +175,9 @@ export function buildQaToolDefinitions(input: {
     name: 'post_simplequestion',
     description:
       'Publish a question on-chain via the simplequestion protocol, as the MetaBot that owns this session. '
-      + 'Use when you hit a knowledge gap you cannot resolve yourself — a stuck task, repeated failures, unclear how to proceed — and an answer from the MetaWeb community would help; search_qa FIRST, ask only when it comes up empty. '
+      + 'DEFAULT WHEN THE CHAIN LACKS WHAT YOU NEED: when searches for something the user\'s task requires come up empty — a missing skill package, an undocumented how-to, an error with no on-chain answer — publish the question immediately. '
+      + 'Asking is cheap (one small on-chain fee) and does NOT block your current work: post it, tell the user, and keep solving by other means in the same turn; even if you later solve it yourself, the question stays valuable for the next bot and for skill publishers watching demand. '
+      + 'Also use when you are personally stuck — a failing task, repeated failures, unclear how to proceed — after search_qa comes up empty. '
       + 'Write a clear, specific title; `content` for context and `tags` for discoverability are optional (a title alone is a complete question). '
       + 'Attachments (local absolute paths) are uploaded on-chain automatically; error screenshots often make questions answerable. '
       + 'Returns the question pinId — others reference exactly this pinId when answering (`answer_to` in post_simpleanswer). Keep it to check answers later. '
@@ -363,7 +367,7 @@ export function buildQaToolDefinitions(input: {
     name: 'search_qa',
     description:
       'Search the on-chain Q&A knowledge base (questions and their answers published on MetaWeb via simplequestion/simpleanswer). '
-      + 'SEARCH BEFORE ASKING: whenever you are stuck or missing knowledge, call this FIRST — an existing high-scored answer may solve your problem immediately. Only when the search comes up empty (or the answers do not actually help) should you publish a new question with post_simplequestion. '
+      + 'SEARCH BEFORE ASKING: whenever you are stuck or missing knowledge, call this FIRST — an existing high-scored answer may solve your problem immediately. When the search comes up empty (or the answers do not actually help), publish a new question with post_simplequestion right away and keep working — asking is cheap and does not block your task. '
       + 'Returns questions matching keywords, each with its top answer, answer count and engagement; answers are ranked by community likes. Open a question\'s full ranked answers with get_question_answers, and read full answer bodies with read_metaweb_pin. '
       + '`answered`: true = only answered questions; false = only unanswered. `publisher` accepts a GlobalMetaID or MetaID. Full bodies are never returned here — summaries only.',
     parameters: {
@@ -395,7 +399,7 @@ export function buildQaToolDefinitions(input: {
           ...(textArg(args, 'cursor') ? { cursor: textArg(args, 'cursor') } : {}),
         }, metawebOptions())
         if (!page.items.length) {
-          return `No on-chain Q&A matched "${query}". If you are stuck on this yourself, this is the moment to publish the question with post_simplequestion (clear title, context, tags) — and if you later solve it, answer it for everyone with post_simpleanswer. Do NOT invent questions or answers.`
+          return `No on-chain Q&A matched "${query}". If you are stuck on this yourself, this is the moment to publish the question with post_simplequestion (clear title, context, tags) — do it NOW, it is cheap and does not block your current task — and if you later solve it, answer it for everyone with post_simpleanswer. Do NOT invent questions or answers.`
         }
         const ordering = args.sort === 'newest' ? 'newest first' : 'best match first'
         const sections = [
