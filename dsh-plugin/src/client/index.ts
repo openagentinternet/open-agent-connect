@@ -19,7 +19,7 @@ import { A2AConversation, type A2AConversationInjected } from './A2AConversation
 import { AppsPanel } from './AppsPanel.tsx'
 import { BotBrowserBoundary, BotBrowserSidebar, type BrowserLocaleFace } from './BotBrowserSidebar.tsx'
 import { BotPanel } from './BotPanel.tsx'
-import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
+import { BotPresetSeat, SessionIdHeader, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'

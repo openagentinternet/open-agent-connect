@@ -40,6 +40,12 @@ function isSkippable(el: Element): boolean {
   // .oac-a2a-list is the A2A Chat / Group Tasks left column: navigation rows
   // whose name/summary text must stay plain — never linkify pinIDs/URIs there.
   if (el.closest('a, code, pre, textarea, .oac-browser-shell, .oac-a2a-list')) return true
+  // A streaming message re-parses and re-renders its tail on every chunk.
+  // Wrapping a partially-arrived URI there leaves a stale truncated anchor in
+  // the DOM when React rewrites its text nodes — the visible garble of a cut
+  // URI glued to a title fragment. Wait for the settled render (the attribute
+  // observer below schedules the pass once data-streaming clears).
+  if (el.closest('[data-streaming]')) return true
   return false
 }
 
@@ -146,7 +152,16 @@ export function startAgentLinkInterceptor(openUri: (uri: string) => void): () =>
     }, 40)
   }
   const observer = new MutationObserver(schedule)
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+  // data-streaming is the settle signal: its removal schedules the pass that
+  // enhances the finished message (content mutations during the stream are
+  // gated off by the [data-streaming] skip in isSkippable).
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['data-streaming'],
+  })
   schedule()
 
   return () => {
