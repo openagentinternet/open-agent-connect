@@ -218,7 +218,8 @@ function isTransientToolError(error: unknown): boolean {
     || message.includes('network')
 }
 
-async function actorHomeDir(slug: string): Promise<string> {
+/** Resolve a Bot slug to its profile homeDir, mirroring the CLI's `--from` resolution. */
+export async function actorHomeDir(slug: string): Promise<string> {
   const resolved = await localActorHomeDir(slug)
   if (resolved) return resolved
   return join(homedir(), '.metabot', 'profiles', slug)

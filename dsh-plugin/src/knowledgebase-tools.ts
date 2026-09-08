@@ -7,11 +7,13 @@
  */
 import { core } from './local-read.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
-import { agentSessionCwd, oacSlugOf } from './browser-tools.js'
+import { actorHomeDir, oacSlugOf } from './browser-tools.js'
 
 export interface KnowledgebaseToolDeps {
   /** Resolve the acting bot slug for one tool exec; fallback when unknown. */
   fallbackSlug?: string
+  /** Resolve a Bot slug to its profile homeDir; defaults to the CLI-mirroring resolution. */
+  resolveHomeDir?: (slug: string) => Promise<string>
 }
 
 function textArg(args: Record<string, unknown>, key: string): string {
@@ -68,26 +70,36 @@ function serviceFor(homeDir: string) {
   return service
 }
 
+/**
+ * Resolve the acting Bot's slug and profile homeDir for one tool exec. The
+ * homeDir comes from the slug (never the session workspace cwd — DSH sessions
+ * run in the host workspace, which resolveMetabotPaths rejects), so the tools
+ * work from any conversation workspace and from never-initialized profiles.
+ */
+async function sessionOf(
+  input: KnowledgebaseToolDeps & { host: HostContext },
+  exec: HostToolExec,
+): Promise<{ slug: string; homeDir: string } | null> {
+  const agent = exec.agent as HostAgentLike | undefined
+  const slug = (agent ? oacSlugOf(input.host, agent) : undefined) ?? input.fallbackSlug ?? ''
+  if (!slug) return null
+  const homeDir = await (input.resolveHomeDir ?? actorHomeDir)(slug)
+  return { slug, homeDir }
+}
+
+/** Tool failure text: a string, so the declared string output schema always validates. */
+function toolError(tool: string, error: unknown): string {
+  return `${tool} failed: ${error instanceof Error ? error.message : String(error)}`
+}
+
+const NO_SESSION = 'could not determine the acting Bot profile for this session.'
+
 export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps & {
   host: HostContext
 }): HostToolDefinition[] {
-  const { host } = input
-
   const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
     { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
   ]
-
-  const slugFor = (exec: HostToolExec, homeDir?: string): { slug: string; homeDir: string } | null => {
-    const agent = exec.agent
-    const slug = (agent ? oacSlugOf(host, agent) : undefined) ?? input.fallbackSlug ?? ''
-    if (!slug || !homeDir) return null
-    return { slug, homeDir }
-  }
-
-  const sessionOf = (exec: HostToolExec) => {
-    const agent = exec.agent as HostAgentLike | undefined
-    return slugFor(exec, agentSessionCwd(agent))
-  }
 
   return [
     {
@@ -100,8 +112,8 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (_args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('knowledge_base_list', NO_SESSION)
         try {
           const rows = await serviceFor(session.homeDir).store.listKnowledgeBases()
           if (!rows.length) return 'No knowledge bases yet. knowledge_base_add_document creates the default one on first save.'
@@ -114,7 +126,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
             return bits.join('\n')
           }).join('\n')
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('knowledge_base_list', error)
         }
       },
     },
@@ -137,10 +149,10 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
       output: { schema: { type: 'string' }, render },
       timeoutMs: 20_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('knowledge_base_query', NO_SESSION)
         const query = textArg(args, 'query')
-        if (!query) return { error: 'query is required.' }
+        if (!query) return toolError('knowledge_base_query', 'query is required.')
         try {
           const results = await serviceFor(session.homeDir).queryKnowledgeBase(
             session.slug,
@@ -159,7 +171,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
             ...result.hits.map((hit) => `- [${hit.score}] ${hit.title} :: ${hit.docRelPath}#${hit.ord}\n  ${hit.snippet}`),
           ].join('\n')).join('\n\n')
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('knowledge_base_query', error)
         }
       },
     },
@@ -186,11 +198,11 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
       output: { schema: { type: 'string' }, render },
       timeoutMs: 20_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('knowledge_base_add_document', NO_SESSION)
         const title = textArg(args, 'title')
         const content = typeof args.content === 'string' ? args.content : ''
-        if (!title || !content.trim()) return { error: 'title and content are required.' }
+        if (!title || !content.trim()) return toolError('knowledge_base_add_document', 'title and content are required.')
         try {
           const saved = await serviceFor(session.homeDir).addDocument(session.slug, {
             title,
@@ -205,7 +217,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
           })
           return `Saved "${title}" as ${saved.relPath}. Now call knowledge_base_learn to make it searchable.`
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('knowledge_base_add_document', error)
         }
       },
     },
@@ -225,8 +237,8 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
       output: { schema: { type: 'string' }, render },
       timeoutMs: 120_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('knowledge_base_learn', NO_SESSION)
         try {
           const learned = await serviceFor(session.homeDir).learnKnowledgeBase(
             session.slug,
@@ -235,7 +247,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
           )
           return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks indexed.`
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('knowledge_base_learn', error)
         }
       },
     },
@@ -283,17 +295,9 @@ function formatProcedureRow(row: Record<string, unknown>): string {
 }
 
 function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: HostContext }): HostToolDefinition[] {
-  const { host } = input
   const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
     { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
   ]
-  const sessionOf = (exec: HostToolExec) => {
-    const agent = exec.agent as HostAgentLike | undefined
-    const homeDir = agentSessionCwd(agent)
-    const slug = (agent ? oacSlugOf(host, agent) : undefined) ?? input.fallbackSlug ?? ''
-    if (!slug || typeof homeDir !== 'string') return null
-    return { slug, homeDir }
-  }
 
   return [
     {
@@ -312,10 +316,10 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('procedure_recall', NO_SESSION)
         const query = textArg(args, 'query')
-        if (!query) return { error: 'query is required.' }
+        if (!query) return toolError('procedure_recall', 'query is required.')
         try {
           const store = procedureStoreFor(session.homeDir)
           const rows = await store.listProcedures({ status: 'active' })
@@ -328,7 +332,7 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
           for (const hit of top) await store.touchUsed(String(hit.procedure.id))
           return top.map((hit) => formatProcedureRow(hit.procedure)).join('\n\n')
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('procedure_recall', error)
         }
       },
     },
@@ -352,11 +356,11 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('procedure_save', NO_SESSION)
         const title = textArg(args, 'title')
         const steps = stringListArg(args, 'steps')
-        if (!title || !steps?.length) return { error: 'title and at least one step are required.' }
+        if (!title || !steps?.length) return toolError('procedure_save', 'title and at least one step are required.')
         try {
           const saved = await procedureStoreFor(session.homeDir).upsertProcedure({
             title,
@@ -369,7 +373,7 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
           })
           return `${saved.created ? 'Saved' : 'Updated (v' + saved.procedure.version + ')'} procedure "${title}".`
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('procedure_save', error)
         }
       },
     },
@@ -384,15 +388,15 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('procedure_archive', NO_SESSION)
         const title = textArg(args, 'title')
-        if (!title) return { error: 'title is required.' }
+        if (!title) return toolError('procedure_archive', 'title is required.')
         try {
           const archived = await procedureStoreFor(session.homeDir).archiveProcedureByTitle(title)
           return archived ? `Archived "${title}".` : `No procedure titled "${title}" found.`
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('procedure_archive', error)
         }
       },
     },
@@ -424,17 +428,9 @@ function studyStoreFor(homeDir: string) {
 }
 
 function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostContext }): HostToolDefinition[] {
-  const { host } = input
   const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
     { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
   ]
-  const sessionOf = (exec: HostToolExec) => {
-    const agent = exec.agent as HostAgentLike | undefined
-    const homeDir = agentSessionCwd(agent)
-    const slug = (agent ? oacSlugOf(host, agent) : undefined) ?? input.fallbackSlug ?? ''
-    if (!slug || typeof homeDir !== 'string') return null
-    return { slug, homeDir }
-  }
 
   return [
     {
@@ -455,10 +451,10 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('metaweb_study_enqueue', NO_SESSION)
         const topic = textArg(args, 'topic')
-        if (!topic) return { error: 'topic is required.' }
+        if (!topic) return toolError('metaweb_study_enqueue', 'topic is required.')
         try {
           const result = await studyStoreFor(session.homeDir).enqueueStudyJob({
             metabotSlug: session.slug,
@@ -468,7 +464,7 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
           return `${result.created ? 'Queued' : 'Already queued'} study job "${topic}" (${result.job.budgetPins} pins/night). `
             + 'It runs nightly 00:00-06:00; check metaweb_study_status later. Answer the user from current knowledge now.'
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('metaweb_study_enqueue', error)
         }
       },
     },
@@ -491,8 +487,8 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('metaweb_qa_surf_enqueue', NO_SESSION)
         try {
           const result = await studyStoreFor(session.homeDir).enqueueQaSurfJob({
             metabotSlug: session.slug,
@@ -508,7 +504,7 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
             'Tell the user it recurs until disabled (metaweb_qa_surf_disable) and that progress shows in metaweb_study_status.',
           ].join('\n')
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('metaweb_qa_surf_enqueue', error)
         }
       },
     },
@@ -522,8 +518,8 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (_args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('metaweb_qa_surf_disable', NO_SESSION)
         try {
           const disabled = await studyStoreFor(session.homeDir).disableQaSurfJob(session.slug)
           if (!disabled) {
@@ -531,7 +527,7 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
           }
           return 'Nightly Q&A surfing disabled. Everything already answered and saved stays with you; future nightly runs are stopped. Re-enable anytime with metaweb_qa_surf_enqueue.'
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('metaweb_qa_surf_disable', error)
         }
       },
     },
@@ -542,8 +538,8 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
       execute: async (_args, exec) => {
-        const session = sessionOf(exec)
-        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('metaweb_study_status', NO_SESSION)
         try {
           const rows = await studyStoreFor(session.homeDir).listStudyJobs(session.slug)
           if (!rows.length) return 'No study jobs yet.'
@@ -554,7 +550,7 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
             job.error ? `  error: ${job.error}` : '',
           ].filter(Boolean).join('\n')).join('\n')
         } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) }
+          return toolError('metaweb_study_status', error)
         }
       },
     },
@@ -566,12 +562,16 @@ function isDuplicateToolError(error: unknown): boolean {
 }
 
 /** Register the KB + procedure tools on the host global layer during plugin apply. */
-export function bindKnowledgeBaseToolInstall(ctx: HostContext, fallbackSlug?: string): void {
+export function bindKnowledgeBaseToolInstall(
+  ctx: HostContext,
+  fallbackSlug?: string,
+  resolveHomeDir?: (slug: string) => Promise<string>,
+): void {
   const hostAgent: HostAgentLike = { ctx }
   for (const definition of [
-    ...buildKnowledgeBaseToolDefinitions({ host: ctx, fallbackSlug }),
-    ...buildProcedureToolDefinitions({ host: ctx, fallbackSlug }),
-    ...buildStudyToolDefinitions({ host: ctx, fallbackSlug }),
+    ...buildKnowledgeBaseToolDefinitions({ host: ctx, fallbackSlug, resolveHomeDir }),
+    ...buildProcedureToolDefinitions({ host: ctx, fallbackSlug, resolveHomeDir }),
+    ...buildStudyToolDefinitions({ host: ctx, fallbackSlug, resolveHomeDir }),
   ]) {
     try {
       ctx.tools?.register(definition)
