@@ -45,6 +45,11 @@ export const BOTS_CSS = `
 /* Clickable avatar (opens the Bot's page in the right-sidebar Bot Browser). */
 .oac-avatar-btn { flex: none; display: inline-flex; padding: 0; border: none; border-radius: 50%; background: none; cursor: pointer; }
 .oac-avatar-btn:hover { filter: brightness(1.08); }
+.oac-bot-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.oac-bot-role { font-size: 12px; line-height: 1.4; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-bot-global-id { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 16px 12px; font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.oac-bot-global-id > span { flex: none; }
+.oac-bot-global-id code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-bot-name { flex: 1; min-width: 0; font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-bot-bio { margin: 0 16px 12px; min-height: 39px; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .oac-bot-model { margin: 0 16px 12px; min-height: 18px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

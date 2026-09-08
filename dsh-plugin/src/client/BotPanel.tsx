@@ -394,7 +394,10 @@ export function BotPanel({
                 <li className="oac-bot-card" key={bot.slug}>
                   <div className="oac-bot-main">
                     <BotAvatar name={bot.name} src={bot.avatarDataUrl} />
-                    <span className="oac-bot-name">{bot.name}</span>
+                    <div className="oac-bot-identity">
+                      <span className="oac-bot-name">{bot.name}</span>
+                      {bot.role?.trim() ? <span className="oac-bot-role" title={bot.role}>{bot.role}</span> : null}
+                    </div>
                     {bot.botType === 'twin' ? <span className="oac-memory-badge oac-memory-badge-twin">Twin</span> : null}
                     {setupPending ? (
                       <span className="oac-memory-badge oac-setup-badge" title={t('cardResyncHint')}>
@@ -402,6 +405,13 @@ export function BotPanel({
                       </span>
                     ) : null}
                   </div>
+                  {bot.globalMetaId ? (
+                    <div className="oac-bot-global-id">
+                      <span>{t('globalMetaId')}</span>
+                      <code title={bot.globalMetaId}>{bot.globalMetaId}</code>
+                      <CopyIconButton value={bot.globalMetaId} label={t('copyGlobalMetaId')} copiedLabel={t('copied')} />
+                    </div>
+                  ) : null}
                   <p className="oac-bot-bio">{bot.bio ?? ''}</p>
                   <div className="oac-bot-model">
                     {llmUnset ? (
