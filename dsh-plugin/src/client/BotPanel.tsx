@@ -407,8 +407,9 @@ export function BotPanel({
                   </div>
                   {bot.globalMetaId ? (
                     <div className="oac-bot-global-id">
-                      <span>{t('globalMetaId')}</span>
-                      <code title={bot.globalMetaId}>{bot.globalMetaId}</code>
+                      <code title={bot.globalMetaId}>
+                        {bot.globalMetaId.length > 16 ? `${bot.globalMetaId.slice(0, 8)}…${bot.globalMetaId.slice(-6)}` : bot.globalMetaId}
+                      </code>
                       <CopyIconButton value={bot.globalMetaId} label={t('copyGlobalMetaId')} copiedLabel={t('copied')} />
                     </div>
                   ) : null}
