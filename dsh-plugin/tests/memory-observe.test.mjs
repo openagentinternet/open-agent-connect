@@ -122,7 +122,7 @@ test('memory tools bridge to the CLI with the expected names and formatting', as
   })
   assert.deepEqual(
     tools.map((tool) => tool.name).sort(),
-    ['conversation_search', 'experience_recall', 'knowledge_recall', 'knowledge_upsert', 'memory_user_edits', 'recent_chats'].sort(),
+    ['conversation_search', 'experience_recall', 'knowledge_recall', 'knowledge_upsert', 'memory_user_edits', 'oac_session_read_all', 'oac_session_read_latest', 'recent_chats'].sort(),
   )
   const edits = tools.find((tool) => tool.name === 'memory_user_edits')
   const listResult = await edits.execute({ action: 'list' }, {})

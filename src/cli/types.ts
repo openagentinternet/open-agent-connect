@@ -220,6 +220,12 @@ export interface CliDependencies {
     scopes?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     stats?: (input: { from?: string; scopeKind?: string; scopeKey?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     transcriptAppend?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    transcriptRead?: (input: {
+      from?: string;
+      session: string;
+      limit?: number;
+      anyBot?: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     chats?: (input: { from?: string; limit?: number; sortOrder?: 'asc' | 'desc' }) => Awaitable<MetabotCommandResult<unknown>>;
     search?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     recall?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;

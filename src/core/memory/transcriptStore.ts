@@ -20,6 +20,18 @@ export interface TranscriptTurn {
   peerGlobalMetaId?: string | null;
 }
 
+/** One session's readable conversation, DSH transcript or A2A private chat. */
+export interface SessionReadSummary {
+  sessionId: string;
+  channel: string;
+  peerGlobalMetaId: string | null;
+  peerName: string | null;
+  messageCount: number;
+  firstMessageAt: number;
+  lastMessageAt: number;
+  turns: TranscriptTurn[];
+}
+
 export interface ChatSummary {
   sessionId: string;
   channel: string;
@@ -124,6 +136,96 @@ export async function readTranscript(
   const limit = options.limit === undefined ? 0 : Math.max(0, Math.floor(options.limit));
   return limit > 0 ? turns.slice(-limit) : turns;
 }
+
+const SESSION_REFERENCE_SCHEMES = [/^session:\/\//i, /^session:/i];
+
+/**
+ * Normalize one session reference the way tool outputs print it. Accepts the
+ * bare id, a `session:` prefix, or a `session://` scheme; returns null for ids
+ * that could not name a stored session (the IDBots cross-session contract).
+ */
+export function normalizeSessionReference(input: string): string | null {
+  let trimmed = input.trim();
+  for (const scheme of SESSION_REFERENCE_SCHEMES) {
+    trimmed = trimmed.replace(scheme, '');
+  }
+  trimmed = trimmed.trim();
+  if (!trimmed || !/^[A-Za-z0-9._-]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function summarizeSession(
+  sessionId: string,
+  channel: string,
+  peerGlobalMetaId: string | null,
+  peerName: string | null,
+  turns: TranscriptTurn[],
+): SessionReadSummary {
+  return {
+    sessionId,
+    channel,
+    peerGlobalMetaId,
+    peerName,
+    messageCount: turns.length,
+    firstMessageAt: turns[0]?.ts ?? 0,
+    lastMessageAt: turns[turns.length - 1]?.ts ?? 0,
+    turns,
+  };
+}
+
+/**
+ * Read one session's visible messages by id: the mirrored DSH transcript
+ * first, then the A2A private-chat store (ids as recent-chats prints them).
+ * Returns null when neither store holds the session.
+ */
+export async function readSessionMessages(
+  paths: MetabotPaths,
+  sessionId: string,
+): Promise<SessionReadSummary | null> {
+  const id = normalizeSessionReference(sessionId);
+  if (!id) return null;
+
+  const transcriptTurns = await readTranscript(paths, id);
+  if (transcriptTurns.length > 0) {
+    return summarizeSession(
+      id,
+      transcriptTurns[0].channel,
+      transcriptTurns[transcriptTurns.length - 1].peerGlobalMetaId ?? null,
+      null,
+      transcriptTurns,
+    );
+  }
+
+  const candidates = id.startsWith('chat-')
+    ? [`${id}.json`]
+    : [`chat-${id}.json`, `${id}.json`];
+  for (const fileName of candidates) {
+    const conversation = await readA2AConversation(paths, fileName);
+    if (!conversation || !Array.isArray(conversation.messages)) continue;
+    const turns = conversation.messages
+      .filter((message) => typeof message?.content === 'string' && message.content.trim())
+      .map((message) => normalizeTurn({
+        role: message.direction === 'outgoing' ? 'assistant' : 'user',
+        text: message.content,
+        ts: typeof message.timestamp === 'number' ? message.timestamp : 0,
+        channel: 'metaweb_private',
+        peerGlobalMetaId: typeof conversation.peer?.globalMetaId === 'string'
+          ? conversation.peer.globalMetaId
+          : undefined,
+      }))
+      .filter((turn): turn is TranscriptTurn => turn !== null);
+    if (turns.length === 0) continue;
+    return summarizeSession(
+      fileName.slice(0, -'.json'.length),
+      'metaweb_private',
+      conversation.peer?.globalMetaId ?? null,
+      conversation.peer?.name ?? null,
+      turns,
+    );
+  }
+  return null;
+}
+
 
 interface A2AConversationMessageLike {
   direction?: string;
