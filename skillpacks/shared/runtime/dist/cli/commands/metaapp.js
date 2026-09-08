@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runMetaAppCommand = runMetaAppCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const pinId_1 = require("../../core/metaapp/pinId");
+const scaffold_1 = require("../../core/metaapp/scaffold");
 const helpers_1 = require("./helpers");
 const METAAPP_SEARCH_LIMIT_DEFAULT = 8;
 const METAAPP_SEARCH_LIMIT_MAX = 20;
@@ -63,6 +64,34 @@ function readSearchLimitFlag(args) {
 }
 async function runMetaAppCommand(args, context) {
     const subcommand = args[0];
+    if (subcommand === 'new') {
+        const positionalDir = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
+        const dirFlag = readOptionalValueFlag(args, '--dir');
+        if (!dirFlag.ok) {
+            return dirFlag.result;
+        }
+        if (positionalDir && dirFlag.value) {
+            return commandInvalidFlag('Pass the target directory either positionally or via --dir, not both.');
+        }
+        const projectDir = positionalDir ?? dirFlag.value;
+        if (!projectDir) {
+            return commandInvalidFlag('metabot metaapp new requires a target directory: metabot metaapp new <dir> [--template demo].');
+        }
+        const template = readOptionalValueFlag(args, '--template');
+        if (!template.ok) {
+            return template.result;
+        }
+        // Scaffolding is a pure local filesystem operation: it runs in the CLI
+        // process (no daemon round-trip) so paths resolve against the user cwd.
+        return (0, scaffold_1.scaffoldMetaAppProject)({
+            projectDir,
+            cwd: context.cwd,
+            title: readOptionalFlag(args, '--title'),
+            appName: readOptionalFlag(args, '--app-name'),
+            ...(template.value ? { template: template.value } : {}),
+            force: (0, helpers_1.hasFlag)(args, '--force'),
+        });
+    }
     if (subcommand === 'preview') {
         const projectDir = readRequiredFlag(args, '--project-dir');
         if (!projectDir.ok) {

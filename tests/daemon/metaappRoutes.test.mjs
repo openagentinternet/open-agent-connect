@@ -14,6 +14,7 @@ const { commandSuccess } = require('../../dist/core/contracts/commandResult.js')
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createMetaAppLocalCacheStore } = require('../../dist/core/metaapp/localCache.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { ChainBroadcastUnknownError } = require('../../dist/core/signing/localMnemonicSigner.js');
 
 const ALICE_MVC_ADDRESS = '16UjcYNBG9GTK4uq2f7yYEbuifqCzoLMGS';
 const TARGET_PIN_ID = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
@@ -840,4 +841,107 @@ test('non-GET and non-POST metaapp routes return method_not_allowed', async (t) 
     code: 'method_not_allowed',
     message: 'Expected GET.',
   });
+});
+
+test('default metaapp owner publish blocks identical retries after an unknown broadcast outcome', async (t) => {
+  const fixture = await createAliceFixture(t);
+  let failures = 1;
+  const writes = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: {
+      writePin: async (input) => {
+        writes.push(input);
+        if (failures > 0) {
+          failures -= 1;
+          throw new ChainBroadcastUnknownError({
+            candidateTxids: ['metaapp-candidate-tx-1'],
+            confirmedTxids: [],
+            cause: new Error('socket timeout'),
+          });
+        }
+        return {
+          pinId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0',
+          txids: ['metaapp-write-tx-ok'],
+          totalCost: 1,
+          network: input.network ?? 'mvc',
+          operation: input.operation,
+          path: input.path,
+          contentType: input.contentType,
+        };
+      },
+    },
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const body = {
+    from: 'alice',
+    title: 'Ledger App',
+    appName: 'ledger-app',
+    content: TARGET_PIN_ID,
+    confirm: true,
+  };
+
+  const first = await fetchJson(server.baseUrl, '/api/metaapp/publish', { method: 'POST', body });
+  assert.equal(first.payload.ok, false);
+  assert.equal(first.payload.state, 'manual_action_required');
+  assert.equal(first.payload.code, 'chain_broadcast_unknown');
+  assert.equal(writes.length, 1);
+
+  const retry = await fetchJson(server.baseUrl, '/api/metaapp/publish', { method: 'POST', body });
+  assert.equal(retry.payload.ok, false);
+  assert.equal(retry.payload.state, 'manual_action_required');
+  assert.equal(retry.payload.code, 'chain_write_attempt_pending');
+  assert.match(retry.payload.message, /metaapp-candidate-tx-1/);
+  assert.equal(writes.length, 1, 'identical retry never reaches the chain');
+
+  const changed = await fetchJson(server.baseUrl, '/api/metaapp/publish', {
+    method: 'POST',
+    body: { ...body, title: 'Ledger App v2' },
+  });
+  assert.equal(changed.payload.ok, true);
+  assert.equal(writes.length, 2, 'edited content writes normally');
+});
+
+test('default metaapp owner update and delete route unknown broadcast outcomes through the attempt ledger', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const failingSigner = {
+    writePin: async () => {
+      throw new ChainBroadcastUnknownError({
+        candidateTxids: ['metaapp-candidate-tx-2'],
+        confirmedTxids: [],
+        cause: new Error('socket timeout'),
+      });
+    },
+  };
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: failingSigner,
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const updateBody = {
+    from: 'alice',
+    targetPinId: TARGET_PIN_ID,
+    title: 'Ledger App',
+    appName: 'ledger-app',
+    content: TARGET_PIN_ID,
+    confirm: true,
+  };
+  const updateFirst = await fetchJson(server.baseUrl, '/api/metaapp/update', { method: 'POST', body: updateBody });
+  assert.equal(updateFirst.payload.code, 'chain_broadcast_unknown');
+  const updateRetry = await fetchJson(server.baseUrl, '/api/metaapp/update', { method: 'POST', body: updateBody });
+  assert.equal(updateRetry.payload.code, 'chain_write_attempt_pending');
+
+  const deleteBody = { from: 'alice', targetPinId: TARGET_PIN_ID, confirm: true };
+  const deleteFirst = await fetchJson(server.baseUrl, '/api/metaapp/delete', { method: 'POST', body: deleteBody });
+  assert.equal(deleteFirst.payload.code, 'chain_broadcast_unknown');
+  const deleteRetry = await fetchJson(server.baseUrl, '/api/metaapp/delete', { method: 'POST', body: deleteBody });
+  assert.equal(deleteRetry.payload.code, 'chain_write_attempt_pending');
 });

@@ -9,6 +9,8 @@ import {
   type MetabotCommandResult,
 } from '../contracts/commandResult';
 import { appendMetafileUriExtension, extensionFromContentType, metafileUriFromPinId } from '../files/metafileUri';
+import type { ChainWriteAttemptStore } from '../chain/writeAttempts';
+import { ChainBroadcastUnknownError } from '../signing/localMnemonicSigner';
 import { readMetaAppForkMarker } from './forkMarker';
 import { buildMetaAppManifestDraft } from './manifest';
 import { assertMetaAppPinId } from './pinId';
@@ -87,6 +89,13 @@ export interface MetaAppPublishDependencies {
   actorKey?: string;
   /** Optional 60 s idempotency window + per-app write lock for chain writes. */
   writeGuard?: MetaAppWriteGuard;
+  /**
+   * Optional 24 h ledger for writes whose broadcast outcome was UNKNOWN. The
+   * pre-upload check refuses an identical retry with chain_write_attempt_pending
+   * (before any upload spends fees); a ChainBroadcastUnknownError from writeChain
+   * is recorded so the retry guard can find it.
+   */
+  writeAttempts?: ChainWriteAttemptStore;
   /** Optional progress callback: archive → upload → write during a confirmed write. */
   onStage?: (stage: string, detail?: Record<string, unknown>) => void;
   now?: () => number;
@@ -517,6 +526,31 @@ async function writePublishedMetaApp(input: {
       compatibilityMirrorContent: input.compatibilityMirrorContent,
     }));
 
+    // One stable content key powers both dedup layers: the 60 s idempotency
+    // window (writeGuard) and the 24 h unknown-broadcast ledger (writeAttempts).
+    // It only depends on the pre-upload deterministic payload, so an identical
+    // retry is recognized before the archive upload spends fees again.
+    const writeKind = `metaapp-${input.operation}`;
+    const idemKey = stableMetaAppWriteHash(writeKind, [
+      input.deps.actorKey,
+      input.path,
+      archive.sha256,
+      JSON.stringify(payloadPreview),
+      input.network,
+    ]);
+
+    if (input.deps.writeAttempts) {
+      const priorAttempt = await input.deps.writeAttempts.findRecent(idemKey).catch(() => null);
+      if (priorAttempt) {
+        return commandManualActionRequired(
+          'chain_write_attempt_pending',
+          `A previous ${writeKind} attempt with identical content hit an UNKNOWN broadcast state at `
+          + `${new Date(priorAttempt.at).toISOString()} (candidates: ${priorAttempt.candidateTxids.join(', ') || 'unavailable'}). `
+          + `The MetaApp may already be on-chain — verify those txids before publishing again.`,
+        );
+      }
+    }
+
     const execute = async (): Promise<MetabotCommandResult<Record<string, unknown>>> => {
       // The archive is staged before execute() because the write guard needs
       // its hash; report it here so a guard replay (which skips execute)
@@ -560,6 +594,21 @@ async function writePublishedMetaApp(input: {
           network: input.network,
         });
       } catch (error) {
+        if (error instanceof ChainBroadcastUnknownError) {
+          await input.deps.writeAttempts?.record({
+            contentHash: idemKey,
+            kind: writeKind,
+            candidateTxids: [...new Set([...error.confirmedTxids, ...error.candidateTxids])],
+            message: error.message,
+          }).catch(() => undefined);
+          return commandManualActionRequired('chain_broadcast_unknown', error.message, {
+            data: {
+              archive: publicArchive(archive),
+              upload,
+              payload,
+            },
+          });
+        }
         return commandFailed('metaapp_publish_failed', `Unable to write MetaApp protocol payload: ${errorMessage(error)}`, {
           data: {
             archive: publicArchive(archive),
@@ -611,13 +660,7 @@ async function writePublishedMetaApp(input: {
 
     if (input.deps.writeGuard) {
       return await input.deps.writeGuard.run({
-        idemKey: stableMetaAppWriteHash(`metaapp-${input.operation}`, [
-          input.deps.actorKey,
-          input.path,
-          archive.sha256,
-          JSON.stringify(payloadPreview),
-          input.network,
-        ]),
+        idemKey,
         lockKey: input.operation === 'modify' && input.targetPinId ? `metaapp:${input.targetPinId}` : undefined,
         fn: execute,
       });

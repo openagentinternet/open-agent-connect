@@ -1,4 +1,5 @@
 import { type MetabotCommandResult } from '../contracts/commandResult';
+import type { ChainWriteAttemptStore } from '../chain/writeAttempts';
 import type { MetaAppGalleryRecord } from './types';
 import { type MetaAppWriteGuard } from './writeGuard';
 export interface UploadLikeResult {
@@ -60,6 +61,13 @@ export interface MetaAppPublishDependencies {
     actorKey?: string;
     /** Optional 60 s idempotency window + per-app write lock for chain writes. */
     writeGuard?: MetaAppWriteGuard;
+    /**
+     * Optional 24 h ledger for writes whose broadcast outcome was UNKNOWN. The
+     * pre-upload check refuses an identical retry with chain_write_attempt_pending
+     * (before any upload spends fees); a ChainBroadcastUnknownError from writeChain
+     * is recorded so the retry guard can find it.
+     */
+    writeAttempts?: ChainWriteAttemptStore;
     /** Optional progress callback: archive → upload → write during a confirmed write. */
     onStage?: (stage: string, detail?: Record<string, unknown>) => void;
     now?: () => number;

@@ -3902,6 +3902,41 @@ function createDefaultMetabotDaemonHandlers(input) {
         const override = normalizeText(process.env[recall_1.QA_RECALL_BASE_URL_ENV]);
         return override ? { baseUrl: override } : {};
     }
+    /** Deterministic JSON for chain-write hashes: object keys sort recursively so
+     *  an identical retry always lands on the same attempt-ledger hash. */
+    function stableJsonForChainWriteHash(value) {
+        if (Array.isArray(value)) {
+            return `[${value.map((entry) => stableJsonForChainWriteHash(entry)).join(',')}]`;
+        }
+        if (value && typeof value === 'object') {
+            const record = value;
+            return `{${Object.keys(record).sort()
+                .map((key) => `${JSON.stringify(key)}:${stableJsonForChainWriteHash(record[key])}`)
+                .join(',')}}`;
+        }
+        return JSON.stringify(value) ?? 'null';
+    }
+    /** Content hash for the MetaApp owner write paths (publish/update/delete).
+     *  Volatile envelope keys (opId, confirm, from, network) never reach the hash;
+     *  network rides as its own part because the payload file rarely carries it. */
+    function metaAppOwnerWriteHash(kind, mvcAddress, rawInput) {
+        const { opId: _opId, confirm: _confirm, from: _from, network: _network, ...content } = rawInput;
+        return (0, writeAttempts_1.stableChainWriteHash)(kind, [
+            mvcAddress,
+            stableJsonForChainWriteHash(content),
+            normalizeText(rawInput.network),
+        ]);
+    }
+    async function metaAppOwnerWritePending(kind, contentHash) {
+        const prior = await (0, writeAttempts_1.createChainWriteAttemptStore)(normalizedSystemHomeDir)
+            .findRecent(contentHash).catch(() => null);
+        if (!prior) {
+            return null;
+        }
+        return (0, commandResult_1.commandManualActionRequired)('chain_write_attempt_pending', `A previous ${kind} attempt with identical content hit an UNKNOWN broadcast state at `
+            + `${new Date(prior.at).toISOString()} (candidates: ${prior.candidateTxids.join(', ') || 'unavailable'}). `
+            + `The MetaApp may already be on-chain — verify those txids before writing again.`);
+    }
     const secretStore = input.secretStore ?? (0, fileSecretStore_1.createFileSecretStore)(input.homeDir);
     // Create default adapter registry if none provided (backward compat)
     const adapters = input.adapters ?? (0, registry_1.createChainAdapterRegistry)([
@@ -11309,6 +11344,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
                         actorKey: actor.homeDir,
                         writeGuard: metaAppWriteGuard,
+                        writeAttempts: (0, writeAttempts_1.createChainWriteAttemptStore)(normalizedSystemHomeDir),
                         now: Date.now,
                         ...(onStage ? { onStage } : {}),
                     });
@@ -11394,6 +11430,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         readExistingMetaApp: async (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
                         actorKey: actor.homeDir,
                         writeGuard: metaAppWriteGuard,
+                        writeAttempts: (0, writeAttempts_1.createChainWriteAttemptStore)(normalizedSystemHomeDir),
                         now: Date.now,
                         ...(onStage ? { onStage } : {}),
                     });
@@ -11427,14 +11464,19 @@ function createDefaultMetabotDaemonHandlers(input) {
                     emitMetaAppOpTerminal(opId, result);
                     return result;
                 };
+                const contentHash = metaAppOwnerWriteHash('metaapp publish', actor.mvcAddress, rawInput);
                 try {
+                    const pending = await metaAppOwnerWritePending('metaapp publish', contentHash);
+                    if (pending) {
+                        return finish(pending);
+                    }
                     if (opId)
                         metaAppStageHub.publish(opId, { stage: 'write' });
                     const result = await (0, ownerService_1.publishMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput, metaAppWriteGuard);
                     return finish(addMetaAppOwnerLocalUiUrl(result));
                 }
                 catch (error) {
-                    return finish((0, commandResult_1.commandFailed)('metaapp_publish_failed', error instanceof Error ? error.message : String(error)));
+                    return finish(await commandFailedOrBroadcastUnknown(error, 'metaapp publish', contentHash, 'metaapp_publish_failed'));
                 }
             },
             update: async (rawInput) => {
@@ -11447,14 +11489,19 @@ function createDefaultMetabotDaemonHandlers(input) {
                     emitMetaAppOpTerminal(opId, result);
                     return result;
                 };
+                const contentHash = metaAppOwnerWriteHash('metaapp update', actor.mvcAddress, rawInput);
                 try {
+                    const pending = await metaAppOwnerWritePending('metaapp update', contentHash);
+                    if (pending) {
+                        return finish(pending);
+                    }
                     if (opId)
                         metaAppStageHub.publish(opId, { stage: 'write' });
                     const result = await (0, ownerService_1.updateMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput, metaAppWriteGuard);
                     return finish(addMetaAppOwnerLocalUiUrl(result));
                 }
                 catch (error) {
-                    return finish((0, commandResult_1.commandFailed)('metaapp_update_failed', error instanceof Error ? error.message : String(error)));
+                    return finish(await commandFailedOrBroadcastUnknown(error, 'metaapp update', contentHash, 'metaapp_update_failed'));
                 }
             },
             delete: async (rawInput) => {
@@ -11462,13 +11509,18 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if ('failure' in actor) {
                     return actor.failure;
                 }
+                const contentHash = metaAppOwnerWriteHash('metaapp delete', actor.mvcAddress, rawInput);
                 try {
+                    const pending = await metaAppOwnerWritePending('metaapp delete', contentHash);
+                    if (pending) {
+                        return pending;
+                    }
                     const result = await (0, ownerService_1.deleteMetaAppPin)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput, metaAppWriteGuard);
                     await upsertMetaAppLocalRevoke({ actor, rawInput, result }).catch(() => undefined);
                     return result;
                 }
                 catch (error) {
-                    return (0, commandResult_1.commandFailed)('metaapp_delete_failed', error instanceof Error ? error.message : String(error));
+                    return await commandFailedOrBroadcastUnknown(error, 'metaapp delete', contentHash, 'metaapp_delete_failed');
                 }
             },
             share: async (rawInput) => {

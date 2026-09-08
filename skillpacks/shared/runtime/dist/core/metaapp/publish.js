@@ -14,6 +14,7 @@ const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../contracts/commandResult");
 const metafileUri_1 = require("../files/metafileUri");
+const localMnemonicSigner_1 = require("../signing/localMnemonicSigner");
 const forkMarker_1 = require("./forkMarker");
 const manifest_1 = require("./manifest");
 const pinId_1 = require("./pinId");
@@ -330,6 +331,26 @@ async function writePublishedMetaApp(input) {
             contentHash: archive.sha256,
             compatibilityMirrorContent: input.compatibilityMirrorContent,
         }));
+        // One stable content key powers both dedup layers: the 60 s idempotency
+        // window (writeGuard) and the 24 h unknown-broadcast ledger (writeAttempts).
+        // It only depends on the pre-upload deterministic payload, so an identical
+        // retry is recognized before the archive upload spends fees again.
+        const writeKind = `metaapp-${input.operation}`;
+        const idemKey = (0, writeGuard_1.stableMetaAppWriteHash)(writeKind, [
+            input.deps.actorKey,
+            input.path,
+            archive.sha256,
+            JSON.stringify(payloadPreview),
+            input.network,
+        ]);
+        if (input.deps.writeAttempts) {
+            const priorAttempt = await input.deps.writeAttempts.findRecent(idemKey).catch(() => null);
+            if (priorAttempt) {
+                return (0, commandResult_1.commandManualActionRequired)('chain_write_attempt_pending', `A previous ${writeKind} attempt with identical content hit an UNKNOWN broadcast state at `
+                    + `${new Date(priorAttempt.at).toISOString()} (candidates: ${priorAttempt.candidateTxids.join(', ') || 'unavailable'}). `
+                    + `The MetaApp may already be on-chain — verify those txids before publishing again.`);
+            }
+        }
         const execute = async () => {
             // The archive is staged before execute() because the write guard needs
             // its hash; report it here so a guard replay (which skips execute)
@@ -373,6 +394,21 @@ async function writePublishedMetaApp(input) {
                 });
             }
             catch (error) {
+                if (error instanceof localMnemonicSigner_1.ChainBroadcastUnknownError) {
+                    await input.deps.writeAttempts?.record({
+                        contentHash: idemKey,
+                        kind: writeKind,
+                        candidateTxids: [...new Set([...error.confirmedTxids, ...error.candidateTxids])],
+                        message: error.message,
+                    }).catch(() => undefined);
+                    return (0, commandResult_1.commandManualActionRequired)('chain_broadcast_unknown', error.message, {
+                        data: {
+                            archive: publicArchive(archive),
+                            upload,
+                            payload,
+                        },
+                    });
+                }
                 return (0, commandResult_1.commandFailed)('metaapp_publish_failed', `Unable to write MetaApp protocol payload: ${errorMessage(error)}`, {
                     data: {
                         archive: publicArchive(archive),
@@ -421,13 +457,7 @@ async function writePublishedMetaApp(input) {
         };
         if (input.deps.writeGuard) {
             return await input.deps.writeGuard.run({
-                idemKey: (0, writeGuard_1.stableMetaAppWriteHash)(`metaapp-${input.operation}`, [
-                    input.deps.actorKey,
-                    input.path,
-                    archive.sha256,
-                    JSON.stringify(payloadPreview),
-                    input.network,
-                ]),
+                idemKey,
                 lockKey: input.operation === 'modify' && input.targetPinId ? `metaapp:${input.targetPinId}` : undefined,
                 fn: execute,
             });
