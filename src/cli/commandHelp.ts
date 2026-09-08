@@ -223,6 +223,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'chain', summary: 'Write arbitrary MetaID tuples and protocol payloads on-chain.' },
     { name: 'wallet', summary: 'Inspect local wallet balances across supported chains.' },
     { name: 'traffic', summary: 'Manage the traffic (account-quota gas credit) mode, balance, usage, grants, and redeem codes.' },
+    { name: 'media', summary: 'Describe one local image/video/audio file through the MetaID free LLM relay (vision + ASR).' },
     { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
     { name: 'provider', summary: 'Inspect local provider orders and settle seller-side refunds.' },
@@ -799,6 +800,25 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot traffic status',
       'metabot traffic mode traffic',
       'metabot traffic ledger --limit 20',
+    ],
+  },
+  {
+    commandPath: ['media'],
+    summary: 'Describe one media file through the MetaID free LLM relay (image description + OCR, video summary, audio transcription). Owner-identity bootstrapped like traffic (no --from); the relay key is cached in ~/.metabot/owner/llm-relay.json.',
+    usage: 'metabot media describe <image|video|audio> --path <file-or-url>',
+    subcommands: [
+      { name: 'describe', summary: 'Describe one media file: describe image --path <abs-path> [--question q], describe video --path <abs-path> [--question q] (over ~3 min truncated; needs ffmpeg for non-mp4/oversized), describe audio --path <abs-path|https-url|data:> [--prompt instruction].' },
+    ],
+    optionalFlags: [
+      { flag: '--question', value: '<text>', description: 'Optional question about the image/video (focuses the answer; omit for the default full description).' },
+      { flag: '--prompt', value: '<text>', description: 'Optional transcription instruction for audio (alias of --question).' },
+      { flag: '--source', value: '<path|url>', description: 'Alias of --path.' },
+      HELP_JSON_FLAG,
+    ],
+    examples: [
+      'metabot media describe image --path /tmp/chart.png --question "what trend is shown?"',
+      'metabot media describe video --path /Users/me/Downloads/demo.mov',
+      'metabot media describe audio --path https://example.test/note.mp3',
     ],
   },
   {

@@ -40,6 +40,30 @@ test('bind survives a Cordis context that guards undeclared media services', () 
       return Reflect.get(target, property, receiver)
     },
   })
-  bindMediaDescriptionTools(ctx)
+  bindMediaDescriptionTools(ctx, () => ({ describeImage: async () => '', describeVideo: async () => '', describeAudio: async () => '' }))
   assert.deepEqual(registered.map((entry) => entry.name), ['describe_image', 'describe_video', 'describe_audio'])
+})
+
+test('bind falls back to an explicit unavailable error when the core relay client cannot be resolved', async () => {
+  const registered = []
+  const warnings = []
+  const ctx = {
+    get() { return undefined },
+    tools: { register(definition) { registered.push(definition) } },
+    logger: { warn(message) { warnings.push(message) } },
+  }
+  bindMediaDescriptionTools(ctx, () => { throw new Error('oac dist root not resolved') })
+  assert.deepEqual(registered.map((entry) => entry.name), ['describe_image', 'describe_video', 'describe_audio'])
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /oac dist root not resolved/)
+  for (const definition of registered) {
+    await assert.rejects(
+      () => definition.execute(definition.name === 'describe_image'
+        ? { image_path: '/tmp/a.png' }
+        : definition.name === 'describe_video'
+          ? { video_path: '/tmp/a.mp4' }
+          : { audio: '/tmp/a.wav' }, {}),
+      /media description is unavailable/,
+    )
+  }
 })

@@ -216,6 +216,10 @@ Allowed contents:
   (one JSON row per line: txId, botAddress, orderId, txSize,
   sponsoredMinerFee, savedFee, billedBy, kind, createdAt); powers the offline
   usage fallback and ledger enrichment.
+- `llm-relay.json` — cached MetaID free LLM relay credentials bootstrapped by
+  the owner identity (apiKey + chat baseUrl for
+  `/v2/assist/llm/vision/recognize` media description and the free chat
+  relay); rotated by re-bootstrap when the server reports the key revoked.
 
 Rules:
 
@@ -225,6 +229,9 @@ Rules:
   hold account/billing metadata and spend activity, so they are written with
   owner-only permissions (`0600`) like `identity.json`; `traffic.json` is
   written atomically (write-then-rename).
+- `llm-relay.json` holds a bearer key (secret material like the mnemonic), so
+  it is written with mode `0600` atomically (write-then-rename) and is never
+  surfaced in CLI/UI output beyond a key prefix.
 - the mnemonic is secret material and must never be copied into `manager/`,
   `skills/`, or any profile workspace/runtime file.
 - public, non-secret owner fields (name, globalMetaId, MVC address) may be
