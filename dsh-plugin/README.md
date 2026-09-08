@@ -267,6 +267,23 @@ verbs are CLI-first for humans and other hosts: `metabot skills install --pin
 <skill-pin-id> --confirm`, `metabot skills list|read|uninstall` (installs land
 in `~/.metabot/skills/<name>/` and rebind installed host skill roots).
 
+## Media understanding: describe_image / describe_video / describe_audio
+
+Every `oac-*` session carries three native media tools backed by the MetaID
+free LLM relay (assist-base-service `/v2/assist/llm/vision/recognize`):
+`describe_image` (description + OCR), `describe_video` (summary, timeline,
+frame text; clips over ~3 minutes are truncated), and `describe_audio`
+(transcription of a local file, public http(s) URL, or data reference; a
+video container's audio track is extracted first). They work regardless of
+whether the session's model is multimodal — the relay's VLM/ASR reads the
+media and the tool returns plain text. The relay key is bootstrapped by the
+machine-wide owner identity (same signing flow as traffic) and cached in
+`~/.metabot/owner/llm-relay.json` (0600); per-identity daily media quotas
+apply and the tool output reports the remaining units. Video transcoding and
+audio extraction use the system ffmpeg (`OAC_FFMPEG_PATH`, else `ffmpeg` on
+PATH) when needed. CLI-first surface: `metabot media describe
+<image|video|audio> --path <file-or-url> [--question|--prompt <text>]`.
+
 ## On-chain Q&A: ask, answer, react, surf
 
 IDBots feat/metaweb-qa parity on the `/protocols/simplequestion` +

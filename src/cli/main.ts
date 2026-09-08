@@ -37,6 +37,7 @@ import { runMetaIdCommand } from './commands/metaid';
 import { runMetawebCommand } from './commands/metaweb';
 import { runSimpleNoteCommand } from './commands/simplenote';
 import { runQandaCommand } from './commands/qanda';
+import { runMediaCommand } from './commands/media';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
@@ -99,6 +100,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'traffic':
           result = await runTrafficCommand(rest, context);
+          break;
+        case 'media':
+          result = await runMediaCommand(rest, context);
           break;
         case 'daemon':
           result = await runDaemonCommand(rest, context);
