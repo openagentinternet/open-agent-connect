@@ -29,6 +29,7 @@ test('bindMetawebToolInstall registers the worldview section and both tools', ()
   assert.equal(host.sections[0].name, 'oac:metaweb-worldview')
   assert.match(host.sections[0].text, /Search first, don't guess/)
   assert.match(host.sections[0].text, /NEVER construct Web2 viewer URLs/)
+  assert.match(host.sections[0].text, /ALWAYS shown in FULL/, 'the worldview must carry the never-abbreviate MetaWeb URI rule')
   assert.deepEqual(host.tools.map((tool) => tool.name).sort(), ['read_metaweb_pin', 'search_metaweb'])
 })
 

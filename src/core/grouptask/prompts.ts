@@ -11,6 +11,7 @@
  */
 
 import { QA_BEHAVIOR_RULE } from '../qanda/behaviorPrompt';
+import { METAWEB_URI_FULL_FORM_RULE } from '../metaweb/uri';
 import type { GroupTaskMessage, GroupTaskRecord } from './types';
 
 export const GROUP_TASK_CONTEXT_MESSAGE_COUNT = 20;
@@ -172,6 +173,11 @@ export function buildGroupTaskSystemPrompt(input: BuildGroupTaskSystemPromptInpu
   // Q&A behavior rule (IDBots feat/metaweb-qa parity): group-task turns get
   // the same search-before-ask self-discipline as cowork sessions.
   sections.push(QA_BEHAVIOR_RULE);
+
+  // Full-form MetaWeb URI rule (IDBots chain-identifier parity): truncated
+  // URIs are unclickable, uncopyable, and break the host's exact-match
+  // deliverable ledger — one shared standing rule for chair AND workers.
+  sections.push(METAWEB_URI_FULL_FORM_RULE);
 
   return sections.join('\n\n');
 }

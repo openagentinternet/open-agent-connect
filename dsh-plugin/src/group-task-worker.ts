@@ -59,6 +59,10 @@ export const GROUP_TASK_WORK_SYSTEM_PROMPT =
   + 'ride as [DELIVERABLE] lines with owner-clickable on-chain URIs (publish finished apps for '
   + 'metaapp://, publish text as pin:// notes, metafile:// only for binaries — never hand the owner '
   + 'a file to download). '
+  + 'Every MetaWeb URI you write (metaid://, pin://, metafile://, metaapp://, map://) goes out in '
+  + 'FULL — never abbreviated or truncated with an ellipsis; the pinId is exactly 64 lowercase hex '
+  + 'chars + `i0`, copied verbatim. A shortened URI is neither clickable nor copyable, and the host '
+  + 'ledger matches identifiers exactly. '
   + 'Do not broaden your permission scope or claim unverifiable completion.'
 
 const DEFAULT_POLL_MS = 8_000

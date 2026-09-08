@@ -1799,3 +1799,10 @@ test('without a resolver or host LLM, the template fallback stays', async () => 
   assert.equal(result.state, 'reply');
   assert.match(result.content, /Thanks for/);
 });
+
+test('buildChatPrompt carries the full-form MetaWeb URI rule', () => {
+  const prompt = buildChatPrompt(makeInput());
+  assert.match(prompt, /MetaWeb URIs \(metaid:\/\/, pin:\/\/, metafile:\/\/, metaapp:\/\/, map:\/\/\) in FULL/);
+  assert.match(prompt, /never abbreviated or truncated with an ellipsis/);
+  assert.match(prompt, /64 lowercase hex chars/);
+});
