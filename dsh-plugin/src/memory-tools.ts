@@ -3,8 +3,10 @@
  * agent/created. Every tool bridges to a `metabot memory` verb through the
  * injected run function. Tool names, parameters, and limits mirror the IDBots
  * toolset (coworkRunner.ts:6920-7228) so the ported prompt guidance stays
- * valid. The Memory Strategy prompt section (ported from
- * coworkRunner.ts:4401-4426) is installed alongside.
+ * valid — including the cross-session reads (`oac_session_read_all` /
+ * `oac_session_read_latest`, the `idbots_session_read_*` ports over
+ * `metabot memory transcript read --any-bot`). The Memory Strategy prompt
+ * section (ported from coworkRunner.ts:4401-4426) is installed alongside.
  */
 import { runMetabot } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
@@ -14,6 +16,7 @@ import type { HostAgentLike, HostToolDefinition } from './context-types.js'
 export const MEMORY_STRATEGY_TEXT = [
   '## Memory Strategy',
   '- Historical retrieval is tool-first: when the user references previous chats, earlier outputs, prior decisions, or says "还记得/之前/上次/刚才", call `conversation_search` or `recent_chats` before answering.',
+  '- When a tool prints a session reference as `(session:<id>)` — from recent_chats, conversation_search, twin_task_status, or the conversation header — inspect that session with `oac_session_read_all` (full history) or `oac_session_read_latest` (quick status check) before relying on it.',
   '- Do not guess historical facts from partial context. If retrieval returns no evidence, explicitly say not found.',
   '- Do not call history tools for every request; only use them when historical context is required.',
   '- If retrieved history conflicts with the latest explicit user instruction, follow the latest explicit user instruction.',
@@ -21,7 +24,7 @@ export const MEMORY_STRATEGY_TEXT = [
   '- Treat each injected memory block as stable context only for that scope; do not assume omitted scopes are available.',
   '- Use `memory_user_edits` when the user asks to remember, update, list, or delete memory facts, or when you discover a durable fact worth persisting.',
   '- Use `experience_recall` to look up your own past days: a bare call returns the last 30 days of your daily summaries, `query` searches your full history, and `date_from`/`date_to` (YYYY-MM-DD) pin a range.',
-  '- When a task resembles something you have done before, first search it with `experience_recall` (keyword), then inspect the referenced session with `conversation_search`: reuse the approaches that worked last time and avoid the pitfalls you already hit.',
+  '- When a task resembles something you have done before, first search it with `experience_recall` (keyword), then read the referenced session with `oac_session_read_all`: reuse the approaches that worked last time and avoid the pitfalls you already hit.',
   '- When <recent_daily_summaries> is present, those summaries are your own nightly dreams (做梦): questions like "did you dream / what did you dream about / do you remember that day" should be answered from them first.',
   '- Use `knowledge_recall` to search your reusable knowledge points (know-how, pitfalls, principles), and `knowledge_upsert` to save or revise one when you learn something worth reusing.',
   '- Never write transient conversation facts, news content, or source citations into user memory unless the user explicitly asks.',
@@ -99,10 +102,43 @@ function formatSearchRecords(records: Array<Record<string, unknown>>): string {
   }).join('\n')
 }
 
-/** The six memory tools, bound to one Bot slug. */
+function formatSessionRead(payload: { session?: Record<string, unknown>; turns?: Array<Record<string, unknown>> }): string {
+  const session = payload.session ?? {}
+  const turns = payload.turns ?? []
+  const header = [
+    `- session: ${String(session.sessionId ?? '')}`,
+    typeof session.botSlug === 'string' && session.botSlug ? `  owner bot: ${session.botSlug}` : '',
+    `  channel: ${String(session.channel ?? '')}`,
+    typeof session.peerName === 'string' && session.peerName ? `  peer: ${session.peerName}` : '',
+    typeof session.peerGlobalMetaId === 'string' && session.peerGlobalMetaId ? `  peer id: ${session.peerGlobalMetaId}` : '',
+    `  messages: ${String(session.messageCount ?? turns.length)}`,
+  ].filter(Boolean).join('\n')
+  if (turns.length === 0) return `${header}\n(no messages)`
+  const body = turns.map((turn) => {
+    const when = typeof turn.ts === 'number' && turn.ts > 0
+      ? new Date(turn.ts).toISOString().slice(0, 16).replace('T', ' ')
+      : '-'
+    const who = turn.role === 'assistant' ? 'assistant' : 'user'
+    return `[${when}] ${who}: ${String(turn.text ?? '')}`
+  }).join('\n')
+  return `${header}\n${body}`
+}
+
+/** The memory tools, bound to one Bot slug. */
 export function buildMemoryToolDefinitions(slug: string, run: RunFn = runMetabot): HostToolDefinition[] {
   const viaPayload = (verb: string[], payload: Record<string, unknown>) =>
     runMetabotWithPayloadFile([...verb, '--from', slug], payload, '--payload-file', [], run)
+
+  /** Cross-session read over `memory transcript read` (flags, not payload). */
+  const readSessionTool = async (args: Record<string, unknown>, limit: number | undefined): Promise<string> => {
+    const sessionId = textArg(args, 'sessionId')
+    if (!sessionId) throw new Error('sessionId is required.')
+    const result = await run(
+      ['memory', 'transcript', 'read', '--session', sessionId, '--from', slug, '--any-bot', ...(limit !== undefined ? ['--limit', String(limit)] : [])],
+      { timeoutMs: 30_000 },
+    )
+    return formatSessionRead(dataOf(result) as { session?: Record<string, unknown>; turns?: Array<Record<string, unknown>> })
+  }
 
   return [
     {
@@ -278,6 +314,36 @@ export function buildMemoryToolDefinitions(slug: string, run: RunFn = runMetabot
         })
         const records = (dataOf(result) as { records?: Array<Record<string, unknown>> }).records ?? []
         return formatSearchRecords(records)
+      },
+    },
+    {
+      name: 'oac_session_read_all',
+      description: 'Read ALL messages from another local session — a DSH conversation (any local Bot, e.g. a delegated Worker) or an A2A private chat — given the session id that recent_chats, conversation_search, or twin_task_status print as (session:<id>). Read-only, never modifies the target. Use to review what a delegated Worker did or catch up on another conversation; for just the last message use oac_session_read_latest (cheaper). Do not read the CURRENT session (already in context). Returns the session summary and full message log; an error if the session does not exist.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sessionId: { type: 'string', description: 'Target session id (the (session:<id>) reference).' },
+        },
+        required: ['sessionId'],
+      },
+      output: TEXT_OUTPUT,
+      async execute(args) {
+        return readSessionTool(args, undefined)
+      },
+    },
+    {
+      name: 'oac_session_read_latest',
+      description: 'Read only the LATEST message from another local session (DSH conversation or A2A private chat), given its session id. Read-only. Use for a quick status check on another session ("did the Worker finish?", "what is the latest in that task") without pulling the whole history; when you need full context or decisions, use oac_session_read_all instead. Returns the session summary and the single latest message; an error if the session does not exist.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sessionId: { type: 'string', description: 'Target session id (the (session:<id>) reference).' },
+        },
+        required: ['sessionId'],
+      },
+      output: TEXT_OUTPUT,
+      async execute(args) {
+        return readSessionTool(args, 1)
       },
     },
   ]

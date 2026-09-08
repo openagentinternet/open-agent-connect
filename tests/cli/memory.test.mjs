@@ -43,6 +43,7 @@ test('runCli dispatches memory CRUD and reads to the memory dependency group', a
       scopes: record('scopes'),
       stats: record('stats'),
       transcriptAppend: record('transcriptAppend'),
+      transcriptRead: record('transcriptRead'),
       chats: record('chats'),
       search: record('search'),
       hygieneStatus: record('hygieneStatus'),
@@ -67,6 +68,7 @@ test('runCli dispatches memory CRUD and reads to the memory dependency group', a
   assert.equal(await run(['memory', 'scopes', '--from', 'alice']), 0);
   assert.equal(await run(['memory', 'stats', '--from', 'alice']), 0);
   assert.equal(await run(['memory', 'transcript', 'append', '--from', 'alice', '--payload-file', 'p.json']), 0);
+  assert.equal(await run(['memory', 'transcript', 'read', '--from', 'alice', '--session', 'session-1', '--any-bot', '--limit', '2']), 0);
   assert.equal(await run(['memory', 'chats', '--from', 'alice', '--sort-order', 'asc']), 0);
   assert.equal(await run(['memory', 'search', '--from', 'alice', '--payload-file', 'p.json']), 0);
   assert.equal(await run(['memory', 'hygiene', 'status', '--from', 'alice']), 0);
@@ -78,12 +80,13 @@ test('runCli dispatches memory CRUD and reads to the memory dependency group', a
   assert.deepEqual(calls.map(([name]) => name), [
     'list', 'add', 'update', 'delete', 'blocks', 'extract',
     'policyGet', 'policySet', 'policyDelete', 'scopes', 'stats',
-    'transcriptAppend', 'chats', 'search',
+    'transcriptAppend', 'transcriptRead', 'chats', 'search',
     'hygieneStatus', 'hygieneDue', 'hygieneRun', 'hygieneConfigGet', 'hygieneConfigSet',
   ]);
   assert.deepEqual(calls[0][1], { from: 'alice', query: '咖啡', limit: 5, includeDeleted: false, scopeKind: undefined, scopeKey: undefined, usageClass: undefined, status: undefined, origin: undefined });
-  assert.equal(calls[12][1].sortOrder, 'asc');
-  assert.deepEqual(calls[16][1], { from: 'alice', noDeep: true });
+  assert.deepEqual(calls[12][1], { from: 'alice', session: 'session-1', anyBot: true, limit: 2 });
+  assert.equal(calls[13][1].sortOrder, 'asc');
+  assert.deepEqual(calls[17][1], { from: 'alice', noDeep: true });
 });
 
 test('runCli rejects malformed memory invocations', async () => {

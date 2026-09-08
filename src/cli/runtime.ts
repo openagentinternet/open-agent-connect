@@ -48,6 +48,7 @@ import {
 import {
   appendTranscriptTurn,
   listRecentChats,
+  readSessionMessages,
   searchConversations,
 } from '../core/memory/transcriptStore';
 import type { MemoryCreateInput, MemoryUpdateInput } from '../core/memory/memoryTypes';
@@ -4184,6 +4185,45 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             : {}),
         });
         return commandSuccess({ appended: true });
+      },
+      transcriptRead: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const actorPaths = resolveMetabotPaths(actor.homeDir);
+        let found = await readSessionMessages(actorPaths, input.session);
+        let botSlug = path.basename(actorPaths.profileRoot);
+        if (!found && input.anyBot) {
+          // The Twin reads across every local Bot's mirrored sessions (the
+          // IDBots global-store contract); first hit wins, scan order is
+          // irrelevant because session ids are unique.
+          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+          const profiles = await listMetabotProfiles(systemHomeDir).catch(() => []);
+          for (const profile of profiles) {
+            const candidate = await readSessionMessages(resolveMetabotPaths(profile.homeDir), input.session);
+            if (candidate) {
+              found = candidate;
+              botSlug = profile.slug;
+              break;
+            }
+          }
+        }
+        if (!found) {
+          return commandFailed('session_not_found', `No session found for id: ${input.session.trim()}`);
+        }
+        const turns = input.limit !== undefined ? found.turns.slice(-input.limit) : found.turns;
+        return commandSuccess({
+          session: {
+            sessionId: found.sessionId,
+            botSlug,
+            channel: found.channel,
+            peerGlobalMetaId: found.peerGlobalMetaId,
+            peerName: found.peerName,
+            messageCount: found.messageCount,
+            firstMessageAt: found.firstMessageAt,
+            lastMessageAt: found.lastMessageAt,
+          },
+          turns,
+        });
       },
       chats: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);

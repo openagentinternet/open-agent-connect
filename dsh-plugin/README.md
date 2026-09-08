@@ -159,7 +159,17 @@ data under `~/.metabot/profiles/<slug>/`):
   capture per the Bot's memory policy).
 - **Memory tools** — `memory_user_edits`, `experience_recall`,
   `knowledge_recall`/`knowledge_upsert`, `recent_chats`,
-  `conversation_search` on `oac-*` agents.
+  `conversation_search` on `oac-*` agents, plus the IDBots-parity
+  cross-session reads `oac_session_read_all` / `oac_session_read_latest`:
+  given the `(session:<id>)` reference those tools (or `twin_task_status`,
+  or the conversation header) print, any Bot can read another local
+  session's message log — a DSH conversation of any local Bot (delegated
+  Worker sessions included) or an A2A private chat — fully or just the
+  latest message. Backed by `metabot memory transcript read --session <id>
+  --any-bot` (the CLI-first verb over the transcript mirror + A2A store);
+  together with the Twin's `oac_session_insert_user_message` this closes
+  the IDBots `idbots_session_read_*` / `idbots_session_insert_user_message`
+  parity loop for Twin-side orchestration of every conversation.
 - **Nightly dream** — the plugin scheduler (`dream.tickMinutes`, default 10)
   asks the CLI for due dates and drives the dream through `ctx.llm`
   (retrying once on the Bot's fallback DSH LLM pair when set):
