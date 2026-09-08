@@ -310,3 +310,34 @@ test('catalog reports missing primary binding and unavailable primary runtime wi
   assert.equal(missingBinary.ok, false);
   assert.equal(missingBinary.code, 'primary_runtime_unavailable');
 });
+
+test('listSkillsForPlatform lists the dsh roots plus the shared agents standard', async () => {
+  const { systemHome, profileRoot } = await createProfileHome('dsh-scoped');
+  const agentsSkill = path.join(systemHome, '.agents', 'skills', 'shared-lookup');
+  const dshSkill = path.join(systemHome, '.dsh', 'skills', 'dsh-greet');
+  const projectSkill = path.join(profileRoot, '.dsh', 'skills', 'project-only');
+  await fs.mkdir(agentsSkill, { recursive: true });
+  await fs.mkdir(dshSkill, { recursive: true });
+  await fs.mkdir(projectSkill, { recursive: true });
+  await fs.writeFile(path.join(agentsSkill, 'SKILL.md'), '# Shared Lookup\nLook things up.\n');
+  await fs.writeFile(path.join(dshSkill, 'SKILL.md'), '# DSH Greet\nSay hello.\n');
+  await fs.writeFile(path.join(projectSkill, 'SKILL.md'), '# Project\nProject skill.\n');
+
+  const catalog = createPlatformSkillCatalog({
+    runtimeStore: createLlmRuntimeStore(resolveMetabotPaths(profileRoot)),
+    bindingStore: createLlmBindingStore(resolveMetabotPaths(profileRoot)),
+    systemHomeDir: systemHome,
+    projectRoot: profileRoot,
+  });
+  const result = await catalog.listSkillsForPlatform({ platformId: 'dsh' });
+  assert.equal(result.ok, true);
+  assert.equal(result.platformId, 'dsh');
+  assert.deepEqual(result.skills.map((skill) => skill.skillName).sort(), [
+    'dsh-greet',
+    'project-only',
+    'shared-lookup',
+  ]);
+
+  const withoutShared = await catalog.listSkillsForPlatform({ platformId: 'dsh', includeSharedAgents: false });
+  assert.deepEqual(withoutShared.skills.map((skill) => skill.skillName).sort(), ['dsh-greet', 'project-only']);
+});

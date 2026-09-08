@@ -102,6 +102,12 @@ const sharedAgentsSkillRoot: InstallSkillRoot = {
   sharedStandard: true,
 };
 
+/** The ~/.agents/skills shared standard root (DSH sessions load it natively). */
+export function getSharedAgentsSkillRoot(): PlatformSkillRoot {
+  const { platformId: _platformId, ...root } = sharedAgentsSkillRoot;
+  return { ...root };
+}
+
 const metabotSharedSkillRoot: InstallSkillRoot = {
   platformId: 'shared-agents',
   id: 'metabot-shared',

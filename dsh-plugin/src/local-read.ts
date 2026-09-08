@@ -613,19 +613,14 @@ export function localChatSkills(from: string): Promise<MetabotCommandResult | nu
       'createRuntimeStateStore',
     )
     const state = await createState(homeDir).readState()
-    if (!state.identity) return null
     const llmRuntime = core('core/llm/llmRuntimeStore.js')
     const llmBinding = core('core/llm/llmBindingStore.js')
     const catalogModule = core('core/services/platformSkillCatalog.js')
     const createRuntimeStore = fn<(input: unknown) => unknown>(llmRuntime, 'createLlmRuntimeStore')
     const createBindingStore = fn<(input: unknown) => unknown>(llmBinding, 'createLlmBindingStore')
     const createCatalog = fn<(options: Record<string, unknown>) => {
-      listPrimaryRuntimeSkills: (opts: { metaBotSlug: string }) => Promise<{
+      listSkillsForPlatform: (opts: { platformId: string; includeSharedAgents?: boolean }) => Promise<{
         ok: boolean
-        code?: string
-        message?: string
-        runtime: Record<string, unknown>
-        platform: unknown
         skills: unknown
         rootDiagnostics: unknown
       }>
@@ -638,33 +633,20 @@ export function localChatSkills(from: string): Promise<MetabotCommandResult | nu
       env: process.env,
     })
     const metaBotSlug = basename(paths.profileRoot)
-    const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug })
-    if (!result.ok) {
-      // A definitive catalog answer (e.g. primary_runtime_unavailable) is what
-      // the CLI would return too — answer directly instead of spawning it.
-      return {
-        ok: false,
-        state: 'failed',
-        ...(result.code ? { code: result.code } : {}),
-        ...(result.message ? { message: result.message } : {}),
-      }
-    }
+    // DSH scope: exactly the skill surface a DSH session can execute —
+    // ~/.dsh/skills, the profile workspace's .dsh/skills, and the
+    // ~/.agents/skills shared standard. Never the local CLI platforms.
+    const result = await catalog.listSkillsForPlatform({ platformId: 'dsh' })
     return success({
       metaBotSlug,
-      identity: {
-        metabotId: state.identity.metabotId,
-        name: state.identity.name,
-        globalMetaId: state.identity.globalMetaId,
-      },
-      runtime: {
-        id: result.runtime.id,
-        provider: result.runtime.provider,
-        displayName: result.runtime.displayName,
-        health: result.runtime.health,
-        version: result.runtime.version,
-        logoPath: result.runtime.logoPath,
-      },
-      platform: result.platform,
+      identity: state.identity
+        ? {
+          metabotId: state.identity.metabotId,
+          name: state.identity.name,
+          globalMetaId: state.identity.globalMetaId,
+        }
+        : null,
+      platform: { id: 'dsh' },
       skills: result.skills,
       rootDiagnostics: result.rootDiagnostics,
     })

@@ -65,12 +65,6 @@ export type BotRow = {
   setup?: BotSetupStatus | null
 }
 
-/** Daemon host-LLM-executor status (the DSH-side bridge for A2A replies). */
-export type LlmHostStatus = {
-  connected: number
-  lastConnectedAt: string | null
-}
-
 export type LlmDirectory = {
   providers: Array<{ id: string; name: string }>
   modelsByProvider: Record<string, Array<{ id: string; name: string }>>
@@ -607,17 +601,6 @@ export const api = {
     return { uri, contentType: textOf(data.contentType) || contentType }
   },
   llmDirectory: async (): Promise<LlmDirectory> => post('llm/directory'),
-  llmHostStatus: async (): Promise<LlmHostStatus | null> => {
-    try {
-      const data = await post<{ connected?: unknown; lastConnectedAt?: unknown }>('llm/host-status')
-      return {
-        connected: typeof data.connected === 'number' ? data.connected : 0,
-        lastConnectedAt: typeof data.lastConnectedAt === 'string' ? data.lastConnectedAt : null,
-      }
-    } catch {
-      return null
-    }
-  },
   chatSkills: async (from: string): Promise<ChatSkillsPayload> => {
     const data = await post<{
       skills?: Array<{ skillName?: unknown; title?: unknown; description?: unknown }>

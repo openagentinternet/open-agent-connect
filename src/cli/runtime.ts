@@ -251,6 +251,7 @@ import { createLlmAvailabilityRecovery } from '../core/llm/llmAvailabilityRecove
 import type { LlmAvailabilityRecovery } from '../core/llm/llmAvailabilityRecovery';
 import {
   createDshPairHostLlmGenerate,
+  createHostFirstCompletion,
   createHostLlmExecutorBridge,
   setActiveHostLlmExecutorBridge,
 } from '../core/llm/hostLlmExecutorBridge';
@@ -4406,6 +4407,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         // No healthy runtime binding = skip (null), never fail; a started run
         // that errors mid-call lands in the run's error list via a throw.
         const complete: MemoryHygieneLlmCompletion = async (request) => {
+          // Unified passive-LLM priority: DSH pair first, then the local chain.
+          const hostText = await createHostFirstCompletion({
+            dshLlmPath: paths.dshLlmPath,
+            timeoutMs: 180_000,
+          })({ botSlug: slug, system: request.system, user: request.user });
+          if (hostText !== null) return hostText;
           const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
           if (!resolved.runtime) return null;
           const outcome = await runLlmPromptWithRuntimeFallback({
@@ -4774,6 +4781,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           executor: 'cli',
         }, {
           runLlm: async (turn) => {
+            // Unified passive-LLM priority: DSH pair first, then the local chain.
+            const hostText = await createHostFirstCompletion({
+              dshLlmPath: paths.dshLlmPath,
+              timeoutMs: 30 * 60_000,
+            })({ botSlug: slug, system: turn.systemPrompt, user: turn.prompt });
+            if (hostText !== null) return { ok: true, output: hostText };
             const outcome = await runLlmPromptWithRuntimeFallback({
               runtimeResolver,
               llmExecutor: executor,
@@ -6180,6 +6193,12 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     }),
     runLlmTurn: async (turn) => {
       const profilePaths = resolveMetabotPaths(turn.profile.homeDir);
+      // Unified passive-LLM priority: DSH pair first (when a host executor is
+      // connected), then the local-runtime chain below.
+      const hostText = await createHostFirstCompletion({
+        dshLlmPath: profilePaths.dshLlmPath,
+      })({ botSlug: turn.profile.slug, system: turn.systemPrompt, user: turn.prompt });
+      if (hostText !== null) return hostText;
       const runtimeResolver = createLlmRuntimeResolver({
         runtimeStore: createLlmRuntimeStore(profilePaths),
         bindingStore: createLlmBindingStore(profilePaths),
@@ -6268,14 +6287,21 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
                 },
               });
               const llm = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
+                const historyText = history
+                  .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
+                  .join('\n\n---\n\n');
+                const studySystemPrompt = 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.';
+                // Unified passive-LLM priority: DSH pair first, then local chain.
+                const hostText = await createHostFirstCompletion({
+                  dshLlmPath: profilePaths.dshLlmPath,
+                })({ botSlug: slug, system: studySystemPrompt, user: historyText });
+                if (hostText !== null) return hostText;
                 const result = await runLlmPromptWithRuntimeFallback({
                   runtimeResolver,
                   llmExecutor,
                   metaBotSlug: slug,
-                  prompt: history
-                    .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
-                    .join('\n\n---\n\n'),
-                  systemPrompt: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
+                  prompt: historyText,
+                  systemPrompt: studySystemPrompt,
                   timeoutMs: 30 * 60_000,
                   pollIntervalMs: 5_000,
                 });
@@ -6543,6 +6569,12 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
             },
           });
           const runLlm = async (turn: { prompt: string; systemPrompt: string }) => {
+            // Unified passive-LLM priority: DSH pair first, then the local chain.
+            const hostText = await createHostFirstCompletion({
+              dshLlmPath: profilePaths.dshLlmPath,
+              timeoutMs: 30 * 60_000,
+            })({ botSlug: profile.slug, system: turn.systemPrompt, user: turn.prompt });
+            if (hostText !== null) return { ok: true as const, output: hostText };
             const outcome = await runLlmPromptWithRuntimeFallback({
               runtimeResolver,
               llmExecutor,
