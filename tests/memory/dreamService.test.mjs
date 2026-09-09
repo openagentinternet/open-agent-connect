@@ -11,6 +11,7 @@ const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createChainHistoryStore } = require('../../dist/core/chainhistory/store.js');
 const { createMemoryStore } = require('../../dist/core/memory/memoryStore.js');
 const { createDreamStore } = require('../../dist/core/memory/dreamStore.js');
+const { createCapabilityStore } = require('../../dist/core/memory/capabilityStore.js');
 const { createExperienceStore } = require('../../dist/core/memory/experienceStore.js');
 const { appendTranscriptTurn } = require('../../dist/core/memory/transcriptStore.js');
 const {
@@ -136,7 +137,14 @@ test('a full dream writes diary, dream memories, knowledge hooks input, and self
   const date = yesterday();
   await seedTranscriptDay(paths, date);
 
-  const result = await runDream(paths, { date, llm: 'test-llm' }, async () => fakeDreamOutput(date));
+  const result = await runDream(paths, { date, llm: 'test-llm' }, async () => fakeDreamOutput(date, {
+    capability_learnings: [{
+      title: '发布清单整理法',
+      description: '按重要程度排序后单独标注文案风险,再交付',
+      capabilityType: 'workflow',
+      sourceSessionIds: ['sess-day-1'],
+    }],
+  }));
   assert.equal(result.kind, 'completed');
   assert.equal(result.commit.ok, true);
   assert.equal(result.commit.selfIdentityValid, true);
@@ -163,6 +171,16 @@ test('a full dream writes diary, dream memories, knowledge hooks input, and self
   assert.ok(entries.every((entry) => entry.origin === 'dream'));
   assert.ok(entries.every((entry) => entry.sources.some((source) => source.dreamDate === date)));
 
+  // Capability learnings landed as append-only drafts.
+  assert.equal(result.commit.written.capabilityDrafts, 1);
+  const drafts = await createCapabilityStore(paths).listDrafts();
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0].title, '发布清单整理法');
+  assert.equal(drafts[0].capabilityType, 'workflow');
+  assert.equal(drafts[0].dreamDate, date);
+  assert.equal(drafts[0].status, 'draft');
+  assert.deepEqual(drafts[0].sourceSessionIds, ['sess-day-1']);
+
   // Self-identity Markdown mirror exists.
   const identityMd = await fs.readFile(paths.memorySelfIdentityPath, 'utf8');
   assert.match(identityMd, /把关/);
@@ -170,6 +188,27 @@ test('a full dream writes diary, dream memories, knowledge hooks input, and self
   // Due algorithm: the just-dreamed date is final (run started after day end).
   const due = await dueDreamDates(paths);
   assert.ok(!due.dueDates.includes(date));
+});
+
+test('a schedule-run-only day is not empty: the prompt carries the 定时任务 section', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  const { startMs } = getDayBoundsMs(date);
+  const { createScheduleStore } = require('../../dist/core/schedule/store.js');
+  const schedule = createScheduleStore(paths);
+  const created = await schedule.createTask({
+    name: '每日复盘',
+    prompt: '写一段复盘',
+    schedule: { type: 'interval', intervalMs: 3600_000 },
+  });
+  const claim = await schedule.claim(created.id, { trigger: 'scheduled', executor: 'host' }, { now: startMs + 1800_000 });
+  assert.ok(claim.ok);
+  await schedule.complete(claim.run.id, { durationMs: 5000 }, { now: startMs + 1800_000 + 5000 });
+
+  const plan = await planDream(paths, { date });
+  assert.equal(plan.kind, 'prompt');
+  assert.match(plan.user, /## 定时任务/);
+  assert.match(plan.user, /每日复盘\(结果:success\)/);
 });
 
 test('re-dreaming a date replaces its batch instead of piling up duplicates', async () => {

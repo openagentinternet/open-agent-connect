@@ -152,6 +152,34 @@ test('parseDreamOutput: tolerant parse, caps, and legacy evaluation mapping', ()
   assert.equal(parseDreamOutput('').ok, false);
 });
 
+test('parseDreamOutput: capability_learnings parsed, capped at 5, invalid entries dropped', () => {
+  const raw = JSON.stringify({
+    daily_summary: '今天反复执行了同一套发布流程。',
+    capability_learnings: [
+      { title: '发布前风险标注法', description: '先标风险再给方案', capabilityType: 'workflow', sourceSessionIds: ['s1', 's1', 's2'] },
+      { title: '标题打磨套路', description: '三条候选标题一起给', capabilityType: 'tool_pattern' },
+      { title: '缺描述的条目' },
+      { description: '缺标题的条目' },
+      ...Array.from({ length: 6 }, (_, i) => ({ title: `候选${i}`, description: `描述${i}`, capabilityType: 'skill' })),
+    ],
+  });
+  const result = parseDreamOutput(raw);
+  assert.ok(result.ok);
+  assert.equal(result.output.capabilityLearnings.length, 5); // MAX_CAPABILITY_LEARNINGS
+  assert.equal(result.output.capabilityLearnings[0].capabilityType, 'workflow');
+  assert.deepEqual(result.output.capabilityLearnings[0].sourceSessionIds, ['s1', 's2']); // dedup
+  assert.equal(result.output.capabilityLearnings[1].capabilityType, 'tool_pattern');
+  assert.ok(result.output.capabilityLearnings.every((entry) => entry.title && entry.description));
+
+  // camelCase key is tolerated and an unknown type falls back to 'skill'.
+  const camel = parseDreamOutput(JSON.stringify({
+    daily_summary: '总结',
+    capabilityLearnings: [{ title: 'T', description: 'D', capabilityType: 'unknown' }],
+  }));
+  assert.ok(camel.ok);
+  assert.equal(camel.output.capabilityLearnings[0].capabilityType, 'skill');
+});
+
 test('buildDreamPrompt: persona, inventory and session sections are all present', () => {
   const prompt = buildDreamPrompt({
     botName: '小梦',
@@ -193,8 +221,8 @@ test('validateSelfIdentity enforces the 200 non-whitespace char minimum', () => 
   assert.equal(validateSelfIdentity('我'.repeat(200)).valid, true);
 });
 
-test('DREAM_VERSION is 2 (chain history sections added)', () => {
-  assert.equal(DREAM_VERSION, 2);
+test('DREAM_VERSION is 3 (capability_learnings + scheduled-task activity added)', () => {
+  assert.equal(DREAM_VERSION, 3);
 });
 
 function makeChainActivity() {
