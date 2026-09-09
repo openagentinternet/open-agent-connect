@@ -11,6 +11,7 @@ const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const chainHistoryStoreModule = require('../../dist/core/chainhistory/store.js');
 const { createChainHistoryStore } = chainHistoryStoreModule;
 const { createDreamStore } = require('../../dist/core/memory/dreamStore.js');
+const { createScheduleStore } = require('../../dist/core/schedule/store.js');
 const { getDayBoundsMs } = require('../../dist/core/memory/dreamPrompt.js');
 
 const DATE = '2026-08-20';
@@ -302,12 +303,40 @@ test('gatherActivity: accepted/active tasks, role join, guest fallback, orders',
   assert.equal(guestChat.taskStatus, 'active');
   assert.equal(guestChat.messages.length, 2);
 
-  // Orders created OR updated in-day count; task runs stay empty (no such feature).
+  // Orders created OR updated in-day count; no schedule ledger exists in this fixture.
   assert.equal(activity.orderCount, 2);
   assert.deepEqual(activity.taskRuns, []);
 });
 
-test('gatherActivity: in-day chat messages are capped at the first 200', async () => {
+test('gatherActivity: scheduled-task runs started in-day feed the activity', async () => {
+  const paths = await createTempProfileHome();
+  const schedule = createScheduleStore(paths);
+  const created = await schedule.createTask({
+    name: '每日早报',
+    prompt: '整理今天的早报',
+    schedule: { type: 'interval', intervalMs: 3600_000 },
+  });
+  const claim = await schedule.claim(created.id, { trigger: 'scheduled', executor: 'host' }, { now: IN_DAY });
+  assert.ok(claim.ok);
+  await schedule.complete(claim.run.id, { durationMs: 5000 }, { now: IN_DAY + 6000 });
+  // A run started before the day window must not leak in.
+  const earlier = await schedule.createTask({
+    name: '过期任务',
+    prompt: '不进梦境',
+    schedule: { type: 'interval', intervalMs: 3600_000 },
+  });
+  const earlierClaim = await schedule.claim(earlier.id, { trigger: 'scheduled', executor: 'host' }, { now: OLD });
+  assert.ok(earlierClaim.ok);
+
+  const activity = await createDreamStore(paths).gatherActivity({ startMs, endMs });
+  assert.equal(activity.taskRuns.length, 1);
+  assert.equal(activity.taskRuns[0].taskName, '每日早报');
+  assert.equal(activity.taskRuns[0].status, 'success');
+  assert.equal(activity.taskRuns[0].startedAt, IN_DAY);
+  assert.equal(activity.taskRuns[0].sessionId, null);
+});
+
+test('gatherActivity: in-day chat messages are capped at the first 400', async () => {
   const paths = await createTempProfileHome();
   const grouptaskRoot = path.join(paths.runtimeRoot, 'grouptask');
   await writeJson(path.join(grouptaskRoot, 'state.json'), emptyGroupTaskState({
@@ -315,7 +344,7 @@ test('gatherActivity: in-day chat messages are capped at the first 200', async (
     members: [makeMember({ id: 1, taskId: 1, slug: 'test-slug', role: 'chair' })],
   }));
   await writeJson(path.join(grouptaskRoot, 'messages', 'grp-busy.json'), {
-    messages: Array.from({ length: 205 }, (_, index) => makeMessage({
+    messages: Array.from({ length: 405 }, (_, index) => makeMessage({
       index,
       pinId: `pin-${index}`,
       content: `msg-${index}`,
@@ -326,11 +355,11 @@ test('gatherActivity: in-day chat messages are capped at the first 200', async (
 
   const activity = await createDreamStore(paths).gatherActivity({ startMs, endMs });
   const chat = activity.groupChats.find((entry) => entry.taskId === 1);
-  assert.equal(chat.messages.length, 200);
+  assert.equal(chat.messages.length, 400);
   assert.equal(chat.messages[0].content, 'msg-0');
-  assert.equal(chat.messages[199].content, 'msg-199');
+  assert.equal(chat.messages[399].content, 'msg-399');
   assert.equal(activity.groupTasks[0].phase, 'active');
-  assert.equal(activity.groupTasks[0].dayMessageCount, 200);
+  assert.equal(activity.groupTasks[0].dayMessageCount, 400);
 });
 
 test('gatherActivity: chain writes/reads are included, day-windowed, chronological', async () => {

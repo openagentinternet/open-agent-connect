@@ -52,6 +52,7 @@ import {
   searchConversations,
 } from '../core/memory/transcriptStore';
 import type { MemoryCreateInput, MemoryUpdateInput } from '../core/memory/memoryTypes';
+import { createCapabilityStore } from '../core/memory/capabilityStore';
 import { createDreamStore } from '../core/memory/dreamStore';
 import {
   commitDream,
@@ -4736,6 +4737,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           text: entries[0]?.text ?? '',
           updatedAt: entries[0]?.updatedAt ?? null,
         });
+      },
+      capabilities: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const drafts = await createCapabilityStore(resolveMetabotPaths(actor.homeDir)).listDrafts({
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        });
+        return commandSuccess({ drafts });
       },
     },
     schedule: {

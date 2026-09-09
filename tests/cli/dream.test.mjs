@@ -32,6 +32,7 @@ test('runCli dispatches dream subcommands to the dream dependency group', async 
       fail: record('fail'),
       summaries: record('summaries'),
       selfIdentity: record('selfIdentity'),
+      capabilities: record('capabilities'),
     },
   };
   const payload = {
@@ -51,13 +52,15 @@ test('runCli dispatches dream subcommands to the dream dependency group', async 
   assert.equal(await run(['dream', 'fail', '--from', 'alice', '--payload-file', 'p.json']), 0);
   assert.equal(await run(['dream', 'summaries', '--from', 'alice', '--limit', '7']), 0);
   assert.equal(await run(['dream', 'self-identity', '--from', 'alice']), 0);
+  assert.equal(await run(['dream', 'capabilities', '--from', 'alice', '--limit', '5']), 0);
 
   assert.deepEqual(calls.map(([name]) => name), [
-    'due', 'status', 'plan', 'run', 'synthesize', 'commit', 'fail', 'summaries', 'selfIdentity',
+    'due', 'status', 'plan', 'run', 'synthesize', 'commit', 'fail', 'summaries', 'selfIdentity', 'capabilities',
   ]);
   assert.equal(calls[2][1].date, '2026-08-19');
   assert.equal(calls[6][1].payload.error, 'llm down');
   assert.equal(calls[7][1].limit, 7);
+  assert.equal(calls[9][1].limit, 5);
 });
 
 test('runCli rejects malformed dream invocations', async () => {
