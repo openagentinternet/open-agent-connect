@@ -286,3 +286,85 @@ test('llm host-executor handlers fail closed without a bridge', async (t) => {
   const events = await handlers.llm.hostExecutorEvents();
   assert.equal(events, null);
 });
+
+test('hostExecutorGenerate runs one generation on the Bot DSH pair through the bridge', async (t) => {
+  const homeDir = await createProfileHome('metabot-host-executor-gen-', 'pair-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+  const { writeDshLlmBinding } = require('../../dist/core/bot/dshLlm.js');
+  await upsertIdentityProfile({ systemHomeDir, name: 'Pair Bot', homeDir });
+  const paths = resolveMetabotPaths(homeDir);
+  await writeDshLlmBinding(paths.dshLlmPath, {
+    dshLlmProvider: 'deepseek-official',
+    dshLlmModel: 'deepseek-v4-pro',
+    dshLlmReasoningEffort: null,
+    dshLlmFallbackProvider: null,
+    dshLlmFallbackModel: null,
+    dshLlmFallbackReasoningEffort: null,
+  });
+
+  const generateCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    hostLlmExecutorBridge: {
+      connectedExecutors: () => 1,
+      generate: async (input) => {
+        generateCalls.push(input);
+        return { ok: true, output: ' judged!' };
+      },
+    },
+  });
+
+  const ok = await handlers.llm.hostExecutorGenerate({ botSlug: 'pair-bot', system: 's', prompt: 'p' });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.data.output, ' judged!');
+  assert.equal(generateCalls.length, 1);
+  assert.equal(generateCalls[0].provider, 'deepseek-official');
+  assert.equal(generateCalls[0].model, 'deepseek-v4-pro');
+  assert.equal(generateCalls[0].botSlug, 'pair-bot');
+  assert.equal(generateCalls[0].system, 's');
+  assert.equal(generateCalls[0].prompt, 'p');
+  assert.ok(generateCalls[0].timeoutMs >= 5000 && generateCalls[0].timeoutMs <= 60000);
+
+  // No executor connected → explicit failure so callers degrade to rule-only.
+  const idle = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    hostLlmExecutorBridge: {
+      connectedExecutors: () => 0,
+      generate: async () => null,
+    },
+  });
+  const idleResult = await idle.llm.hostExecutorGenerate({ botSlug: 'pair-bot', system: 's', prompt: 'p' });
+  assert.equal(idleResult.ok, false);
+  assert.equal(idleResult.code, 'no_host_executor');
+
+  // A Bot without a DSH pair fails with no_dsh_pair.
+  const noPairHome = await createProfileHome('metabot-host-executor-gen2-', 'no-pair-bot');
+  t.after(async () => {
+    await cleanupProfileHome(noPairHome);
+  });
+  await upsertIdentityProfile({
+    systemHomeDir: deriveSystemHome(noPairHome),
+    name: 'No Pair Bot',
+    homeDir: noPairHome,
+  });
+  const noPairHandlers = createDefaultMetabotDaemonHandlers({
+    homeDir: noPairHome,
+    systemHomeDir: deriveSystemHome(noPairHome),
+    getDaemonRecord: () => null,
+    hostLlmExecutorBridge: {
+      connectedExecutors: () => 1,
+      generate: async () => ({ ok: true, output: 'x' }),
+    },
+  });
+  const noPair = await noPairHandlers.llm.hostExecutorGenerate({ botSlug: 'no-pair-bot', system: 's', prompt: 'p' });
+  assert.equal(noPair.ok, false);
+  assert.equal(noPair.code, 'no_dsh_pair');
+});

@@ -10,6 +10,7 @@ import type {
   MemoryVisibility,
 } from './memoryScope';
 import type { MemoryGuardLevel } from './memoryExtractor';
+import type { MemoryTurnExtractionChange } from './memoryTurnExtraction';
 
 export type MemoryEntryStatus = 'created' | 'stale' | 'deleted';
 
@@ -179,6 +180,18 @@ export interface ApplyTurnMemoryUpdatesOptions {
   assistantMessageId?: string;
   /** Dependency-injected LLM judge; omit to keep rule-only judging. */
   judgeComplete?: (systemPrompt: string, userPrompt: string) => Promise<string>;
+  /**
+   * Dependency-injected LLM turn extraction (multilingual de-hardgate,
+   * IDBots judgeTurnMemoryExtraction parity); omit to keep regex-only
+   * extraction. Called at most once per turn, only when the LLM judge is
+   * policy-enabled and the user text is substantive.
+   */
+  llmExtract?: (input: {
+    userText: string;
+    assistantText: string;
+    guardLevel: MemoryGuardLevel;
+    implicitEnabled: boolean;
+  }) => Promise<MemoryTurnExtractionChange[] | null>;
 }
 
 export interface ApplyTurnMemoryUpdatesResult {

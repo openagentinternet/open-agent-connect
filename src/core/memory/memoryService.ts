@@ -19,6 +19,7 @@ import { createKnowledgeBaseService, type KnowledgeBaseService } from '../knowle
 import type { KnowledgeBaseStore } from '../knowledgebase/store';
 import { extractTurnMemoryChanges } from './memoryExtractor';
 import { judgeMemoryCandidate } from './memoryJudge';
+import { isSubstantiveMemoryText, type MemoryTurnExtractionChange } from './memoryTurnExtraction';
 import { buildScopedMemoryPromptBlocks } from './memoryPromptBlocks';
 import { resolveMemoryScopes, type ResolvedMemoryScopes } from './memoryScopeResolver';
 import { createMemoryPolicyStore, type MemoryPolicyStore } from './memoryPolicy';
@@ -242,7 +243,61 @@ export async function applyTurnMemoryExtraction(
     guardLevel: policy.memoryGuardLevel,
     maxImplicitAdds: policy.memoryImplicitUpdateEnabled ? 2 : 0,
   });
-  result.totalChanges = extracted.length;
+
+  // Global-audit de-hardgate (IDBots parity): the regex extractor only
+  // recognizes zh/en signal phrases, so non-zh/en users' explicit commands
+  // and personal facts never even reached the judge. One turn-level LLM
+  // extraction carries the multilingual coverage — at most once per turn,
+  // only when the session's LLM judge is enabled and the text is
+  // substantive. Regex candidates keep their existing judged path; entries
+  // the LLM extraction duplicates are dropped below.
+  let llmExtraction: MemoryTurnExtractionChange[] = [];
+  if (policy.memoryLlmJudgeEnabled && options.llmExtract && isSubstantiveMemoryText(options.userText)) {
+    try {
+      llmExtraction = await options.llmExtract({
+        userText: options.userText,
+        assistantText: options.assistantText,
+        guardLevel: policy.memoryGuardLevel,
+        implicitEnabled: policy.memoryImplicitUpdateEnabled,
+      }) ?? [];
+    } catch {
+      llmExtraction = [];
+    }
+  }
+  const regexKeys = new Set(extracted.map(
+    (change) => `${change.action}|${normalizeMemoryMatchKey(change.text)}`,
+  ));
+  const llmOnlyChanges = llmExtraction.filter((change) => {
+    const key = `${change.action}|${normalizeMemoryMatchKey(change.text)}`;
+    return normalizeMemoryMatchKey(change.text).length > 0 && !regexKeys.has(key);
+  });
+  result.totalChanges = extracted.length + llmOnlyChanges.length;
+
+  const deleteBestMatching = async (text: string): Promise<boolean> => {
+    const key = normalizeMemoryMatchKey(text);
+    if (!key) return false;
+    const candidates = await memory.list({
+      scope: resolved.writeScope,
+      status: 'all',
+      includeDeleted: false,
+      limit: 100,
+    });
+    let target: (typeof candidates)[number] | null = null;
+    let bestScore = 0;
+    for (const entry of candidates) {
+      const currentKey = normalizeMemoryMatchKey(entry.text);
+      if (!currentKey) continue;
+      const score = scoreDeleteMatch(currentKey, key);
+      if (score <= bestScore) continue;
+      bestScore = score;
+      target = entry;
+    }
+    if (!target) return false;
+    return memory.remove({
+      id: target.id,
+      scope: resolved.writeScope,
+    });
+  };
 
   for (const change of extracted) {
     if (change.action === 'add') {
@@ -300,40 +355,48 @@ export async function applyTurnMemoryExtraction(
       continue;
     }
 
-    const key = normalizeMemoryMatchKey(change.text);
-    if (!key) {
+    if (await deleteBestMatching(change.text)) {
+      result.deleted += 1;
+    } else {
       result.skipped += 1;
+    }
+  }
+
+  // LLM-only changes skip the rule judge (the extraction already vetted them,
+  // IDBots parity): implicit-disabled filtering and best-match deletes behave
+  // exactly like the regex path.
+  for (const change of llmOnlyChanges) {
+    if (change.action === 'add') {
+      if (!policy.memoryImplicitUpdateEnabled && !change.isExplicit) {
+        result.skipped += 1;
+        continue;
+      }
+      result.llmReviewed += 1;
+      const write = await memory.createOrRevive({
+        text: change.text,
+        confidence: change.isExplicit ? 0.95 : 0.8,
+        isExplicit: change.isExplicit,
+        scope: resolved.writeScope,
+        source: {
+          role: 'user',
+          sessionId: options.sessionId,
+          messageId: options.userMessageId,
+          sourceChannel: options.channel,
+          sourceType: change.isExplicit ? 'turn_explicit' : 'turn_llm',
+          sourceId: options.userMessageId,
+        },
+      });
+      if (write.created) result.created += 1;
+      else if (write.updated) result.updated += 1;
+      else result.skipped += 1;
       continue;
     }
 
-    const candidates = await memory.list({
-      scope: resolved.writeScope,
-      status: 'all',
-      includeDeleted: false,
-      limit: 100,
-    });
-    let target: (typeof candidates)[number] | null = null;
-    let bestScore = 0;
-    for (const entry of candidates) {
-      const currentKey = normalizeMemoryMatchKey(entry.text);
-      if (!currentKey) continue;
-      const score = scoreDeleteMatch(currentKey, key);
-      if (score <= bestScore) continue;
-      bestScore = score;
-      target = entry;
-    }
-
-    if (!target) {
+    if (await deleteBestMatching(change.text)) {
+      result.deleted += 1;
+    } else {
       result.skipped += 1;
-      continue;
     }
-
-    const deleted = await memory.remove({
-      id: target.id,
-      scope: resolved.writeScope,
-    });
-    if (deleted) result.deleted += 1;
-    else result.skipped += 1;
   }
 
   await memory.markOrphanImplicitMemoriesStale({ scope: resolved.writeScope });

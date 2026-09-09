@@ -75,7 +75,7 @@ import type {
   MetabotProfileFull,
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
-import { normalizeOptionalDshLlmId, normalizeOptionalDshLlmReasoningEffort } from '../core/bot/dshLlm';
+import { normalizeOptionalDshLlmId, normalizeOptionalDshLlmReasoningEffort, readDshLlmBinding } from '../core/bot/dshLlm';
 import { normalizeBotType, normalizeOptionalGlobalMetaId } from '../core/bot/botRole';
 import { applyTwinInvariant, resolveCurrentTwinSlug, resolveTwinHomeDir } from '../core/bot/twinRole';
 import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
@@ -18807,6 +18807,64 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('host_executor_result_unknown', `No pending host LLM request: ${requestId}`);
         }
         return commandSuccess({ accepted: true });
+      },
+      hostExecutorGenerate: async (body) => {
+        if (!input.hostLlmExecutorBridge) {
+          return commandFailed('host_executor_not_configured', 'Host LLM executor bridge is not configured.');
+        }
+        if (input.hostLlmExecutorBridge.connectedExecutors() === 0) {
+          return commandFailed('no_host_executor', 'No host LLM executor is connected (open the DSH host first).');
+        }
+        const slug = normalizeText(body.botSlug);
+        const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+        }
+        const paths = resolveMetabotPaths(profile.homeDir);
+        let binding;
+        try {
+          binding = await readDshLlmBinding(paths.dshLlmPath);
+        } catch {
+          binding = null;
+        }
+        const provider = binding?.dshLlmProvider?.trim() ?? '';
+        const model = binding?.dshLlmModel?.trim() ?? '';
+        if (!provider || !model) {
+          return commandFailed('no_dsh_pair', 'No DSH LLM provider/model configured for this Bot.');
+        }
+        const system = typeof body.system === 'string' ? body.system : '';
+        const prompt = typeof body.prompt === 'string' ? body.prompt : '';
+        if (!system || !prompt) {
+          return commandFailed('missing_payload', 'system and prompt are required.');
+        }
+        const rawTimeout = typeof body.timeoutMs === 'number' && Number.isFinite(body.timeoutMs)
+          ? Math.floor(body.timeoutMs)
+          : 0;
+        const timeoutMs = Math.min(Math.max(rawTimeout, 5_000), 60_000);
+        const fallbackProvider = binding?.dshLlmFallbackProvider?.trim() ?? '';
+        const fallbackModel = binding?.dshLlmFallbackModel?.trim() ?? '';
+        const outcome = await input.hostLlmExecutorBridge.generate({
+          ...(slug ? { botSlug: slug } : {}),
+          provider,
+          model,
+          reasoningEffort: binding?.dshLlmReasoningEffort,
+          ...(fallbackProvider && fallbackModel
+            ? {
+              fallback: {
+                provider: fallbackProvider,
+                model: fallbackModel,
+                reasoningEffort: binding?.dshLlmFallbackReasoningEffort,
+              },
+            }
+            : {}),
+          system,
+          prompt,
+          timeoutMs,
+        });
+        if (!outcome || !outcome.ok) {
+          return commandFailed('host_generate_failed', outcome?.error ?? 'Host LLM generation failed.');
+        }
+        return commandSuccess({ output: outcome.output ?? '' });
       },
       hostExecutorEvents: () => {
         const bridge = input.hostLlmExecutorBridge;
