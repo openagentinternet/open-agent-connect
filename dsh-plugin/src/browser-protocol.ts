@@ -58,6 +58,87 @@ export function isBotBrowserUri(href: string): boolean {
   return normalizeBotBrowserUri(href) !== null
 }
 
+function decodeSegment(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+const SEARCH_GLUING_DEEP_LINK_RE = /^\/browser\/(pin|metaapp)\/([^/?#]+)$/u
+const SEARCH_GLUING_MAP_PATH_RE = /^\/browser\/map\/(.+)$/u
+const BARE_BROWSER_SEGMENT_RE = /^\/browser\/([^/?#]+)$/u
+const BARE_PIN_SEGMENT_RE = /^[0-9a-f]{64}i[0-9]+$/iu
+
+/**
+ * Resource URI a search-gluing Browser deep-link path stands for, or null.
+ *
+ * agent-browser-ui's `browserUriFromPath` derives the URI to open from the
+ * page path by gluing the whole URL search onto it (`pin://<id> + search`).
+ * That makes any extra query param part of the resource URI — pin and metaapp
+ * deep links, map deep links, and bare-pin paths all share this contract.
+ * metaid deep links forward only an explicit `botpage` param and
+ * metafile / preview-metaapp deep links drop the search, so they are exempt.
+ */
+function searchGluingBrowserUri(pathname: string): string | null {
+  const deep = SEARCH_GLUING_DEEP_LINK_RE.exec(pathname)
+  if (deep) {
+    const resourceId = decodeSegment(deep[2] ?? '').trim()
+    return resourceId ? `${deep[1]}://${resourceId}` : null
+  }
+  const mapMatch = SEARCH_GLUING_MAP_PATH_RE.exec(pathname)
+  if (mapMatch) {
+    const mapPath = (mapMatch[1] ?? '').split('/').map(decodeSegment).join('/')
+    return mapPath.trim() ? `map://${mapPath}` : null
+  }
+  const bare = BARE_BROWSER_SEGMENT_RE.exec(pathname)
+  if (bare) {
+    const input = decodeSegment(bare[1] ?? '').trim()
+    return BARE_PIN_SEGMENT_RE.test(input) ? `pin://${input.toLowerCase()}` : null
+  }
+  return null
+}
+
+/**
+ * Append the sidebar theme param to a daemon-served Browser page URL without
+ * letting it leak into the resource URI the page opens.
+ *
+ * - `/browser` home and `/browser?uri=…` forms take `?theme=` directly (the
+ *   page reads the target URI from the `uri` param and ignores extras).
+ * - metaid / metafile / preview-metaapp deep links keep `?theme=` in the
+ *   search (agent-browser-ui drops or filters it when deriving the URI).
+ * - pin / metaapp / map / bare-pin deep links are rerouted to the
+ *   `/browser?uri=<resource>&theme=…` form, because on those paths the whole
+ *   search becomes part of the resource URI (`pin://<id>?theme=dark` cannot
+ *   resolve). A deep link that already carries its own search is returned
+ *   unchanged — that search is part of the resource URI, so the theme rides
+ *   the iframe's load-time set-theme postMessage instead.
+ * - Non-`/browser` URLs (e.g. the qanda question page) and non-URLs pass
+ *   through unchanged; only the Browser shell consumes the param.
+ */
+export function withBrowserThemeParam(url: string, theme: 'light' | 'dark'): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return url
+  }
+  if (parsed.pathname !== '/browser' && !parsed.pathname.startsWith('/browser/')) {
+    return url
+  }
+  const gluedUri = searchGluingBrowserUri(parsed.pathname)
+  if (gluedUri === null) {
+    parsed.searchParams.set('theme', theme)
+    return parsed.toString()
+  }
+  if (parsed.search) return url
+  const query = new URLSearchParams()
+  query.set('uri', gluedUri)
+  query.set('theme', theme)
+  return `${parsed.origin}/browser?${query.toString()}`
+}
+
 /**
  * Recover the Agent Internet URI from a markdown/DOM href.
  * Accepts metaapp://, metaid://, pin://, pinid://, map://, metafile://,
