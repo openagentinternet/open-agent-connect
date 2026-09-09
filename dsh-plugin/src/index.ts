@@ -29,6 +29,7 @@ import {
   proxyDaemonAvatar,
   streamDaemonConversationEvents,
 } from './conversation-bridge.js'
+import { streamAllChatEvents } from './chat-watcher.js'
 import { streamDaemonMetaAppEvents } from './metaapp-bridge.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
@@ -339,6 +340,14 @@ function registerApi(
           return
         }
         await streamDaemonConversationEvents(req, res, from)
+        return
+      }
+      if (method === 'chat/events/all') {
+        if (req.method !== 'GET') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+          return
+        }
+        streamAllChatEvents(req, res)
         return
       }
       if (method === 'metaapp/events') {
@@ -733,6 +742,18 @@ export {
   slugFromPresetId,
   type HeroIdentity,
 } from './chip-logic.js'
+export {
+  applyGroupUpdate,
+  applyPrivateLatest,
+  diffGroupTasks,
+  EMPTY_UNREAD,
+  hasAnyUnread,
+  privateRowStatus,
+  seedPrivateSeen,
+  type GroupTaskRow,
+  type GroupTaskUpdate,
+  type UnreadState,
+} from './unread-logic.js'
 export { dispatchSection } from './sections.js'
 export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'

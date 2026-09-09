@@ -66,6 +66,16 @@ function systemHomeDir(): string {
   return normalize(process.env, process.cwd())
 }
 
+/** The `~/.metabot` system home the CLI would use, or null when unresolvable. */
+export function localSystemHomeDir(): string | null {
+  try {
+    if (process.env.OAC_DSH_NO_LOCAL_READ) return null
+    return systemHomeDir()
+  } catch {
+    return null
+  }
+}
+
 /** Resolve a `--from` slug/name to a profile homeDir, mirroring the CLI. */
 export async function localActorHomeDir(from: string): Promise<string | null> {
   try {
