@@ -291,7 +291,8 @@ test('describeAudio handles local files, URLs, data URIs, and video-container ex
   await service.describeAudio({ source: audioFile });
   assert.equal(seen[0].body.audioBase64, wavBytes.toString('base64'));
   assert.equal(seen[0].body.mimeType, 'audio/wav');
-  assert.equal(seen[0].body.prompt, '请完整转写这段音频，保留原语言、标点和说话内容，不要总结。');
+  assert.match(seen[0].body.prompt, /请完整转写这段音频/);
+  assert.match(seen[0].body.prompt, /逐字母念出的字母序列/, 'letter-by-letter sequences must be preserved (FIX-4)');
 
   await service.describeAudio({ source: 'https://example.test/a.mp3', prompt: 'summarize' });
   assert.equal(seen[1].body.audioUrl, 'https://example.test/a.mp3');

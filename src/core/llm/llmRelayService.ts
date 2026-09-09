@@ -757,7 +757,9 @@ export function createLlmRelayService(deps: LlmRelayServiceDeps): LlmRelayServic
         }
       }
       // IDBots-parity default: full verbatim transcription, no summarizing.
-      body.prompt = prompt || '请完整转写这段音频，保留原语言、标点和说话内容，不要总结。';
+      // Letter-by-letter spoken sequences (O A C) must survive as O-A-C —
+      // merging them into a new word (OOC) silently corrupts acronyms.
+      body.prompt = prompt || '请完整转写这段音频，保留原语言、标点和说话内容，不要总结。逐字母念出的字母序列按连字符保留（例如 "O A C" 转写为 O-A-C），绝不能把逐个念出的字母合并成新词。';
       return await postRecognizeWithKeyRetry(body, 'vision relay returned no audio transcription');
     },
   };

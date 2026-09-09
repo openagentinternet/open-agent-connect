@@ -7,6 +7,9 @@ import test from 'node:test'
 const plugin = await import('../lib/index.js')
 
 const PIN = `${'d'.repeat(64)}i0`
+/** A pin never published by any test in this file — the module-level publish
+ * ledger would otherwise vouch for PIN (published in earlier tests). */
+const FOREIGN_PIN = `${'f'.repeat(64)}i0`
 
 function fakeHub(snapshot, onCommand) {
   const opens = []
@@ -682,15 +685,28 @@ test('bot_browser_update_app resolves the target from the fork marker and refuse
   const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-update-notowned-'))
   await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
   await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
-  await writeFile(join(dir, '.metaapp-fork.json'), JSON.stringify({ sourcePinId: PIN }), 'utf8')
+  await writeFile(join(dir, '.metaapp-fork.json'), JSON.stringify({ sourcePinId: FOREIGN_PIN }), 'utf8')
   const calls = []
   const { agent, tools } = registerUpdateTools({ run: updateToolRun(calls, { owned: false }) })
-  const text = await tools.find((tool) => tool.name === 'bot_browser_update_app').execute({ dir }, { agent })
+  const update = tools.find((tool) => tool.name === 'bot_browser_update_app')
+  const text = await update.execute({ dir }, { agent })
   assert.match(text, /not among this Bot's published apps/)
+  assert.match(text, /index may lag/, 'the refusal distinguishes index lag from foreign ownership')
   assert.match(text, /bot_browser_publish_app/)
   // Only the ownership check ran — no preflight, no write.
   assert.equal(calls.length, 1)
   assert.equal(calls[0][1], 'list')
+
+  // A foreign pin passed explicitly is refused the same way.
+  const dir2 = await mkdtemp(join(tmpdir(), 'oac-dsh-update-foreign-'))
+  await writeFile(join(dir2, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir2, 'index.html'), '<html></html>\n', 'utf8')
+  const calls2 = []
+  const second = registerUpdateTools({ run: updateToolRun(calls2, { owned: false }) })
+  const refused = await second.tools.find((tool) => tool.name === 'bot_browser_update_app')
+    .execute({ dir: dir2, targetPinId: FOREIGN_PIN }, { agent: second.agent })
+  assert.match(refused, /not among this Bot's published apps/)
+  assert.equal(calls2.length, 1)
 })
 
 test('bot_browser_update_app refuses while ownership is unverifiable', async () => {
@@ -758,4 +774,183 @@ test('bot_browser_update_app publishes a new version under the stable app URI', 
   assert.deepEqual(confirm.slice(0, 4), ['metaapp', 'update-project', '--project-dir', dir])
   assert.ok(confirm.includes('--target-pin-id'))
   assert.ok(confirm.includes(PIN))
+})
+// ---------------------------------------------------------------------------
+// Smoke-test R2 fixes (docs/OAC-dsh-plugin-修复需求-2026-09-09)
+// ---------------------------------------------------------------------------
+
+const PUBLISH_R2_PIN = `${'a'.repeat(64)}i0`
+const UPDATE_R2_PIN = `${'b'.repeat(64)}i0`
+
+function publishToolSetup(calls, publishData) {
+  const { agent, tools } = fakeAgent()
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub: fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    approval: { async request() { return 'allowed-once' } },
+    run: async (args) => {
+      calls.push(args)
+      if (!args.includes('--confirm')) {
+        return {
+          ok: true,
+          state: 'awaiting_confirmation',
+          data: { plan: { indexFile: 'index.html' }, manifest: { title: 'R2' }, archivePreview: { bytes: 128 } },
+        }
+      }
+      return { ok: true, state: 'success', data: publishData }
+    },
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  return { agent, tools }
+}
+
+test('publish -> immediate update bridges the MAN index lag via the publish ledger (FIX-1)', async () => {
+  const publishCalls = []
+  const published = publishToolSetup(publishCalls, {
+    pinId: PUBLISH_R2_PIN,
+    firstPinId: PUBLISH_R2_PIN,
+    metaappUri: `metaapp://${PUBLISH_R2_PIN}`,
+    chainWrite: { totalCost: 555 },
+  })
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-r2-publish-'))
+  await writeFile(join(dir, 'APP.md'), 'R2.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const publish = published.tools.find((tool) => tool.name === 'bot_browser_publish_app')
+  const publishText = await publish.execute({ dir, title: 'R2' }, { agent: published.agent })
+  assert.match(publishText, new RegExp(`metaapp://${PUBLISH_R2_PIN}`))
+  assert.match(publishText, /Cost: 555 sats/, 'fee rides at data.chainWrite.totalCost (FIX-5)')
+
+  // Same-minute update: the MAN owner list (metaapp list) is EMPTY for the new
+  // app — the local publish ledger must vouch for it instead of refusing.
+  const updateCalls = []
+  const updateRun = async (args) => {
+    updateCalls.push(args)
+    if (args[1] === 'list') {
+      return { ok: true, state: 'success', data: { records: [], nextCursor: '' } }
+    }
+    if (!args.includes('--confirm')) {
+      return {
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: { plan: { indexFile: 'index.html' }, manifest: { title: 'R2' }, archivePreview: { bytes: 128 } },
+      }
+    }
+    return { ok: true, state: 'success', data: { pinId: UPDATE_R2_PIN, firstPinId: PUBLISH_R2_PIN, chainWrite: { totalCost: 42 } } }
+  }
+  const { agent, tools } = registerUpdateTools({ run: updateRun })
+  const updateDir = await mkdtemp(join(tmpdir(), 'oac-dsh-r2-update-'))
+  await writeFile(join(updateDir, 'APP.md'), 'R2.\n', 'utf8')
+  await writeFile(join(updateDir, 'index.html'), '<html></html>\n', 'utf8')
+  const text = await tools.find((tool) => tool.name === 'bot_browser_update_app')
+    .execute({ dir: updateDir, targetPinId: PUBLISH_R2_PIN }, { agent })
+  assert.match(text, /Updated on-chain/, 'the ledger vouches for the just-published pin')
+  assert.match(text, /Cost: 42 sats/)
+  assert.ok(updateCalls.some((args) => args.includes('--confirm') && args.includes(PUBLISH_R2_PIN)))
+})
+
+test('publish with no fee figure reports Cost: unavailable instead of silence (FIX-5)', async () => {
+  const calls = []
+  const { agent, tools } = publishToolSetup(calls, {
+    pinId: `${'c'.repeat(64)}i0`,
+    firstPinId: `${'c'.repeat(64)}i0`,
+  })
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-r2-nocost-'))
+  await writeFile(join(dir, 'APP.md'), 'R2.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const text = await tools.find((tool) => tool.name === 'bot_browser_publish_app')
+    .execute({ dir, title: 'R2' }, { agent })
+  assert.match(text, /Cost: unavailable/)
+})
+
+test('preview credential survives agent object replacement (FIX-2)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-r2-preview-'))
+  await writeFile(join(dir, 'APP.md'), 'R2.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const calls = []
+  const { agent, tools } = registerUpdateTools({
+    run: updateToolRun(calls),
+    agentSession: { events: [{ type: 'approval/policy', data: { policy: 'never' } }] },
+  })
+  // The host replaced the agent object between the preview and the publish
+  // (sidebar reload / recompose): different reference, same acting Bot.
+  const replacementAgent = { ...agent, ctx: agent.ctx, session: agent.session }
+  const preview = tools.find((tool) => tool.name === 'bot_browser_preview_local')
+  await preview.execute({ path: dir }, { agent })
+  const update = tools.find((tool) => tool.name === 'bot_browser_update_app')
+  const text = await update.execute({ dir, targetPinId: PIN }, { agent: replacementAgent })
+  assert.match(text, /Updated on-chain/, 'the slug-keyed preview record outlives the agent object')
+  const confirm = calls.find((args) => args.includes('--confirm'))
+  assert.ok(confirm)
+})
+
+test('open_uri waits for the navigation commit before reporting tabs (FIX-3)', async () => {
+  // The command result carries a pre-navigation tab list; the live client
+  // state fills the URI in shortly after. The returned text must show the
+  // requested URI (or explicitly say navigation is in progress), never
+  // "(untitled) — (no uri)" for the freshly opened tab.
+  let reads = 0
+  const hub = {
+    getSnapshot: () => {
+      reads += 1
+      return reads < 3
+        ? { open: true, tabs: [{ id: 2, uri: null, title: null, isActive: true }] }
+        : { open: true, tabs: [{ id: 2, uri: `metaapp://${PIN}`, title: 'R2 App', isActive: true }] }
+    },
+    clientCount: () => 1,
+    open: () => ({ uri: '', localUiUrl: 'x' }),
+    publishCatalog() {},
+    requestCommand: async () => ({
+      requestId: 'x',
+      ok: true,
+      action: 'open-tab',
+      tabs: [{ id: 2, uri: null, title: null, isActive: true }],
+    }),
+  }
+  const { agent, tools } = fakeAgent()
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: {} }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const text = await tools.find((tool) => tool.name === 'bot_browser_open_uri')
+    .execute({ uri: `metaapp://${PIN}` }, { agent })
+  assert.match(text, new RegExp(`metaapp://${PIN}`))
+  assert.match(text, /R2 App/)
+  assert.doesNotMatch(text, /\(no uri\)/)
+})
+
+test('open_uri reports navigation-in-progress when the commit never lands (FIX-3)', async () => {
+  const hub = {
+    getSnapshot: () => ({ open: true, tabs: [{ id: 2, uri: null, title: null, isActive: true }] }),
+    clientCount: () => 1,
+    open: () => ({ uri: '', localUiUrl: 'x' }),
+    publishCatalog() {},
+    requestCommand: async () => ({
+      requestId: 'x',
+      ok: true,
+      action: 'open-tab',
+      tabs: [{ id: 2, uri: null, title: null, isActive: true }],
+    }),
+  }
+  const { agent, tools } = fakeAgent()
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: {} }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const text = await tools.find((tool) => tool.name === 'bot_browser_open_uri')
+    .execute({ uri: `metaapp://${PIN}` }, { agent })
+  assert.match(text, /navigation in progress/)
+  assert.match(text, /Do not open it again/)
 })
