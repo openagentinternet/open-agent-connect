@@ -66,7 +66,11 @@ name and a description; there is no manual document typing — the corpus is fed
 by agent tools (`knowledge_base_add_document`, `skill_tool`) and file import.
 The nightly study-jobs status panel (topics assigned via
 `metaweb_study_enqueue`) sits below, and the model gets the same registry
-every turn through the `<knowledge_bases>` volatile prompt block.
+every turn through the `<knowledge_bases>` volatile prompt block. The
+`knowledge_base_*` tools resolve the acting Bot per call (session `oac-*`
+agent first, then the machine-default Twin — the same target a no-`--from`
+CLI call picks), so they also work from plain DSH conversations, and write
+results name the profile they landed on.
 
 ## Group Tasks (群任务) and OpenTeam
 
@@ -170,6 +174,15 @@ data under `~/.metabot/profiles/<slug>/`):
   together with the Twin's `oac_session_insert_user_message` this closes
   the IDBots `idbots_session_read_*` / `idbots_session_insert_user_message`
   parity loop for Twin-side orchestration of every conversation.
+  `knowledge_recall`/`knowledge_upsert` are ALSO registered on the host
+  global layer (the learning-loop prompt names `knowledge_upsert` in every
+  session, so it must exist in every session): outside `oac-*`
+  conversations they act as the machine-default Bot (the Twin) — the same
+  target a no-`--from` CLI call picks — and write outputs say so. Every
+  tool's failure path returns a plain string: the DSH host validates tool
+  output against the declared string schema, and an object error would
+  surface as `invalid output: "value" must be a string` instead of the
+  actual message.
 - **Nightly dream** — the plugin scheduler (`dream.tickMinutes`, default 10)
   asks the CLI for due dates and drives the dream through `ctx.llm`
   (retrying once on the Bot's fallback DSH LLM pair when set):

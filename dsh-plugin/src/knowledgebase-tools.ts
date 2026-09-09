@@ -5,7 +5,7 @@
  * procedure module). In-process execution through the local-read dist loader
  * against the session Bot's profile paths.
  */
-import { core } from './local-read.js'
+import { core, twinFallbackSlug } from './local-read.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 import { actorHomeDir, oacSlugOf } from './browser-tools.js'
 
@@ -14,6 +14,12 @@ export interface KnowledgebaseToolDeps {
   fallbackSlug?: string
   /** Resolve a Bot slug to its profile homeDir; defaults to the CLI-mirroring resolution. */
   resolveHomeDir?: (slug: string) => Promise<string>
+  /**
+   * Resolve the machine-default Bot (the Twin) when the session has no
+   * `oac-*` agent; defaults to the in-process twin lookup. Inject `undefined`
+   * resolution in tests that assert the no-profile error path.
+   */
+  resolveFallbackSlug?: () => Promise<string | undefined>
 }
 
 function textArg(args: Record<string, unknown>, key: string): string {
@@ -75,16 +81,28 @@ function serviceFor(homeDir: string) {
  * homeDir comes from the slug (never the session workspace cwd — DSH sessions
  * run in the host workspace, which resolveMetabotPaths rejects), so the tools
  * work from any conversation workspace and from never-initialized profiles.
+ * Sessions with no `oac-*` agent fall back to the machine-default Bot (the
+ * Twin) — the same target a no-`--from` CLI call picks — so plain DSH
+ * conversations keep working instead of failing on a missing profile.
+ * `viaFallback` marks that resolution so write tools can report where data
+ * actually landed.
  */
 async function sessionOf(
   input: KnowledgebaseToolDeps & { host: HostContext },
   exec: HostToolExec,
-): Promise<{ slug: string; homeDir: string } | null> {
+): Promise<{ slug: string; homeDir: string; viaFallback: boolean } | null> {
   const agent = exec.agent as HostAgentLike | undefined
-  const slug = (agent ? oacSlugOf(input.host, agent) : undefined) ?? input.fallbackSlug ?? ''
+  const ownSlug = (agent ? oacSlugOf(input.host, agent) : undefined) ?? input.fallbackSlug ?? ''
+  let slug = ownSlug
+  let viaFallback = false
+  if (!slug) {
+    const resolver = input.resolveFallbackSlug ?? twinFallbackSlug
+    slug = (await resolver()) ?? ''
+    viaFallback = slug !== ''
+  }
   if (!slug) return null
   const homeDir = await (input.resolveHomeDir ?? actorHomeDir)(slug)
-  return { slug, homeDir }
+  return { slug, homeDir, viaFallback }
 }
 
 /** Tool failure text: a string, so the declared string output schema always validates. */
@@ -92,7 +110,10 @@ function toolError(tool: string, error: unknown): string {
   return `${tool} failed: ${error instanceof Error ? error.message : String(error)}`
 }
 
-const NO_SESSION = 'could not determine the acting Bot profile for this session.'
+const NO_SESSION = [
+  'could not determine the acting Bot profile: this session is not an OAC Bot conversation and the machine has no Twin Bot.',
+  'Ask the owner to create or designate one (Settings → Bots, or `metabot bot create --type twin`), then retry.',
+].join(' ')
 
 export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps & {
   host: HostContext
@@ -215,7 +236,10 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
             ...(textArg(args, 'pinId') ? { pinId: textArg(args, 'pinId') } : {}),
             ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
           })
-          return `Saved "${title}" as ${saved.relPath}. Now call knowledge_base_learn to make it searchable.`
+          const landing = session.viaFallback
+            ? ` on the machine-default Bot "${session.slug}" (this session has no OAC Bot of its own)`
+            : ''
+          return `Saved "${title}" as ${saved.relPath}${landing}. Now call knowledge_base_learn to make it searchable.`
         } catch (error) {
           return toolError('knowledge_base_add_document', error)
         }
@@ -245,7 +269,10 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
             textArg(args, 'knowledgeBaseId') || undefined,
             args.full === true,
           )
-          return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks indexed.`
+          const landing = session.viaFallback
+            ? ` on the machine-default Bot "${session.slug}" (this session has no OAC Bot of its own)`
+            : ''
+          return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks indexed${landing}.`
         } catch (error) {
           return toolError('knowledge_base_learn', error)
         }

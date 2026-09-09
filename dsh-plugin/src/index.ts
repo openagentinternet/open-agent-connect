@@ -50,7 +50,7 @@ import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyScheduleScheduler } from './schedule-scheduler.js'
 import { HostLlmExecutor, type HostAgentTurnRunner } from './host-llm-executor.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
-import { installMemoryToolsOnAgent } from './memory-tools.js'
+import { bindGlobalKnowledgeToolInstall, installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { agentsRegistryOf, errorFromTurnEvents, installTwinOnAgent, liveOacAgents, textFromAssistantEvents } from './twin-tools.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
@@ -614,6 +614,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindSimpleNoteToolInstall(ctx)
   bindQaToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
+  bindGlobalKnowledgeToolInstall(ctx)
   bindMediaDescriptionTools(ctx)
 
   // Source-session relay: drain group-task milestones back into the chat that
@@ -774,7 +775,13 @@ export {
 } from './group-task-tools.js'
 export { applyGroupTaskRelayDrain } from './group-task-relay.js'
 export { applyGroupTaskWorkerSessions, GROUP_TASK_WORK_SYSTEM_PROMPT } from './group-task-worker.js'
-export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
+export {
+  bindGlobalKnowledgeToolInstall,
+  buildGlobalKnowledgeToolDefinitions,
+  buildMemoryToolDefinitions,
+  installMemoryToolsOnAgent,
+  MEMORY_STRATEGY_TEXT,
+} from './memory-tools.js'
 export { bindMediaDescriptionTools, buildMediaDescriptionToolDefinitions, type MediaDescriptionControl } from './vision-tools.js'
 export {
   buildChainHistoryRecallToolDefinitions,

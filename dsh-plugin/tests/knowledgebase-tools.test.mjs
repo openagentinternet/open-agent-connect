@@ -222,11 +222,44 @@ test('tool failures return locatable strings that satisfy the string output sche
 
 test('missing session context returns a readable string error', async () => {
   const host = fakeHost()
-  const [, query] = plugin.buildKnowledgeBaseToolDefinitions({ host: host.ctx })
+  const [, query] = plugin.buildKnowledgeBaseToolDefinitions({
+    host: host.ctx,
+    resolveFallbackSlug: async () => undefined,
+  })
   const result = await query.execute({ query: 'x' }, {})
   assert.equal(typeof result, 'string')
   assert.match(result, /^knowledge_base_query failed: /)
   assert.match(result, /acting Bot profile/)
+  assert.match(result, /Twin Bot/)
+})
+
+// Plain non-oac DSH sessions resolve the machine-default Bot (the Twin) and
+// keep working; write tools say where the data landed (KB problem report
+// category C: no silent profile guesswork).
+test('session without an oac agent falls back to the machine-default Bot', async () => {
+  const { homeDir, resolve } = profileSetup('kb-twin-fallback-')
+  const host = fakeHost()
+  const defs = plugin.buildKnowledgeBaseToolDefinitions({
+    host: host.ctx,
+    resolveHomeDir: resolve,
+    resolveFallbackSlug: async () => 'twin-bot',
+  })
+  const [list, , add, learn] = defs
+  // Plain exec: no agent at all, like a coding-workspace session.
+  const exec = {}
+
+  const empty = await list.execute({}, exec)
+  assert.match(String(empty), /No knowledge bases yet/)
+
+  const saved = await add.execute({ title: '回退笔记', content: '机器默认 Bot 的回退写入。' }, exec)
+  assert.equal(typeof saved, 'string')
+  assert.match(saved, /Saved "回退笔记"/)
+  assert.match(saved, /machine-default Bot "twin-bot"/)
+
+  const learned = await learn.execute({}, exec)
+  assert.match(String(learned), /1 docs, \d+ chunks indexed/)
+  assert.match(String(learned), /machine-default Bot "twin-bot"/)
+  assert.ok(homeDir.length > 0, 'homeDir resolved through the injected resolver')
 })
 
 test('procedure_save -> recall -> archive roundtrip with colloquial matching', async () => {

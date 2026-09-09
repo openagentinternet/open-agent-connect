@@ -10,7 +10,9 @@
  */
 import { runMetabot } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
-import type { HostAgentLike, HostToolDefinition } from './context-types.js'
+import { twinFallbackSlug } from './local-read.js'
+import { oacSlugOf } from './browser-tools.js'
+import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 
 /** Memory Strategy section, ported from IDBots and adapted to this toolset. */
 export const MEMORY_STRATEGY_TEXT = [
@@ -362,5 +364,136 @@ export function installMemoryToolsOnAgent(
   })
   for (const definition of buildMemoryToolDefinitions(slug, run)) {
     agent.ctx.tools?.register(definition)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Global knowledge-point tools
+// ---------------------------------------------------------------------------
+
+export interface GlobalKnowledgeToolDeps {
+  host: HostContext
+  /** Static acting-Bot slug fallback (tests); the session's own agent wins. */
+  fallbackSlug?: string
+  /** Machine-default (Twin) resolver override; defaults to the in-process lookup. */
+  resolveFallbackSlug?: () => Promise<string | undefined>
+  /** CLI bridge override for tests. */
+  run?: RunFn
+}
+
+const NO_PROFILE = [
+  'could not determine the acting Bot profile: this session is not an OAC Bot conversation and the machine has no Twin Bot.',
+  'Ask the owner to create or designate one (Settings → Bots, or `metabot bot create --type twin`), then retry.',
+].join(' ')
+
+/**
+ * `knowledge_recall` / `knowledge_upsert` on the HOST GLOBAL layer, so the two
+ * memory-family names the global prompt sections advertise (the metaweb
+ * learning loop steers single facts to knowledge_upsert) exist in every DSH
+ * session — plain coding conversations included — instead of answering
+ * `unknown tool`. The acting Bot resolves per exec (session `oac-*` agent,
+ * then the machine-default Twin), so writes land exactly where a no-`--from`
+ * CLI call would. On `oac-*` agents the per-agent install from
+ * {@link installMemoryToolsOnAgent} shadows these with identical behavior.
+ */
+export function buildGlobalKnowledgeToolDefinitions(input: GlobalKnowledgeToolDeps): HostToolDefinition[] {
+  const run: RunFn = input.run ?? runMetabot
+  const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
+    { type: 'text', text: String(value) },
+  ]
+
+  const slugFor = async (exec: HostToolExec): Promise<string | undefined> => {
+    const agent = exec.agent as HostAgentLike | undefined
+    const own = (agent ? oacSlugOf(input.host, agent) : undefined) ?? input.fallbackSlug ?? ''
+    if (own) return own
+    const resolver = input.resolveFallbackSlug ?? twinFallbackSlug
+    return (await resolver()) ?? undefined
+  }
+
+  return [
+    {
+      name: 'knowledge_recall',
+      description:
+        'Search your reusable knowledge points (know-how, pitfalls, principles) by keyword, kind, or category.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          kind: { type: 'string', enum: ['know_how', 'pitfall', 'principle'] },
+          category: { type: 'string' },
+          limit: { type: 'number', description: '1-50, default 20' },
+        },
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 30_000,
+      async execute(args, exec) {
+        const slug = await slugFor(exec)
+        if (!slug) return `knowledge_recall failed: ${NO_PROFILE}`
+        const result = await runMetabotWithPayloadFile(
+          ['memory', 'knowledge', 'list', '--from', slug],
+          {
+            ...(textArg(args, 'query') ? { query: textArg(args, 'query') } : {}),
+            ...(textArg(args, 'kind') ? { kind: textArg(args, 'kind') } : {}),
+            ...(textArg(args, 'category') ? { category: textArg(args, 'category') } : {}),
+            limit: numberArg(args, 'limit') ?? 20,
+          },
+          '--payload-file',
+          [],
+          run,
+        )
+        const entries = (dataOf(result) as { entries?: Array<Record<string, unknown>> }).entries ?? []
+        return formatKnowledgeEntries(entries)
+      },
+    },
+    {
+      name: 'knowledge_upsert',
+      description:
+        'Save or revise a reusable knowledge point. Reusing an existing topic rewrites it (version bump); a fresh topic creates a new entry.',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: 'Retrievable topic, not a one-off detail.' },
+          summary: { type: 'string', description: 'Actionable conclusion that guides the next similar task.' },
+          kind: { type: 'string', enum: ['know_how', 'pitfall', 'principle'] },
+          category: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['topic', 'summary'],
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 30_000,
+      async execute(args, exec) {
+        const slug = await slugFor(exec)
+        if (!slug) return `knowledge_upsert failed: ${NO_PROFILE}`
+        const result = await runMetabotWithPayloadFile(
+          ['memory', 'knowledge', 'upsert', '--from', slug],
+          {
+            topic: textArg(args, 'topic'),
+            summary: textArg(args, 'summary'),
+            ...(textArg(args, 'kind') ? { kind: textArg(args, 'kind') } : {}),
+            ...(textArg(args, 'category') ? { category: textArg(args, 'category') } : {}),
+            ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
+          },
+          '--payload-file',
+          [],
+          run,
+        )
+        const data = dataOf(result) as { text?: unknown }
+        return toolText(data.text ?? data)
+      },
+    },
+  ]
+}
+
+/** Register the global knowledge-point tools on the host global layer during plugin apply. */
+export function bindGlobalKnowledgeToolInstall(ctx: HostContext): void {
+  for (const definition of buildGlobalKnowledgeToolDefinitions({ host: ctx })) {
+    try {
+      ctx.tools?.register(definition)
+    } catch (error) {
+      if (!/already.*(registered|exists)|duplicate/i.test(error instanceof Error ? error.message : String(error))) {
+        ctx.logger?.warn?.(`[oac-dsh] global knowledge tool install failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
   }
 }

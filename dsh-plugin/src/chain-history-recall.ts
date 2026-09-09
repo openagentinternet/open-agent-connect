@@ -139,9 +139,14 @@ export function formatChainHistoryRecallResults(
 
 const RECALL_TIMEOUT_MS = 30_000
 
-/** Tool error convention: a readable message the model can act on. */
-function toolError(message: string): { error: string } {
-  return { error: message }
+/**
+ * Tool error convention: a readable STRING the model can act on. The declared
+ * output schema is `{ type: 'string' }` and the DSH host validates tool output
+ * against it, so an object return here surfaces as
+ * `invalid output: "value" must be a string` instead of the actual message.
+ */
+function toolError(message: string): string {
+  return `chain_history_recall failed: ${message}`
 }
 
 function stringOrNull(value: unknown): string | null {
