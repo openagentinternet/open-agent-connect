@@ -53,6 +53,8 @@ export interface MetabotPaths {
     memoryTranscriptsRoot: string;
     /** Memory hygiene run ledger (`.runtime/memory/hygiene.json`). */
     memoryHygienePath: string;
+    /** L3b capability drafts from dreams (`.runtime/memory/capability-drafts.json`). */
+    memoryCapabilityDraftsPath: string;
     chainHistoryRoot: string;
     schedulePath: string;
     llmRoot: string;

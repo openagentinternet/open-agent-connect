@@ -16221,6 +16221,65 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 return (0, commandResult_1.commandSuccess)({ accepted: true });
             },
+            hostExecutorGenerate: async (body) => {
+                if (!input.hostLlmExecutorBridge) {
+                    return (0, commandResult_1.commandFailed)('host_executor_not_configured', 'Host LLM executor bridge is not configured.');
+                }
+                if (input.hostLlmExecutorBridge.connectedExecutors() === 0) {
+                    return (0, commandResult_1.commandFailed)('no_host_executor', 'No host LLM executor is connected (open the DSH host first).');
+                }
+                const slug = normalizeText(body.botSlug);
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+                }
+                const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
+                let binding;
+                try {
+                    binding = await (0, dshLlm_1.readDshLlmBinding)(paths.dshLlmPath);
+                }
+                catch {
+                    binding = null;
+                }
+                const provider = binding?.dshLlmProvider?.trim() ?? '';
+                const model = binding?.dshLlmModel?.trim() ?? '';
+                if (!provider || !model) {
+                    return (0, commandResult_1.commandFailed)('no_dsh_pair', 'No DSH LLM provider/model configured for this Bot.');
+                }
+                const system = typeof body.system === 'string' ? body.system : '';
+                const prompt = typeof body.prompt === 'string' ? body.prompt : '';
+                if (!system || !prompt) {
+                    return (0, commandResult_1.commandFailed)('missing_payload', 'system and prompt are required.');
+                }
+                const rawTimeout = typeof body.timeoutMs === 'number' && Number.isFinite(body.timeoutMs)
+                    ? Math.floor(body.timeoutMs)
+                    : 0;
+                const timeoutMs = Math.min(Math.max(rawTimeout, 5_000), 60_000);
+                const fallbackProvider = binding?.dshLlmFallbackProvider?.trim() ?? '';
+                const fallbackModel = binding?.dshLlmFallbackModel?.trim() ?? '';
+                const outcome = await input.hostLlmExecutorBridge.generate({
+                    ...(slug ? { botSlug: slug } : {}),
+                    provider,
+                    model,
+                    reasoningEffort: binding?.dshLlmReasoningEffort,
+                    ...(fallbackProvider && fallbackModel
+                        ? {
+                            fallback: {
+                                provider: fallbackProvider,
+                                model: fallbackModel,
+                                reasoningEffort: binding?.dshLlmFallbackReasoningEffort,
+                            },
+                        }
+                        : {}),
+                    system,
+                    prompt,
+                    timeoutMs,
+                });
+                if (!outcome || !outcome.ok) {
+                    return (0, commandResult_1.commandFailed)('host_generate_failed', outcome?.error ?? 'Host LLM generation failed.');
+                }
+                return (0, commandResult_1.commandSuccess)({ output: outcome.output ?? '' });
+            },
             hostExecutorEvents: () => {
                 const bridge = input.hostLlmExecutorBridge;
                 if (!bridge)

@@ -136,9 +136,9 @@ export interface DreamDayActivity {
 }
 /** Render the human-readable diary mirror at `memory/YYYY-MM-DD.md`. */
 export declare function renderDreamDiaryMarkdown(summary: DailySummary): string;
-/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots caps
- * the same excerpt at 400; the file port stays tighter). */
-export declare const DREAM_GROUP_CHAT_MAX_MESSAGES = 200;
+/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots
+ * `MAX_GROUP_CHAT_MESSAGES_PER_TASK` parity). */
+export declare const DREAM_GROUP_CHAT_MAX_MESSAGES = 400;
 /** One in-day group-chat message at full fidelity — the prompt activity shape
  * drops pin/sender ids, but the dream-time experience harvest needs them. */
 export interface DreamDayGroupChatSourceMessage {

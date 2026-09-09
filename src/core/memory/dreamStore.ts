@@ -13,6 +13,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { createChainHistoryStore } from '../chainhistory/store';
+import { createScheduleStore } from '../schedule/store';
 import {
   GROUP_TASK_TERMINAL_STATUSES,
   type GroupTaskMember,
@@ -337,9 +338,9 @@ export function renderDreamDiaryMarkdown(summary: DailySummary): string {
   return `${parts.join('\n')}\n`;
 }
 
-/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots caps
- * the same excerpt at 400; the file port stays tighter). */
-export const DREAM_GROUP_CHAT_MAX_MESSAGES = 200;
+/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots
+ * `MAX_GROUP_CHAT_MESSAGES_PER_TASK` parity). */
+export const DREAM_GROUP_CHAT_MAX_MESSAGES = 400;
 
 /** One in-day group-chat message at full fidelity — the prompt activity shape
  * drops pin/sender ids, but the dream-time experience harvest needs them. */
@@ -973,10 +974,34 @@ export function createDreamStore(paths: MetabotPaths, deps: {
         chainReads = [];
       }
 
+      // Scheduled-task runs started that day (IDBots parity — the prompt's
+      // 定时任务 section and the day-stats taskRunCount both read these).
+      // `startedAt` is a UTC ISO string, so parse then window it. Best effort:
+      // a missing or corrupt ledger degrades to no runs, never a failed dream.
+      let taskRuns: DreamTaskRunActivity[] = [];
+      try {
+        const schedule = createScheduleStore(paths);
+        const [tasks, runs] = await Promise.all([schedule.listTasks(), schedule.listRuns()]);
+        const taskNames = new Map(tasks.map((task) => [task.id, task.name]));
+        taskRuns = runs
+          .map((run) => ({ run, startedAtMs: Date.parse(run.startedAt) }))
+          .filter((entry) => Number.isFinite(entry.startedAtMs)
+            && entry.startedAtMs >= startMs
+            && entry.startedAtMs < endMs)
+          .sort((left, right) => left.startedAtMs - right.startedAtMs)
+          .map((entry) => ({
+            taskName: taskNames.get(entry.run.taskId) ?? entry.run.taskId,
+            status: entry.run.status,
+            startedAt: entry.startedAtMs,
+            sessionId: null,
+          }));
+      } catch {
+        taskRuns = [];
+      }
+
       return {
         sessions,
-        // OAC has no scheduled-task feature; the prompt section stays empty.
-        taskRuns: [],
+        taskRuns,
         orderCount: dayOrders.length,
         groupTasks: [...acceptedGroupTasks, ...activeGroupTasks],
         groupChats,

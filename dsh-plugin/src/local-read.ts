@@ -66,6 +66,24 @@ function systemHomeDir(): string {
   return normalize(process.env, process.cwd())
 }
 
+/**
+ * The metabot profiles root (`~/.metabot/profiles`), or null when the core
+ * home layout cannot be resolved. NOTE: `normalizeSystemHomeDir` returns the
+ * SYSTEM home — the `.metabot` segment comes from
+ * `resolveMetabotManagerLayout`, so joining 'profiles' onto the system home
+ * alone points at a directory that does not exist.
+ */
+export function localProfilesRoot(): string | null {
+  try {
+    if (process.env.OAC_DSH_NO_LOCAL_READ) return null
+    const homeSelection = core('core/state/homeSelection.js')
+    const layout = fn<(home: string) => { profilesRoot: string }>(homeSelection, 'resolveMetabotManagerLayout')
+    return layout(systemHomeDir()).profilesRoot
+  } catch {
+    return null
+  }
+}
+
 /** Resolve a `--from` slug/name to a profile homeDir, mirroring the CLI. */
 export async function localActorHomeDir(from: string): Promise<string | null> {
   try {

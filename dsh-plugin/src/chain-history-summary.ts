@@ -17,7 +17,7 @@
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import type { HostContext } from './context-types.js'
-import { generateLlmText, type LlmStreamLike } from './llm-generate.js'
+import { generateLlmText, resolveDreamLlmProfile, type LlmStreamLike } from './llm-generate.js'
 
 const DEFAULT_TICK_MINUTES = 30
 const DEFAULT_DAILY_CAP = 40
@@ -81,15 +81,31 @@ function buildSummaryPrompt(input: SummarizerInput): { system: string; user: str
  * retried once on the fallback brain pair when configured.
  */
 export function createDshLlmSummarizerProvider(llm: LlmStreamLike, brains: SummarizerBrains): SummarizerProvider {
-  const call = (provider: string, model: string, system: string, user: string): Promise<string> =>
-    generateLlmText(llm, {
+  // Reasoning-off memo per pair: with a 512-token summary budget a
+  // reasoning-default model spends it all on thinking chunks and the call
+  // fails as empty content, so summaries ask for 'off' where the model
+  // declares it (see resolveDreamLlmProfile for why 'off' is conditional).
+  const effortCache = new Map<string, string | undefined>()
+  const effortFor = async (provider: string, model: string): Promise<string | undefined> => {
+    const key = `${provider}/${model}`
+    if (!effortCache.has(key)) {
+      const { reasoningEffort } = await resolveDreamLlmProfile(llm, provider, model)
+      effortCache.set(key, reasoningEffort)
+    }
+    return effortCache.get(key)
+  }
+  const call = async (provider: string, model: string, system: string, user: string): Promise<string> => {
+    const reasoningEffort = await effortFor(provider, model)
+    return generateLlmText(llm, {
       provider,
       model,
       system,
       user,
       maxTokens: SUMMARY_MAX_TOKENS,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       timeoutMs: SUMMARY_LLM_IDLE_TIMEOUT_MS,
     })
+  }
   return {
     async summarize(input) {
       const { system, user } = buildSummaryPrompt(input)

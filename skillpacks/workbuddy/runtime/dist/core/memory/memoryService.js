@@ -18,6 +18,7 @@ const promptBlocks_1 = require("../knowledgebase/promptBlocks");
 const service_1 = require("../knowledgebase/service");
 const memoryExtractor_1 = require("./memoryExtractor");
 const memoryJudge_1 = require("./memoryJudge");
+const memoryTurnExtraction_1 = require("./memoryTurnExtraction");
 const memoryPromptBlocks_1 = require("./memoryPromptBlocks");
 const memoryScopeResolver_1 = require("./memoryScopeResolver");
 const memoryPolicy_1 = require("./memoryPolicy");
@@ -192,7 +193,62 @@ async function applyTurnMemoryExtraction(paths, options, stores = {}) {
         guardLevel: policy.memoryGuardLevel,
         maxImplicitAdds: policy.memoryImplicitUpdateEnabled ? 2 : 0,
     });
-    result.totalChanges = extracted.length;
+    // Global-audit de-hardgate (IDBots parity): the regex extractor only
+    // recognizes zh/en signal phrases, so non-zh/en users' explicit commands
+    // and personal facts never even reached the judge. One turn-level LLM
+    // extraction carries the multilingual coverage — at most once per turn,
+    // only when the session's LLM judge is enabled and the text is
+    // substantive. Regex candidates keep their existing judged path; entries
+    // the LLM extraction duplicates are dropped below.
+    let llmExtraction = [];
+    if (policy.memoryLlmJudgeEnabled && options.llmExtract && (0, memoryTurnExtraction_1.isSubstantiveMemoryText)(options.userText)) {
+        try {
+            llmExtraction = await options.llmExtract({
+                userText: options.userText,
+                assistantText: options.assistantText,
+                guardLevel: policy.memoryGuardLevel,
+                implicitEnabled: policy.memoryImplicitUpdateEnabled,
+            }) ?? [];
+        }
+        catch {
+            llmExtraction = [];
+        }
+    }
+    const regexKeys = new Set(extracted.map((change) => `${change.action}|${(0, memoryText_1.normalizeMemoryMatchKey)(change.text)}`));
+    const llmOnlyChanges = llmExtraction.filter((change) => {
+        const key = `${change.action}|${(0, memoryText_1.normalizeMemoryMatchKey)(change.text)}`;
+        return (0, memoryText_1.normalizeMemoryMatchKey)(change.text).length > 0 && !regexKeys.has(key);
+    });
+    result.totalChanges = extracted.length + llmOnlyChanges.length;
+    const deleteBestMatching = async (text) => {
+        const key = (0, memoryText_1.normalizeMemoryMatchKey)(text);
+        if (!key)
+            return false;
+        const candidates = await memory.list({
+            scope: resolved.writeScope,
+            status: 'all',
+            includeDeleted: false,
+            limit: 100,
+        });
+        let target = null;
+        let bestScore = 0;
+        for (const entry of candidates) {
+            const currentKey = (0, memoryText_1.normalizeMemoryMatchKey)(entry.text);
+            if (!currentKey)
+                continue;
+            const score = (0, memoryText_1.scoreDeleteMatch)(currentKey, key);
+            if (score <= bestScore)
+                continue;
+            bestScore = score;
+            target = entry;
+        }
+        if (!target)
+            return false;
+        return memory.remove({
+            id: target.id,
+            scope: resolved.writeScope,
+        });
+    };
     for (const change of extracted) {
         if (change.action === 'add') {
             if (!policy.memoryImplicitUpdateEnabled && !change.isExplicit) {
@@ -248,41 +304,51 @@ async function applyTurnMemoryExtraction(paths, options, stores = {}) {
                 result.skipped += 1;
             continue;
         }
-        const key = (0, memoryText_1.normalizeMemoryMatchKey)(change.text);
-        if (!key) {
-            result.skipped += 1;
-            continue;
-        }
-        const candidates = await memory.list({
-            scope: resolved.writeScope,
-            status: 'all',
-            includeDeleted: false,
-            limit: 100,
-        });
-        let target = null;
-        let bestScore = 0;
-        for (const entry of candidates) {
-            const currentKey = (0, memoryText_1.normalizeMemoryMatchKey)(entry.text);
-            if (!currentKey)
-                continue;
-            const score = (0, memoryText_1.scoreDeleteMatch)(currentKey, key);
-            if (score <= bestScore)
-                continue;
-            bestScore = score;
-            target = entry;
-        }
-        if (!target) {
-            result.skipped += 1;
-            continue;
-        }
-        const deleted = await memory.remove({
-            id: target.id,
-            scope: resolved.writeScope,
-        });
-        if (deleted)
+        if (await deleteBestMatching(change.text)) {
             result.deleted += 1;
-        else
+        }
+        else {
             result.skipped += 1;
+        }
+    }
+    // LLM-only changes skip the rule judge (the extraction already vetted them,
+    // IDBots parity): implicit-disabled filtering and best-match deletes behave
+    // exactly like the regex path.
+    for (const change of llmOnlyChanges) {
+        if (change.action === 'add') {
+            if (!policy.memoryImplicitUpdateEnabled && !change.isExplicit) {
+                result.skipped += 1;
+                continue;
+            }
+            result.llmReviewed += 1;
+            const write = await memory.createOrRevive({
+                text: change.text,
+                confidence: change.isExplicit ? 0.95 : 0.8,
+                isExplicit: change.isExplicit,
+                scope: resolved.writeScope,
+                source: {
+                    role: 'user',
+                    sessionId: options.sessionId,
+                    messageId: options.userMessageId,
+                    sourceChannel: options.channel,
+                    sourceType: change.isExplicit ? 'turn_explicit' : 'turn_llm',
+                    sourceId: options.userMessageId,
+                },
+            });
+            if (write.created)
+                result.created += 1;
+            else if (write.updated)
+                result.updated += 1;
+            else
+                result.skipped += 1;
+            continue;
+        }
+        if (await deleteBestMatching(change.text)) {
+            result.deleted += 1;
+        }
+        else {
+            result.skipped += 1;
+        }
     }
     await memory.markOrphanImplicitMemoriesStale({ scope: resolved.writeScope });
     return result;

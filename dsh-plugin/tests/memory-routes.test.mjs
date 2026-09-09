@@ -111,6 +111,48 @@ test('dream/run drives plan → llm → commit and honors the identity retry hin
   assert.equal(commits[0][1].outputText, '{"daily_summary": "ok"}')
 })
 
+test('dream/run disables reasoning and forwards declared model limits to the plan', async () => {
+  const seen = []
+  const run = async (args) => {
+    seen.push(args)
+    if (args[1] === 'plan') {
+      const fileFlag = args.indexOf('--payload-file')
+      const file = JSON.parse(await readFile(args[fileFlag + 1], 'utf8'))
+      seen.push(['plan-payload', file])
+      return { ok: true, state: 'success', data: { kind: 'prompt', system: 'sys', user: 'usr', maxOutputTokens: 4096 } }
+    }
+    return { ok: true, state: 'success', data: { ok: true } }
+  }
+  const llmCalls = []
+  const llm = {
+    resolveModelInfo: async () => ({
+      context: { contextWindow: 131072 },
+      defaultMaxTokens: 32768,
+      reasoning: { efforts: [{ id: 'off' }, { id: 'high' }] },
+    }),
+    stream: (options) => {
+      llmCalls.push(options)
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'text-delta', index: 0, text: '{"daily_summary": "ok"}' }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        },
+      }
+    },
+  }
+  const result = await plugin.dispatchMemoryRoutes('dream/run', {
+    from: 'alice',
+    date: '2026-08-19',
+    provider: 'deepseek-official',
+    model: 'deepseek-v4-flash',
+  }, { run, llm })
+  assert.equal(result.ok, true)
+  assert.equal(llmCalls.length, 1)
+  assert.equal(llmCalls[0].reasoningEffort, 'off')
+  const planPayload = seen.find((entry) => Array.isArray(entry) && entry[0] === 'plan-payload')
+  assert.deepEqual(planPayload[1].limits, { contextWindow: 131072, maxOutputTokens: 32768 })
+})
+
 test('dream/run handles the fragments path and refuses without a provider', async () => {
   const run = async (args) => {
     const verb = args[1]

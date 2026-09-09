@@ -286,6 +286,7 @@ export interface CliDependencies {
     fail?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     summaries?: (input: { from?: string; limit?: number; before?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     selfIdentity?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    capabilities?: (input: { from?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   knowledgeBase?: {
     list?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;

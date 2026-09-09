@@ -1,6 +1,7 @@
 import type { MetabotPaths } from '../state/paths';
 import { type DreamDueResult } from './dreamPrompt';
 import { type DreamRun, type DreamStore } from './dreamStore';
+import { type CapabilityStore } from './capabilityStore';
 import { type ExperienceStore } from './experienceStore';
 import { type ImpressionStore } from './impressionStore';
 import { type KnowledgeStore } from './knowledgeStore';
@@ -75,6 +76,7 @@ export interface DreamCommitResult {
         workReviews: number;
         identityUpdated: boolean;
         identitySkippedOlder: boolean;
+        capabilityDrafts: number;
     };
 }
 export interface DreamServiceDeps {
@@ -83,6 +85,7 @@ export interface DreamServiceDeps {
     experienceStore?: ExperienceStore;
     impressionStore?: ImpressionStore;
     knowledgeStore?: KnowledgeStore;
+    capabilityStore?: CapabilityStore;
 }
 /**
  * Mark the live run for one date as failed. The DSH plugin drives dreams

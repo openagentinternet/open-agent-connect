@@ -78,7 +78,9 @@ const readLedger_1 = require("../core/chainhistory/readLedger");
 const memoryStore_1 = require("../core/memory/memoryStore");
 const memoryPolicy_1 = require("../core/memory/memoryPolicy");
 const memoryService_1 = require("../core/memory/memoryService");
+const memoryTurnExtraction_1 = require("../core/memory/memoryTurnExtraction");
 const transcriptStore_1 = require("../core/memory/transcriptStore");
+const capabilityStore_1 = require("../core/memory/capabilityStore");
 const dreamStore_1 = require("../core/memory/dreamStore");
 const dreamService_1 = require("../core/memory/dreamService");
 const hygieneStore_1 = require("../core/memory/hygieneStore");
@@ -3265,6 +3267,28 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
+                // LLM judge + multilingual turn extraction ride the daemon's
+                // host-executor generate route (the Bot's DSH pair through the
+                // connected DSH host). Every failure degrades to null — rule-only
+                // extraction, exactly the pre-wiring behavior — so a daemon that is
+                // down, old, or without a connected executor never breaks a turn.
+                const daemonComplete = async (system, prompt) => {
+                    try {
+                        const result = await requestJson(context, 'POST', '/api/llm/host-executor/generate', {
+                            ...(input.from ? { botSlug: input.from } : {}),
+                            system,
+                            prompt,
+                            timeoutMs: 20_000,
+                        });
+                        const output = result && result.ok === true && result.data && typeof result.data.output === 'string'
+                            ? result.data.output
+                            : null;
+                        return output && output.trim() ? output : null;
+                    }
+                    catch {
+                        return null;
+                    }
+                };
                 const result = await (0, memoryService_1.applyTurnMemoryExtraction)((0, paths_1.resolveMetabotPaths)(actor.homeDir), {
                     userText: String(input.payload.userText ?? ''),
                     assistantText: String(input.payload.assistantText ?? ''),
@@ -3276,6 +3300,12 @@ function createDefaultCliDependencies(context) {
                         : undefined,
                     userMessageId: typeof input.payload.userMessageId === 'string' ? input.payload.userMessageId : undefined,
                     assistantMessageId: typeof input.payload.assistantMessageId === 'string' ? input.payload.assistantMessageId : undefined,
+                    judgeComplete: async (systemPrompt, userPrompt) => (await daemonComplete(systemPrompt, userPrompt)) ?? '',
+                    llmExtract: async (extractionInput) => {
+                        const prompts = (0, memoryTurnExtraction_1.buildTurnMemoryExtractionPrompts)(extractionInput);
+                        const text = await daemonComplete(prompts.system, prompts.user);
+                        return text ? (0, memoryTurnExtraction_1.parseTurnMemoryExtractionPayload)(text) : null;
+                    },
                 });
                 return (0, commandResult_1.commandSuccess)(result);
             },
@@ -3943,6 +3973,15 @@ function createDefaultCliDependencies(context) {
                     updatedAt: entries[0]?.updatedAt ?? null,
                 });
             },
+            capabilities: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const drafts = await (0, capabilityStore_1.createCapabilityStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir)).listDrafts({
+                    ...(input.limit !== undefined ? { limit: input.limit } : {}),
+                });
+                return (0, commandResult_1.commandSuccess)({ drafts });
+            },
         },
         schedule: {
             create: async (input) => {
@@ -4516,7 +4555,7 @@ function createDefaultCliDependencies(context) {
                     ...(input.pinId ? { pinId: input.pinId } : {}),
                     ...(input.tags ? { tags: input.tags } : {}),
                 });
-                return (0, commandResult_1.commandSuccess)({ knowledgeBase: saved.knowledgeBase, relPath: saved.relPath });
+                return (0, commandResult_1.commandSuccess)({ knowledgeBase: saved.knowledgeBase, relPath: saved.relPath, indexed: saved.indexed });
             },
             learn: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);

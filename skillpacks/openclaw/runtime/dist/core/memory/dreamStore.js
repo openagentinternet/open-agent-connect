@@ -23,6 +23,7 @@ const node_crypto_1 = __importDefault(require("node:crypto"));
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const store_1 = require("../chainhistory/store");
+const store_2 = require("../schedule/store");
 const types_1 = require("../grouptask/types");
 const transcriptStore_1 = require("./transcriptStore");
 let atomicWriteSequence = 0;
@@ -180,9 +181,9 @@ function renderDreamDiaryMarkdown(summary) {
     }
     return `${parts.join('\n')}\n`;
 }
-/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots caps
- * the same excerpt at 400; the file port stays tighter). */
-exports.DREAM_GROUP_CHAT_MAX_MESSAGES = 200;
+/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots
+ * `MAX_GROUP_CHAT_MESSAGES_PER_TASK` parity). */
+exports.DREAM_GROUP_CHAT_MAX_MESSAGES = 400;
 /** Epoch-ms field or null; grouptask timestamps are ms, junk/missing → null. */
 function timestampMs(value) {
     return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
@@ -686,10 +687,34 @@ function createDreamStore(paths, deps = {}) {
                 chainWrites = [];
                 chainReads = [];
             }
+            // Scheduled-task runs started that day (IDBots parity — the prompt's
+            // 定时任务 section and the day-stats taskRunCount both read these).
+            // `startedAt` is a UTC ISO string, so parse then window it. Best effort:
+            // a missing or corrupt ledger degrades to no runs, never a failed dream.
+            let taskRuns = [];
+            try {
+                const schedule = (0, store_2.createScheduleStore)(paths);
+                const [tasks, runs] = await Promise.all([schedule.listTasks(), schedule.listRuns()]);
+                const taskNames = new Map(tasks.map((task) => [task.id, task.name]));
+                taskRuns = runs
+                    .map((run) => ({ run, startedAtMs: Date.parse(run.startedAt) }))
+                    .filter((entry) => Number.isFinite(entry.startedAtMs)
+                    && entry.startedAtMs >= startMs
+                    && entry.startedAtMs < endMs)
+                    .sort((left, right) => left.startedAtMs - right.startedAtMs)
+                    .map((entry) => ({
+                    taskName: taskNames.get(entry.run.taskId) ?? entry.run.taskId,
+                    status: entry.run.status,
+                    startedAt: entry.startedAtMs,
+                    sessionId: null,
+                }));
+            }
+            catch {
+                taskRuns = [];
+            }
             return {
                 sessions,
-                // OAC has no scheduled-task feature; the prompt section stays empty.
-                taskRuns: [],
+                taskRuns,
                 orderCount: dayOrders.length,
                 groupTasks: [...acceptedGroupTasks, ...activeGroupTasks],
                 groupChats,

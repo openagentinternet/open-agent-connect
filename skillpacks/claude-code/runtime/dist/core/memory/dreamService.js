@@ -21,6 +21,7 @@ const chatPersonaLoader_1 = require("../chat/chatPersonaLoader");
 const dreamFragments_1 = require("./dreamFragments");
 const dreamPrompt_1 = require("./dreamPrompt");
 const dreamStore_1 = require("./dreamStore");
+const capabilityStore_1 = require("./capabilityStore");
 const experienceHarvest_1 = require("./experienceHarvest");
 const experienceStore_1 = require("./experienceStore");
 const impressionStore_1 = require("./impressionStore");
@@ -71,6 +72,7 @@ function resolveDreamStores(paths, deps) {
         experienceStore,
         impressionStore: deps.impressionStore ?? (0, impressionStore_1.createImpressionStore)(paths, { experienceStore }),
         knowledgeStore: deps.knowledgeStore ?? (0, knowledgeStore_1.createKnowledgeStore)(paths),
+        capabilityStore: deps.capabilityStore ?? (0, capabilityStore_1.createCapabilityStore)(paths),
     };
 }
 /**
@@ -537,6 +539,19 @@ async function commitDream(paths, input, deps = {}) {
             }
         }
     }
+    // L3b capability channel (IDBots `capability_drafts` parity): every
+    // capability learning the model distilled today becomes an append-only
+    // 'draft' row. Never touches the skill tables — promotion into real skills
+    // is a later phase. A failure here must not fail the dream run.
+    let capabilityDrafts = 0;
+    if (output.capabilityLearnings.length > 0) {
+        try {
+            capabilityDrafts = await stores.capabilityStore.insertDrafts(date, output.capabilityLearnings);
+        }
+        catch {
+            // capability draft persistence failure keeps the dream result intact
+        }
+    }
     await dreamStore.finishRun(date, 'completed');
     const identityValidation = (0, dreamPrompt_1.validateSelfIdentity)(output.selfIdentity);
     return {
@@ -556,6 +571,7 @@ async function commitDream(paths, input, deps = {}) {
             workReviews: reviewsWritten,
             identityUpdated,
             identitySkippedOlder,
+            capabilityDrafts,
         },
     };
 }
@@ -657,6 +673,7 @@ function outputToJson(output) {
         self_identity: output.selfIdentity,
         impression_updates: output.impressionUpdates,
         knowledge_points: output.knowledgeUpdates,
+        capability_learnings: output.capabilityLearnings,
     };
 }
 /** Status snapshot for the UI Dream tab. */

@@ -41,6 +41,8 @@ export interface KnowledgeBaseService {
     addDocument(metabotSlug: string, input: AddDocumentInput): Promise<{
         knowledgeBase: KnowledgeBaseRecord;
         relPath: string;
+        /** False when the post-save incremental index refresh failed — the raw document is still saved. */
+        indexed: boolean;
     }>;
     importFiles(metabotSlug: string, knowledgeBaseId: string | undefined, filePaths: string[]): Promise<number>;
 }

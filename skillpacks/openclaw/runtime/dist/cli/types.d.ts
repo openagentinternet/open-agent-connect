@@ -448,6 +448,10 @@ export interface CliDependencies {
         selfIdentity?: (input: {
             from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        capabilities?: (input: {
+            from?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     knowledgeBase?: {
         list?: (input: {

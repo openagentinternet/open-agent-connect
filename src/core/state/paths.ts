@@ -57,6 +57,8 @@ export interface MetabotPaths {
   memoryTranscriptsRoot: string;
   /** Memory hygiene run ledger (`.runtime/memory/hygiene.json`). */
   memoryHygienePath: string;
+  /** L3b capability drafts from dreams (`.runtime/memory/capability-drafts.json`). */
+  memoryCapabilityDraftsPath: string;
 
   // Per-bot chain history store (storage layout v2 amendment 2026-09-03).
   chainHistoryRoot: string;
@@ -237,6 +239,7 @@ function buildMetabotPaths(input: {
     memoryOrchestrationPath: path.join(memoryRoot, 'orchestration.json'),
     memoryTranscriptsRoot: path.join(memoryRoot, 'transcripts'),
     memoryHygienePath: path.join(memoryRoot, 'hygiene.json'),
+    memoryCapabilityDraftsPath: path.join(memoryRoot, 'capability-drafts.json'),
 
     // Per-bot chain history store root (`.runtime/chain-history/`).
     chainHistoryRoot: path.join(input.runtimeRoot, 'chain-history'),

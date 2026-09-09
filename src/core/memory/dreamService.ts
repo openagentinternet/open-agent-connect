@@ -27,6 +27,7 @@ import {
   type DreamOutput,
 } from './dreamPrompt';
 import { createDreamStore, hashDreamFragmentContent, type DreamRun, type DreamStore } from './dreamStore';
+import { createCapabilityStore, type CapabilityStore } from './capabilityStore';
 import { harvestDreamDayExperiences } from './experienceHarvest';
 import { createExperienceStore, type ExperienceStore } from './experienceStore';
 import { createImpressionStore, type ImpressionStore } from './impressionStore';
@@ -141,6 +142,7 @@ export interface DreamCommitResult {
     workReviews: number;
     identityUpdated: boolean;
     identitySkippedOlder: boolean;
+    capabilityDrafts: number;
   };
 }
 
@@ -150,6 +152,7 @@ export interface DreamServiceDeps {
   experienceStore?: ExperienceStore;
   impressionStore?: ImpressionStore;
   knowledgeStore?: KnowledgeStore;
+  capabilityStore?: CapabilityStore;
 }
 
 interface ResolvedDreamStores {
@@ -158,6 +161,7 @@ interface ResolvedDreamStores {
   experienceStore: ExperienceStore;
   impressionStore: ImpressionStore;
   knowledgeStore: KnowledgeStore;
+  capabilityStore: CapabilityStore;
 }
 
 function resolveDreamStores(paths: MetabotPaths, deps: DreamServiceDeps): ResolvedDreamStores {
@@ -168,6 +172,7 @@ function resolveDreamStores(paths: MetabotPaths, deps: DreamServiceDeps): Resolv
     experienceStore,
     impressionStore: deps.impressionStore ?? createImpressionStore(paths, { experienceStore }),
     knowledgeStore: deps.knowledgeStore ?? createKnowledgeStore(paths),
+    capabilityStore: deps.capabilityStore ?? createCapabilityStore(paths),
   };
 }
 
@@ -694,6 +699,19 @@ export async function commitDream(
     }
   }
 
+  // L3b capability channel (IDBots `capability_drafts` parity): every
+  // capability learning the model distilled today becomes an append-only
+  // 'draft' row. Never touches the skill tables — promotion into real skills
+  // is a later phase. A failure here must not fail the dream run.
+  let capabilityDrafts = 0;
+  if (output.capabilityLearnings.length > 0) {
+    try {
+      capabilityDrafts = await stores.capabilityStore.insertDrafts(date, output.capabilityLearnings);
+    } catch {
+      // capability draft persistence failure keeps the dream result intact
+    }
+  }
+
   await dreamStore.finishRun(date, 'completed');
 
   const identityValidation = validateSelfIdentity(output.selfIdentity);
@@ -714,6 +732,7 @@ export async function commitDream(
       workReviews: reviewsWritten,
       identityUpdated,
       identitySkippedOlder,
+      capabilityDrafts,
     },
   };
 }
@@ -835,6 +854,7 @@ function outputToJson(output: DreamOutput): Record<string, unknown> {
     self_identity: output.selfIdentity,
     impression_updates: output.impressionUpdates,
     knowledge_points: output.knowledgeUpdates,
+    capability_learnings: output.capabilityLearnings,
   };
 }
 

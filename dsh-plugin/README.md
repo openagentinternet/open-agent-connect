@@ -18,7 +18,7 @@ packages). Peer ranges `^0.1.2-alpha.2 || ^0.1.3-alpha.1` cover both kernel
 lines. It will not load on 0.1.0-rc-era kernels; hosts still there should stay
 on plugin 0.3.x until their kernel is upgraded.
 
-After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero).
+After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The A2A Chat entry and each private-chat/group-task row carry unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
 
 ## LLM resolution: who generates what
 
@@ -70,7 +70,13 @@ every turn through the `<knowledge_bases>` volatile prompt block. The
 `knowledge_base_*` tools resolve the acting Bot per call (session `oac-*`
 agent first, then the machine-default Twin — the same target a no-`--from`
 CLI call picks), so they also work from plain DSH conversations, and write
-results name the profile they landed on.
+results name the profile they landed on. Retrieval quality: queries tokenize
+to CJK bigrams + latin words with function words dropped, and scoring is
+absolute (coverage × share of the query's achievable best), so an unrelated
+query returns an honest empty instead of a high-scored noise hit;
+`knowledge_base_add_document` refreshes the index on save, making the
+document searchable immediately — `knowledge_base_learn` remains for
+corpus imports/edits and full rebuilds.
 
 ## Group Tasks (群任务) and OpenTeam
 
@@ -393,6 +399,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/chat/*` | `metabot chat conversations`, `messages`, `private` |
 | POST | `/oac/api/llm/host-status` | daemon `/api/llm/host-executor/status` (connected-executor count) for the Bot editor's reply-model lines |
 | GET | `/oac/api/chat/events?from=<slug>` | SSE proxy of the daemon's `/api/conversations/events` (`conversation-update` on stored-row changes and chain-profile warm-up completions) |
+| GET | `/oac/api/chat/events/all` | SSE unread feed: the host fs-watches every profile's a2a conversation store and the synced grouptask stores (one recursive watcher) and pushes `private-conversations-changed` per Bot plus pre-diffed `group-task-update` frames — push-only by design, the 2026-09-07 polling badge stays dead |
 | GET | `/oac/api/metaapp/events?op=<id>` | SSE proxy of the daemon's `/api/metaapp/events` (per-op publish stage events: `archive`/`upload`/`write` then `done`/`error`) |
 | GET | `/oac/api/file/avatar?ref=<pin>` | same-origin proxy of the daemon's `/api/file/avatar`, so chain avatar pin references render in the panels |
 | POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |
@@ -518,7 +525,12 @@ the DSH-resolved theme to the iframe URL (`?theme=dark|light`), the daemon
 bakes it into the served ABC page (no light flash in dark mode), and DSH
 theme flips are pushed into the loaded iframe as ABC
 `agent-browser:set-theme` postMessages without reloading it. Pages opened
-outside DSH keep ABC's light default.
+outside DSH keep ABC's light default. On pin/metaapp/map/bare-pin deep links
+the theme never rides the page search — ABC defines that search as part of
+the resource URI there, so `withBrowserThemeParam` reroutes those URLs to the
+`/browser?uri=<resource>&theme=…` form instead (a deep link that already
+carries its own search keeps it untouched and takes the theme via the
+load-time postMessage).
 
 When the plugin is not mounted (Codex, Claude Code, OpenClaw, ...), no Browser
 page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
