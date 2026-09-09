@@ -14,7 +14,7 @@ import {
   runMetabotWithPayloadFile,
   type RunFn,
 } from './cli-payload.js'
-import { generateLlmText, type LlmStreamLike } from './llm-generate.js'
+import { generateLlmText, resolveDreamLlmProfile, type LlmStreamLike } from './llm-generate.js'
 import {
   localDreamSelfIdentity,
   localDreamStatus,
@@ -156,9 +156,18 @@ async function dreamAttempt(
   llm: LlmStreamLike,
 ): Promise<MetabotCommandResult> {
   try {
+    // IDBots thinking-disabled parity, resolved once per attempt from the
+    // pair's exact-model metadata: pass reasoningEffort 'off' when the model
+    // declares it (a reasoning-default model can burn the whole output budget
+    // before any text) and forward declared limits so the plan's budget math
+    // sizes to the real model. Explicit payload values win over resolved ones.
+    const profile = await resolveDreamLlmProfile(llm, provider, model)
     const limits = body.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
       ? body.limits as Record<string, unknown>
-      : undefined
+      : profile.limits
+    const reasoningEffort = typeof body.reasoningEffort === 'string' && body.reasoningEffort.trim()
+      ? body.reasoningEffort.trim()
+      : profile.reasoningEffort
     const llmTag = `${provider}/${model}`
 
     const plan = await runMetabotWithPayloadFile(
@@ -199,6 +208,7 @@ async function dreamAttempt(
           system: fragment.system,
           user: fragment.user,
           ...(fragment.maxOutputTokens !== undefined ? { maxTokens: fragment.maxOutputTokens } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
           timeoutMs: DREAM_LLM_IDLE_TIMEOUT_MS,
         })
       }
@@ -229,6 +239,7 @@ async function dreamAttempt(
         system: prompt.system,
         user: userText,
         ...(prompt.maxOutputTokens !== undefined ? { maxTokens: prompt.maxOutputTokens } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         timeoutMs: DREAM_LLM_IDLE_TIMEOUT_MS,
       })
       return runMetabotWithPayloadFile(
