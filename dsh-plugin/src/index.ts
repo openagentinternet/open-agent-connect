@@ -725,11 +725,13 @@ export {
   advertisedModelForBot,
   chipDisplayName,
   filterSelectablePresets,
+  heroIdentityFor,
   isOacPresetId,
   modelSelectionToApply,
   presetIdForSlug,
   shouldApplyStagedPreset,
   slugFromPresetId,
+  type HeroIdentity,
 } from './chip-logic.js'
 export { dispatchSection } from './sections.js'
 export { dispatchGroupTaskRoutes } from './grouptask.js'

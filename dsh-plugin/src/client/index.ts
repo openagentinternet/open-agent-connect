@@ -38,8 +38,9 @@ import { TrafficPanel } from './TrafficPanel.tsx'
 import { UserPanel } from './UserPanel.tsx'
 import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
+import { startHeroIdentityMount } from './hero-identity.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -64,7 +65,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -356,5 +357,11 @@ export function apply(ctx: ClientContext): void {
         headerId()
       }
     }, 'oac-dsh: preset chip')
+
+    // The selected Bot's big avatar + name under the blank-session hero
+    // headline. DSH offers no slot between the headline and the chip row, so
+    // this mounts through the DOM (hero-identity.ts) and reads the same seat
+    // store the chip drives.
+    scope.effect(() => startHeroIdentityMount(seat.store), 'oac-dsh: hero bot identity')
   })
 }
