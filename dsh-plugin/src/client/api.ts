@@ -254,6 +254,10 @@ export type ConversationSummary = {
   messageCount: number
   kinds: string[]
   state: string
+  /** UI meta (IDBots parity): pin flag, archive stamp, rename override. */
+  pinned: boolean
+  archivedAt: number | null
+  displayName: string | null
 }
 
 export type ConversationMessage = {
@@ -716,14 +720,14 @@ export const api = {
     normalizeTrafficRedeem(await post('traffic/redeem', { code })),
   trafficApiBase: async (action: 'get' | 'set' | 'reset' = 'get', value?: string): Promise<TrafficApiBasePayload> =>
     normalizeTrafficApiBasePayload(await post('traffic/api-base', { action, ...(value === undefined ? {} : { value }) })),
-  /** A2A conversation summaries, sorted newest first (OAC /ui/conversations source). */
+  /** A2A conversation summaries, pinned first then newest (OAC /ui/conversations source). */
   conversations: async (from: string): Promise<ConversationSummary[]> => {
     const data = await post<{ conversations?: unknown }>('conversations/list', { from })
     const rows = Array.isArray(data.conversations) ? data.conversations : []
     return rows
       .map((row) => normalizeSummary(row))
       .filter((row) => row.peerGlobalMetaId !== '')
-      .sort((left, right) => right.latestAt - left.latestAt)
+      .sort((left, right) => (Number(right.pinned) - Number(left.pinned)) || (right.latestAt - left.latestAt))
   },
   conversationThread: async (from: string, peer: string): Promise<ConversationThread> => {
     const data = await post<{
@@ -743,6 +747,15 @@ export const api = {
   },
   conversationGuidance: async (from: string, peer: string, guidance: string): Promise<CommandEnvelope> =>
     postEnvelope('conversations/guidance', { from, peer, guidance }),
+  /**
+   * UI-meta write (pin/archive/rename). Empty-string displayName clears the
+   * rename override; the host routes daemon-first and falls back to the CLI.
+   */
+  conversationMeta: async (
+    from: string,
+    peer: string,
+    patch: { pinned?: boolean; archived?: boolean; displayName?: string | null },
+  ): Promise<CommandEnvelope> => postEnvelope('conversations/meta', { from, peer, ...patch }),
   /** Group task surface (chair-addressed; the daemon owns the store). */
   grouptaskList: async (tab: GroupTaskListTab = 'all', includeArchived = false): Promise<GroupTaskSummaryRow[]> => {
     const data = await post<{ tasks?: unknown }>('grouptask/list', { tab, includeArchived })
@@ -1071,6 +1084,9 @@ function normalizeSummary(value: unknown): ConversationSummary {
       ? record.kinds.map((item) => textOf(item)).filter(Boolean)
       : [],
     state: textOf(record.state) || 'active',
+    pinned: record.pinned === true,
+    archivedAt: toTimestampMs(record.archivedAt) || null,
+    displayName: textOf(record.displayName) || null,
   }
 }
 

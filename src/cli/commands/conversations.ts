@@ -97,5 +97,35 @@ export async function runConversationsCommand(
     return handler({ local, peer, guidance });
   }
 
+  // UI-meta verbs (IDBots pin/rename/archive parity): one shared handler,
+  // each verb maps to its meta patch. `--name ''` clears the rename override.
+  if (subcommand === 'rename' || subcommand === 'pin' || subcommand === 'unpin'
+    || subcommand === 'archive' || subcommand === 'unarchive') {
+    const handler = context.dependencies.conversations?.meta;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Conversations meta handler is not configured.');
+    }
+    const local = readLocalFlag(args);
+    if (!local) {
+      return commandMissingFlag('--local');
+    }
+    const peer = readFlagValue(args, '--peer') || undefined;
+    if (!peer) {
+      return commandMissingFlag('--peer');
+    }
+    if (subcommand === 'rename') {
+      const nameFlagIndex = args.indexOf('--name');
+      if (nameFlagIndex === -1) {
+        return commandMissingFlag('--name');
+      }
+      const displayName = readFlagValue(args, '--name') ?? '';
+      return handler({ local, peer, displayName });
+    }
+    if (subcommand === 'pin' || subcommand === 'unpin') {
+      return handler({ local, peer, pinned: subcommand === 'pin' });
+    }
+    return handler({ local, peer, archived: subcommand === 'archive' });
+  }
+
   return commandUnknownSubcommand(`conversations ${String(subcommand ?? '')}`.trim());
 }

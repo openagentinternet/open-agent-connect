@@ -70,7 +70,8 @@ const handleConversationRoutes = async (context) => {
     if (url.pathname !== '/api/conversations'
         && url.pathname !== '/api/conversations/messages'
         && url.pathname !== '/api/conversations/events'
-        && url.pathname !== '/api/conversations/guidance') {
+        && url.pathname !== '/api/conversations/guidance'
+        && url.pathname !== '/api/conversations/meta') {
         return false;
     }
     if (url.pathname === '/api/conversations/guidance') {
@@ -100,6 +101,46 @@ const handleConversationRoutes = async (context) => {
         sendCommandResult(context, result);
         return true;
     }
+    // UI-meta writes (pin/unpin, archive/unarchive, rename). One endpoint, one
+    // handler: only the fields present in the body are applied.
+    if (url.pathname === '/api/conversations/meta') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const body = await context.readJsonBody();
+        const local = normalizeText(body.local);
+        if (!local) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('missing_local', 'local is required.'));
+            return true;
+        }
+        const peer = normalizeText(body.peer);
+        if (!peer) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('missing_peer', 'peer is required.'));
+            return true;
+        }
+        const hasPatch = typeof body.pinned === 'boolean'
+            || typeof body.archived === 'boolean'
+            || typeof body.displayName === 'string'
+            || body.displayName === null;
+        if (!hasPatch) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('missing_patch', 'One of pinned, archived, or displayName is required.'));
+            return true;
+        }
+        const result = handlers.conversations?.meta
+            ? await handlers.conversations.meta({
+                local,
+                peer,
+                ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
+                ...(typeof body.archived === 'boolean' ? { archived: body.archived } : {}),
+                ...((typeof body.displayName === 'string' || body.displayName === null)
+                    ? { displayName: body.displayName }
+                    : {}),
+            })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Conversation meta handler is not configured.');
+        sendCommandResult(context, result);
+        return true;
+    }
     if (req.method !== 'GET') {
         context.sendMethodNotAllowed(['GET']);
         return true;
@@ -108,10 +149,12 @@ const handleConversationRoutes = async (context) => {
         const local = requireLocal(context);
         if (!local)
             return true;
+        const includeArchived = normalizeText(url.searchParams.get('includeArchived')) === 'true';
         const result = handlers.conversations?.list
             ? await handlers.conversations.list({
                 local,
                 limit: readLimit(url.searchParams.get('limit')),
+                ...(includeArchived ? { includeArchived: true } : {}),
             })
             : (0, commandResult_1.commandFailed)('not_implemented', 'Conversation list handler is not configured.');
         sendCommandResult(context, result);

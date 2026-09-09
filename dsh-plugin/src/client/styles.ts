@@ -230,6 +230,29 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-a2a-row-name { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-a2a-row-text { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-a2a-row-time { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+/* Trailing hover menu (DSH home session-list pattern): the relative time
+   swaps for the "..." button on row hover / while the menu is open; pinned
+   rows keep the slot as a pin marker (star crossfades to "..." on hover). */
+.oac-row-trail { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: flex-end; }
+.oac-a2a-row:hover .oac-row-trail .oac-a2a-row-time,
+.oac-row-trail[data-menu-open='true'] .oac-a2a-row-time,
+.oac-row-trail[data-pinned='true'] .oac-a2a-row-time { display: none; }
+.oac-row-actions { display: none; align-items: center; position: relative; }
+.oac-a2a-row:hover .oac-row-actions,
+.oac-row-trail[data-menu-open='true'] .oac-row-actions,
+.oac-row-trail[data-pinned='true'] .oac-row-actions { display: inline-flex; }
+.oac-row-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.oac-row-menu-btn:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.oac-row-menu-btn .oac-row-pin-icon { display: none; font-size: 12px; line-height: 1; color: var(--dsw-alias-state-warn-label); }
+.oac-row-trail[data-pinned='true'] .oac-row-menu-btn .oac-row-pin-icon { display: inline-flex; }
+.oac-row-trail[data-pinned='true'] .oac-row-menu-btn svg,
+.oac-row-trail[data-pinned='true'] .oac-row-menu-btn .oac-row-ellipsis { display: none; }
+.oac-a2a-row:hover .oac-row-menu-btn .oac-row-pin-icon,
+.oac-row-trail[data-menu-open='true'] .oac-row-menu-btn .oac-row-pin-icon { display: none; }
+.oac-a2a-row:hover .oac-row-trail[data-pinned='true'] .oac-row-menu-btn svg,
+.oac-row-trail[data-menu-open='true'] .oac-row-trail[data-pinned='true'] .oac-row-menu-btn svg { display: inline-flex; }
+.oac-row-menu-copied { position: absolute; top: calc(100% + 4px); right: 0; padding: 2px 6px; border-radius: 4px; background: rgba(16, 24, 40, .94); color: #fff; font-size: 10px; line-height: 14px; white-space: nowrap; pointer-events: none; z-index: 20; }
+.oac-menu-star { display: inline-flex; width: 16px; justify-content: center; font-size: 12px; line-height: 1; color: var(--dsw-alias-state-warn-label); }
 .oac-a2a-thread { position: relative; min-width: 0; display: flex; flex-direction: column; }
 .oac-a2a-thread-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-thread-avatar { flex: none; width: 32px; height: 32px; font-size: 12px; }

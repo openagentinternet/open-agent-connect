@@ -22,10 +22,17 @@ import { bindQaToolInstall } from './qa-tools.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
 import { bindMediaDescriptionTools } from './vision-tools.js'
 import { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
-import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
+import {
+  getConversationMessages,
+  listConversations,
+  runConversationGuidance,
+  runConversationMeta,
+  type ConversationMetaPatch,
+} from './a2a.js'
 import {
   daemonConversationsList,
   daemonConversationsMessages,
+  daemonConversationsMeta,
   proxyDaemonAvatar,
   streamDaemonConversationEvents,
 } from './conversation-bridge.js'
@@ -226,6 +233,40 @@ async function dispatchPost(
     if (!peer) return { ok: false, state: 'failed', code: 'missing_peer', message: 'peer is required' }
     if (!guidance) return { ok: false, state: 'failed', code: 'missing_guidance', message: 'guidance is required' }
     return runConversationGuidance(from, peer, guidance)
+  }
+  if (method === 'conversations/meta') {
+    const body = payload as {
+      from?: unknown
+      peer?: unknown
+      pinned?: unknown
+      archived?: unknown
+      displayName?: unknown
+    }
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    const peer = typeof body.peer === 'string' ? body.peer.trim() : ''
+    if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    if (!peer) return { ok: false, state: 'failed', code: 'missing_peer', message: 'peer is required' }
+    const hasDisplayName = typeof body.displayName === 'string' || body.displayName === null
+    if (typeof body.pinned !== 'boolean' && typeof body.archived !== 'boolean' && !hasDisplayName) {
+      return {
+        ok: false,
+        state: 'failed',
+        code: 'missing_patch',
+        message: 'one of pinned, archived, or displayName is required',
+      }
+    }
+    const patch: ConversationMetaPatch = {
+      ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
+      ...(typeof body.archived === 'boolean' ? { archived: body.archived } : {}),
+      ...(hasDisplayName
+        ? { displayName: typeof body.displayName === 'string' ? body.displayName : null }
+        : {}),
+    }
+    // Daemon first (it also publishes the conversation-update SSE event);
+    // the CLI verbs reach the same daemon route and are the fallback.
+    const daemon = await daemonConversationsMeta(from, peer, patch)
+    if (daemon) return daemon
+    return runConversationMeta(from, peer, patch)
   }
   const grouptask = await dispatchGroupTaskRoutes(method, payload)
   if (grouptask !== undefined) return grouptask

@@ -8,6 +8,7 @@ import type {
   A2AConversationSession,
   A2AConversationState,
 } from './conversationTypes';
+import { normalizeA2AConversationMeta } from './conversationStore';
 import { normalizeSimplemsgDisplayContent, readSimplemsgPayloadContentType } from './simplemsgPayload';
 
 const CHAT_FILE_RE = /^chat-[a-z0-9]+-[a-z0-9]+\.json$/u;
@@ -27,12 +28,18 @@ export interface PeerConversationSummary {
   messageCount: number;
   kinds: A2AConversationMessageKind[];
   state: string;
+  /** UI meta (pin/archive/rename override); defaults when never touched. */
+  pinned: boolean;
+  archivedAt: number | null;
+  displayName: string | null;
 }
 
 export interface ListPeerConversationSummariesInput {
   homeDir: string;
   localGlobalMetaId: string;
   limit?: number;
+  /** Keep archived conversations in the list (archived-surfaces hook). */
+  includeArchived?: boolean;
 }
 
 export interface ListPeerConversationSummariesResult {
@@ -156,6 +163,7 @@ function normalizeConversationState(value: unknown): A2AConversationState | null
   const sessions = Array.isArray(record.sessions)
     ? record.sessions.map(normalizeSession).filter((entry): entry is A2AConversationSession => Boolean(entry))
     : [];
+  const meta = normalizeA2AConversationMeta(record.meta);
   return {
     version: 1,
     local,
@@ -167,6 +175,7 @@ function normalizeConversationState(value: unknown): A2AConversationState | null
       orderTxidToSessionId: {},
       paymentTxidToSessionId: {},
     },
+    ...(meta !== undefined ? { meta } : {}),
     updatedAt: normalizeTimestamp(record.updatedAt),
   };
 }
@@ -186,7 +195,7 @@ function latestPeerSession(conversation: A2AConversationState): A2AConversationS
     .sort((left, right) => normalizeTimestamp(right.updatedAt) - normalizeTimestamp(left.updatedAt))[0] ?? null;
 }
 
-function conversationIdFor(conversation: A2AConversationState): string {
+export function peerConversationId(conversation: A2AConversationState): string {
   const peerSession = latestPeerSession(conversation);
   if (peerSession) {
     return peerSession.sessionId;
@@ -307,8 +316,9 @@ function summarizeConversation(conversation: A2AConversationState): PeerConversa
     }
   }
   const peerSession = latestPeerSession(conversation);
+  const meta = conversation.meta;
   return {
-    conversationId: conversationIdFor(conversation),
+    conversationId: peerConversationId(conversation),
     localGlobalMetaId: conversation.local.globalMetaId,
     localName: conversation.local.name ?? null,
     localAvatar: conversation.local.avatar ?? null,
@@ -320,6 +330,9 @@ function summarizeConversation(conversation: A2AConversationState): PeerConversa
     messageCount: messages.length,
     kinds,
     state: normalizeText(peerSession?.state) || 'active',
+    pinned: meta?.pinned === true,
+    archivedAt: meta?.archivedAt ?? null,
+    displayName: meta?.displayName ?? null,
   };
 }
 
@@ -340,9 +353,29 @@ export async function listPeerConversationSummaries(
     },
     conversations: conversations
       .map(summarizeConversation)
-      .sort((left, right) => right.latestAt - left.latestAt)
+      // Archive hides a conversation from the live list only — `includeArchived`
+      // is the archived-surfaces hook (records are always fully preserved).
+      .filter((summary) => input.includeArchived === true || summary.archivedAt == null)
+      .sort((left, right) => (Number(right.pinned) - Number(left.pinned)) || (right.latestAt - left.latestAt))
       .slice(0, limit),
   };
+}
+
+/**
+ * Load the raw stored conversation between one local Bot and one peer (any
+ * message/session shape), for the meta writer and other pair-addressed reads.
+ */
+export async function findPeerConversationState(input: {
+  homeDir: string;
+  localGlobalMetaId: string;
+  peerGlobalMetaId: string;
+}): Promise<A2AConversationState | null> {
+  const localGlobalMetaId = normalizeText(input.localGlobalMetaId);
+  const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
+  return (await readConversations(input.homeDir)).find((entry) => (
+    entry.local.globalMetaId === localGlobalMetaId
+    && entry.peer.globalMetaId === peerGlobalMetaId
+  )) ?? null;
 }
 
 export async function readPeerConversationMessages(

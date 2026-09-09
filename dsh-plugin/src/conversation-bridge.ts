@@ -78,6 +78,27 @@ export async function daemonConversationsMessages(from: string, peer: string): P
   return daemonGetJson(baseUrl, `/api/conversations/messages?${params.toString()}`)
 }
 
+/**
+ * UI-meta write (pin/archive/rename) against the daemon's
+ * `POST /api/conversations/meta`. Null means "transport failed — try the CLI".
+ */
+export async function daemonConversationsMeta(
+  from: string,
+  peer: string,
+  patch: { pinned?: boolean; archived?: boolean; displayName?: string | null },
+): Promise<MetabotCommandResult | null> {
+  const baseUrl = await resolveDaemonBaseUrl()
+  if (baseUrl === null) return null
+  const body = Buffer.from(JSON.stringify({ local: from, peer, ...patch }), 'utf8')
+  return daemonPostRawJson(
+    baseUrl,
+    '/api/conversations/meta',
+    body,
+    'application/json',
+    DAEMON_JSON_TIMEOUT_MS,
+  )
+}
+
 /** POST a raw body to one daemon JSON endpoint. Null means "transport failed". */
 function daemonPostRawJson(
   baseUrl: string,

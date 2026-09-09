@@ -299,3 +299,26 @@ test('conversation store reads a manual disk repair before its next update', asy
   assert.equal(state.messages[0].content, 'manually repaired content');
   assert.equal(state.messages[1].messageId, 'msg-2');
 });
+
+test('conversation UI meta round-trips through normalization and stays absent when untouched', async () => {
+  const store = createStore();
+
+  // An untouched conversation stores no meta at all.
+  const initial = await store.readConversation();
+  assert.equal(initial.meta, undefined);
+
+  await store.updateConversation((state) => ({
+    ...state,
+    meta: { pinned: true, archivedAt: 123_456, displayName: '  Named chat  ' },
+  }));
+  const written = await store.readConversation();
+  assert.deepEqual(written.meta, { pinned: true, archivedAt: 123_456, displayName: 'Named chat' });
+
+  // Invalid meta values normalize to defaults instead of throwing.
+  await store.updateConversation((state) => ({
+    ...state,
+    meta: { pinned: 'yes', archivedAt: -5, displayName: '' },
+  }));
+  const cleaned = await store.readConversation();
+  assert.deepEqual(cleaned.meta, { pinned: false, archivedAt: null, displayName: null });
+});

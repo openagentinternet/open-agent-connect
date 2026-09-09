@@ -3,12 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.peerConversationId = peerConversationId;
 exports.clearConversationProjectionCache = clearConversationProjectionCache;
 exports.listPeerConversationSummaries = listPeerConversationSummaries;
+exports.findPeerConversationState = findPeerConversationState;
 exports.readPeerConversationMessages = readPeerConversationMessages;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const paths_1 = require("../state/paths");
+const conversationStore_1 = require("./conversationStore");
 const simplemsgPayload_1 = require("./simplemsgPayload");
 const CHAT_FILE_RE = /^chat-[a-z0-9]+-[a-z0-9]+\.json$/u;
 function normalizeText(value) {
@@ -89,6 +92,7 @@ function normalizeConversationState(value) {
     const sessions = Array.isArray(record.sessions)
         ? record.sessions.map(normalizeSession).filter((entry) => Boolean(entry))
         : [];
+    const meta = (0, conversationStore_1.normalizeA2AConversationMeta)(record.meta);
     return {
         version: 1,
         local,
@@ -100,6 +104,7 @@ function normalizeConversationState(value) {
             orderTxidToSessionId: {},
             paymentTxidToSessionId: {},
         },
+        ...(meta !== undefined ? { meta } : {}),
         updatedAt: normalizeTimestamp(record.updatedAt),
     };
 }
@@ -116,7 +121,7 @@ function latestPeerSession(conversation) {
         .filter((session) => session.type === 'peer')
         .sort((left, right) => normalizeTimestamp(right.updatedAt) - normalizeTimestamp(left.updatedAt))[0] ?? null;
 }
-function conversationIdFor(conversation) {
+function peerConversationId(conversation) {
     const peerSession = latestPeerSession(conversation);
     if (peerSession) {
         return peerSession.sessionId;
@@ -217,8 +222,9 @@ function summarizeConversation(conversation) {
         }
     }
     const peerSession = latestPeerSession(conversation);
+    const meta = conversation.meta;
     return {
-        conversationId: conversationIdFor(conversation),
+        conversationId: peerConversationId(conversation),
         localGlobalMetaId: conversation.local.globalMetaId,
         localName: conversation.local.name ?? null,
         localAvatar: conversation.local.avatar ?? null,
@@ -230,6 +236,9 @@ function summarizeConversation(conversation) {
         messageCount: messages.length,
         kinds,
         state: normalizeText(peerSession?.state) || 'active',
+        pinned: meta?.pinned === true,
+        archivedAt: meta?.archivedAt ?? null,
+        displayName: meta?.displayName ?? null,
     };
 }
 async function listPeerConversationSummaries(input) {
@@ -244,9 +253,22 @@ async function listPeerConversationSummaries(input) {
         },
         conversations: conversations
             .map(summarizeConversation)
-            .sort((left, right) => right.latestAt - left.latestAt)
+            // Archive hides a conversation from the live list only — `includeArchived`
+            // is the archived-surfaces hook (records are always fully preserved).
+            .filter((summary) => input.includeArchived === true || summary.archivedAt == null)
+            .sort((left, right) => (Number(right.pinned) - Number(left.pinned)) || (right.latestAt - left.latestAt))
             .slice(0, limit),
     };
+}
+/**
+ * Load the raw stored conversation between one local Bot and one peer (any
+ * message/session shape), for the meta writer and other pair-addressed reads.
+ */
+async function findPeerConversationState(input) {
+    const localGlobalMetaId = normalizeText(input.localGlobalMetaId);
+    const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
+    return (await readConversations(input.homeDir)).find((entry) => (entry.local.globalMetaId === localGlobalMetaId
+        && entry.peer.globalMetaId === peerGlobalMetaId)) ?? null;
 }
 async function readPeerConversationMessages(input) {
     const localGlobalMetaId = normalizeText(input.localGlobalMetaId);

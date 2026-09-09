@@ -1,4 +1,4 @@
-import type { A2AConversationMessage, A2AConversationMessageKind } from './conversationTypes';
+import type { A2AConversationMessage, A2AConversationMessageKind, A2AConversationState } from './conversationTypes';
 export interface PeerConversationSummary {
     conversationId: string;
     localGlobalMetaId: string;
@@ -14,11 +14,17 @@ export interface PeerConversationSummary {
     messageCount: number;
     kinds: A2AConversationMessageKind[];
     state: string;
+    /** UI meta (pin/archive/rename override); defaults when never touched. */
+    pinned: boolean;
+    archivedAt: number | null;
+    displayName: string | null;
 }
 export interface ListPeerConversationSummariesInput {
     homeDir: string;
     localGlobalMetaId: string;
     limit?: number;
+    /** Keep archived conversations in the list (archived-surfaces hook). */
+    includeArchived?: boolean;
 }
 export interface ListPeerConversationSummariesResult {
     localBot: {
@@ -54,7 +60,17 @@ export interface ReadPeerConversationMessagesResult {
         hasMoreBefore: boolean;
     };
 }
+export declare function peerConversationId(conversation: A2AConversationState): string;
 /** Drop every cached conversation parse (test helper; production never needs it). */
 export declare function clearConversationProjectionCache(): void;
 export declare function listPeerConversationSummaries(input: ListPeerConversationSummariesInput): Promise<ListPeerConversationSummariesResult>;
+/**
+ * Load the raw stored conversation between one local Bot and one peer (any
+ * message/session shape), for the meta writer and other pair-addressed reads.
+ */
+export declare function findPeerConversationState(input: {
+    homeDir: string;
+    localGlobalMetaId: string;
+    peerGlobalMetaId: string;
+}): Promise<A2AConversationState | null>;
 export declare function readPeerConversationMessages(input: ReadPeerConversationMessagesInput): Promise<ReadPeerConversationMessagesResult>;

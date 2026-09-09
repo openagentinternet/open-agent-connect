@@ -3158,6 +3158,13 @@ function createDefaultCliDependencies(context) {
                 return requestJsonForSelectedActor('GET', `/api/conversations/messages${suffix}`, input.local);
             },
             guidance: async (input) => requestJsonForSelectedActor('POST', '/api/conversations/guidance', input.local, { local: input.local, peer: input.peer, guidance: input.guidance }),
+            meta: async (input) => requestJsonForSelectedActor('POST', '/api/conversations/meta', input.local, {
+                local: input.local,
+                peer: input.peer,
+                ...(input.pinned !== undefined ? { pinned: input.pinned } : {}),
+                ...(input.archived !== undefined ? { archived: input.archived } : {}),
+                ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+            }),
         },
         memory: {
             list: async (input) => {

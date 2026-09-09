@@ -7,6 +7,7 @@ import {
   IconSendOutline16,
   Input,
   MarkdownText,
+  Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
@@ -18,6 +19,7 @@ import {
   type ConversationThread,
 } from './api.ts'
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
+import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { pickDefaultBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
@@ -33,6 +35,12 @@ export interface A2AConversationInjected {
   thread: (from: string, peer: string) => Promise<ConversationThread>
   send: (from: string, to: string, content: string) => Promise<unknown>
   guidance: (from: string, peer: string, guidance: string) => Promise<unknown>
+  /** UI-meta write (pin/archive/rename) on one private conversation. */
+  meta: (from: string, peer: string, patch: {
+    pinned?: boolean
+    archived?: boolean
+    displayName?: string | null
+  }) => Promise<unknown>
   grouptask: GroupTaskInjectedApi
   /** Open the right-sidebar Bot Browser on a resource URI (e.g. `metaid://<globalMetaId>`). */
   browserOpen: (uri?: string) => Promise<void>
@@ -180,6 +188,7 @@ export function A2AConversation({
   thread,
   send,
   guidance,
+  meta,
   grouptask,
   browserOpen,
   t,
@@ -202,6 +211,10 @@ export function A2AConversation({
   const [guidanceOpen, setGuidanceOpen] = useState(false)
   const [guidanceDraft, setGuidanceDraft] = useState('')
   const [guidanceStatus, setGuidanceStatus] = useState<string | null>(null)
+  // Row-menu rename modal (IDBots parity: empty save clears the override).
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
   const [unread, setUnread] = useState<UnreadState>(() => (
     UNREAD_BADGE_ENABLED ? readUnreadState() : { private: {}, group: {}, privateSeen: {}, groupSeen: {} }
   ))
@@ -452,6 +465,33 @@ export function A2AConversation({
     void browserOpen(`metaid://${gmid}`).then(() => setOpen(false))
   }, [browserOpen])
 
+  // Row-menu writes (pin/archive/rename). One shared path: apply, then let the
+  // SSE conversation-update (published by the daemon write) plus this explicit
+  // reload race to refresh the list. Failures surface in the list error slot.
+  const applyConversationMeta = useCallback(async (
+    peer: string,
+    patch: { pinned?: boolean; archived?: boolean; displayName?: string | null },
+  ): Promise<void> => {
+    if (!from || !peer) return
+    try {
+      await meta(from, peer, patch)
+      reloadList()
+    } catch (cause) {
+      setListError(errorText(cause))
+    }
+  }, [from, meta, reloadList])
+
+  const submitRename = async (): Promise<void> => {
+    if (renameTarget === null || renameBusy) return
+    setRenameBusy(true)
+    try {
+      await applyConversationMeta(renameTarget, { displayName: renameDraft })
+      setRenameTarget(null)
+    } finally {
+      setRenameBusy(false)
+    }
+  }
+
   // Group-task drawer: open one deliverable/resource URI in the Bot Browser.
   const openResource = useCallback((uri: string): void => {
     const target = uri.trim()
@@ -524,7 +564,7 @@ export function A2AConversation({
   const localLabel = currentBot?.name ?? t('localBot')
   const localAvatar = currentBot?.avatarDataUrl
   const localGlobalMetaId = selectedSummary?.localGlobalMetaId || currentBot?.globalMetaId || ''
-  const peerLabel = selectedSummary?.peerName ?? selectedPeer
+  const peerLabel = (selectedSummary?.displayName?.trim() || selectedSummary?.peerName) ?? selectedPeer
   // Conversation payloads carry peer avatars as small chain references (rendered
   // through the daemon avatar proxy). When the peer is one of the local Bots,
   // its fresh data-URL avatar is already in the Bot list — resolve it here
@@ -635,30 +675,50 @@ export function A2AConversation({
                   {summaries !== null && summaries.length === 0 ? (
                     <p className="oac-note">{t('empty')}</p>
                   ) : null}
-                  {summaries?.map((row) => (
-                    <button
-                      type="button"
-                      key={row.conversationId || row.peerGlobalMetaId}
-                      className={row.peerGlobalMetaId === selectedPeer ? 'oac-a2a-row active' : 'oac-a2a-row'}
-                      onClick={() => selectPeer(row.peerGlobalMetaId)}
-                    >
-                      <BotAvatar
-                        name={row.peerName ?? row.peerGlobalMetaId}
-                        src={localAvatarByMetaId.get(row.peerGlobalMetaId) ?? row.peerAvatar ?? undefined}
-                        className="oac-a2a-row-avatar"
-                      />
-                      <span className="oac-a2a-row-main">
-                        <span className="oac-a2a-row-name">{row.peerName ?? row.peerGlobalMetaId}</span>
-                        <span className="oac-a2a-row-text">{row.latestText}</span>
-                      </span>
-                      <span className="oac-a2a-row-time" title={timestampLabel(row.latestAt)}>
-                        {relativeTimeLabel(row.latestAt)}
-                      </span>
-                      {unread.private[`${from}:${row.peerGlobalMetaId}`]
-                        ? <span className="oac-unread-dot" aria-label={t('unread')} />
-                        : null}
-                    </button>
-                  ))}
+                  {summaries?.map((row) => {
+                    const rowTitle = row.displayName?.trim() || row.peerName || row.peerGlobalMetaId
+                    return (
+                      <div
+                        key={row.conversationId || row.peerGlobalMetaId}
+                        role="button"
+                        tabIndex={0}
+                        className={row.peerGlobalMetaId === selectedPeer ? 'oac-a2a-row active' : 'oac-a2a-row'}
+                        onClick={() => selectPeer(row.peerGlobalMetaId)}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            selectPeer(row.peerGlobalMetaId)
+                          }
+                        }}
+                      >
+                        <BotAvatar
+                          name={rowTitle}
+                          src={localAvatarByMetaId.get(row.peerGlobalMetaId) ?? row.peerAvatar ?? undefined}
+                          className="oac-a2a-row-avatar"
+                        />
+                        <span className="oac-a2a-row-main">
+                          <span className="oac-a2a-row-name">{rowTitle}</span>
+                          <span className="oac-a2a-row-text">{row.latestText}</span>
+                        </span>
+                        {unread.private[`${from}:${row.peerGlobalMetaId}`]
+                          ? <span className="oac-unread-dot" aria-label={t('unread')} />
+                          : null}
+                        <ConversationRowMenu
+                          pinned={row.pinned}
+                          copyId={row.conversationId}
+                          time={row.latestAt}
+                          onRename={() => {
+                            setRenameTarget(row.peerGlobalMetaId)
+                            setRenameDraft(row.displayName ?? '')
+                          }}
+                          onTogglePin={(pinned) => { void applyConversationMeta(row.peerGlobalMetaId, { pinned }) }}
+                          onArchive={() => { void applyConversationMeta(row.peerGlobalMetaId, { archived: true }) }}
+                          t={t}
+                        />
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
               <div className="oac-a2a-thread">
@@ -832,6 +892,43 @@ export function A2AConversation({
                 </div>
               </div>
             </div>
+            {/* Row-menu rename modal (DSH home-list rename pattern). */}
+            <Modal
+              closeLabel={t('close')}
+              open={renameTarget !== null}
+              onClose={() => { if (!renameBusy) setRenameTarget(null) }}
+              title={t('renameConversationTitle')}
+              className="oac-dialog-delete"
+              footer={(
+                <>
+                  <Button type="button" variant="outline" disabled={renameBusy} onClick={() => setRenameTarget(null)}>
+                    {t('guidanceCancel')}
+                  </Button>
+                  <Button type="button" variant="primary" disabled={renameBusy} onClick={() => { void submitRename() }}>
+                    {renameBusy ? t('sending') : t('menuRename')}
+                  </Button>
+                </>
+              )}
+            >
+              <div className="oac-gt-form">
+                <label className="oac-gt-form-field">
+                  <span className="oac-gt-field-label">{t('renameConversationField')}</span>
+                  <Input
+                    value={renameDraft}
+                    disabled={renameBusy}
+                    autoFocus
+                    onChange={(event) => setRenameDraft(event.target.value)}
+                    placeholder={t('renameConversationPlaceholder')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                        event.preventDefault()
+                        if (!renameBusy) void submitRename()
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </Modal>
           </div>
         </div>
       ) : null}

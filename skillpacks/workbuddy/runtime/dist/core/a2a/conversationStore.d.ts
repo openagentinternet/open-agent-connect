@@ -1,5 +1,5 @@
 import { type MetabotPaths } from '../state/paths';
-import type { A2AConversationLocalProfile, A2AConversationMessage, A2AConversationPeerProfile, A2AConversationSession, A2AConversationState } from './conversationTypes';
+import type { A2AConversationLocalProfile, A2AConversationMessage, A2AConversationMeta, A2AConversationPeerProfile, A2AConversationSession, A2AConversationState } from './conversationTypes';
 export interface CreateA2AConversationStoreInput {
     homeDir?: string;
     paths?: MetabotPaths;
@@ -20,5 +20,7 @@ export interface A2AConversationStore {
     findSessionByOrderTxid(orderTxid: string): Promise<A2AConversationSession | null>;
     findSessionByPaymentTxid(paymentTxid: string): Promise<A2AConversationSession | null>;
 }
+/** Tolerant UI-meta read: absent/invalid input yields undefined (not stored). */
+export declare function normalizeA2AConversationMeta(value: unknown): A2AConversationMeta | undefined;
 export declare function resolveA2AConversationFilePath(paths: MetabotPaths, localGlobalMetaId: string, peerGlobalMetaId: string): string;
 export declare function createA2AConversationStore(input: CreateA2AConversationStoreInput): A2AConversationStore;

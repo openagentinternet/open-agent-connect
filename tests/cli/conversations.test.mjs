@@ -82,3 +82,59 @@ test('runCli rejects conversations commands with missing or malformed flags', as
 
   assert.deepEqual(calls, []);
 });
+
+test('runCli dispatches conversations UI-meta verbs to the meta handler', async () => {
+  const calls = [];
+  const dependencies = {
+    conversations: {
+      meta: async (input) => {
+        calls.push(input);
+        return commandSuccess({ conversationId: 'sess-1', pinned: false, archivedAt: null, displayName: null });
+      },
+    },
+  };
+  const run = (args) => runCli(args, {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  });
+
+  assert.equal(await run(['conversations', 'rename', '--local', 'alice', '--peer', 'gm-bob', '--name', 'Bob chat']), 0);
+  assert.equal(await run(['conversations', 'rename', '--local', 'alice', '--peer', 'gm-bob', '--name', '']), 0);
+  assert.equal(await run(['conversations', 'pin', '--local', 'alice', '--peer', 'gm-bob']), 0);
+  assert.equal(await run(['conversations', 'unpin', '--local', 'alice', '--peer', 'gm-bob']), 0);
+  assert.equal(await run(['conversations', 'archive', '--local', 'alice', '--peer', 'gm-bob']), 0);
+  assert.equal(await run(['conversations', 'unarchive', '--local', 'alice', '--peer', 'gm-bob']), 0);
+
+  assert.deepEqual(calls, [
+    { local: 'alice', peer: 'gm-bob', displayName: 'Bob chat' },
+    { local: 'alice', peer: 'gm-bob', displayName: '' },
+    { local: 'alice', peer: 'gm-bob', pinned: true },
+    { local: 'alice', peer: 'gm-bob', pinned: false },
+    { local: 'alice', peer: 'gm-bob', archived: true },
+    { local: 'alice', peer: 'gm-bob', archived: false },
+  ]);
+});
+
+test('runCli rejects conversations meta verbs with missing flags', async () => {
+  const calls = [];
+  const dependencies = {
+    conversations: {
+      meta: async (input) => {
+        calls.push(input);
+        return commandSuccess({});
+      },
+    },
+  };
+  const run = (args) => runCli(args, {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  });
+
+  assert.equal(await run(['conversations', 'rename', '--local', 'alice', '--peer', 'gm-bob']), 1);
+  assert.equal(await run(['conversations', 'pin', '--local', 'alice']), 1);
+  assert.equal(await run(['conversations', 'archive']), 1);
+
+  assert.deepEqual(calls, []);
+});

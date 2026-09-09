@@ -113,6 +113,7 @@ const watchEvents_1 = require("../core/a2a/watch/watchEvents");
 const conversationStore_1 = require("../core/a2a/conversationStore");
 const conversationPersistence_1 = require("../core/a2a/conversationPersistence");
 const conversationProjection_1 = require("../core/a2a/conversationProjection");
+const conversationMeta_1 = require("../core/a2a/conversationMeta");
 const traceProjection_1 = require("../core/a2a/traceProjection");
 const conversationUrl_1 = require("../core/a2a/conversationUrl");
 const localIdentityBootstrap_1 = require("../core/bootstrap/localIdentityBootstrap");
@@ -14407,6 +14408,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         homeDir: profile.homeDir,
                         localGlobalMetaId: profile.globalMetaId,
                         limit: rawInput.limit,
+                        ...(rawInput.includeArchived === true ? { includeArchived: true } : {}),
                     });
                     return (0, commandResult_1.commandSuccess)(await enrichConversationListResult(result, profile));
                 }
@@ -14443,6 +14445,38 @@ function createDefaultMetabotDaemonHandlers(input) {
                 peer: normalizeText(rawInput.peer),
                 guidance: normalizeText(rawInput.guidance),
             }),
+            meta: async (rawInput) => {
+                const profile = await resolveMetabotProfileBySelector(rawInput.local);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(rawInput.local) || '<missing>'}`);
+                }
+                const peer = normalizeText(rawInput.peer);
+                if (!peer) {
+                    return (0, commandResult_1.commandFailed)('missing_peer', 'peer is required.');
+                }
+                try {
+                    const result = await (0, conversationMeta_1.updatePeerConversationMeta)({
+                        homeDir: profile.homeDir,
+                        localGlobalMetaId: profile.globalMetaId,
+                        peerGlobalMetaId: peer,
+                        ...(typeof rawInput.pinned === 'boolean' ? { pinned: rawInput.pinned } : {}),
+                        ...(typeof rawInput.archived === 'boolean' ? { archived: rawInput.archived } : {}),
+                        ...(rawInput.displayName !== undefined
+                            ? { displayName: typeof rawInput.displayName === 'string' ? rawInput.displayName : null }
+                            : {}),
+                    });
+                    if (!result) {
+                        return (0, commandResult_1.commandFailed)('conversation_not_found', `No A2A conversation found between ${profile.globalMetaId} and ${peer}.`);
+                    }
+                    // Stored-row change: wake the per-Bot conversation SSE stream so the
+                    // open panel list re-pulls immediately (the file watcher also fires).
+                    publishConversationProfileUpdate(profile.globalMetaId);
+                    return (0, commandResult_1.commandSuccess)(result);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('conversation_meta_failed', error instanceof Error ? error.message : 'Failed to update conversation meta.');
+                }
+            },
             streamEvents: async (rawInput) => {
                 const profile = await resolveMetabotProfileBySelector(rawInput.local);
                 const localGlobalMetaId = profile?.globalMetaId ?? normalizeText(rawInput.local);

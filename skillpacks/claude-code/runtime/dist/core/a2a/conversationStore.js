@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeA2AConversationMeta = normalizeA2AConversationMeta;
 exports.resolveA2AConversationFilePath = resolveA2AConversationFilePath;
 exports.createA2AConversationStore = createA2AConversationStore;
 const node_fs_1 = require("node:fs");
@@ -99,12 +100,28 @@ function normalizeSessions(sessions) {
     return sessions
         .filter(session => normalizeText(session?.sessionId));
 }
+/** Tolerant UI-meta read: absent/invalid input yields undefined (not stored). */
+function normalizeA2AConversationMeta(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return undefined;
+    }
+    const record = value;
+    const displayName = typeof record.displayName === 'string' ? record.displayName.trim() : '';
+    return {
+        pinned: record.pinned === true,
+        archivedAt: typeof record.archivedAt === 'number' && Number.isFinite(record.archivedAt) && record.archivedAt > 0
+            ? Math.trunc(record.archivedAt)
+            : null,
+        displayName: displayName || null,
+    };
+}
 function normalizeConversationState(value, input) {
     if (!value || typeof value !== 'object') {
         return cloneEmptyConversation(input);
     }
     const messages = normalizeMessages(value.messages);
     const sessions = normalizeSessions(value.sessions);
+    const meta = normalizeA2AConversationMeta(value.meta);
     return {
         version: A2A_CONVERSATION_SCHEMA_VERSION,
         local: normalizeActor(value.local ?? input.local),
@@ -112,6 +129,7 @@ function normalizeConversationState(value, input) {
         messages,
         sessions,
         indexes: buildIndexes(messages, sessions),
+        ...(meta !== undefined ? { meta } : {}),
         updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
     };
 }
