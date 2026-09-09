@@ -32,9 +32,9 @@ test('diffGroupTasks skips rows without a finite updatedAt', () => {
   assert.deepEqual(updates, [{ key: 'bob:2', updatedAt: 5 }])
 })
 
-test('applyGroupUpdate seeds first sight without marking unread', () => {
+test('applyGroupUpdate marks first sight (the host prime keeps connect quiet)', () => {
   const state = plugin.applyGroupUpdate(plugin.EMPTY_UNREAD, { key: 'bob:1', updatedAt: 500 }, false)
-  assert.deepEqual(state.group, {})
+  assert.deepEqual(state.group, { 'bob:1': 500 })
   assert.deepEqual(state.groupSeen, { 'bob:1': 500 })
 })
 
@@ -50,7 +50,7 @@ test('applyGroupUpdate marks newer updates and stays read while viewing', () => 
 test('applyGroupUpdate ignores stale repeats', () => {
   let state = plugin.applyGroupUpdate(plugin.EMPTY_UNREAD, { key: 'bob:1', updatedAt: 500 }, false)
   state = plugin.applyGroupUpdate(state, { key: 'bob:1', updatedAt: 400 }, false)
-  assert.deepEqual(state.group, {})
+  assert.deepEqual(state.group, { 'bob:1': 500 })
   assert.deepEqual(state.groupSeen, { 'bob:1': 500 })
 })
 
@@ -87,8 +87,22 @@ test('chat watcher is push-only: no polling loop, store paths filtered by patter
   assert.match(watcher, /group-task-update/)
   assert.ok(watcher.includes('\\.runtime\\/a2a\\/chat-'), 'a2a store path filter present')
   assert.ok(watcher.includes('\\.runtime\\/grouptask\\/'), 'grouptask store path filter present')
+  // The watcher must resolve the profiles root through the core layout:
+  // normalizeSystemHomeDir returns the SYSTEM home — joining 'profiles' onto
+  // it watches a directory that does not exist (round-1 live bug).
+  assert.match(watcher, /localProfilesRoot\(\)/)
+  assert.doesNotMatch(watcher, /join\(home, 'profiles'\)/)
+  // The group baseline primes at stream start so connect marks nothing.
+  assert.match(watcher, /groupPrimed/)
   // The 2026-09-07 polling badge must stay dead.
   assert.doesNotMatch(watcher, /setInterval\(\s*\(\)\s*=>\s*\{\s*void poll/)
+})
+
+test('localProfilesRoot resolves through resolveMetabotManagerLayout, never a bare home join', async () => {
+  const localRead = await readFile(join(root, 'src/local-read.ts'), 'utf8')
+  assert.match(localRead, /resolveMetabotManagerLayout/)
+  assert.match(localRead, /profilesRoot/)
+  assert.doesNotMatch(localRead, /join\(.*'profiles'\)/)
 })
 
 test('client rides one all-events stream; the polling badge flag is gone', async () => {

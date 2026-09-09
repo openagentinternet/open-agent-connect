@@ -43,22 +43,18 @@ export function diffGroupTasks(
 }
 
 /**
- * Fold one group-task update: first sight seeds the baseline; a newer update
- * marks unread unless the user is viewing that task right now (then it stays
- * read). The baseline always advances, so every update is accounted once.
+ * Fold one group-task update. The HOST primes its own diff baseline at stream
+ * start, so every frame here is a genuine change: first sight marks unread
+ * (unless the user is viewing that task right now) instead of seeding —
+ * seeding here would swallow a new task's first activity. The baseline
+ * always advances, so every update is accounted once.
  */
 export function applyGroupUpdate(
   state: Readonly<UnreadState>,
   update: GroupTaskUpdate,
   viewing: boolean,
 ): UnreadState {
-  const seen = state.groupSeen[update.key]
-  if (seen === undefined) {
-    return {
-      ...state,
-      groupSeen: { ...state.groupSeen, [update.key]: update.updatedAt },
-    }
-  }
+  const seen = state.groupSeen[update.key] ?? Number.NEGATIVE_INFINITY
   if (update.updatedAt <= seen) return state
   const group = { ...state.group }
   if (viewing) delete group[update.key]

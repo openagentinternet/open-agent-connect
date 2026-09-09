@@ -13,10 +13,10 @@
  * open panel already uses.
  */
 
-import { watch, readdirSync, existsSync, type FSWatcher } from 'node:fs'
+import { watch, readdirSync, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import type { PluginHttpRequest, PluginHttpResponse } from './context-types.js'
-import { localGrouptaskList, localSystemHomeDir } from './local-read.js'
+import { localGrouptaskList, localProfilesRoot } from './local-read.js'
 import { diffGroupTasks, type GroupTaskRow } from './unread-logic.js'
 
 const PRIVATE_DEBOUNCE_MS = 500
@@ -58,7 +58,12 @@ export function streamAllChatEvents(req: PluginHttpRequest, res: PluginHttpRespo
   const watchers: FSWatcher[] = []
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   let groupTimer: ReturnType<typeof setTimeout> | null = null
+  // The group diff baseline: primed from a first store read so a stream's
+  // first frames carry only genuinely-changed tasks, never every task at
+  // once. Until a read succeeds, the first successful read IS the prime
+  // (emits nothing) however it arrives.
   let groupSnapshot: Record<string, number> = {}
+  let groupPrimed = false
   const heartbeat = setInterval(() => {
     try {
       res.write?.(': ping\n\n')
@@ -113,9 +118,12 @@ export function streamAllChatEvents(req: PluginHttpRequest, res: PluginHttpRespo
       void localGrouptaskList('all', true).then((result) => {
         if (stopped) return
         if (result === null || !result.ok) return
-        const rows = taskRowsOf(result.data)
-        const { next, updates } = diffGroupTasks(groupSnapshot, rows)
+        const { next, updates } = diffGroupTasks(groupSnapshot, taskRowsOf(result.data))
         groupSnapshot = next
+        if (!groupPrimed) {
+          groupPrimed = true
+          return
+        }
         if (updates.length > 0) emit('group-task-update', { updates })
       }).catch(() => {
         // a failed store read is retried on the next store change
@@ -147,9 +155,8 @@ export function streamAllChatEvents(req: PluginHttpRequest, res: PluginHttpRespo
     }
   }
 
-  const home = localSystemHomeDir()
-  if (home !== null) {
-    const profilesRoot = join(home, 'profiles')
+  const profilesRoot = localProfilesRoot()
+  if (profilesRoot !== null) {
     // Preferred: one recursive watcher over the whole profiles tree (FSEvents
     // on darwin). Platforms without recursive fs.watch fall back to
     // per-directory watches on the store dirs that exist.
@@ -166,6 +173,17 @@ export function streamAllChatEvents(req: PluginHttpRequest, res: PluginHttpRespo
       }
     }
   }
+
+  // Prime the group baseline before announcing readiness; the client may
+  // also be mid-connect, and its first sight of each task marks unread —
+  // the prime keeps "connect" from lighting every task up.
+  void localGrouptaskList('all', true).then((result) => {
+    if (stopped || result === null || !result.ok) return
+    groupSnapshot = diffGroupTasks({}, taskRowsOf(result.data)).next
+    groupPrimed = true
+  }).catch(() => {
+    // first successful change-driven read becomes the prime instead
+  })
 
   emit('watch-ready', {})
   req.on?.('close', stop)
