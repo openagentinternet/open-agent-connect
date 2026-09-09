@@ -345,3 +345,83 @@ test('persistA2AConversationMessage normalizes Unix-second message timestamps to
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].timestamp, 1_784_910_335_000);
 });
+
+test('updatePeerConversationMeta drives pin-first order, archive hiding, and rename overrides', async (t) => {
+  const homeDir = await createProfileHome('metabot-a2a-conversation-meta-', 'eric');
+  t.after(async () => cleanupProfileHome(homeDir));
+  const PEER_A = 'idq1peera000000000000000000000000000';
+  const PEER_B = 'idq2peerb000000000000000000000000000';
+  const PEER_C = 'idq3peerc000000000000000000000000000';
+  await writeConversation(homeDir, {
+    peerGlobalMetaId: PEER_A,
+    peerName: 'Alpha Bot',
+    messages: [message(1, { direction: 'incoming', content: 'alpha hello' })],
+  });
+  await writeConversation(homeDir, {
+    peerGlobalMetaId: PEER_B,
+    peerName: 'Beta Bot',
+    messages: [message(1, { direction: 'incoming', content: 'beta hello' })],
+  });
+  await writeConversation(homeDir, {
+    peerGlobalMetaId: PEER_C,
+    peerName: 'Gamma Bot',
+    messages: [message(1, { direction: 'incoming', content: 'gamma hello' })],
+  });
+
+  const { updatePeerConversationMeta } = require('../../dist/core/a2a/conversationMeta.js');
+
+  // Untouched conversations surface the meta defaults.
+  const before = await listPeerConversationSummaries({ homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID });
+  assert.equal(before.conversations.length, 3);
+  for (const summary of before.conversations) {
+    assert.equal(summary.pinned, false);
+    assert.equal(summary.archivedAt, null);
+    assert.equal(summary.displayName, null);
+  }
+
+  // Pin the OLDEST conversation (Beta) — it must jump to the top.
+  await updatePeerConversationMeta({
+    homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID, peerGlobalMetaId: PEER_B, pinned: true,
+  });
+  // Rename Alpha with an override; archive Gamma.
+  await updatePeerConversationMeta({
+    homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID, peerGlobalMetaId: PEER_A, displayName: '  Alpha renamé  ',
+  });
+  const archivedAt = await updatePeerConversationMeta({
+    homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID, peerGlobalMetaId: PEER_C, archived: true,
+  });
+  assert.ok(archivedAt.archivedAt > 0);
+
+  const after = await listPeerConversationSummaries({ homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID });
+  assert.equal(after.conversations.length, 2);
+  assert.equal(after.conversations[0].peerGlobalMetaId, PEER_B);
+  assert.equal(after.conversations[0].pinned, true);
+  assert.equal(after.conversations[1].peerGlobalMetaId, PEER_A);
+  assert.equal(after.conversations[1].displayName, 'Alpha renamé');
+
+  // includeArchived keeps the archived row available for archived surfaces.
+  const withArchived = await listPeerConversationSummaries({
+    homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID, includeArchived: true,
+  });
+  assert.equal(withArchived.conversations.length, 3);
+  assert.ok(withArchived.conversations.some((summary) => summary.peerGlobalMetaId === PEER_C));
+
+  // Unarchive restores the row; clearing the rename falls back to the peer name.
+  await updatePeerConversationMeta({
+    homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID, peerGlobalMetaId: PEER_C, archived: false,
+  });
+  await updatePeerConversationMeta({
+    homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID, peerGlobalMetaId: PEER_A, displayName: '   ',
+  });
+  const restored = await listPeerConversationSummaries({ homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID });
+  assert.equal(restored.conversations.length, 3);
+  const alpha = restored.conversations.find((summary) => summary.peerGlobalMetaId === PEER_A);
+  assert.equal(alpha.displayName, null);
+  assert.equal(alpha.peerName, 'Alpha Bot');
+
+  // Meta writes never create a conversation for an unknown pair.
+  const missing = await updatePeerConversationMeta({
+    homeDir, localGlobalMetaId: LOCAL_GLOBAL_META_ID, peerGlobalMetaId: 'idq4nosuchpeer00000000000000000000', pinned: true,
+  });
+  assert.equal(missing, null);
+});

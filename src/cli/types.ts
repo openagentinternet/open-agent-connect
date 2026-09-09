@@ -196,6 +196,14 @@ export interface CliDependencies {
       after?: number;
     }) => Awaitable<MetabotCommandResult<unknown>>;
     guidance?: (input: { local: string; peer: string; guidance: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    meta?: (input: {
+      local: string;
+      peer: string;
+      pinned?: boolean;
+      archived?: boolean;
+      /** Present (possibly empty) = rename; empty string clears the override. */
+      displayName?: string | null;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   memory?: {
     list?: (input: {

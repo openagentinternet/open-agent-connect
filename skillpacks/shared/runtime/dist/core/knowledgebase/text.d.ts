@@ -18,7 +18,17 @@
 export declare const SUPPORTED_KB_EXTENSIONS: ReadonlySet<string>;
 export declare const KB_DEFAULT_CHUNK_SIZE = 1200;
 export declare const KB_DEFAULT_CHUNK_OVERLAP = 180;
-export declare const KB_SNIPPET_MAX_CHARS = 220;
+export declare const KB_SNIPPET_MAX_CHARS = 320;
+/**
+ * Function words dropped from QUERY tokens (never from index tokens, so the
+ * stored v2 token lists stay valid). With bigram-only CJK query tokens the
+ * dominant noise is multi-char function words (什么/可以/应该…) and Latin
+ * function words (the/a/of…), which appear in virtually every chunk and
+ * matched the whole corpus at high scores; the unigram entries only fire for
+ * chars isolated by punctuation. Kept deliberately small and safe: membership
+ * must never exclude a content-bearing term.
+ */
+export declare const KB_QUERY_STOPWORDS: ReadonlySet<string>;
 export declare class KnowledgeBaseTextError extends Error {
     readonly code: 'dependency_missing' | 'unsupported_format' | 'extract_failed';
     constructor(code: KnowledgeBaseTextError['code'], detail: string);
@@ -43,8 +53,10 @@ export declare function tokenizeKnowledgeBaseText(text: string): string[];
  * Token selection for free-form queries, favoring precision: latin words and
  * CJK *bigrams* (a CJK unigram is only emitted for an isolated single char,
  * never for chars inside a longer run — otherwise every doc containing e.g.
- * 法 in 做法 would match a 民法 query). Shared by the index query path and
- * the retention-tested query-builder contract.
+ * 法 in 做法 would match a 民法 query). Function words (KB_QUERY_STOPWORDS)
+ * are dropped: they appear in virtually every chunk and used to push noise
+ * hits above real matches. Shared by the index query path (indexStore) and
+ * the legacy FTS query builder.
  */
 export declare function buildKbQueryTokens(query: string, maxTokens?: number): string[];
 /** Double-quoted OR expression of the query tokens (the legacy FTS5 shape). */

@@ -151,7 +151,24 @@ function createKnowledgeBaseService(paths) {
                     // Marking is advisory; the document is already saved.
                 }
             }
-            return { knowledgeBase: kb, relPath };
+            // A save is searchable the moment it returns: run the incremental learn
+            // (unchanged docs reuse their chunks) through the per-KB queue so it
+            // serializes with explicit learns. A refresh failure must not fail the
+            // save — the document stays on disk and the next learn picks it up.
+            let indexed = true;
+            try {
+                await enqueueLearn(kb.id, async () => {
+                    const index = indexFor(kb.id);
+                    await node_fs_1.promises.mkdir(kb.rawDir, { recursive: true });
+                    const stats = await index.rebuild(kb.rawDir, () => Date.now());
+                    await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
+                });
+            }
+            catch {
+                indexed = false;
+            }
+            const updated = await store.getKnowledgeBase(kb.id);
+            return { knowledgeBase: updated ?? kb, relPath, indexed };
         },
         importFiles: async (metabotSlug, knowledgeBaseId, filePaths) => {
             const kb = await requireKb(metabotSlug, knowledgeBaseId);

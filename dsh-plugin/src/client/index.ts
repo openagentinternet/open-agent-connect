@@ -180,6 +180,7 @@ export function apply(ctx: ClientContext): void {
       send: (from: string, to: string, content: string) => api.chatPrivate(from, to, content),
       guidance: (from: string, peer: string, guidance: string) =>
         api.conversationGuidance(from, peer, guidance),
+      meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
       browserOpen: (uri?: string) => openBrowser(browserStore, uri ?? null),
       grouptask: {
         list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),

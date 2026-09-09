@@ -6,6 +6,7 @@ import type {
   A2AConversationIndexes,
   A2AConversationLocalProfile,
   A2AConversationMessage,
+  A2AConversationMeta,
   A2AConversationPeerProfile,
   A2AConversationSession,
   A2AConversationState,
@@ -144,6 +145,23 @@ function normalizeSessions(sessions: unknown): A2AConversationSession[] {
     .filter(session => normalizeText(session?.sessionId));
 }
 
+/** Tolerant UI-meta read: absent/invalid input yields undefined (not stored). */
+export function normalizeA2AConversationMeta(value: unknown): A2AConversationMeta | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Partial<A2AConversationMeta>;
+  const displayName = typeof record.displayName === 'string' ? record.displayName.trim() : '';
+  return {
+    pinned: record.pinned === true,
+    archivedAt:
+      typeof record.archivedAt === 'number' && Number.isFinite(record.archivedAt) && record.archivedAt > 0
+        ? Math.trunc(record.archivedAt)
+        : null,
+    displayName: displayName || null,
+  };
+}
+
 function normalizeConversationState(
   value: A2AConversationState | null,
   input: {
@@ -157,6 +175,7 @@ function normalizeConversationState(
 
   const messages = normalizeMessages((value as { messages?: unknown }).messages);
   const sessions = normalizeSessions((value as { sessions?: unknown }).sessions);
+  const meta = normalizeA2AConversationMeta((value as { meta?: unknown }).meta);
   return {
     version: A2A_CONVERSATION_SCHEMA_VERSION,
     local: normalizeActor((value as { local?: A2AConversationLocalProfile }).local ?? input.local),
@@ -164,6 +183,7 @@ function normalizeConversationState(
     messages,
     sessions,
     indexes: buildIndexes(messages, sessions),
+    ...(meta !== undefined ? { meta } : {}),
     updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
   };
 }

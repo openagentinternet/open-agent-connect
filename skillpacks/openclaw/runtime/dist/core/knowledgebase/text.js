@@ -20,7 +20,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.KnowledgeBaseTextError = exports.KB_SNIPPET_MAX_CHARS = exports.KB_DEFAULT_CHUNK_OVERLAP = exports.KB_DEFAULT_CHUNK_SIZE = exports.SUPPORTED_KB_EXTENSIONS = void 0;
+exports.KnowledgeBaseTextError = exports.KB_QUERY_STOPWORDS = exports.KB_SNIPPET_MAX_CHARS = exports.KB_DEFAULT_CHUNK_OVERLAP = exports.KB_DEFAULT_CHUNK_SIZE = exports.SUPPORTED_KB_EXTENSIONS = void 0;
 exports.cleanKnowledgeBaseText = cleanKnowledgeBaseText;
 exports.sha256Text = sha256Text;
 exports.sha256FileAsync = sha256FileAsync;
@@ -73,7 +73,38 @@ const PLAIN_TEXT_KB_EXTENSIONS = new Set([
 ]);
 exports.KB_DEFAULT_CHUNK_SIZE = 1200;
 exports.KB_DEFAULT_CHUNK_OVERLAP = 180;
-exports.KB_SNIPPET_MAX_CHARS = 220;
+exports.KB_SNIPPET_MAX_CHARS = 320;
+/**
+ * Function words dropped from QUERY tokens (never from index tokens, so the
+ * stored v2 token lists stay valid). With bigram-only CJK query tokens the
+ * dominant noise is multi-char function words (什么/可以/应该…) and Latin
+ * function words (the/a/of…), which appear in virtually every chunk and
+ * matched the whole corpus at high scores; the unigram entries only fire for
+ * chars isolated by punctuation. Kept deliberately small and safe: membership
+ * must never exclude a content-bearing term.
+ */
+exports.KB_QUERY_STOPWORDS = new Set([
+    // isolated CJK function chars
+    '的', '了', '吗', '呢', '吧', '啊', '嘛', '么', '与', '及', '或',
+    '但', '是', '还', '而', '且', '于', '因', '此', '其', '中', '上', '下',
+    '不', '一', '个', '这', '那', '怎', '如', '何', '为', '对', '很', '真',
+    '全', '定', '可', '以', '应', '该', '能', '已', '经', '会', '没', '我',
+    '你', '他', '它',
+    // common CJK function bigrams
+    '什么', '怎么', '如何', '为何', '以及', '对于', '关于', '根据', '由于',
+    '虽然', '此外', '其中', '以上', '以下', '非常', '真的', '十分', '全部',
+    '一起', '一样', '一下', '一直', '不一', '可以', '应该', '可能', '已经',
+    '正在', '将会', '没有', '我们', '你们', '他们', '还是', '就是', '但是',
+    '因为', '所以', '如果', '而且', '于是', '然后', '因此', '并且', '或者',
+    '这个', '那个', '这些', '那些', '这里', '那里', '哪些', '哪个', '怎样',
+    '一些', '一定',
+    // top Latin function words
+    'the', 'a', 'an', 'of', 'and', 'or', 'to', 'in', 'on', 'for', 'with',
+    'is', 'are', 'was', 'were', 'be', 'been', 'it', 'its', 'this', 'that',
+    'as', 'at', 'by', 'from', 'not', 'no', 'yes', 'do', 'does', 'did',
+    'will', 'would', 'can', 'could', 'should', 'have', 'has', 'had', 'you',
+    'we', 'they', 'i', 'me', 'my',
+]);
 class KnowledgeBaseTextError extends Error {
     code;
     constructor(code, detail) {
@@ -186,8 +217,10 @@ function tokenizeKnowledgeBaseText(text) {
  * Token selection for free-form queries, favoring precision: latin words and
  * CJK *bigrams* (a CJK unigram is only emitted for an isolated single char,
  * never for chars inside a longer run — otherwise every doc containing e.g.
- * 法 in 做法 would match a 民法 query). Shared by the index query path and
- * the retention-tested query-builder contract.
+ * 法 in 做法 would match a 民法 query). Function words (KB_QUERY_STOPWORDS)
+ * are dropped: they appear in virtually every chunk and used to push noise
+ * hits above real matches. Shared by the index query path (indexStore) and
+ * the legacy FTS query builder.
  */
 function buildKbQueryTokens(query, maxTokens = 32) {
     const source = String(query || '').toLowerCase();
@@ -206,7 +239,7 @@ function buildKbQueryTokens(query, maxTokens = 32) {
             tokens.push(`${chars[idx]}${chars[idx + 1]}`);
         }
     }
-    return [...new Set(tokens)].slice(0, maxTokens);
+    return [...new Set(tokens)].filter((token) => !exports.KB_QUERY_STOPWORDS.has(token)).slice(0, maxTokens);
 }
 /** Double-quoted OR expression of the query tokens (the legacy FTS5 shape). */
 function buildKbFtsQuery(query, maxTokens = 32) {

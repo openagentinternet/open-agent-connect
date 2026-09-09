@@ -15,12 +15,14 @@ export declare const MAX_IMPORTANT_MEMORIES = 5;
 export declare const MAX_VALUE_LESSONS = 3;
 export declare const MAX_IMPRESSION_UPDATES = 20;
 export declare const MAX_KNOWLEDGE_UPDATES = 6;
+export declare const MAX_CAPABILITY_LEARNINGS = 5;
 /** Dream algorithm version, recorded on every run. Bump it on any change to the
  * prompt, budgeting, stats or write semantics — completed in-window dates with
  * an older version are then re-dreamed automatically (limited per night).
  * The file-backed port restarts versioning at 1; 2 adds the chain-history
- * sections (own writes + full reads) to the prompt, stats and token estimate. */
-export declare const DREAM_VERSION = 2;
+ * sections (own writes + full reads) to the prompt, stats and token estimate;
+ * 3 adds the capability_learnings contract and scheduled-task run activity. */
+export declare const DREAM_VERSION = 3;
 declare const DREAM_SECTION_KEYS: readonly ["human", "a2a", "orders", "tasks", "group_tasks"];
 export type DreamSectionKey = (typeof DREAM_SECTION_KEYS)[number];
 /**
@@ -102,6 +104,18 @@ export interface DreamKnowledgeExisting {
     category?: string | null;
     version: number;
 }
+/**
+ * An L3b capability-learning candidate (IDBots `capability_drafts` parity):
+ * work that recurred or succeeded today and deserves capture as a reusable
+ * skill / workflow / tool pattern. Lands in the capability-drafts store as a
+ * status 'draft' row; promotion into real skills is a later phase.
+ */
+export interface DreamCapabilityLearning {
+    title: string;
+    description: string;
+    capabilityType: 'skill' | 'workflow' | 'tool_pattern';
+    sourceSessionIds: string[];
+}
 export interface DreamOutput {
     dailySummary: string;
     sections: Partial<Record<DreamSectionKey, string>>;
@@ -111,6 +125,7 @@ export interface DreamOutput {
     selfIdentity: string | null;
     impressionUpdates: DreamImpressionUpdate[];
     knowledgeUpdates: DreamKnowledgeUpdate[];
+    capabilityLearnings: DreamCapabilityLearning[];
 }
 export type DreamParseResult = {
     ok: true;

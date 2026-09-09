@@ -29,6 +29,7 @@ import {
   type OpenTeamGuestInviteRow,
 } from './api.ts'
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
+import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { relativeTimeLabel } from '../relative-time.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
@@ -235,29 +236,44 @@ function StatusBadge({ status, t }: { status: GroupTaskSummaryRow['status']; t: 
   return <span className={`oac-gt-badge oac-gt-status-${status}`}>{t(statusKey(status))}</span>
 }
 
-/** One row in the left task list: pin marker, title, badges, members, time. */
+/** One row in the left task list: title, badges, members, time, hover menu. */
 function TaskListRow({
   task,
   active,
   onSelect,
   unread,
+  disabled,
+  onRename,
+  onTogglePin,
+  onArchive,
   t,
 }: {
   task: GroupTaskSummaryRow
   active: boolean
   onSelect: () => void
   unread: boolean
+  disabled?: boolean
+  onRename: () => void
+  onTogglePin: (pinned: boolean) => void
+  onArchive: () => void
   t: Translate
 }): ReactNode {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={active ? 'oac-a2a-row oac-gt-row active' : 'oac-a2a-row oac-gt-row'}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
     >
       <span className="oac-a2a-row-main">
         <span className="oac-gt-row-title">
-          {task.pinned ? <span className="oac-gt-pin-mark" title={t('gtPinned')}>★</span> : null}
           <span className="oac-a2a-row-name">{taskLabel(task)}</span>
           {task.openTeam ? <span className="oac-gt-badge oac-gt-openteam">{t('gtOpenTeam')}</span> : null}
         </span>
@@ -266,11 +282,18 @@ function TaskListRow({
           <span className="oac-a2a-row-text">{t('gtMemberCount', { count: task.memberCount })}</span>
         </span>
       </span>
-      <span className="oac-a2a-row-time" title={timestampLabel(task.updatedAt)}>
-        {relativeTimeLabel(task.updatedAt)}
-      </span>
       {unread ? <span className="oac-unread-dot" aria-label={t('unread')} /> : null}
-    </button>
+      <ConversationRowMenu
+        pinned={task.pinned}
+        copyId={task.groupId || `#${task.id}`}
+        time={task.updatedAt}
+        disabled={disabled}
+        onRename={onRename}
+        onTogglePin={onTogglePin}
+        onArchive={onArchive}
+        t={t}
+      />
+    </div>
   )
 }
 
@@ -624,9 +647,12 @@ export function GroupTaskView({
   // Kick confirm modal
   const [kickTarget, setKickTarget] = useState<GroupTaskMemberRow | null>(null)
 
-  // Rename modal
-  const [renameOpen, setRenameOpen] = useState(false)
+  // Rename modal — targets any task (row menu or detail panel)
+  const [renameTarget, setRenameTarget] = useState<{ chair: string; taskId: number } | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
+
+  // Archive confirm modal (IDBots parity: group-task archive asks first)
+  const [archiveTarget, setArchiveTarget] = useState<{ chair: string; taskId: number } | null>(null)
 
   // OpenTeam: guest-side collaborations (memberships + received invites)
   const [collabs, setCollabs] = useState<OpenTeamCollabsPayload>({ memberships: [], guestInvites: [] })
@@ -660,10 +686,12 @@ export function GroupTaskView({
   }, [createSignal])
 
   // Task list follows the filter; keep the previous rows on screen during
-  // reloads so the list does not flash.
+  // reloads so the list does not flash. Archived tasks are always hidden
+  // (IDBots parity: archive folds the row out of the live list; the archived
+  // surface with restore is a follow-up).
   useEffect(() => {
     let current = true
-    void gt.list(filter, filter === 'all').then(
+    void gt.list(filter, false).then(
       (rows) => {
         if (!current) return
         setTasks(rows)
@@ -858,9 +886,20 @@ export function GroupTaskView({
   }
 
   const onRename = async (): Promise<void> => {
-    if (!selected) return
-    const done = await runAction(() => gt.rename(selected.chair, selected.taskId, renameDraft.trim()))
-    if (done) setRenameOpen(false)
+    if (!renameTarget) return
+    const target = renameTarget
+    const done = await runAction(() => gt.rename(target.chair, target.taskId, renameDraft.trim()))
+    if (done) setRenameTarget(null)
+  }
+
+  const onArchiveTask = async (): Promise<void> => {
+    if (!archiveTarget) return
+    const target = archiveTarget
+    const done = await runAction(() => gt.archive(target.chair, target.taskId, true))
+    if (done) {
+      setArchiveTarget(null)
+      setInfoNote(t('gtArchivedNote'))
+    }
   }
 
   const onInvite = async (): Promise<void> => {
@@ -1012,6 +1051,15 @@ export function GroupTaskView({
                 onTaskRead?.(`${task.chairSlug}:${task.id}`)
               }}
               unread={unreadTaskKeys?.has(`${task.chairSlug}:${task.id}`) === true}
+              disabled={busy}
+              onRename={() => {
+                setRenameDraft(task.displayName ?? taskLabel(task))
+                setRenameTarget({ chair: task.chairSlug, taskId: task.id })
+              }}
+              onTogglePin={(pinned) => {
+                void runAction(() => gt.pin(task.chairSlug, task.id, pinned))
+              }}
+              onArchive={() => setArchiveTarget({ chair: task.chairSlug, taskId: task.id })}
               t={t}
             />
           ))}
@@ -1285,7 +1333,7 @@ export function GroupTaskView({
                     className="oac-a2a-guidance-toggle"
                     onClick={() => {
                       setRenameDraft(detail.displayName ?? '')
-                      setRenameOpen(true)
+                      setRenameTarget({ chair: detail.chairSlug, taskId: detail.id })
                     }}
                   >
                     {t('gtRename')}
@@ -1713,13 +1761,13 @@ export function GroupTaskView({
 
       <Modal
         closeLabel={t('close')}
-        open={renameOpen}
-        onClose={() => { if (!busy) setRenameOpen(false) }}
+        open={renameTarget !== null}
+        onClose={() => { if (!busy) setRenameTarget(null) }}
         title={t('gtRename')}
         className="oac-dialog-delete"
         footer={(
           <>
-            <Button type="button" variant="outline" disabled={busy} onClick={() => setRenameOpen(false)}>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setRenameTarget(null)}>
               {t('gtCancel')}
             </Button>
             <Button type="button" variant="primary" disabled={busy} onClick={() => { void onRename() }}>
@@ -1732,10 +1780,37 @@ export function GroupTaskView({
           <Input
             value={renameDraft}
             disabled={busy}
+            autoFocus
             onChange={(event) => setRenameDraft(event.target.value)}
             placeholder={t('gtRenamePlaceholder')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                if (!busy) void onRename()
+              }
+            }}
           />
         </div>
+      </Modal>
+
+      <Modal
+        closeLabel={t('close')}
+        open={archiveTarget !== null}
+        onClose={() => { if (!busy) setArchiveTarget(null) }}
+        title={t('gtArchiveConfirmTitle')}
+        className="oac-dialog-delete"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setArchiveTarget(null)}>
+              {t('gtCancel')}
+            </Button>
+            <Button type="button" variant="primary" disabled={busy} onClick={() => { void onArchiveTask() }}>
+              {busy ? t('gtWorking') : t('menuArchive')}
+            </Button>
+          </>
+        )}
+      >
+        <p className="oac-dialog-body">{t('gtArchiveConfirmMessage')}</p>
       </Modal>
     </div>
   )

@@ -275,6 +275,8 @@ export interface MetabotDaemonHttpHandlers {
         list?: (input: {
             local: string;
             limit?: number;
+            /** Keep archived conversations in the list (archived-surfaces hook). */
+            includeArchived?: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         messages?: (input: {
             local: string;
@@ -287,6 +289,14 @@ export interface MetabotDaemonHttpHandlers {
             local: string;
             peer: string;
             guidance: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        meta?: (input: {
+            local: string;
+            peer: string;
+            pinned?: boolean;
+            archived?: boolean;
+            /** Present (possibly empty) = rename; empty string clears the override. */
+            displayName?: string | null;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         streamEvents?: (input: {
             local: string;
@@ -383,6 +393,8 @@ export interface MetabotDaemonHttpHandlers {
         hostExecutorSubmitResult?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         /** Host-executor bridge: the SSE stream of generation requests (null = not configured). */
         hostExecutorEvents?: () => AsyncIterable<unknown> | null | Promise<AsyncIterable<unknown> | null>;
+        /** Host-executor bridge: one generation on the Bot's DSH pair (CLI passive turns). */
+        hostExecutorGenerate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     bot?: {
         getStats?: () => Awaitable<MetabotCommandResult<unknown>>;

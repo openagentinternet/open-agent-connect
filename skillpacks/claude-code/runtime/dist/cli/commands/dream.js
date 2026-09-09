@@ -109,5 +109,16 @@ async function runDreamCommand(args, context) {
             return handler;
         return handler({ from });
     }
+    if (subcommand === 'capabilities') {
+        const handler = requireDreamHandler(context, 'capabilities');
+        if (isFailure(handler))
+            return handler;
+        const rawLimit = (0, helpers_1.readFlagValue)(args, '--limit');
+        const limit = rawLimit === null ? undefined : Number(rawLimit);
+        if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+            return (0, commandResult_1.commandFailed)('invalid_flag', '--limit must be a positive integer.');
+        }
+        return handler({ from, ...(limit !== undefined ? { limit } : {}) });
+    }
     return (0, helpers_1.commandUnknownSubcommand)(`dream ${String(subcommand ?? '')}`.trim());
 }

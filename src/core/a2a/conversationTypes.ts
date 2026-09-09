@@ -90,6 +90,17 @@ export interface A2AConversationIndexes {
   paymentTxidToSessionId: Record<string, string>;
 }
 
+/**
+ * UI-layer conversation state (IDBots `cowork_sessions` parity): pin/archive
+ * are list-presentation flags — never lifecycle — and `displayName` is a
+ * rename override that falls back to the peer profile name when cleared.
+ */
+export interface A2AConversationMeta {
+  pinned: boolean;
+  archivedAt: number | null;
+  displayName: string | null;
+}
+
 export interface A2AConversationState {
   version: number;
   local: A2AConversationLocalProfile;
@@ -97,5 +108,7 @@ export interface A2AConversationState {
   messages: A2AConversationMessage[];
   sessions: A2AConversationSession[];
   indexes: A2AConversationIndexes;
+  /** Present only once the user pinned/archived/renamed the conversation. */
+  meta?: A2AConversationMeta;
   updatedAt: number;
 }

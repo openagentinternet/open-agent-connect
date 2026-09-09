@@ -1165,3 +1165,67 @@ test('chat.private reports peer_chat_public_key_missing when endpoints are reach
     global.fetch = originalFetch;
   }
 });
+
+test('default conversation meta handler pins, renames, archives, and hides archived rows from the list', async (t) => {
+  const { handlers } = await createFixture(t);
+
+  const renamed = await handlers.conversations.meta({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    displayName: '  My peer chat  ',
+  });
+  assert.equal(renamed.ok, true);
+  assert.equal(renamed.data.displayName, 'My peer chat');
+  assert.equal(renamed.data.conversationId, 'a2a-peer-idq1loca-idq1peer');
+
+  const pinned = await handlers.conversations.meta({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    pinned: true,
+  });
+  assert.equal(pinned.ok, true);
+  assert.equal(pinned.data.pinned, true);
+  // The rename survives the unrelated pin write.
+  assert.equal(pinned.data.displayName, 'My peer chat');
+
+  let listed = await handlers.conversations.list({ local: LOCAL_GLOBAL_META_ID });
+  assert.equal(listed.ok, true);
+  assert.equal(listed.data.conversations.length, 1);
+  assert.equal(listed.data.conversations[0].pinned, true);
+  assert.equal(listed.data.conversations[0].displayName, 'My peer chat');
+  assert.equal(listed.data.conversations[0].archivedAt, null);
+
+  const archived = await handlers.conversations.meta({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    archived: true,
+  });
+  assert.equal(archived.ok, true);
+  assert.ok(archived.data.archivedAt > 0);
+
+  listed = await handlers.conversations.list({ local: LOCAL_GLOBAL_META_ID });
+  assert.equal(listed.ok, true);
+  assert.equal(listed.data.conversations.length, 0);
+
+  // The archived-surfaces hook keeps the row reachable.
+  listed = await handlers.conversations.list({ local: LOCAL_GLOBAL_META_ID, includeArchived: true });
+  assert.equal(listed.ok, true);
+  assert.equal(listed.data.conversations.length, 1);
+  assert.ok(listed.data.conversations[0].archivedAt > 0);
+
+  const unarchived = await handlers.conversations.meta({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    archived: false,
+  });
+  assert.equal(unarchived.ok, true);
+  assert.equal(unarchived.data.archivedAt, null);
+
+  const missing = await handlers.conversations.meta({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: 'idq4nosuchpeer00000000000000000000',
+    pinned: true,
+  });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'conversation_not_found');
+});

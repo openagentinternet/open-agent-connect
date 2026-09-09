@@ -4009,6 +4009,18 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         input.local,
         { local: input.local, peer: input.peer, guidance: input.guidance },
       ),
+      meta: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/conversations/meta',
+        input.local,
+        {
+          local: input.local,
+          peer: input.peer,
+          ...(input.pinned !== undefined ? { pinned: input.pinned } : {}),
+          ...(input.archived !== undefined ? { archived: input.archived } : {}),
+          ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+        },
+      ),
     },
     memory: {
       list: async (input) => {
