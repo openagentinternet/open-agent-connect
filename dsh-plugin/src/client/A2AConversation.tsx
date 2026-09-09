@@ -21,6 +21,15 @@ import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { pickDefaultBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
+import {
+  applyGroupUpdate,
+  applyPrivateLatest,
+  EMPTY_UNREAD,
+  hasAnyUnread,
+  privateRowStatus,
+  seedPrivateSeen,
+  type UnreadState,
+} from '../unread-logic.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -38,26 +47,10 @@ export interface A2AConversationInjected {
   browserOpen: (uri?: string) => Promise<void>
 }
 
-type UnreadState = {
-  private: Record<string, number>
-  group: Record<string, number>
-  privateSeen: Record<string, number>
-  groupSeen: Record<string, number>
-}
-
 const UNREAD_STORAGE_KEY = 'oac-dsh:a2a-unread:v1'
-const UNREAD_POLL_MS = 15_000
-// The unread badge is DISABLED (user decision 2026-09-07). Its warm-up poll
-// pulled EVERY Bot's conversation list plus EVERY thread every 15s —
-// O(bots × threads) background requests that starved the browser's
-// per-origin connection pool (6 on HTTP/1.1), so every panel open queued
-// behind them for seconds and the tab's renderer burned a core. Re-enable
-// only after rewriting it to ride the conversation SSE stream (push, not
-// poll); the polling implementation below must not come back as-is.
-const UNREAD_BADGE_ENABLED = false
 
 function readUnreadState(): UnreadState {
-  const fallback: UnreadState = { private: {}, group: {}, privateSeen: {}, groupSeen: {} }
+  const fallback: UnreadState = EMPTY_UNREAD
   try {
     const raw = window.localStorage.getItem(UNREAD_STORAGE_KEY)
     if (!raw) return fallback
@@ -202,9 +195,7 @@ export function A2AConversation({
   const [guidanceOpen, setGuidanceOpen] = useState(false)
   const [guidanceDraft, setGuidanceDraft] = useState('')
   const [guidanceStatus, setGuidanceStatus] = useState<string | null>(null)
-  const [unread, setUnread] = useState<UnreadState>(() => (
-    UNREAD_BADGE_ENABLED ? readUnreadState() : { private: {}, group: {}, privateSeen: {}, groupSeen: {} }
-  ))
+  const [unread, setUnread] = useState<UnreadState>(() => readUnreadState())
   const unreadRef = useRef(unread)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -220,6 +211,17 @@ export function A2AConversation({
   useEffect(() => {
     selectedPeerRef.current = selectedPeer
   }, [selectedPeer])
+
+  // Live view state for the unread feed below: it must know which thread the
+  // user is actually reading without re-subscribing on every change.
+  const liveRef = useRef({ open, mode, from, selectedPeer, list, thread })
+  useEffect(() => {
+    liveRef.current = { open, mode, from, selectedPeer, list, thread }
+  }, [open, mode, from, selectedPeer, list, thread])
+
+  // The group task the user opened last; its live updates stay read while it
+  // is on screen (cleared when the panel closes).
+  const lastTaskReadRef = useRef('')
 
   useEffect(() => {
     let current = true
@@ -261,57 +263,105 @@ export function A2AConversation({
     updateUnread(next)
   }, [unread, updateUnread])
 
-  // Keep unread state warm while the A2A panel is closed. The first snapshot
-  // establishes a baseline so installing/upgrading the plugin does not mark
-  // every historical message as new.
+  // Opening a task clears its badge AND pins it as "being read" so live
+  // updates for that task stay read while it is on screen.
+  const handleTaskRead = useCallback((key: string): void => {
+    lastTaskReadRef.current = key
+    clearGroupUnread(key)
+  }, [clearGroupUnread])
+
   useEffect(() => {
-    if (!UNREAD_BADGE_ENABLED || profiles.length === 0) return undefined
-    let current = true
-    let timer: ReturnType<typeof setInterval> | null = null
-    const poll = async (): Promise<void> => {
-      const next: UnreadState = {
-        private: { ...unreadRef.current.private },
-        group: { ...unreadRef.current.group },
-        privateSeen: { ...unreadRef.current.privateSeen },
-        groupSeen: { ...unreadRef.current.groupSeen },
+    if (!open) lastTaskReadRef.current = ''
+  }, [open])
+
+  // Always-on unread feed (SSE rewrite of the 2026-09-07 polling badge): the
+  // host watches every Bot's conversation store file and the synced
+  // grouptask stores (chat-watcher.ts) and pushes change signals over one
+  // idle connection — no polling, so the browser connection pool the old
+  // O(bots × threads) poller starved stays free. Private changes re-check
+  // only the touched Bot's rows (a thread fetch tells peer messages from the
+  // local Bot's own sends/auto-replies); group updates arrive pre-diffed.
+  useEffect(() => {
+    let source: EventSource
+    try {
+      source = new EventSource('/oac/api/chat/events/all')
+    } catch {
+      return undefined
+    }
+    const privateTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    const fold = (mutate: (state: UnreadState) => UnreadState): void => {
+      updateUnread(mutate(unreadRef.current))
+    }
+    const checkPrivate = (from: string): void => {
+      const timer = privateTimers.get(from)
+      if (timer !== undefined) clearTimeout(timer)
+      privateTimers.set(from, setTimeout(() => {
+        privateTimers.delete(from)
+        void liveRef.current.list(from).then((rows) => {
+          const live = liveRef.current
+          for (const row of rows) {
+            const key = `${from}:${row.peerGlobalMetaId}`
+            const status = privateRowStatus(unreadRef.current, key, row.latestAt)
+            if (status === 'seeded') {
+              fold((state) => seedPrivateSeen(state, key, row.latestAt))
+            } else if (status === 'changed') {
+              // The thread the user is reading right now stays read.
+              if (live.open && live.mode === 'private' && live.from === from
+                && live.selectedPeer === row.peerGlobalMetaId) {
+                fold((state) => seedPrivateSeen(state, key, row.latestAt))
+                continue
+              }
+              void live.thread(from, row.peerGlobalMetaId).then((conversation) => {
+                const latest = conversation.messages[conversation.messages.length - 1]
+                if (latest === undefined) return
+                fold((state) => applyPrivateLatest(
+                  state,
+                  key,
+                  Math.max(latest.timestamp, row.latestAt),
+                  isLocalMessage(latest),
+                ))
+              }).catch(() => {
+                // transient read failure: the next change retries
+              })
+            }
+          }
+        }).catch(() => {
+          // transient daemon/read failure: the next change retries
+        })
+      }, 600))
+    }
+    const onPrivateChanged = (event: MessageEvent<string>): void => {
+      try {
+        const from = (JSON.parse(event.data) as { from?: unknown }).from
+        if (typeof from === 'string' && from !== '') checkPrivate(from)
+      } catch {
+        // malformed frame
       }
-      try {
-        const privateRows = await Promise.all(profiles.map(async (bot) => {
-          const rows = await list(bot.slug)
-          return Promise.all(rows.map(async (row) => ({ bot, row, thread: await thread(bot.slug, row.peerGlobalMetaId) })))
-        })).then((batches) => batches.flat())
-        for (const { bot, row, thread: conversation } of privateRows) {
-          const key = `${bot.slug}:${row.peerGlobalMetaId}`
-          const latest = conversation.messages[conversation.messages.length - 1]
-          const latestAt = latest?.timestamp ?? row.latestAt
-          if (!next.privateSeen[key]) {
-            next.privateSeen[key] = latestAt
-          } else if (latest && !isLocalMessage(latest) && latestAt > next.privateSeen[key]) {
-            next.private[key] = latestAt
-            next.privateSeen[key] = latestAt
-          }
-        }
-      } catch { /* transient daemon/read failures are retried next tick */ }
-      try {
-        const tasks = await grouptask.list('all', true)
-        for (const task of tasks) {
-          const key = `${task.chairSlug}:${task.id}`
-          if (!next.groupSeen[key]) next.groupSeen[key] = task.updatedAt
-          else if (task.updatedAt > next.groupSeen[key]) {
-            next.group[key] = task.updatedAt
-            next.groupSeen[key] = task.updatedAt
-          }
-        }
-      } catch { /* transient daemon/read failures are retried next tick */ }
-      if (current) updateUnread(next)
     }
-    void poll()
-    timer = setInterval(() => { void poll() }, UNREAD_POLL_MS)
+    const onGroupUpdate = (event: MessageEvent<string>): void => {
+      try {
+        const updates = (JSON.parse(event.data) as { updates?: unknown }).updates
+        if (!Array.isArray(updates)) return
+        const live = liveRef.current
+        for (const update of updates) {
+          if (update === null || typeof update !== 'object') continue
+          const { key, updatedAt } = update as { key?: unknown; updatedAt?: unknown }
+          if (typeof key !== 'string' || typeof updatedAt !== 'number') continue
+          const viewing = live.open && live.mode === 'grouptask' && lastTaskReadRef.current === key
+          fold((state) => applyGroupUpdate(state, { key, updatedAt }, viewing))
+        }
+      } catch {
+        // malformed frame
+      }
+    }
+    source.addEventListener('private-conversations-changed', onPrivateChanged)
+    source.addEventListener('group-task-update', onGroupUpdate)
     return () => {
-      current = false
-      if (timer !== null) clearInterval(timer)
+      source.close()
+      for (const timer of privateTimers.values()) clearTimeout(timer)
+      privateTimers.clear()
     }
-  }, [profiles, list, thread, grouptask, updateUnread])
+  }, [updateUnread])
 
   // Conversation list follows the selected local Bot; newest first comes from
   // the api normalization. Switching Bots resets the selection; plain reloads
@@ -551,10 +601,7 @@ export function A2AConversation({
       >
         <IconNewChatOutline16 />
         {wide ? <span>{t('nav')}</span> : null}
-        {UNREAD_BADGE_ENABLED
-        && (Object.keys(unread.private).length > 0 || Object.keys(unread.group).length > 0)
-          ? <span className="oac-unread-dot" aria-label={t('unread')} />
-          : null}
+        {hasAnyUnread(unread) ? <span className="oac-unread-dot" aria-label={t('unread')} /> : null}
       </button>
       {open ? (
         <div className="oac-a2a-overlay" role="presentation">
@@ -610,7 +657,7 @@ export function A2AConversation({
                 onOpenBotPage={openBotPage}
                 onOpenUri={openResource}
                 unreadTaskKeys={new Set(Object.keys(unread.group))}
-                onTaskRead={clearGroupUnread}
+                onTaskRead={handleTaskRead}
               />
             ) : null}
             <div className="oac-a2a-body" style={mode === 'grouptask' ? { display: 'none' } : undefined}>
