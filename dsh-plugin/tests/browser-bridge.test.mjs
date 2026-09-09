@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import test from 'node:test'
 
 const plugin = await import('../lib/index.js')
-const { BrowserEventHub, resolveBrowserPath } = plugin
+const { BrowserEventHub, resolveBrowserPath, withBrowserThemeParam } = plugin
 
 test('resolveBrowserPath mirrors the CLI path forms for deep links', () => {
   assert.equal(
@@ -38,6 +38,76 @@ test('resolveBrowserPath maps bare pins and domain aliases', () => {
 
 test('resolveBrowserPath falls back to the query form for unmapped schemes', () => {
   assert.equal(resolveBrowserPath('map://region/0x1'), '/browser?uri=map%3A%2F%2Fregion%2F0x1')
+})
+
+const PIN_ID = '676dd6ef86dfc1f5e714e1eddb495dd8d2907c7ba6e42401ea58780a23b92ea7i0'
+
+test('withBrowserThemeParam reroutes pin/metaapp/map/bare-pin deep links to the uri query form', () => {
+  // The reported bug: theme on a pin deep link used to become part of the
+  // pin URI (pin://<id>?theme=dark) because agent-browser-ui glues the whole
+  // page search onto the resource URI for these path forms.
+  assert.equal(
+    withBrowserThemeParam(`http://127.0.0.1:10001/browser/pin/${PIN_ID}`, 'dark'),
+    `http://127.0.0.1:10001/browser?uri=pin%3A%2F%2F${PIN_ID}&theme=dark`,
+  )
+  assert.equal(
+    withBrowserThemeParam(`http://127.0.0.1:10001/browser/metaapp/${PIN_ID}`, 'dark'),
+    `http://127.0.0.1:10001/browser?uri=metaapp%3A%2F%2F${PIN_ID}&theme=dark`,
+  )
+  assert.equal(
+    withBrowserThemeParam('http://127.0.0.1:10001/browser/map/region%2F0x1', 'dark'),
+    'http://127.0.0.1:10001/browser?uri=map%3A%2F%2Fregion%2F0x1&theme=dark',
+  )
+  assert.equal(
+    withBrowserThemeParam(`http://127.0.0.1:10001/browser/${PIN_ID}`, 'dark'),
+    `http://127.0.0.1:10001/browser?uri=pin%3A%2F%2F${PIN_ID}&theme=dark`,
+  )
+})
+
+test('withBrowserThemeParam keeps theme in the search on search-safe pages', () => {
+  assert.equal(
+    withBrowserThemeParam('http://127.0.0.1:10001/browser', 'dark'),
+    'http://127.0.0.1:10001/browser?theme=dark',
+  )
+  assert.equal(
+    withBrowserThemeParam(`http://127.0.0.1:10001/browser?uri=map%3A%2F%2Fregion%2F0x1`, 'light'),
+    'http://127.0.0.1:10001/browser?uri=map%3A%2F%2Fregion%2F0x1&theme=light',
+  )
+  // metaid forwards only an explicit botpage param; metafile and
+  // preview-metaapp drop the search entirely when deriving the resource URI.
+  assert.equal(
+    withBrowserThemeParam(
+      'http://127.0.0.1:10001/browser/metaid/idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz',
+      'dark',
+    ),
+    'http://127.0.0.1:10001/browser/metaid/idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz?theme=dark',
+  )
+  assert.equal(
+    withBrowserThemeParam(
+      `http://127.0.0.1:10001/browser/metafile/${PIN_ID}.png`,
+      'dark',
+    ),
+    `http://127.0.0.1:10001/browser/metafile/${PIN_ID}.png?theme=dark`,
+  )
+  assert.equal(
+    withBrowserThemeParam('http://127.0.0.1:10001/browser/preview-metaapp/localhost/apps/demo', 'dark'),
+    'http://127.0.0.1:10001/browser/preview-metaapp/localhost/apps/demo?theme=dark',
+  )
+})
+
+test('withBrowserThemeParam leaves deep links with their own search and non-browser URLs alone', () => {
+  // A search on these paths is part of the resource URI (ABC glues it), so it
+  // must survive untouched; the theme rides the load-time postMessage.
+  assert.equal(
+    withBrowserThemeParam(`http://127.0.0.1:10001/browser/pin/${PIN_ID}?x=1`, 'dark'),
+    `http://127.0.0.1:10001/browser/pin/${PIN_ID}?x=1`,
+  )
+  // The qanda question page is not the Browser shell; the param is dead there.
+  assert.equal(
+    withBrowserThemeParam(`http://127.0.0.1:10001/ui/qanda/app/index.html#q/${PIN_ID}`, 'dark'),
+    `http://127.0.0.1:10001/ui/qanda/app/index.html#q/${PIN_ID}`,
+  )
+  assert.equal(withBrowserThemeParam('pin://not-a-page-url', 'dark'), 'pin://not-a-page-url')
 })
 
 test('hub.open returns null until a daemon base URL is known', () => {

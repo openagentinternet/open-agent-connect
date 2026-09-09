@@ -517,7 +517,12 @@ the DSH-resolved theme to the iframe URL (`?theme=dark|light`), the daemon
 bakes it into the served ABC page (no light flash in dark mode), and DSH
 theme flips are pushed into the loaded iframe as ABC
 `agent-browser:set-theme` postMessages without reloading it. Pages opened
-outside DSH keep ABC's light default.
+outside DSH keep ABC's light default. On pin/metaapp/map/bare-pin deep links
+the theme never rides the page search — ABC defines that search as part of
+the resource URI there, so `withBrowserThemeParam` reroutes those URLs to the
+`/browser?uri=<resource>&theme=…` form instead (a deep link that already
+carries its own search keeps it untouched and takes the theme via the
+load-time postMessage).
 
 When the plugin is not mounted (Codex, Claude Code, OpenClaw, ...), no Browser
 page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.

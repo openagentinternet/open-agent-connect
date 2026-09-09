@@ -15,6 +15,7 @@
  *   loaded iframe (`postBrowserThemeMessage`) re-themes ABC without
  *   reloading or losing page state.
  */
+import { withBrowserThemeParam } from '../browser-protocol.ts'
 
 export type BrowserResolvedTheme = 'light' | 'dark'
 
@@ -46,16 +47,12 @@ export function watchDshTheme(onChange: (theme: BrowserResolvedTheme) => void): 
 
 /**
  * Bake the resolved DSH theme into a daemon-served Browser page URL
- * (`/browser/*?theme=dark`). Non-URLs pass through unchanged.
+ * (`/browser/*?theme=dark`). Search-gluing deep links (pin/metaapp/map/bare
+ * pin) are rerouted to the `/browser?uri=…` form first — see
+ * `withBrowserThemeParam` in browser-protocol.ts for the full contract.
  */
 export function withThemeParam(url: string, theme: BrowserResolvedTheme): string {
-  try {
-    const parsed = new URL(url)
-    parsed.searchParams.set('theme', theme)
-    return parsed.toString()
-  } catch {
-    return url
-  }
+  return withBrowserThemeParam(url, theme)
 }
 
 /** Push a theme flip into the loaded ABC iframe (no-op when not loaded). */

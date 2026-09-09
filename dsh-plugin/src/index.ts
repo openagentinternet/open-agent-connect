@@ -711,6 +711,7 @@ export {
   parseMetaAppPinIdFromUri,
   reduceBrowserTabs,
   resolveBrowserPath,
+  withBrowserThemeParam,
   wrapKnownCatalogTitles,
 } from './browser-protocol.js'
 export { BrowserEventHub, resolveDaemonBaseUrl, type BrowserOpenEvent } from './browser-bridge.js'
