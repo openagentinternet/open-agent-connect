@@ -35,13 +35,15 @@ test('addDocument -> learn -> query roundtrip with metaweb provenance', async ()
   const { paths } = makeProfile('metabot-kb-svc-roundtrip-');
   const service = createKnowledgeBaseService(paths);
 
-  await service.addDocument('bot-1', {
+  const savedTarot = await service.addDocument('bot-1', {
     title: '占卜塔罗入门',
     content: '塔罗牌共有七十八张，其中大阿卡纳二十二张，小阿卡纳五十六张。占卜时洗牌、切牌、抽牌。',
     sourceType: 'metaweb',
     pinId: 'pin-abc',
     tags: ['tarot'],
   });
+  assert.equal(savedTarot.indexed, true, 'a save is searchable the moment it returns');
+  assert.equal(savedTarot.knowledgeBase.docCount, 1, 'counts refresh with the auto-index');
   await service.addDocument('bot-1', {
     title: 'Sourdough Basics',
     content: 'Feed the starter daily, knead until windowpane, bake at 230C with steam.',
@@ -49,8 +51,10 @@ test('addDocument -> learn -> query roundtrip with metaweb provenance', async ()
     url: 'https://example.test/bread',
   });
 
-  const empty = await service.queryKnowledgeBase('bot-1', '塔罗');
-  assert.deepEqual(empty, [], 'before learn the index is empty');
+  // Auto-indexed on save: no separate learn needed before the first query.
+  const immediate = await service.queryKnowledgeBase('bot-1', '塔罗 占卜');
+  assert.equal(immediate.length, 1);
+  assert.ok(immediate[0].hits.length > 0);
 
   const learned = await service.learnKnowledgeBase('bot-1');
   assert.equal(learned.docCount, 2);

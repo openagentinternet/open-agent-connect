@@ -49,7 +49,11 @@ type ServiceModule = {
       knowledgeBaseName: string
       hits: Array<{ docRelPath: string; ord: number; snippet: string; score: number; title: string }>
     }>>
-    addDocument(slug: string, input: Record<string, unknown>): Promise<{ relPath: string }>
+    addDocument(slug: string, input: Record<string, unknown>): Promise<{
+      relPath: string
+      indexed?: boolean
+      knowledgeBase?: { docCount?: unknown; chunkCount?: unknown }
+    }>
     learnKnowledgeBase(slug: string, kbId?: string, full?: boolean): Promise<Record<string, unknown>>
   }
 }
@@ -201,8 +205,8 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
       description:
         'Save a full document (article body, tutorial, reference page) into a knowledge base for future '
         + 'retrieval. Use for substantial content worth keeping whole — single facts belong in '
-        + 'knowledge_upsert instead. Call knowledge_base_learn right after so the content is searchable. '
-        + 'sourceType metaweb records the pinId provenance.',
+        + 'knowledge_upsert instead. The KB index refreshes on save, so the document is searchable '
+        + 'immediately — no separate learn call. sourceType metaweb records the pinId provenance.',
       parameters: {
         type: 'object',
         properties: {
@@ -217,7 +221,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
         required: ['title', 'content'],
       },
       output: { schema: { type: 'string' }, render },
-      timeoutMs: 20_000,
+      timeoutMs: 60_000,
       execute: async (args, exec) => {
         const session = await sessionOf(input, exec)
         if (!session) return toolError('knowledge_base_add_document', NO_SESSION)
@@ -239,7 +243,12 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
           const landing = session.viaFallback
             ? ` on the machine-default Bot "${session.slug}" (this session has no OAC Bot of its own)`
             : ''
-          return `Saved "${title}" as ${saved.relPath}${landing}. Now call knowledge_base_learn to make it searchable.`
+          const counts = saved.indexed !== false && typeof saved.knowledgeBase?.docCount === 'number'
+            ? ` (${saved.knowledgeBase.docCount} docs, ${saved.knowledgeBase.chunkCount} chunks indexed)`
+            : ''
+          return saved.indexed === false
+            ? `Saved "${title}" as ${saved.relPath}${landing}, but the search index could not be refreshed — call knowledge_base_learn to make it searchable.`
+            : `Saved "${title}" as ${saved.relPath}${landing}; searchable now${counts}. Verify with knowledge_base_query.`
         } catch (error) {
           return toolError('knowledge_base_add_document', error)
         }
@@ -248,9 +257,9 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
     {
       name: 'knowledge_base_learn',
       description:
-        '(Re)build a knowledge base\'s search index from its raw documents. Run after '
-        + 'knowledge_base_add_document or after files are imported into the corpus directory. '
-        + 'full=true forces a complete rebuild.',
+        '(Re)build a knowledge base\'s search index from its raw documents. Saves through '
+        + 'knowledge_base_add_document already index incrementally; run this after files are imported '
+        + 'into the corpus directory or edited in place. full=true forces a complete rebuild.',
       parameters: {
         type: 'object',
         properties: {
