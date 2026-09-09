@@ -82,7 +82,12 @@ export interface KnowledgeBaseService {
     topK?: number;
     minScore?: number;
   }): Promise<KbQueryResult[]>;
-  addDocument(metabotSlug: string, input: AddDocumentInput): Promise<{ knowledgeBase: KnowledgeBaseRecord; relPath: string }>;
+  addDocument(metabotSlug: string, input: AddDocumentInput): Promise<{
+    knowledgeBase: KnowledgeBaseRecord;
+    relPath: string;
+    /** False when the post-save incremental index refresh failed — the raw document is still saved. */
+    indexed: boolean;
+  }>;
   importFiles(metabotSlug: string, knowledgeBaseId: string | undefined, filePaths: string[]): Promise<number>;
 }
 
@@ -187,7 +192,23 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
           // Marking is advisory; the document is already saved.
         }
       }
-      return { knowledgeBase: kb, relPath };
+      // A save is searchable the moment it returns: run the incremental learn
+      // (unchanged docs reuse their chunks) through the per-KB queue so it
+      // serializes with explicit learns. A refresh failure must not fail the
+      // save — the document stays on disk and the next learn picks it up.
+      let indexed = true;
+      try {
+        await enqueueLearn(kb.id, async () => {
+          const index = indexFor(kb.id);
+          await fs.mkdir(kb.rawDir, { recursive: true });
+          const stats = await index.rebuild(kb.rawDir, () => Date.now());
+          await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
+        });
+      } catch {
+        indexed = false;
+      }
+      const updated = await store.getKnowledgeBase(kb.id);
+      return { knowledgeBase: updated ?? kb, relPath, indexed };
     },
 
     importFiles: async (metabotSlug, knowledgeBaseId, filePaths) => {

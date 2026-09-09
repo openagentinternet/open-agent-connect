@@ -5330,7 +5330,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             ...(input.tags ? { tags: input.tags } : {}),
           },
         );
-        return commandSuccess({ knowledgeBase: saved.knowledgeBase, relPath: saved.relPath });
+        return commandSuccess({ knowledgeBase: saved.knowledgeBase, relPath: saved.relPath, indexed: saved.indexed });
       },
       learn: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);

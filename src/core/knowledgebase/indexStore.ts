@@ -19,6 +19,7 @@ import path from 'node:path';
 import {
   chunkKnowledgeBaseText,
   cleanKnowledgeBaseText,
+  buildKbQueryTokens,
   phraseScore,
   sha256FileAsync,
   tokenizeKnowledgeBaseText,
@@ -349,36 +350,59 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
     query: async (query, options: { topK?: number; minScore?: number } = {}) => {
       const index = await readIndexCached();
       if (index.chunks.length === 0 || !query.trim()) return [];
-      const tokens = indexTokens(query);
+      // Precision tokens (CJK bigrams only, stopwords dropped) — NOT the index
+      // tokenizer: function-word unigrams sit in virtually every chunk and used
+      // to push completely unrelated queries to the top of the ranking.
+      const tokens = buildKbQueryTokens(query);
       if (!tokens.length) return [];
 
       const chunkTokenLists = index.chunks.map(tokensOfChunk);
       const avgLen = chunkTokenLists.reduce((sum, list) => sum + list.length, 0)
         / Math.max(1, chunkTokenLists.length);
       const scores = new Map<number, number>();
+      const matchedTokens = new Map<number, Set<string>>();
+      let ideal = 0;
 
       for (const token of tokens) {
         const postings = index.inverted[token];
         if (!postings?.length) continue;
         const df = new Set(postings).size;
+        let tokenBest = 0;
         for (const chunkIndex of postings) {
           const chunkTokenList = chunkTokenLists[chunkIndex];
           if (!chunkTokenList) continue;
           const tf = chunkTokenList.filter((item) => item === token).length;
           const raw = bm25Score(tf, chunkTokenList.length, avgLen, df, index.chunks.length);
+          if (raw <= 0) continue;
           scores.set(chunkIndex, (scores.get(chunkIndex) ?? 0) + raw);
+          let tokenSet = matchedTokens.get(chunkIndex);
+          if (!tokenSet) {
+            tokenSet = new Set<string>();
+            matchedTokens.set(chunkIndex, tokenSet);
+          }
+          tokenSet.add(token);
+          if (raw > tokenBest) tokenBest = raw;
         }
+        ideal += tokenBest;
       }
+      if (ideal <= 0) return [];
 
       const topK = options.topK ?? KB_QUERY_DEFAULT_TOP_K;
       const minScore = options.minScore ?? KB_QUERY_DEFAULT_MIN_SCORE;
-      const maxScore = Math.max(...[...scores.values()], 1e-9);
       const titleByDoc = new Map(index.docs.map((doc) => [doc.relpath, doc.title]));
 
+      // Absolute scoring, not relative: the old bm25/maxScore normalization
+      // handed the top candidate ~0.85 for ANY query with one token overlap,
+      // so unrelated queries outranked real matches and minScore never
+      // filtered. Now the bm25 part is the share of this query's achievable
+      // best score (ideal) times the coverage of matched distinct tokens — a
+      // chunk matching one noise bigram out of a dozen query tokens stays far
+      // below the default 0.18 floor and the result comes back honestly empty.
       const ranked = [...scores.entries()]
         .map(([chunkIndex, bm25]) => {
           const chunk = index.chunks[chunkIndex];
-          const normalizedBm25 = 0.85 * (bm25 / maxScore);
+          const coverage = (matchedTokens.get(chunkIndex)?.size ?? 0) / tokens.length;
+          const normalizedBm25 = 0.85 * coverage * (bm25 / ideal);
           const phrase = 0.15 * Math.min(1, phraseScore(query, chunk.text));
           return {
             docRelPath: chunk.docRelPath,

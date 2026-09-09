@@ -70,7 +70,13 @@ every turn through the `<knowledge_bases>` volatile prompt block. The
 `knowledge_base_*` tools resolve the acting Bot per call (session `oac-*`
 agent first, then the machine-default Twin — the same target a no-`--from`
 CLI call picks), so they also work from plain DSH conversations, and write
-results name the profile they landed on.
+results name the profile they landed on. Retrieval quality: queries tokenize
+to CJK bigrams + latin words with function words dropped, and scoring is
+absolute (coverage × share of the query's achievable best), so an unrelated
+query returns an honest empty instead of a high-scored noise hit;
+`knowledge_base_add_document` refreshes the index on save, making the
+document searchable immediately — `knowledge_base_learn` remains for
+corpus imports/edits and full rebuilds.
 
 ## Group Tasks (群任务) and OpenTeam
 

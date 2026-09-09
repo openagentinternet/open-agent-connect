@@ -105,7 +105,7 @@ test('qa-surf enqueue/dedup/disable roundtrip with the recurring status label', 
   assert.match(String(again), /not active for this bot/)
 })
 
-// DSH-DEFECT-KB-001 acceptance smoke: add -> learn -> query -> list on a
+// DSH-DEFECT-KB-001 acceptance smoke: add -> query -> learn -> list on a
 // never-initialized (A-class) profile from a plain workspace session cwd.
 test('add -> learn -> query -> list closed loop on a fresh profile (DSH-DEFECT-KB-001)', async () => {
   const { homeDir, exec, resolve } = profileSetup('kb-tools-')
@@ -130,6 +130,11 @@ test('add -> learn -> query -> list closed loop on a fresh profile (DSH-DEFECT-K
   }, exec)
   assert.equal(typeof saved, 'string')
   assert.match(saved, /Saved "塔罗入门"/)
+  assert.match(saved, /searchable now/, 'the save reports immediate searchability')
+
+  // Saves are searchable the moment they return (report V6) — query before any learn.
+  const immediate = await query.execute({ query: '塔罗 占卜' }, exec)
+  assert.match(String(immediate), /塔罗入门/)
 
   // Duplicate write of the same title+content stays idempotent (same corpus file).
   const again = await add.execute({
