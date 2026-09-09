@@ -292,6 +292,35 @@ export function A2AConversation({
     const fold = (mutate: (state: UnreadState) => UnreadState): void => {
       updateUnread(mutate(unreadRef.current))
     }
+    // A first-sight row is almost always a brand-new conversation's first
+    // message (the stream only fires on real store changes) — mark it read
+    // only when the latest message is inbound AND fresh, so store rewrites
+    // of old threads never light a badge.
+    const FRESH_MS = 10 * 60_000
+    const checkThread = (from: string, peer: string, key: string, latestAt: number, firstSight: boolean): void => {
+      void liveRef.current.thread(from, peer).then((conversation) => {
+        const latest = conversation.messages[conversation.messages.length - 1]
+        if (latest === undefined) return
+        if (firstSight) {
+          const fresh = latest.timestamp >= Date.now() - FRESH_MS
+          fold((state) => applyPrivateLatest(
+            state,
+            key,
+            Math.max(latest.timestamp, latestAt),
+            isLocalMessage(latest) || !fresh,
+          ))
+          return
+        }
+        fold((state) => applyPrivateLatest(
+          state,
+          key,
+          Math.max(latest.timestamp, latestAt),
+          isLocalMessage(latest),
+        ))
+      }).catch(() => {
+        // transient read failure: the next change retries
+      })
+    }
     const checkPrivate = (from: string): void => {
       const timer = privateTimers.get(from)
       if (timer !== undefined) clearTimeout(timer)
@@ -303,7 +332,7 @@ export function A2AConversation({
             const key = `${from}:${row.peerGlobalMetaId}`
             const status = privateRowStatus(unreadRef.current, key, row.latestAt)
             if (status === 'seeded') {
-              fold((state) => seedPrivateSeen(state, key, row.latestAt))
+              checkThread(from, row.peerGlobalMetaId, key, row.latestAt, true)
             } else if (status === 'changed') {
               // The thread the user is reading right now stays read.
               if (live.open && live.mode === 'private' && live.from === from
@@ -311,18 +340,7 @@ export function A2AConversation({
                 fold((state) => seedPrivateSeen(state, key, row.latestAt))
                 continue
               }
-              void live.thread(from, row.peerGlobalMetaId).then((conversation) => {
-                const latest = conversation.messages[conversation.messages.length - 1]
-                if (latest === undefined) return
-                fold((state) => applyPrivateLatest(
-                  state,
-                  key,
-                  Math.max(latest.timestamp, row.latestAt),
-                  isLocalMessage(latest),
-                ))
-              }).catch(() => {
-                // transient read failure: the next change retries
-              })
+              checkThread(from, row.peerGlobalMetaId, key, row.latestAt, false)
             }
           }
         }).catch(() => {
