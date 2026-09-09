@@ -413,3 +413,32 @@ test('dream/run never touches the fail route on success or on empty days', async
   assert.equal(result.ok, true)
   assert.ok(!verbs.includes('fail'))
 })
+
+test('hygiene routes, memory unarchive, and archived list flag map to CLI verbs', async () => {
+  const status = await capture('memory/hygiene/status', { from: 'alice' })
+  assert.deepEqual(status.calls[0].slice(0, 5), ['memory', 'hygiene', 'status', '--from', 'alice'])
+
+  const due = await capture('memory/hygiene/due', { from: 'alice' })
+  assert.deepEqual(due.calls[0].slice(0, 5), ['memory', 'hygiene', 'due', '--from', 'alice'])
+
+  const run = await capture('memory/hygiene/run', { from: 'alice', noDeep: true })
+  assert.deepEqual(run.calls[0], ['memory', 'hygiene', 'run', '--from', 'alice', '--no-deep'])
+  const runDefault = await capture('memory/hygiene/run', { from: 'alice' })
+  assert.deepEqual(runDefault.calls[0], ['memory', 'hygiene', 'run', '--from', 'alice'])
+
+  const configGet = await capture('memory/hygiene/config-get', { from: 'alice' })
+  assert.deepEqual(configGet.calls[0].slice(0, 6), ['memory', 'hygiene', 'config', 'get', '--from', 'alice'])
+
+  const configSet = await capture('memory/hygiene/config-set', { from: 'alice', config: { memoryDecayDays: 90 } })
+  assert.deepEqual(configSet.result.data.file, { memoryDecayDays: 90 })
+  assert.deepEqual(configSet.calls[0].slice(0, 6), ['memory', 'hygiene', 'config', 'set', '--from', 'alice'])
+
+  const unarchive = await capture('memory/unarchive', { from: 'alice', id: 'mem_1' })
+  assert.equal(unarchive.result.data.file.id, 'mem_1')
+  assert.deepEqual(unarchive.calls[0].slice(0, 3), ['memory', 'unarchive', '--from'])
+
+  const archived = await capture('memory/list', { from: 'alice', includeArchived: true })
+  assert.ok(archived.calls[0].includes('--include-archived'))
+  const plain = await capture('memory/list', { from: 'alice' })
+  assert.ok(!plain.calls[0].includes('--include-archived'))
+})

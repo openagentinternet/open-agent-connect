@@ -12,6 +12,7 @@ import type {
   BotRow,
   DreamStatusPayload,
   DreamSummaryRow,
+  HygieneStatusPayload,
   ImpressionObservationRow,
   ImpressionSnapshotRow,
   KnowledgeRow,
@@ -29,10 +30,14 @@ export interface MemoryPanelInjected {
   memoryAdd: (from: string, entry: Record<string, unknown>) => Promise<unknown>
   memoryUpdate: (from: string, entry: Record<string, unknown>) => Promise<unknown>
   memoryDelete: (from: string, id: string) => Promise<unknown>
+  memoryUnarchive: (from: string, id: string) => Promise<unknown>
   memoryStats: (from: string) => Promise<{ stats?: { total: number; created: number; stale: number } }>
   memoryPolicyGet: (from: string) => Promise<MemoryPolicyPayload>
   memoryPolicySet: (from: string, patch: Record<string, unknown>) => Promise<unknown>
   memoryPolicyDelete: (from: string) => Promise<unknown>
+  hygieneStatus: (from: string) => Promise<HygieneStatusPayload>
+  hygieneRun: (from: string, noDeep?: boolean) => Promise<unknown>
+  hygieneConfigSet: (from: string, config: Record<string, unknown>) => Promise<unknown>
   knowledgeList: (from: string, options?: Record<string, unknown>) => Promise<{ entries?: KnowledgeRow[] }>
   knowledgeUpdate: (from: string, entry: Record<string, unknown>) => Promise<unknown>
   knowledgeArchive: (from: string, id: string) => Promise<unknown>
@@ -96,6 +101,17 @@ function yesterdayLocal(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+/** Compact countdown to a future epoch ms (dream retry rows): ≤1m / Nm / Nh / Nd. */
+function untilLabel(target: number, now = Date.now()): string {
+  const diff = target - now
+  if (diff <= 60_000) return '≤1m'
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
 export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void; t: Translate }): ReactNode {
   const { t } = injected
   const [bots, setBots] = useState<BotRow[] | null>(null)
@@ -153,6 +169,14 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
             memoryPolicyGet={injected.memoryPolicyGet}
             memoryPolicySet={injected.memoryPolicySet}
             memoryPolicyDelete={injected.memoryPolicyDelete}
+          />
+          <HygieneCard
+            key={`hygiene-${tick}`}
+            from={slug}
+            t={t}
+            hygieneStatus={injected.hygieneStatus}
+            hygieneRun={injected.hygieneRun}
+            hygieneConfigSet={injected.hygieneConfigSet}
           />
           <div className="oac-tablist" role="tablist">
             {(['knowledge', 'contacts', 'facts', 'dream'] as const).map((key) => (
@@ -364,6 +388,159 @@ function PolicyCard({ from, t, memoryPolicyGet, memoryPolicySet, memoryPolicyDel
             {note === 'error' ? <span className="oac-note error">{t('policySaveFailed')}</span> : null}
             <Button type="button" variant="primary" onClick={() => void save()} disabled={note === 'saving'}>
               {note === 'saving' ? t('policySaving') : t('policySave')}
+            </Button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  )
+}
+
+/** Nightly memory-hygiene card (IDBots parity): last-run per-step counters,
+ * editable retention config, and a manual run button. */
+function HygieneCard({ from, t, hygieneStatus, hygieneRun, hygieneConfigSet }: {
+  from: string
+  t: Translate
+  hygieneStatus: MemoryPanelInjected['hygieneStatus']
+  hygieneRun: MemoryPanelInjected['hygieneRun']
+  hygieneConfigSet: MemoryPanelInjected['hygieneConfigSet']
+}): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [status, setStatus] = useState<HygieneStatusPayload | null>(null)
+  const [form, setForm] = useState<Record<string, unknown>>({})
+  const [running, setRunning] = useState(false)
+  const [note, setNote] = useState<'done' | 'failed' | 'saved' | null>(null)
+
+  useEffect(() => {
+    let current = true
+    void hygieneStatus(from).then(
+      (result) => {
+        if (!current) return
+        setStatus(result)
+        setForm(result.config ?? {})
+      },
+      () => { if (current) setStatus({}) },
+    )
+    return () => { current = false }
+  }, [from, hygieneStatus])
+
+  const lastRun = status?.lastRun ?? null
+  const config = status?.config ?? {}
+
+  const saveConfig = (): void => {
+    setNote(null)
+    void hygieneConfigSet(from, form).then(
+      () => setNote('saved'),
+      () => setNote('failed'),
+    )
+  }
+
+  const runNow = (): void => {
+    setRunning(true)
+    setNote(null)
+    void hygieneRun(from).then(
+      () => setNote('done'),
+      () => setNote('failed'),
+    ).finally(() => {
+      setRunning(false)
+      void hygieneStatus(from).then((result) => setStatus(result))
+    })
+  }
+
+  return (
+    <section className="oac-section-card">
+      <button type="button" className="oac-section-head oac-section-toggle" onClick={() => setOpen(!open)}>
+        <div className="oac-section-text">
+          <span className="oac-section-title">{t('hygieneTitle')}</span>
+          <span className="oac-section-hint">
+            {lastRun?.dateKey
+              ? t('hygieneLastRun', { date: lastRun.dateKey }).replace('{date}', String(lastRun.dateKey))
+                + (lastRun.trigger === 'manual' ? ` · ${t('hygieneTriggerManual')}` : '')
+              : t('hygieneNever')}
+          </span>
+        </div>
+        {open ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
+      </button>
+      {open ? (
+        <>
+          {lastRun ? (
+            <div className="oac-hint">
+              {Object.entries(lastRun.counts ?? {}).map(([step, count]) => `${step}: ${count}`).join(' · ')}
+              {(lastRun.errors ?? []).length > 0 ? (
+                <p className="oac-note error">{(lastRun.errors ?? []).join('; ')}</p>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="oac-form">
+            <label className="oac-field">
+              <span className="oac-field-label">{t('hygieneConfigDecayDays')}</span>
+              <input
+                className="oac-input"
+                type="number"
+                min={14}
+                max={3650}
+                value={Number(form.memoryDecayDays ?? config.memoryDecayDays ?? 180)}
+                onChange={(event) => setForm((prev) => ({ ...prev, memoryDecayDays: Number(event.target.value) }))}
+              />
+            </label>
+            <label className="oac-field">
+              <span className="oac-field-label">{t('hygieneConfigRevisionKeep')}</span>
+              <input
+                className="oac-input"
+                type="number"
+                min={1}
+                max={50}
+                value={Number(form.knowledgeRevisionKeep ?? config.knowledgeRevisionKeep ?? 5)}
+                onChange={(event) => setForm((prev) => ({ ...prev, knowledgeRevisionKeep: Number(event.target.value) }))}
+              />
+            </label>
+            <label className="oac-field">
+              <span className="oac-field-label">{t('hygieneConfigRunRetention')}</span>
+              <input
+                className="oac-input"
+                type="number"
+                min={30}
+                max={3650}
+                value={Number(form.dreamRunRetentionDays ?? config.dreamRunRetentionDays ?? 90)}
+                onChange={(event) => setForm((prev) => ({ ...prev, dreamRunRetentionDays: Number(event.target.value) }))}
+              />
+            </label>
+            <label className="oac-field">
+              <span className="oac-field-label">{t('hygieneConfigDeep')}</span>
+              <select
+                className="oac-input oac-input-select"
+                value={String(form.deepConsolidationEnabled ?? config.deepConsolidationEnabled ?? true)}
+                onChange={(event) => setForm((prev) => ({
+                  ...prev,
+                  deepConsolidationEnabled: event.target.value === 'true',
+                }))}
+              >
+                <option value="true">{t('hygieneDeepOn')}</option>
+                <option value="false">{t('hygieneDeepOff')}</option>
+              </select>
+            </label>
+            <label className="oac-field">
+              <span className="oac-field-label">{t('hygieneConfigInterval')}</span>
+              <input
+                className="oac-input"
+                type="number"
+                min={7}
+                max={365}
+                value={Number(form.deepConsolidationIntervalDays ?? config.deepConsolidationIntervalDays ?? 7)}
+                onChange={(event) => setForm((prev) => ({
+                  ...prev,
+                  deepConsolidationIntervalDays: Number(event.target.value),
+                }))}
+              />
+            </label>
+          </div>
+          <div className="oac-form-actions">
+            {note === 'done' ? <span className="oac-note success">{t('hygieneRunDone')}</span> : null}
+            {note === 'saved' ? <span className="oac-note success">{t('hygieneSaved')}</span> : null}
+            {note === 'failed' ? <span className="oac-note error">{t('hygieneRunFailed')}</span> : null}
+            <Button type="button" onClick={() => void saveConfig()}>{t('hygieneSave')}</Button>
+            <Button type="button" variant="primary" disabled={running} onClick={runNow}>
+              {running ? t('hygieneRunning') : t('hygieneRunNow')}
             </Button>
           </div>
         </>
@@ -604,7 +781,9 @@ function FactsTab({ from, t, injected }: {
   useEffect(() => {
     let current = true
     void Promise.all([
-      injected.memoryList(from, { limit: 100, ...(query.trim() ? { query: query.trim() } : {}) }),
+      // includeArchived pulls the hygiene-soft-archived rows too; they render
+      // in a separate restorable section below (IDBots Facts-tab parity).
+      injected.memoryList(from, { limit: 100, includeArchived: true, ...(query.trim() ? { query: query.trim() } : {}) }),
       injected.memoryStats(from).catch(() => null),
     ]).then(([list, statsResult]) => {
       if (!current) return
@@ -613,6 +792,15 @@ function FactsTab({ from, t, injected }: {
     })
     return () => { current = false }
   }, [from, query, tick, injected])
+
+  const activeEntries = useMemo(
+    () => (entries ?? []).filter((entry) => !entry.archivedAt),
+    [entries],
+  )
+  const archivedEntries = useMemo(
+    () => (entries ?? []).filter((entry) => Boolean(entry.archivedAt)),
+    [entries],
+  )
 
   return (
     <div className="oac-card-list">
@@ -637,7 +825,7 @@ function FactsTab({ from, t, injected }: {
       ) : null}
       {entries === null ? <div className="oac-muted">{t('loading')}</div> : null}
       {entries?.length === 0 ? <div className="oac-muted">{t('factsEmpty')}</div> : null}
-      {(entries ?? []).map((entry) => (
+      {activeEntries.map((entry) => (
         <div className="oac-card" key={entry.id} data-active={entry.status === 'created'}>
           <p className="oac-note">{entry.text}</p>
           <div className="oac-row">
@@ -665,6 +853,20 @@ function FactsTab({ from, t, injected }: {
           </div>
         </div>
       ))}
+      {archivedEntries.length > 0 ? (
+        <div className="oac-card">
+          <span className="oac-section-title">{t('factsArchived')}</span>
+          <span className="oac-hint">{t('factsArchivedHint')}</span>
+          {archivedEntries.map((entry) => (
+            <div className="oac-note oac-memory-run-row" key={entry.id}>
+              <span>{entry.text}</span>
+              <Button type="button" onClick={() => {
+                void injected.memoryUnarchive(from, entry.id).then(() => setTick((v) => v + 1))
+              }}>{t('factsRestore')}</Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <Modal
         closeLabel={t('close')}
         open={adding}
@@ -753,8 +955,24 @@ function DreamTab({ from, t, injected, onDone, bot }: {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [runDate, setRunDate] = useState(yesterdayLocal())
   const [running, setRunning] = useState(false)
+  const [rowRunning, setRowRunning] = useState<string | null>(null)
   const [runNote, setRunNote] = useState<'done' | 'failed' | null>(null)
   const [tick, setTick] = useState(0)
+
+  /** Per-row 立即重试 for a failed date (IDBots parity): manual runs bypass
+   * the retry backoff, so a wedged date can be forced right now. */
+  const retryDate = (date: string): void => {
+    setRowRunning(date)
+    setRunNote(null)
+    void injected.dreamRun(from, date).then(
+      () => setRunNote('done'),
+      () => setRunNote('failed'),
+    ).finally(() => {
+      setRowRunning(null)
+      setTick((v) => v + 1)
+      onDone()
+    })
+  }
 
   useEffect(() => {
     let current = true
@@ -828,12 +1046,26 @@ function DreamTab({ from, t, injected, onDone, bot }: {
         <div className="oac-card">
           <span className="oac-section-title">{t('dreamRuns')}</span>
           {runs.slice(0, 10).map((run) => (
-            <p className={`oac-note${run.status === 'failed' ? ' error' : ''}`} key={run.dreamDate}>
-              {run.dreamDate} · {dreamRunStatusLabel(t, run.status)}
-              {` · ${t('dreamRunAttempts', { count: run.attemptCount }).replace('{count}', String(run.attemptCount))}`}
-              {run.status === 'completed' && !summaryDates.has(run.dreamDate) ? ` · ${t('dreamQuietDay')}` : ''}
-              {run.status === 'failed' && run.error ? ` · ${run.error}` : ''}
-            </p>
+            <div className={`oac-note oac-memory-run-row${run.status === 'failed' ? ' error' : ''}`} key={run.dreamDate}>
+              <span>
+                {run.dreamDate} · {dreamRunStatusLabel(t, run.status)}
+                {` · ${t('dreamRunAttempts', { count: run.attemptCount }).replace('{count}', String(run.attemptCount))}`}
+                {run.status === 'completed' && !summaryDates.has(run.dreamDate) ? ` · ${t('dreamQuietDay')}` : ''}
+                {run.status === 'failed' && run.error ? ` · ${run.error}` : ''}
+                {run.status === 'failed' && typeof run.nextRetryAt === 'number' && run.nextRetryAt > Date.now()
+                  ? ` · ${t('dreamNextRetry', { time: untilLabel(run.nextRetryAt) }).replace('{time}', untilLabel(run.nextRetryAt))}`
+                  : ''}
+              </span>
+              {run.status === 'failed' ? (
+                <Button
+                  type="button"
+                  disabled={running || rowRunning !== null}
+                  onClick={() => retryDate(run.dreamDate)}
+                >
+                  {rowRunning === run.dreamDate ? t('dreamRunning') : t('dreamRetryNow')}
+                </Button>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : null}

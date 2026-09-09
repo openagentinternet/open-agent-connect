@@ -272,6 +272,7 @@ export function localMemoryList(
       ...(typeof options.query === 'string' ? { query: options.query } : {}),
       ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
       ...(options.includeDeleted === true ? { includeDeleted: true } : {}),
+      ...(options.includeArchived === true ? { includeArchived: true } : {}),
     })
     return success({ entries })
   })

@@ -4024,6 +4024,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           ...(input.query ? { query: input.query } : {}),
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
           ...(input.includeDeleted ? { includeDeleted: true } : {}),
+          ...(input.includeArchived ? { includeArchived: true } : {}),
         });
         return commandSuccess({ entries });
       },
@@ -4081,6 +4082,16 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           return commandFailed('not_found', 'Memory entry not found in the resolved scope (or it is protected).');
         }
         return commandSuccess({ deleted: true });
+      },
+      unarchive: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const restored = await store.unarchiveMemories([String(input.payload.id ?? '')]);
+        if (restored === 0) {
+          return commandFailed('not_found', 'No archived memory entry with that id.');
+        }
+        return commandSuccess({ restored });
       },
       blocks: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);

@@ -459,6 +459,27 @@ test('dueDreamDates leaves a fresh running run untouched and not due', async () 
   assert.equal((await dreamStore.getRun(date)).status, 'running');
 });
 
+test('dreamStatus carries the next automatic retry time on failed runs', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  await seedTranscriptDay(paths, date);
+
+  const plan = await planDream(paths, { date });
+  assert.equal(plan.kind, 'prompt');
+  const failed = await failDream(paths, { date, error: 'llm stream returned empty content' });
+  assert.equal(failed.failed, true);
+
+  const status = await dreamStatus(paths);
+  const run = status.runs.find((entry) => entry.dreamDate === date);
+  assert.ok(run);
+  assert.equal(run.status, 'failed');
+  assert.equal(run.attemptCount, 1);
+  // One attempt → the 30-minute base backoff (IDBots dream:listRuns parity).
+  assert.equal(run.nextRetryAt, run.startedAt + 30 * 60 * 1000);
+  const completedRuns = status.runs.filter((entry) => entry.status !== 'failed');
+  assert.ok(completedRuns.every((entry) => entry.nextRetryAt === null || entry.nextRetryAt === undefined));
+});
+
 test('dreamStatus sweeps stale running runs so the UI never shows phantom runs', async () => {
   const paths = await createTempProfileHome();
   const date = yesterday();
