@@ -9,6 +9,13 @@ export interface LlmStreamChunkLike {
   reason?: { kind: string; failure?: { message?: string } }
 }
 
+/** Subset of the DSH runtime's `LlmResolvedModelInfo` the dream path consumes. */
+export interface LlmModelInfoLike {
+  context?: { contextWindow?: unknown }
+  defaultMaxTokens?: unknown
+  reasoning?: { efforts?: Array<{ id?: unknown }>; defaultEffort?: unknown }
+}
+
 export interface LlmStreamLike {
   stream(options: {
     provider: string
@@ -18,6 +25,8 @@ export interface LlmStreamLike {
     purpose?: string
     reasoningEffort?: string
   }): AsyncIterable<LlmStreamChunkLike>
+  /** Exact-model metadata (context window, output cap, reasoning efforts). */
+  resolveModelInfo?(provider: string, model: string): Promise<LlmModelInfoLike>
 }
 
 export interface GenerateTextOptions {
@@ -59,6 +68,8 @@ export async function generateLlmText(llm: LlmStreamLike, options: GenerateTextO
   })
   const iterator = iterable[Symbol.asyncIterator]()
   let text = ''
+  let reasoningChars = 0
+  let finishKind: string | null = null
   let failure: string | null = null
   try {
     for (;;) {
@@ -79,7 +90,10 @@ export async function generateLlmText(llm: LlmStreamLike, options: GenerateTextO
         const chunk = next.value
         if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
           text += chunk.text
+        } else if (chunk.type === 'reasoning-delta' && typeof chunk.text === 'string') {
+          reasoningChars += chunk.text.length
         } else if (chunk.type === 'finish' && chunk.reason) {
+          finishKind = chunk.reason.kind
           if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') {
             failure = chunk.reason.failure?.message ?? `llm stream ${chunk.reason.kind}`
           }
@@ -102,7 +116,75 @@ export async function generateLlmText(llm: LlmStreamLike, options: GenerateTextO
     throw new Error(failure)
   }
   if (!text.trim()) {
+    if (reasoningChars > 0) {
+      // A thinking model spent its whole output budget on reasoning chunks
+      // and finished before emitting any text — the persistent nightly-dream
+      // failure on reasoning-default models. Name the cause so the run row
+      // (and the fallback-pair retry decision) carries something actionable.
+      throw new Error(
+        `llm stream returned empty content (reasoning-only output: ${reasoningChars} chars of thinking, finish ${finishKind ?? 'unknown'} — disable reasoning or raise maxTokens)`,
+      )
+    }
     throw new Error('llm stream returned empty content')
   }
   return text
+}
+
+/** Model limits forwarded to `dream plan` so budgets size to the declared model. */
+export interface DreamLlmLimits {
+  contextWindow?: number
+  maxOutputTokens?: number
+}
+
+/** Per-pair dream generation profile resolved from exact-model metadata. */
+export interface DreamLlmProfile {
+  /** Effort to pass on every dream generation when the model declares 'off'. */
+  reasoningEffort?: string
+  limits?: DreamLlmLimits
+}
+
+function positiveInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
+
+/**
+ * Best-effort per-model dream profile (IDBots `thinking: 'disabled'` parity).
+ * Dreams want reasoning OFF: a reasoning-default model can burn the entire
+ * output budget on `reasoning-delta` chunks and finish with zero text — the
+ * recurring `llm stream returned empty content` dream failures. The effort is
+ * passed ONLY when the model's declared efforts include 'off': the pi-ai
+ * adapter rejects unsupported efforts outright (UNSUPPORTED_REASONING_EFFORT),
+ * and for it 'off' merely omits the knob anyway. Declared limits feed the
+ * plan's budget math (DeepSeek V4 declares a 32k output cap; the plan's
+ * default assumption is 8192). Never throws; missing/failing metadata
+ * degrades to today's behavior.
+ */
+export async function resolveDreamLlmProfile(
+  llm: LlmStreamLike,
+  provider: string,
+  model: string,
+): Promise<DreamLlmProfile> {
+  if (typeof llm.resolveModelInfo !== 'function') return {}
+  let info: LlmModelInfoLike
+  try {
+    info = await llm.resolveModelInfo(provider, model)
+  } catch {
+    return {}
+  }
+  if (!info || typeof info !== 'object') return {}
+  const efforts = info.reasoning?.efforts
+  const reasoningEffort = Array.isArray(efforts)
+    && efforts.some((effort) => effort && typeof effort === 'object' && effort.id === 'off')
+    ? 'off'
+    : undefined
+  const contextWindow = positiveInt(info.context?.contextWindow)
+  const maxOutputTokens = positiveInt(info.defaultMaxTokens)
+  const limits: DreamLlmLimits = {
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+  }
+  return {
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(Object.keys(limits).length > 0 ? { limits } : {}),
+  }
 }
