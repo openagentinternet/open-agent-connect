@@ -126,6 +126,8 @@ export type MemoryEntryRow = {
   visibility: string
   origin: string
   updatedAt: number
+  /** Hygiene soft-archive mark (restorable from the Facts tab). */
+  archivedAt?: string | null
 }
 
 export type MemoryEntriesPayload = {
@@ -196,6 +198,8 @@ export type DreamRunRow = {
   error?: string | null
   startedAt: number
   completedAt?: number | null
+  /** Failed rows only: epoch ms of the next automatic retry (IDBots parity). */
+  nextRetryAt?: number | null
 }
 
 /** dream/status payload: run ledger plus the diary/self-identity snapshot. */
@@ -204,6 +208,22 @@ export type DreamStatusPayload = {
   summaryCount?: number
   latestSummaryDate?: string | null
   hasSelfIdentity?: boolean
+}
+
+/** One hygiene run record: per-step counters and errors of the last pass. */
+export type HygieneLastRun = {
+  dateKey?: string
+  ranAt?: number
+  trigger?: string
+  counts?: Record<string, number>
+  errors?: string[]
+} | null
+
+export type HygieneStatusPayload = {
+  config?: Record<string, unknown>
+  lastRun?: HygieneLastRun
+  deepConsolidationLastRunAt?: string | null
+  due?: boolean | { due?: boolean }
 }
 
 export type OwnerIdentityRow = {
@@ -662,12 +682,19 @@ export const api = {
     post('memory/update', { from, ...entry }),
   memoryDelete: async (from: string, id: string): Promise<unknown> =>
     post('memory/delete', { from, id }),
+  memoryUnarchive: async (from: string, id: string): Promise<unknown> =>
+    post('memory/unarchive', { from, id }),
   memoryStats: async (from: string): Promise<{ stats?: { total: number; created: number; stale: number } }> =>
     post('memory/stats', { from }),
   memoryPolicyGet: async (from: string): Promise<MemoryPolicyPayload> => post('memory/policy/get', { from }),
   memoryPolicySet: async (from: string, patch: Record<string, unknown>): Promise<unknown> =>
     post('memory/policy/set', { from, patch }),
   memoryPolicyDelete: async (from: string): Promise<unknown> => post('memory/policy/delete', { from }),
+  hygieneStatus: async (from: string): Promise<HygieneStatusPayload> => post('memory/hygiene/status', { from }),
+  hygieneRun: async (from: string, noDeep = false): Promise<unknown> =>
+    post('memory/hygiene/run', { from, ...(noDeep ? { noDeep: true } : {}) }),
+  hygieneConfigSet: async (from: string, config: Record<string, unknown>): Promise<unknown> =>
+    post('memory/hygiene/config-set', { from, config }),
   knowledgeList: async (from: string, options: Record<string, unknown> = {}): Promise<{ entries?: KnowledgeRow[] }> =>
     post('memory/knowledge/list', { from, ...options }),
   knowledgeUpsert: async (from: string, entry: Record<string, unknown>): Promise<unknown> =>

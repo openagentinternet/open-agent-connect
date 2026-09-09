@@ -208,10 +208,12 @@ export interface CliDependencies {
       query?: string;
       limit?: number;
       includeDeleted?: boolean;
+      includeArchived?: boolean;
     }) => Awaitable<MetabotCommandResult<unknown>>;
     add?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     update?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     delete?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    unarchive?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     blocks?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     extract?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     policyGet?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;

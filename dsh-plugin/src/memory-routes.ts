@@ -31,6 +31,8 @@ import {
 
 const LIST_TIMEOUT_MS = 30_000
 const DREAM_CLI_TIMEOUT_MS = 120_000
+/** Manual hygiene runs share the scheduler's budget (deep consolidation may take minutes). */
+const HYGIENE_RUN_TIMEOUT_MS = 600_000
 // Per-chunk idle budget for dream LLM streams. Daytime provider stalls used
 // to hang the run in `running` until the 30-minute stale sweeper fired; fail
 // fast instead so the retry/backoff path sees the real error.
@@ -313,9 +315,11 @@ export async function dispatchMemoryRoutes(
     }
     if (typeof body.limit === 'number') args.push('--limit', String(Math.trunc(body.limit)))
     if (body.includeDeleted === true) args.push('--include-deleted')
+    if (body.includeArchived === true) args.push('--include-archived')
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
   }
-  if (method === 'memory/add' || method === 'memory/update' || method === 'memory/delete') {
+  if (method === 'memory/add' || method === 'memory/update' || method === 'memory/delete'
+    || method === 'memory/unarchive') {
     const verb = method.slice('memory/'.length)
     const from = requireFrom(payload)
     if (typeof from !== 'string') return from
@@ -371,6 +375,29 @@ export async function dispatchMemoryRoutes(
     if (typeof from !== 'string') return from
     const patch = objectOf(payload, 'patch') ?? {}
     return runMetabotWithPayloadFile(['memory', 'policy', 'set', '--from', from], patch, '--payload-file', [], run)
+  }
+  if (method === 'memory/hygiene/status' || method === 'memory/hygiene/due') {
+    const args = withFrom(['memory', 'hygiene', method.endsWith('/status') ? 'status' : 'due'], payload)
+    if (!Array.isArray(args)) return args
+    return run(args, { timeoutMs: LIST_TIMEOUT_MS })
+  }
+  if (method === 'memory/hygiene/run') {
+    const from = requireFrom(payload)
+    if (typeof from !== 'string') return from
+    const args = ['memory', 'hygiene', 'run', '--from', from]
+    if (body.noDeep === true) args.push('--no-deep')
+    return run(args, { timeoutMs: HYGIENE_RUN_TIMEOUT_MS })
+  }
+  if (method === 'memory/hygiene/config-get') {
+    const args = withFrom(['memory', 'hygiene', 'config', 'get'], payload)
+    if (!Array.isArray(args)) return args
+    return run(args, { timeoutMs: LIST_TIMEOUT_MS })
+  }
+  if (method === 'memory/hygiene/config-set') {
+    const from = requireFrom(payload)
+    if (typeof from !== 'string') return from
+    const config = objectOf(payload, 'config') ?? body
+    return runMetabotWithPayloadFile(['memory', 'hygiene', 'config', 'set', '--from', from], config, '--payload-file', [], run)
   }
   if (method === 'memory/knowledge/list') {
     const from = readTrimmed(payload, 'from')

@@ -398,6 +398,8 @@ export const MEMORY_CSS = `
 .oac-memory-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 20px; white-space: nowrap; }
 .oac-memory-badge-twin { background: var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-layer-3); font-weight: 600; }
 .oac-memory-badge.oac-llm-unset-badge { background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 16%, transparent); color: var(--dsw-alias-state-warn-label); }
+.oac-memory-run-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.oac-memory-run-row > span { min-width: 0; overflow-wrap: anywhere; }
 .oac-memory-identity { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); white-space: pre-wrap; }
 .oac-memory-contact { text-align: left; cursor: pointer; border: 1px solid var(--dsw-alias-border-l2); transition: border-color .16s; }
 .oac-memory-contact:hover { border-color: var(--dsw-alias-label-dimmed); }
