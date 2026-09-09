@@ -32,18 +32,22 @@ test('heroIdentityFor keeps the stock hero for stock presets, unknown slugs, and
   assert.equal(plugin.heroIdentityFor({ current: 'oac-mute', botsBySlug }), undefined)
 })
 
-test('hero identity mount anchors on content (the whale svg), never positional walks', async () => {
+test('hero identity mount climbs past slot wrappers to a width-validated headline', async () => {
   const mount = await readFile(join(root, 'src/client/hero-identity.ts'), 'utf8')
   assert.match(mount, /\[data-phase="hero"\]/)
   assert.match(mount, /\[data-composer-seat\]/)
-  // The headline is found as the nearest div ancestor of the whale-logo svg —
-  // immune to the renderer's display:contents slot/chain wrapper layers.
+  // The whale svg is slot output too: it sits inside span.fishHitbox >
+  // div[data-slot="conversation.hero.brand.mark"], so the climb must skip
+  // slot anchors AND prove the target is the wide headline (wrappers hug
+  // content at 34px; only the headline spans the hero column).
   assert.match(mount, /querySelector\('svg'\)/)
-  assert.match(mount, /whale\.closest\('div'\)/)
-  // Positional walks off the composer seat landed wrong twice (chip row,
-  // HeroShell root) — they must not come back.
+  assert.match(mount, /dataset\.slot === undefined/)
+  assert.match(mount, /dataset\.chainOverlayFallback === undefined/)
+  assert.match(mount, /getBoundingClientRect\(\)\.width >= columnWidth \/ 2/)
+  // Positional walks and bare ancestor matches each shipped a wrong spot —
+  // they must not come back.
   assert.doesNotMatch(mount, /firstElementChild/)
-  assert.doesNotMatch(mount, /querySelector\('\[class/)
+  assert.doesNotMatch(mount, /closest\('div'\)/)
   // Inserts directly above the headline row, and releases itself when the
   // hero unmounts (blank → active flip).
   assert.match(mount, /headline\.before\(host\)/)

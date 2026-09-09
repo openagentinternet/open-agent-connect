@@ -4,21 +4,23 @@
  * hero stack through the DOM, the same technique the Bot Browser sidebar and
  * the browser-iframe layout push already use.
  *
- * Anchoring lesson (three live rounds): the slot renderer wraps EVERY
- * renderSlot/renderSlotChain output in `display: contents` divs — the outlet
- * anchor `[data-slot="…"]`, and for overlay chains a second
- * `[data-chain-overlay-fallback="…"]` around the fallback — so positional
- * child walks from the composer seat land an unpredictable number of levels
- * short (round 1 dropped the block into the chip row, round 3 into the
- * HeroShell flex-row root beside the stack). The mount therefore anchors on
- * CONTENT, which no wrapper can displace: in the hero phase the whale-logo
- * svg is the first svg under the composer seat, and its nearest div ancestor
- * IS the headline row. The host is inserted directly before that row, so the
- * avatar + name sits centered above the whale and slogan inside the hero
- * stack's flex column. When the first message flips the session active the
- * hero subtree unmounts, the host disconnects, and the mount releases
- * itself until the next blank session. A future DSH layout change that
- * breaks the anchor fails safe: the block stops appearing.
+ * Anchoring lesson (four live rounds): the slot renderer wraps EVERY
+ * renderSlot/renderSlotChain output — including the whale mark itself — in
+ * `display: contents` divs (`[data-slot="…"]`, and for overlay chains a
+ * second `[data-chain-overlay-fallback="…"]` around the fallback). Child
+ * walks and bare ancestor matches from any slot output therefore land on a
+ * wrapper, not the layout element: rounds 1/3 dropped the block into the
+ * chip row and the HeroShell flex-row root, round 4 into the 34px brand-mark
+ * wrapper beside the whale. The mount now climbs from the whale svg to the
+ * first ancestor div that is provably the headline row: not a slot anchor,
+ * and spanning at least half the composer seat's width (the wrappers are
+ * content-hugging; only the headline grid spans the hero column). The host
+ * inserts directly before that row, making the block a regular child of the
+ * hero stack's stretch flex column — horizontally centered, above the whale
+ * and slogan. When the first message flips the session active the hero
+ * subtree unmounts, the host disconnects, and the mount releases itself
+ * until the next blank session. A future DSH layout change that breaks the
+ * anchor fails safe: the block stops appearing.
  */
 
 import { createElement } from 'react'
@@ -38,12 +40,26 @@ function heroHeadline(): HTMLElement | null {
   const seat = phaseRoot.querySelector('[data-composer-seat]')
   if (!(seat instanceof HTMLElement)) return null
   // Hero phase renders HeroShell first in the composer stack, so the first
-  // svg under the seat is the whale mark; the headline grid is its nearest
-  // div ancestor (the fish hitbox in between is a span).
+  // svg under the seat is the whale mark.
   const whale = seat.querySelector('svg')
   if (!(whale instanceof SVGElement)) return null
-  const headline = whale.closest('div')
-  return headline instanceof HTMLElement ? headline : null
+  // Climb past every slot wrapper (content-hugging display:contents divs) to
+  // the wide, un-wrapped div that can only be the headline grid. Zero-width
+  // (hidden) seats never anchor.
+  const columnWidth = seat.getBoundingClientRect().width
+  if (columnWidth <= 0) return null
+  let node: HTMLElement | null = whale.parentElement
+  while (node !== null && node !== seat) {
+    if (node instanceof HTMLElement
+      && node.tagName === 'DIV'
+      && node.dataset.slot === undefined
+      && node.dataset.chainOverlayFallback === undefined
+      && node.getBoundingClientRect().width >= columnWidth / 2) {
+      return node
+    }
+    node = node.parentElement
+  }
+  return null
 }
 
 /**
