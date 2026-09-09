@@ -110,6 +110,30 @@ export function chipAvatar(
   return avatar || undefined
 }
 
+/** What the hero identity block renders under the blank-session headline. */
+export type HeroIdentity = {
+  slug: string
+  name: string
+  avatarDataUrl?: string
+}
+
+/**
+ * The selected `oac-*` Bot as a hero identity, when the staged preset is one.
+ * Stock DSH presets (and not-yet-loaded rosters) return undefined so the
+ * stock hero stays untouched.
+ */
+export function heroIdentityFor(
+  state: { current: string; botsBySlug: Readonly<Record<string, Pick<ChipBot, 'name' | 'avatarDataUrl'>>> },
+): HeroIdentity | undefined {
+  const slug = slugFromPresetId(state.current)
+  if (slug === undefined) return undefined
+  const bot = state.botsBySlug[slug]
+  const name = bot?.name?.trim()
+  if (bot === undefined || name === undefined || name === '') return undefined
+  const avatar = bot.avatarDataUrl?.trim()
+  return { slug, name, ...(avatar === undefined || avatar === '' ? {} : { avatarDataUrl: avatar }) }
+}
+
 /** Apply only on a blank session that is not already on this preset. */
 export function shouldApplyStagedPreset(session: ChipSession | undefined, staged: string | undefined): boolean {
   if (staged === undefined || session === undefined) return false
