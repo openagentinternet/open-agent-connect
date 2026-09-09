@@ -234,6 +234,16 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  // POST /api/llm/host-executor/generate (one generation on the Bot's DSH pair)
+  if (url.pathname === '/api/llm/host-executor/generate' && req.method === 'POST') {
+    const body = await context.readJsonBody();
+    const result = handlers.llm?.hostExecutorGenerate
+      ? await handlers.llm.hostExecutorGenerate(body)
+      : commandFailed('not_implemented', 'Host LLM executor handler not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   // GET /api/llm/host-executor/events (SSE stream of generation requests)
   if (url.pathname === '/api/llm/host-executor/events' && req.method === 'GET') {
     const stream = handlers.llm?.hostExecutorEvents

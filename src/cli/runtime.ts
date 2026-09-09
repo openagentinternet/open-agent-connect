@@ -46,6 +46,10 @@ import {
   buildMemoryBlocksForRequest,
 } from '../core/memory/memoryService';
 import {
+  buildTurnMemoryExtractionPrompts,
+  parseTurnMemoryExtractionPayload,
+} from '../core/memory/memoryTurnExtraction';
+import {
   appendTranscriptTurn,
   listRecentChats,
   readSessionMessages,
@@ -4099,6 +4103,32 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       extract: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
+        // LLM judge + multilingual turn extraction ride the daemon's
+        // host-executor generate route (the Bot's DSH pair through the
+        // connected DSH host). Every failure degrades to null — rule-only
+        // extraction, exactly the pre-wiring behavior — so a daemon that is
+        // down, old, or without a connected executor never breaks a turn.
+        const daemonComplete = async (system: string, prompt: string): Promise<string | null> => {
+          try {
+            const result = await requestJson<{ output?: string }>(
+              context,
+              'POST',
+              '/api/llm/host-executor/generate',
+              {
+                ...(input.from ? { botSlug: input.from } : {}),
+                system,
+                prompt,
+                timeoutMs: 20_000,
+              },
+            );
+            const output = result && result.ok === true && result.data && typeof result.data.output === 'string'
+              ? result.data.output
+              : null;
+            return output && output.trim() ? output : null;
+          } catch {
+            return null;
+          }
+        };
         const result = await applyTurnMemoryExtraction(resolveMetabotPaths(actor.homeDir), {
           userText: String(input.payload.userText ?? ''),
           assistantText: String(input.payload.assistantText ?? ''),
@@ -4110,6 +4140,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             : undefined,
           userMessageId: typeof input.payload.userMessageId === 'string' ? input.payload.userMessageId : undefined,
           assistantMessageId: typeof input.payload.assistantMessageId === 'string' ? input.payload.assistantMessageId : undefined,
+          judgeComplete: async (systemPrompt, userPrompt) => (await daemonComplete(systemPrompt, userPrompt)) ?? '',
+          llmExtract: async (extractionInput) => {
+            const prompts = buildTurnMemoryExtractionPrompts(extractionInput);
+            const text = await daemonComplete(prompts.system, prompts.user);
+            return text ? parseTurnMemoryExtractionPayload(text) : null;
+          },
         });
         return commandSuccess(result as unknown as Record<string, unknown>);
       },

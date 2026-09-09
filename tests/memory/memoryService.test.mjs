@@ -209,3 +209,81 @@ test('blocks: local owner turn ensures the default knowledge base and lists it',
   const rows = await kbService.store.listKnowledgeBases();
   assert.equal(rows.filter((row) => row.isDefault).length, 1);
 });
+
+test('extract: LLM turn extraction merges multilingual facts and dedupes against regex results', async () => {
+  const paths = await createTempProfileHome();
+  const store = createMemoryStore(paths);
+  const calls = [];
+  // The regex extractor pulls two candidates from this text (an explicit
+  // add-command tail plus the implicit coffee preference); the LLM returns
+  // one exact duplicate of the implicit candidate (dropped by the dedup key)
+  // and one llm-only multilingual fact (written via the turn_llm path).
+  const result = await applyTurnMemoryExtraction(paths, {
+    userText: '请记住：我喜欢喝美式咖啡。另外 benim adım Elif,这位朋友记一下。',
+    assistantText: '好的。',
+    channel: 'dsh',
+    sessionId: 'sess-1',
+    userMessageId: 'msg-1',
+    llmExtract: async (input) => {
+      calls.push(input);
+      return [
+        { action: 'add', text: '请记住：我喜欢喝美式咖啡', isExplicit: true },
+        { action: 'add', text: '用户名叫 Elif', isExplicit: false },
+      ];
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].guardLevel, 'strict');
+  assert.equal(calls[0].implicitEnabled, true);
+  assert.equal(result.totalChanges, 3); // regex 2 + llm-only 1 (the dup dropped)
+  // The strict rule judge rejects the regex implicit candidate; the explicit
+  // add-command and the llm-only fact both land.
+  assert.equal(result.created, 2);
+  assert.equal(result.judgeRejected, 1);
+  assert.equal(result.llmReviewed, 1);
+  const entries = await store.list();
+  const llmEntry = entries.find((entry) => entry.text === '用户名叫 Elif');
+  assert.ok(llmEntry, 'llm-only fact written');
+  assert.equal(llmEntry.confidence, 0.8);
+  assert.ok(llmEntry.sources.some((source) => source.sourceType === 'turn_llm'));
+});
+
+test('extract: LLM turn extraction is gated to substantive text and degrades on failure', async () => {
+  const paths = await createTempProfileHome();
+  // Short acknowledgement: the LLM is never called.
+  let called = 0;
+  await applyTurnMemoryExtraction(paths, {
+    userText: '好的',
+    assistantText: '嗯',
+    channel: 'dsh',
+    llmExtract: async () => {
+      called += 1;
+      return [];
+    },
+  });
+  assert.equal(called, 0);
+
+  // A throwing transport degrades to regex-only extraction.
+  const first = await applyTurnMemoryExtraction(paths, {
+    userText: '请记住：我喜欢喝美式咖啡',
+    assistantText: '好的',
+    channel: 'dsh',
+    sessionId: 's1',
+    llmExtract: async () => {
+      throw new Error('daemon down');
+    },
+  });
+  assert.equal(first.created, 1);
+
+  // A null result behaves the same.
+  const second = await applyTurnMemoryExtraction(paths, {
+    userText: '请记住：我喜欢喝美式咖啡',
+    assistantText: '好的',
+    channel: 'dsh',
+    sessionId: 's1',
+    userMessageId: 'm2',
+    llmExtract: async () => null,
+  });
+  assert.equal(second.created, 0);
+  assert.equal(second.updated, 1);
+});
