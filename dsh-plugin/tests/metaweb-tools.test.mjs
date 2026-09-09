@@ -84,7 +84,8 @@ test('search tool executes the OAC core in-process and renders guidance', async 
     assert.match(result, /Open 1-3 of the most relevant pins/)
 
     const missing = await search.execute({}, {})
-    assert.equal(missing.error, 'query is required.')
+    assert.equal(typeof missing, 'string')
+    assert.match(missing, /^search_metaweb failed: query is required\.$/)
   } finally {
     if (originalEnv === undefined) delete process.env.METABOT_METAWEB_API_BASE_URL
     else process.env.METABOT_METAWEB_API_BASE_URL = originalEnv

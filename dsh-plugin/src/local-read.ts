@@ -211,6 +211,28 @@ export function localTwinCurrent(): Promise<MetabotCommandResult | null> {
   })
 }
 
+// ---- acting-Bot fallback (global tools in non-oac sessions) ----------------
+
+/**
+ * Machine-default Bot slug for the host global tools when a session resolves
+ * no `oac-*` agent (plain DSH conversations, coding workspaces): the Twin Bot,
+ * exactly what a no-`--from` CLI call targets. Cached briefly — resolution
+ * scans every profile, and the tool layer calls this per exec.
+ */
+let twinFallbackCache: { at: number; slug: string | null } | undefined
+
+export async function twinFallbackSlug(): Promise<string | null> {
+  const now = Date.now()
+  if (twinFallbackCache && now - twinFallbackCache.at < 60_000) return twinFallbackCache.slug
+  const result = await localTwinCurrent()
+  const slug = result?.ok
+    ? (result.data as { twinSlug?: unknown } | undefined)?.twinSlug
+    : undefined
+  const resolved = typeof slug === 'string' && slug ? slug : null
+  twinFallbackCache = { at: now, slug: resolved }
+  return resolved
+}
+
 // ---- memory ---------------------------------------------------------------
 
 export function localMemoryList(

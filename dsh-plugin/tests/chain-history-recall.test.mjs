@@ -176,10 +176,11 @@ test('chain_history_recall surfaces CLI failure as a tool error string', async (
   const tool = buildTool(makeRun(calls, new Error('no such bot')))
 
   const result = await tool.execute({}, {})
-  assert.deepEqual(result, { error: 'no such bot' })
+  assert.equal(typeof result, 'string')
+  assert.match(result, /^chain_history_recall failed: no such bot/)
 
   const throwing = buildTool(async () => { throw new Error('cli down') })
-  assert.deepEqual(await throwing.execute({}, {}), { error: 'cli down' })
+  assert.match(await throwing.execute({}, {}), /^chain_history_recall failed: cli down/)
 })
 
 test('chain_history_recall without a resolvable slug returns a friendly error', async () => {
@@ -187,6 +188,8 @@ test('chain_history_recall without a resolvable slug returns a friendly error', 
   const tool = buildTool(makeRun(calls, { writes: [], reads: [] }), null)
 
   const result = await tool.execute({}, { agent: undefined })
-  assert.match(result.error, /no Bot slug resolved/)
+  assert.equal(typeof result, 'string')
+  assert.match(result, /^chain_history_recall failed: /)
+  assert.match(result, /no Bot slug resolved/)
   assert.equal(calls.length, 0, 'no CLI call is attempted without a slug')
 })

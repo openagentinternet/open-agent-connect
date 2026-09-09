@@ -90,9 +90,14 @@ function dayWindow(value: unknown, field: string): number | undefined {
   return parsed
 }
 
-/** Tool error convention: a readable message the model can act on. */
-function toolError(message: string): { error: string } {
-  return { error: message }
+/**
+ * Tool error convention: a readable STRING the model can act on. The declared
+ * output schema is `{ type: 'string' }` and the DSH host validates tool output
+ * against it, so an object return here surfaces as
+ * `invalid output: "value" must be a string` instead of the actual message.
+ */
+function toolError(tool: string, message: string): string {
+  return `${tool} failed: ${message}`
 }
 
 export function buildMetawebToolDefinitions(input: {
@@ -150,7 +155,7 @@ export function buildMetawebToolDefinitions(input: {
       execute: async (args: Record<string, unknown>) => {
         const input = args as SearchInput
         const query = textOf(input.query)
-        if (!query) return toolError('query is required.')
+        if (!query) return toolError('search_metaweb', 'query is required.')
         try {
           const searchModule = core('core/metaweb/search.js') as {
             searchMetaweb: (params: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{
@@ -188,7 +193,7 @@ export function buildMetawebToolDefinitions(input: {
             ? `${bullets}\n${guidance}`
             : `No results for this query.\n${guidance}`
         } catch (error) {
-          return toolError(error instanceof Error ? error.message : String(error))
+          return toolError('search_metaweb', error instanceof Error ? error.message : String(error))
         }
       },
     },
@@ -210,7 +215,7 @@ export function buildMetawebToolDefinitions(input: {
       timeoutMs: 20_000,
       execute: async (args: Record<string, unknown>, exec: HostToolExec) => {
         const pinId = textOf(args.pinId)
-        if (!pinId) return toolError('pinId is required.')
+        if (!pinId) return toolError('read_metaweb_pin', 'pinId is required.')
         try {
           const pinModule = core('core/metaweb/pinRead.js') as {
             readMetawebPin: (pinId: string, options?: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -246,7 +251,7 @@ export function buildMetawebToolDefinitions(input: {
           }
           return `${formatModule.formatMetawebPinDetail(pin)}\n${uriModule.METAWEB_CITATION_RULE}`
         } catch (error) {
-          return toolError(error instanceof Error ? error.message : String(error))
+          return toolError('read_metaweb_pin', error instanceof Error ? error.message : String(error))
         }
       },
     },
