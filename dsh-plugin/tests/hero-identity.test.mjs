@@ -32,17 +32,20 @@ test('heroIdentityFor keeps the stock hero for stock presets, unknown slugs, and
   assert.equal(plugin.heroIdentityFor({ current: 'oac-mute', botsBySlug }), undefined)
 })
 
-test('hero identity mount anchors on structural attributes, never css-module classes', async () => {
+test('hero identity mount anchors on content (the whale svg), never positional walks', async () => {
   const mount = await readFile(join(root, 'src/client/hero-identity.ts'), 'utf8')
   assert.match(mount, /\[data-phase="hero"\]/)
   assert.match(mount, /\[data-composer-seat\]/)
-  // renderSlot/renderSlotChain wrap slot output in data-slot anchor divs —
-  // the composer chain anchor is the correct first step off the seat.
-  assert.match(mount, /\[data-slot="conversation\.composer"\]/)
-  assert.match(mount, /new MutationObserver/)
+  // The headline is found as the nearest div ancestor of the whale-logo svg —
+  // immune to the renderer's display:contents slot/chain wrapper layers.
+  assert.match(mount, /querySelector\('svg'\)/)
+  assert.match(mount, /whale\.closest\('div'\)/)
+  // Positional walks off the composer seat landed wrong twice (chip row,
+  // HeroShell root) — they must not come back.
+  assert.doesNotMatch(mount, /firstElementChild/)
   assert.doesNotMatch(mount, /querySelector\('\[class/)
-  // Inserts directly above the headline (whale + slogan row), and releases
-  // itself when the hero unmounts (blank → active flip).
+  // Inserts directly above the headline row, and releases itself when the
+  // hero unmounts (blank → active flip).
   assert.match(mount, /headline\.before\(host\)/)
   assert.match(mount, /isConnected/)
   assert.match(mount, /unmount/)
