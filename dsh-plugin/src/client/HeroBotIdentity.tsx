@@ -1,10 +1,9 @@
 /**
- * Big Bot identity under the blank-session hero headline: the selected
+ * Big Bot identity above the blank-session hero headline: the selected
  * `oac-*` Bot's 100px avatar and name, centered, following the hero chip's
  * staged selection live. Stock DSH presets render nothing (stock hero stays
- * pristine). Rendered into the hero's reserved body hole by
- * hero-identity.ts, not by a slot — DSH offers no slot between the headline
- * and the workspace row.
+ * pristine). Rendered above the whale logo + slogan row by hero-identity.ts,
+ * not by a slot — DSH offers no slot there.
  */
 
 import { useCallback, useSyncExternalStore, type ReactNode } from 'react'
