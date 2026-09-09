@@ -514,6 +514,18 @@ Agent linkage is two layers:
   confirmation dialog, with entry file, package size, and fork provenance)
   before the `--confirm` write. Live page context injection stays
   `oac-*` only.
+- **Publish/update trust rails** (smoke-test R2 fixes): the MAN owner index
+  lags chain writes by a minute or two, so `metaapp list` cannot see an app
+  published seconds ago — publish/update record every pin this host writes in
+  a per-Bot ledger, and update_app accepts that ledger as ownership proof,
+  refusing only on index-confirmed foreign apps (with an explicit
+  "index may lag" hint when a miss is inconclusive). Publish/update and
+  `skill_tool publish_skill` always echo a `Cost:` line (sats from the chain
+  write, or an explicit `Cost: unavailable`). The preview-then-publish gate
+  for approval-disabled sessions keys the preview record by the acting Bot
+  (not the agent object, which the host may replace), and `bot_browser_open_uri`
+  waits briefly for the navigation commit — reporting `(navigation in
+  progress)` instead of an empty `(untitled) — (no uri)` tab row.
 
 Each `oac-*` turn also injects a live `<browser_context>` block at the
 user-message tail (active tab URI/title, open tabs, MetaApp `source_dir` when

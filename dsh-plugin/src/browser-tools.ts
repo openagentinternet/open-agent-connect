@@ -401,22 +401,53 @@ function publishApprovalReason(input: {
  * Preview-then-publish gate for sessions with approval prompts disabled:
  * `approval/policy: never` must not mean "publish anything" — the same
  * session must have PREVIEWED the directory before publish proceeds.
+ *
+ * Keyed by the acting Bot slug, NEVER the agent object: the host can replace
+ * the agent between the preview and the publish (blank-session recompose,
+ * sidebar reload), and an object-keyed WeakMap then silently lost the record
+ * and refused a genuinely previewed directory.
  */
-const previewedDirsByAgent = new WeakMap<object, Set<string>>()
+const previewedDirsByBot = new Map<string, Set<string>>()
 
-function rememberPreviewedDir(agent: unknown, dir: string): void {
-  if (!agent || typeof agent !== 'object') return
-  let set = previewedDirsByAgent.get(agent)
+function rememberPreviewedDir(bot: string, dir: string): void {
+  if (!bot) return
+  let set = previewedDirsByBot.get(bot)
   if (!set) {
     set = new Set<string>()
-    previewedDirsByAgent.set(agent, set)
+    previewedDirsByBot.set(bot, set)
   }
   set.add(dir)
 }
 
-function hasPreviewedDir(agent: unknown, dir: string): boolean {
-  if (!agent || typeof agent !== 'object') return false
-  return previewedDirsByAgent.get(agent)?.has(dir) === true
+function hasPreviewedDir(bot: string, dir: string): boolean {
+  return previewedDirsByBot.get(bot)?.has(dir) === true
+}
+
+/**
+ * Publish ledger (host lifetime): the metaapp pinIds this host published per
+ * acting Bot. `metaapp list` reads the remote MAN owner index, which lags
+ * chain writes by a minute or two, so the update-app ownership check alone
+ * would refuse an app published seconds ago ("not among this Bot's published
+ * apps") and bait the agent into a needless fork+republish. Records both the
+ * version pin and the stable firstPinId.
+ */
+const publishedPinsByBot = new Map<string, Set<string>>()
+
+function rememberPublishedPins(bot: string, pinIds: Array<string | undefined>): void {
+  const keys = pinIds
+    .filter((pin): pin is string => typeof pin === 'string' && pin.trim() !== '')
+    .map((pin) => pin.trim().toLowerCase())
+  if (!bot || keys.length === 0) return
+  let set = publishedPinsByBot.get(bot)
+  if (!set) {
+    set = new Set<string>()
+    publishedPinsByBot.set(bot, set)
+  }
+  for (const key of keys) set.add(key)
+}
+
+function hasPublishedPin(bot: string, pinId: string): boolean {
+  return publishedPinsByBot.get(bot)?.has(pinId.trim().toLowerCase()) === true
 }
 
 export function buildBrowserToolDefinitions(input: {
@@ -447,14 +478,45 @@ export function buildBrowserToolDefinitions(input: {
     return `Opened the Bot Browser homepage in the right sidebar (${event.localUiUrl}).`
   }
 
+  const tabsIncludeUri = (tabs: ReadonlyArray<{ uri?: string | null }>, uri: string): boolean =>
+    tabs.some((tab) => (tab.uri ?? '').trim() === uri)
+
   const openUri = async (uri: string): Promise<string> => {
     if (isBrowserHomeUri(uri)) return openHome()
     const resolved = normalizeBotBrowserUri(uri) ?? uri
     const snapshot = hub.getSnapshot()
     if (snapshot.open && hub.clientCount() > 0) {
       const result = await hub.requestCommand({ action: 'open-tab', uri: resolved })
-      if (!result.ok) return `Opened ${resolved}, but the Browser did not confirm: ${commandError(result)}`
-      return `Opened ${resolved} in the Bot Browser. Current tabs (* = active):\n${formatBotBrowserTabs(result.tabs ?? snapshot.tabs)}`
+      if (!result.ok) {
+        return [
+          `Opened ${resolved}, but the Browser did not confirm: ${commandError(result)}`,
+          'The navigation status is unknown — do NOT blindly open it again: run bot_browser_tabs action "list" first, and only retry when the tab is absent.',
+        ].join('\n')
+      }
+      // The command result is a pre-navigation snapshot for a fresh tab
+      // (title/uri fill in only when the page commits). Poll the live client
+      // state briefly so the returned tab list shows the requested URI; if
+      // the page is still committing, say so explicitly instead of rendering
+      // "(untitled) — (no uri)", which reads like a failure.
+      let tabs = result.tabs ?? snapshot.tabs
+      if (!tabsIncludeUri(tabs, resolved)) {
+        const deadline = Date.now() + 3_000
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 250))
+          const live = hub.getSnapshot().tabs
+          if (tabsIncludeUri(live, resolved)) {
+            tabs = live
+            break
+          }
+        }
+        if (!tabsIncludeUri(tabs, resolved)) {
+          return [
+            `Opened ${resolved} in the Bot Browser (navigation in progress — the tab list catches up when the page commits).`,
+            'Do not open it again; the next browser_context or bot_browser_tabs action "list" will show the final state.',
+          ].join('\n')
+        }
+      }
+      return `Opened ${resolved} in the Bot Browser. Current tabs (* = active):\n${formatBotBrowserTabs(tabs)}`
     }
     const event = hub.open(resolved, 'host')
     if (event === null) {
@@ -539,14 +601,14 @@ export function buildBrowserToolDefinitions(input: {
         if (!(await pathExists(localPath))) {
           throw new Error(`Local path not found: ${localPath}`)
         }
-        rememberPreviewedDir(exec?.agent, localPath)
+        rememberPreviewedDir(actorSlug(exec), localPath)
         // Previewing an entry FILE (e.g. dir/index.html) also vouches for its
         // containing directory: the publish gate checks the directory, and the
         // fork flow previews the entry file. A directory preview vouches for
         // itself only — never its parent.
         const stat = await import('node:fs').then((fs) => fs.statSync(localPath))
         if (stat.isFile()) {
-          rememberPreviewedDir(exec?.agent, dirname(localPath))
+          rememberPreviewedDir(actorSlug(exec), dirname(localPath))
         }
         return openUri(`preview-metaapp://localhost${localPath}`)
       },
@@ -798,10 +860,14 @@ export function buildBrowserToolDefinitions(input: {
         }
         const agent = exec.agent ?? hostAgent
         const policy = approvalPolicyOf(gate, agent)
-        if (policy === 'never' && !hasPreviewedDir(agent, dir)) {
+        if (policy === 'never' && !hasPreviewedDir(actorSlug(exec), dir)) {
           // Prompts disabled in this session: the preview record is the
           // gate — publish only what this session actually previewed.
-          return 'Publish refused: approval prompts are disabled in this session and this directory was not previewed here. Run bot_browser_preview_local on the directory first, or have the user re-enable approval prompts.'
+          return [
+            'Publish refused: approval prompts are disabled in this session and this directory was not previewed here.',
+            'Run bot_browser_preview_local on the directory and retry immediately, or have the user re-enable approval prompts.',
+            'If you did preview it but the Bot Browser sidebar was closed and reopened since, preview again — the record is per Bot, not per preview.',
+          ].join('\n')
         }
         const title = textArg(args, 'title') || dir.split('/').filter(Boolean).at(-1) || 'MetaApp'
         const intro = textArg(args, 'intro')
@@ -849,13 +915,20 @@ export function buildBrowserToolDefinitions(input: {
           metaappUri?: string
           hasAppDoc?: boolean
           totalCost?: number
+          chainWrite?: { totalCost?: number }
           idempotent?: boolean
         }
+        // Same-host publish ledger: the MAN owner index lags chain writes, so
+        // a same-minute update_app must not be refused for "not yours".
+        rememberPublishedPins(from, [data.pinId, data.firstPinId])
         const viewPin = data.firstPinId || data.pinId || ''
         const uri = data.metaappUri || (viewPin ? `metaapp://${viewPin}` : '')
+        const cost = typeof data.totalCost === 'number'
+          ? data.totalCost
+          : (typeof data.chainWrite?.totalCost === 'number' ? data.chainWrite.totalCost : null)
         const lines = [
           `Published on-chain: ${uri || '(see envelope)'}`,
-          ...(typeof data.totalCost === 'number' ? [`Cost: ${data.totalCost} sats`] : []),
+          cost !== null ? `Cost: ${cost} sats` : 'Cost: unavailable (the chain write reported no fee figure)',
           ...(data.idempotent === true
             ? ['An identical publish completed moments ago; this is its recorded result — no duplicate chain write was made.']
             : []),
@@ -902,13 +975,20 @@ export function buildBrowserToolDefinitions(input: {
         if (!targetPinId) {
           throw new Error('bot_browser_update_app needs the target app: pass targetPinId (find it with search_metaapps — your own apps are marked "(your MetaBot)"), or use a directory forked from your own app. To publish a NEW app instead, use bot_browser_publish_app.')
         }
-        const ownership = await findOwnedMetaApp(run, from, targetPinId)
+        // Ownership via the MAN owner index first; a miss is not final — the
+        // index lags chain writes by a minute or two, and an app this host
+        // published moments ago is in the local publish ledger instead.
+        let ownership = await findOwnedMetaApp(run, from, targetPinId)
         if (ownership === null) {
           throw new Error(`Unable to verify that this Bot owns metaapp://${targetPinId} (metaapp list failed). An update writes fees on-chain, so it is refused while ownership is unverifiable — try again when the daemon and index API are reachable.`)
         }
+        if (!ownership.found && hasPublishedPin(from, targetPinId)) {
+          ownership = { found: true, firstPinId: targetPinId }
+        }
         if (!ownership.found) {
           return [
-            `Update refused: metaapp://${targetPinId} is not among this Bot's published apps.`,
+            `Update refused: metaapp://${targetPinId} is not among this Bot's published apps in the chain index.`,
+            'If this app was published moments ago (especially from this machine), the index may lag by a minute or two — wait briefly and retry the exact same call.',
             'Updating another publisher\'s app writes a detached modify pin: fees are spent but the original app does not change.',
             'If you forked someone else\'s app, publish it as a NEW app with bot_browser_publish_app (forkedFrom provenance is recorded automatically).',
           ].join('\n')
@@ -919,8 +999,12 @@ export function buildBrowserToolDefinitions(input: {
         }
         const agent = exec.agent ?? hostAgent
         const policy = approvalPolicyOf(gate, agent)
-        if (policy === 'never' && !hasPreviewedDir(agent, dir)) {
-          return 'Update refused: approval prompts are disabled in this session and this directory was not previewed here. Run bot_browser_preview_local on the directory first, or have the user re-enable approval prompts.'
+        if (policy === 'never' && !hasPreviewedDir(actorSlug(exec), dir)) {
+          return [
+            'Update refused: approval prompts are disabled in this session and this directory was not previewed here.',
+            'Run bot_browser_preview_local on the directory and retry immediately, or have the user re-enable approval prompts.',
+            'If you did preview it but the Bot Browser sidebar was closed and reopened since, preview again — the record is per Bot, not per preview.',
+          ].join('\n')
         }
         const title = textArg(args, 'title') || dir.split('/').filter(Boolean).at(-1) || 'MetaApp'
         const intro = textArg(args, 'intro')
@@ -965,13 +1049,18 @@ export function buildBrowserToolDefinitions(input: {
           pinId?: string
           firstPinId?: string
           totalCost?: number
+          chainWrite?: { totalCost?: number }
           idempotent?: boolean
         }
+        rememberPublishedPins(from, [data.pinId, data.firstPinId, targetPinId])
         const viewPin = data.firstPinId || ownership.firstPinId || targetPinId
         const uri = `metaapp://${viewPin}`
+        const cost = typeof data.totalCost === 'number'
+          ? data.totalCost
+          : (typeof data.chainWrite?.totalCost === 'number' ? data.chainWrite.totalCost : null)
         return [
           `Updated on-chain: ${uri} (stable app URI; new version pin ${data.pinId || '(see envelope)'})`,
-          ...(typeof data.totalCost === 'number' ? [`Cost: ${data.totalCost} sats`] : []),
+          cost !== null ? `Cost: ${cost} sats` : 'Cost: unavailable (the chain write reported no fee figure)',
           ...(data.idempotent === true
             ? ['An identical update completed moments ago; this is its recorded result — no duplicate chain write was made.']
             : []),

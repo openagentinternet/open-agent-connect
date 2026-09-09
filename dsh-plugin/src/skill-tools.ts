@@ -228,10 +228,17 @@ export function buildSkillToolDefinitions(input: SkillToolDependencies): HostToo
             const data = dataOf(await run(cliArgs, { timeoutMs: 150_000 })) as {
               formatted?: string
               pinId?: string
+              totalCost?: number
+              chainWrite?: { totalCost?: number }
             }
+            // Fee figures ride at data.chainWrite.totalCost (the chain-write
+            // envelope); a missing figure is reported, never silently omitted.
+            const cost = typeof data?.totalCost === 'number'
+              ? data.totalCost
+              : (typeof data?.chainWrite?.totalCost === 'number' ? data.chainWrite.totalCost : null)
             return [
               data?.formatted ?? 'Published.',
-              '',
+              cost !== null ? `Cost: ${cost} sats` : 'Cost: unavailable (the chain write reported no fee figure)',
               ...(data?.pinId ? [`Others can learn it: the skill is advertised by pin ${data.pinId} (protocol metabot-skill).`] : []),
             ].join('\n')
           }
