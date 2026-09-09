@@ -3183,6 +3183,7 @@ function createDefaultCliDependencies(context) {
                     ...(input.query ? { query: input.query } : {}),
                     ...(input.limit !== undefined ? { limit: input.limit } : {}),
                     ...(input.includeDeleted ? { includeDeleted: true } : {}),
+                    ...(input.includeArchived ? { includeArchived: true } : {}),
                 });
                 return (0, commandResult_1.commandSuccess)({ entries });
             },
@@ -3243,6 +3244,17 @@ function createDefaultCliDependencies(context) {
                     return (0, commandResult_1.commandFailed)('not_found', 'Memory entry not found in the resolved scope (or it is protected).');
                 }
                 return (0, commandResult_1.commandSuccess)({ deleted: true });
+            },
+            unarchive: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, memoryStore_1.createMemoryStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const restored = await store.unarchiveMemories([String(input.payload.id ?? '')]);
+                if (restored === 0) {
+                    return (0, commandResult_1.commandFailed)('not_found', 'No archived memory entry with that id.');
+                }
+                return (0, commandResult_1.commandSuccess)({ restored });
             },
             blocks: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);

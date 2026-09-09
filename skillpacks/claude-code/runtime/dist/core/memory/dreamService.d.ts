@@ -153,7 +153,9 @@ export declare function runDream(paths: MetabotPaths, input: {
 }, complete: DreamChatCompletion, deps?: DreamServiceDeps): Promise<DreamRunResult>;
 /** Status snapshot for the UI Dream tab. */
 export declare function dreamStatus(paths: MetabotPaths, deps?: DreamServiceDeps): Promise<{
-    runs: DreamRun[];
+    runs: Array<DreamRun & {
+        nextRetryAt: number | null;
+    }>;
     summaryCount: number;
     latestSummaryDate: string | null;
     hasSelfIdentity: boolean;

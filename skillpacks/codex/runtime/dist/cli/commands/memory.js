@@ -55,8 +55,21 @@ async function runMemoryCommand(args, context) {
             origin: (0, helpers_1.readFlagValue)(args, '--origin') ?? undefined,
             query: (0, helpers_1.readFlagValue)(args, '--query') ?? undefined,
             includeDeleted: args.includes('--include-deleted'),
+            includeArchived: args.includes('--include-archived'),
             ...(limit !== undefined ? { limit } : {}),
         });
+    }
+    if (subcommand === 'unarchive') {
+        const handler = requireMemoryHandler(context, 'unarchive');
+        if (isFailure(handler))
+            return handler;
+        const payload = await readPayload(context, args, { required: true });
+        if (isFailure(payload))
+            return payload;
+        if (typeof payload.id !== 'string') {
+            return (0, commandResult_1.commandFailed)('invalid_payload', 'payload.id is required.');
+        }
+        return handler({ from, payload });
     }
     if (subcommand === 'add' || subcommand === 'update' || subcommand === 'delete') {
         const handler = requireMemoryHandler(context, subcommand);

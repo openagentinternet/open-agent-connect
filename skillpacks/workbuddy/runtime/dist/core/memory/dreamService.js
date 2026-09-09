@@ -690,8 +690,19 @@ async function dreamStatus(paths, deps = {}) {
         status: 'created',
         limit: 1,
     });
+    const runs = [...runStates.values()]
+        .sort((left, right) => right.dreamDate.localeCompare(left.dreamDate))
+        // IDBots dream:listRuns parity: failed rows carry the next automatic
+        // retry time (startedAt + backoff by attempt count) so the UI can show
+        // 下次自动重试 without duplicating the backoff formula client-side.
+        .map((run) => ({
+        ...run,
+        nextRetryAt: run.status === 'failed'
+            ? run.startedAt + (0, dreamPrompt_1.computeDreamRetryDelayMs)(run.attemptCount)
+            : null,
+    }));
     return {
-        runs: [...runStates.values()].sort((left, right) => right.dreamDate.localeCompare(left.dreamDate)),
+        runs,
         summaryCount: summaries.length,
         latestSummaryDate: summaries[0]?.summaryDate ?? null,
         hasSelfIdentity: identityEntries.length > 0,
