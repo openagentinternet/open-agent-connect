@@ -604,11 +604,11 @@ export const PRESETS_CSS = `
 
 export const HERO_CSS = `
 /* Hero Bot identity (hero-identity.ts): the selected Bot's big avatar + name
-   centered in the blank-session hero's reserved body hole, between the
-   headline (logo + slogan) and the workspace/preset chip row. The hero stack
-   already supplies 12px gaps on both sides; the block only adds its own
-   breathing room and a one-shot entrance that reduced motion disables. */
-.oac-hero-identity { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 6px 0 2px; animation: oac-hero-identity-in .24s ease-out; }
+   centered DIRECTLY ABOVE the blank-session hero headline (whale logo +
+   slogan), before the workspace/preset chip row. The hero stack already
+   supplies 12px gaps; the block adds a little breathing room above the
+   headline and a one-shot entrance that reduced motion disables. */
+.oac-hero-identity { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 0 0 4px; animation: oac-hero-identity-in .24s ease-out; }
 .oac-bot-avatar.oac-hero-identity-avatar { width: 100px; height: 100px; font-size: 28px; box-shadow: 0 0 0 1px var(--dsw-alias-border-l4); }
 .oac-hero-identity-name { max-width: 100%; font-size: 20px; line-height: 28px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes oac-hero-identity-in { from { opacity: 0; transform: translateY(6px); } }

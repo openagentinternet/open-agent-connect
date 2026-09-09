@@ -18,7 +18,7 @@ packages). Peer ranges `^0.1.2-alpha.2 || ^0.1.3-alpha.1` cover both kernel
 lines. It will not load on 0.1.0-rc-era kernels; hosts still there should stay
 on plugin 0.3.x until their kernel is upgraded.
 
-After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered under the logo/slogan headline (a DOM mount into the hero's reserved body hole — DSH has no slot there; stock presets keep the stock hero).
+After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero).
 
 ## LLM resolution: who generates what
 
