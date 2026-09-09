@@ -4,20 +4,21 @@
  * hero stack through the DOM, the same technique the Bot Browser sidebar and
  * the browser-iframe layout push already use.
  *
- * Anchors are structural, never css-module class names (those rehash per
- * build): the conversation root's `data-phase="hero"`, the composer seat's
- * `data-composer-seat`, and — critically — the slot renderer's own
- * `data-slot="conversation.composer"` anchor div. renderSlot/renderSlotChain
- * wrap EVERY slot's output in such a `display: contents` div, so positional
- * firstElementChild walks off the composer seat land one level short; the
- * first round shipped exactly that bug (the block rendered inside the
- * workspace/preset chip row). Traversal: composer chain anchor → composer
- * stack → HeroShell root → hero stack; the host is inserted BEFORE the
- * stack's first child (the headline), putting the avatar + name directly
- * above the whale and slogan. When the first message flips the session
- * active the hero subtree unmounts, the host disconnects, and the mount
- * releases itself until the next blank session. A future DSH layout that
- * breaks the traversal fails safe: the block simply stops appearing.
+ * Anchoring lesson (three live rounds): the slot renderer wraps EVERY
+ * renderSlot/renderSlotChain output in `display: contents` divs — the outlet
+ * anchor `[data-slot="…"]`, and for overlay chains a second
+ * `[data-chain-overlay-fallback="…"]` around the fallback — so positional
+ * child walks from the composer seat land an unpredictable number of levels
+ * short (round 1 dropped the block into the chip row, round 3 into the
+ * HeroShell flex-row root beside the stack). The mount therefore anchors on
+ * CONTENT, which no wrapper can displace: in the hero phase the whale-logo
+ * svg is the first svg under the composer seat, and its nearest div ancestor
+ * IS the headline row. The host is inserted directly before that row, so the
+ * avatar + name sits centered above the whale and slogan inside the hero
+ * stack's flex column. When the first message flips the session active the
+ * hero subtree unmounts, the host disconnects, and the mount releases
+ * itself until the next blank session. A future DSH layout change that
+ * breaks the anchor fails safe: the block stops appearing.
  */
 
 import { createElement } from 'react'
@@ -27,24 +28,22 @@ import { HeroBotIdentity } from './HeroBotIdentity.tsx'
 import type { BotPresetSeatState } from './preset-seat-store.ts'
 
 /**
- * The hero stack element to insert into, plus its first child (the headline
- * row: whale logo + slogan + preview badge).
- * @returns the mount anchor, or null when no hero is on screen.
+ * The headline row (whale logo + slogan + preview badge) of the on-screen
+ * blank-session hero.
+ * @returns the row to insert before, or null when no hero is on screen.
  */
-function heroAnchor(): { stack: HTMLElement; headline: Element } | null {
+function heroHeadline(): HTMLElement | null {
   const phaseRoot = document.querySelector('[data-phase="hero"]')
   if (!(phaseRoot instanceof HTMLElement)) return null
   const seat = phaseRoot.querySelector('[data-composer-seat]')
   if (!(seat instanceof HTMLElement)) return null
-  const composer = seat.querySelector(':scope > [data-slot="conversation.composer"]')
-  if (!(composer instanceof HTMLElement)) return null
-  const composerStack = composer.firstElementChild
-  const heroRoot = composerStack?.firstElementChild
-  const stack = heroRoot?.firstElementChild
-  if (!(stack instanceof HTMLElement)) return null
-  const headline = stack.firstElementChild
-  if (headline === null) return null
-  return { stack, headline }
+  // Hero phase renders HeroShell first in the composer stack, so the first
+  // svg under the seat is the whale mark; the headline grid is its nearest
+  // div ancestor (the fish hitbox in between is a span).
+  const whale = seat.querySelector('svg')
+  if (!(whale instanceof SVGElement)) return null
+  const headline = whale.closest('div')
+  return headline instanceof HTMLElement ? headline : null
 }
 
 /**
@@ -70,11 +69,11 @@ export function startHeroIdentityMount(store: SnapshotStore<BotPresetSeatState>)
       // The hero unmounted underneath us (session left the blank phase).
       release()
     }
-    const anchor = heroAnchor()
-    if (anchor === null) return
+    const headline = heroHeadline()
+    if (headline === null) return
     host = document.createElement('div')
     host.dataset.oacHeroIdentity = ''
-    anchor.headline.before(host)
+    headline.before(host)
     root = createRoot(host)
     root.render(createElement(HeroBotIdentity, { store }))
   }
