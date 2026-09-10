@@ -1,30 +1,41 @@
 /**
  * Browser half of open-agent-connect-dsh: locale dictionaries, the Settings
- * sections, and the new-session preset chip. Does not shadow Settings →
- * Agent presets.
+ * sections, the new-session preset chip, the right-Sidebar `bot-browser` tab
+ * type, and the A2A Chat main panel with its `sidebar.panellist` glyph. Does
+ * not shadow Settings → Agent presets.
  */
-import { createElement } from 'react'
-import { createRoot } from 'react-dom/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
+import { IconBrowseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api } from './api.ts'
 import { A2AConversation, type A2AConversationInjected } from './A2AConversation.tsx'
+import { A2APanelGlyph, type A2APanelGlyphInjected } from './A2APanelGlyph.tsx'
 import { AppsPanel } from './AppsPanel.tsx'
-import { BotBrowserBoundary, BotBrowserSidebar, type BrowserLocaleFace } from './BotBrowserSidebar.tsx'
+import { BotBrowserTab, BotBrowserTabTitle, type BotBrowserTabInjected } from './BotBrowserTab.tsx'
 import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
+import { A2AUnreadController } from './a2a-unread-store.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
 import { BotBrowserIframeBridge } from './browser-iframe.ts'
+import {
+  BOT_BROWSER_TAB_ID,
+  BOT_BROWSER_TAB_KIND,
+  revealBotBrowserTab,
+  type BotBrowserOpenFace,
+} from '../browser-open-flow.ts'
 import { appEn, APP_NS, appZh, type AppsLocaleKey } from './locale-apps.ts'
 import { browserEn, BROWSER_NS, browserZh, type BrowserLocaleKey } from './locale-browser.ts'
 import { convEn, CONV_NS, convZh, type ConversationsLocaleKey } from './locale-conversations.ts'
@@ -53,13 +64,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.oac.memory': MemoryLocaleKey
     'settings.oac.user': UserLocaleKey
   }
-  interface SlotMap {
-    /** Sidebar-foot action above Settings; owner share is the column state. */
-    'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: { wide: boolean } }
-  }
 }
 
-export const inject = ['slots', 'locale', 'remote', 'remote.agentPresets', 'remote.session']
+export const inject = [
+  'slots',
+  'locale',
+  'remote',
+  'remote.agentPresets',
+  'remote.session',
+  'layout',
+  'sidebarRight',
+  'sidebarRightTabs',
+]
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
@@ -78,6 +94,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(MEMORY_NS, { zh: memoryZh, en: memoryEn }), 'oac-dsh: memory dictionary')
   ctx.effect(() => ctx.locale.register(USER_NS, { zh: userZh, en: userEn }), 'oac-dsh: user dictionary')
   const t = ctx.locale.bind(NS)
+  const tBrowser = ctx.locale.bind(BROWSER_NS)
   const tConv = ctx.locale.bind(CONV_NS)
   const tSvc = ctx.locale.bind(SVC_NS)
   const tApps = ctx.locale.bind(APP_NS)
@@ -85,93 +102,78 @@ export function apply(ctx: ClientContext): void {
   const tMemory = ctx.locale.bind(MEMORY_NS)
   const tUser = ctx.locale.bind(USER_NS)
 
-  // Right-sidebar Bot Browser: one store per activation, shared by the mounted
-  // panel, the Settings > Bots entry buttons, and the daemon-event listener.
+  // Right-Sidebar Bot Browser: one store and one iframe bridge per activation.
+  // The store is the reactive face the tab body/title read; the bridge tracks
+  // the live iframe, reports snapshots to the host, and runs host tab commands.
+  // Every entry point (Settings buttons, avatar links, daemon SSE) reveals the
+  // tab through openFace → revealBotBrowserTab.
   const browserStore = new BotBrowserStore()
   const iframeBridge = new BotBrowserIframeBridge(browserStore, (snapshot) => api.browserState(snapshot))
-  ctx.effect(() => {
-    const host = document.createElement('div')
-    host.dataset.plugin = 'open-agent-connect-dsh'
-    host.dataset.oacBrowser = ''
-    document.body.appendChild(host)
-    const fail = (phase: string, error: unknown): void => {
-      const message = `[oac-dsh] bot browser ${phase}: ${error instanceof Error ? error.message : String(error)}`
-      console.error(message, error)
-      try {
-        const bar = document.createElement('div')
-        bar.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483000;max-width:70vw;'
-          + 'padding:8px 12px;font:12px/1.5 ui-monospace,Menlo,monospace;color:#f2a1a1;'
-          + 'background:#1b1b22;border:1px solid #f2a1a1;border-radius:8px;white-space:pre-wrap'
-        bar.textContent = message
-        document.body.appendChild(bar)
-      } catch {
-        // nothing left to report with
-      }
-    }
-    try {
-      const root = createRoot(host)
-      root.render(createElement(BotBrowserBoundary, null,
-        createElement(BotBrowserSidebar, {
-          store: browserStore,
-          locale: ctx.locale as unknown as BrowserLocaleFace,
-          openHome: () => openBrowser(browserStore, null),
-          onIframe: (frame) => iframeBridge.setIframe(frame),
-        }),
-      ))
-      const stopBridge = iframeBridge.start()
-      let lastOpen = browserStore.getSnapshot().open
-      const stopOpenWatch = browserStore.subscribe(() => {
-        const open = browserStore.getSnapshot().open
-        if (open === lastOpen) return
-        lastOpen = open
-        iframeBridge.reportNow()
-      })
-      const stopEvents = startBrowserEventSource(browserStore, iframeBridge)
-      const stopLinks = startAgentLinkInterceptor((uri) => openBrowser(browserStore, uri))
-      return () => {
-        stopEvents()
-        stopLinks()
-        stopOpenWatch()
-        stopBridge()
-        root.unmount()
-        host.remove()
-      }
-    } catch (error) {
-      fail('mount', error)
-      return () => { host.remove() }
-    }
-  }, 'oac-dsh: bot browser sidebar')
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'oac-bots',
-    order: 20,
-    label: () => t('nav'),
-    locale: NS,
-    inject: () => ({
-      list: () => api.list(),
-      create: (input: Parameters<typeof api.create>[0]) => api.create(input),
-      update: (slug: string, patch: Record<string, unknown>) => api.update(slug, patch),
-      remove: (slug: string) => api.remove(slug),
-      llmDirectory: () => api.llmDirectory(),
-      chatSkills: (from: string) => api.chatSkills(from),
-      loadAutoReplyStatus: (from: string) => api.autoReplyStatus(from),
-      autoReplyConfig: (
-        from: string,
-        patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
-      ) => api.autoReplyConfig(from, patch),
-      browserOpen: (uri?: string) => openBrowser(browserStore, uri ?? null),
-      botWallet: (slug: string) => api.botWallet(slug),
-      botBackup: (slug: string) => api.botBackup(slug),
-      botSetupRetry: (slug: string) => api.botSetupRetry(slug),
-      botHomepageUpload: (slug: string, fileName: string, contentType: string, base64: string) =>
-        api.botHomepageUpload(slug, fileName, contentType, base64),
-      metaappList: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
+  const openFace: BotBrowserOpenFace = {
+    browserOpen: (uri) => api.browserOpen(uri),
+    selectConversation: () => { ctx.layout.selectPanel(null) },
+    openTab: (params) => { ctx.sidebarRight.openTab(BOT_BROWSER_TAB_KIND, { params }) },
+    reportError: (message) => {
+      console.error(`[oac-dsh] bot browser open: ${message}`)
+      browserStore.fail(message)
+      // Best-effort: surface the tab so its landing state shows the failure.
+      // The inner reveal reports nowhere — a second failure must not recurse.
+      void revealBotBrowserTab({ ...openFace, reportError: () => {} }, {})
+    },
+  }
+  const openBrowserNow = (uri: string | null): Promise<void> => openBrowser(openFace, iframeBridge, uri)
+  ctx.effect(() => ctx.sidebarRightTabs.register({
+    id: BOT_BROWSER_TAB_ID,
+    kind: BOT_BROWSER_TAB_KIND,
+    title: () => tBrowser('title'),
+    guide: [{
+      order: 20,
+      title: () => tBrowser('guideTitle'),
+      description: () => tBrowser('guideDesc'),
+      icon: IconBrowseOutline16,
+    }],
+  }), 'oac-dsh: bot browser tab type')
+  ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab',
+    key: BOT_BROWSER_TAB_ID,
+    locale: BROWSER_NS,
+    inject: (): BotBrowserTabInjected => ({
+      hooks: { browser: browserStore },
+      onIframe: (element, url) => iframeBridge.setIframe(element, url),
+      openHome: () => { void openBrowserNow(null) },
     }),
-  }, BotPanel))
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'oac-a2a',
-    order: 0,
+  }, BotBrowserTab))
+  ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab.title',
+    key: BOT_BROWSER_TAB_ID,
+    inject: (): Pick<BotBrowserTabInjected, 'hooks'> => ({ hooks: { browser: browserStore } }),
+  }, BotBrowserTabTitle))
+  ctx.effect(() => {
+    const stopBridge = iframeBridge.start()
+    const stopEvents = startBrowserEventSource(iframeBridge, {
+      liveUrl: () => iframeBridge.liveUrl(),
+      reveal: (params) => revealBotBrowserTab(openFace, params),
+    })
+    const stopLinks = startAgentLinkInterceptor((uri) => { void openBrowserNow(uri) })
+    return () => {
+      stopEvents()
+      stopLinks()
+      stopBridge()
+    }
+  }, 'oac-dsh: bot browser wiring')
+
+  // A2A Chat: a global main panel (key `oac-a2a`) plus its panellist glyph.
+  // The unread feed lives at apply scope so the glyph's dot works no matter
+  // which panel is selected; the panel feeds its live view back through
+  // setView so the thread being read stays read.
+  const unreadController = new A2AUnreadController({
+    list: (from) => api.conversations(from),
+    thread: (from, peer) => api.conversationThread(from, peer),
+  })
+  ctx.effect(() => unreadController.start(), 'oac-dsh: a2a unread feed')
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main',
+    key: 'oac-a2a',
     locale: CONV_NS,
     inject: (): A2AConversationInjected => ({
       bots: () => api.list(),
@@ -181,7 +183,7 @@ export function apply(ctx: ClientContext): void {
       guidance: (from: string, peer: string, guidance: string) =>
         api.conversationGuidance(from, peer, guidance),
       meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
-      browserOpen: (uri?: string) => openBrowser(browserStore, uri ?? null),
+      browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
       grouptask: {
         list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
         detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
@@ -201,8 +203,47 @@ export function apply(ctx: ClientContext): void {
         staffingDecide: (chair, proposalId, decision) => api.grouptaskStaffingDecide(chair, proposalId, decision),
         staffingCreate: (proposalId) => api.grouptaskStaffingCreate(proposalId),
       },
+      hooks: { unread: unreadController.source },
+      clearPrivateUnread: (from, peer) => unreadController.clearPrivateUnread(from, peer),
+      clearGroupUnread: (key) => unreadController.clearGroupUnread(key),
+      setView: (view) => unreadController.setView(view),
     }),
   }, A2AConversation))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: 'oac-a2a',
+    order: 0,
+    label: () => tConv('nav'),
+    inject: (): A2APanelGlyphInjected => ({ hooks: { unread: unreadController.source } }),
+  }, A2APanelGlyph))
+
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'oac-bots',
+    order: 20,
+    label: () => t('nav'),
+    locale: NS,
+    inject: () => ({
+      list: () => api.list(),
+      create: (input: Parameters<typeof api.create>[0]) => api.create(input),
+      update: (slug: string, patch: Record<string, unknown>) => api.update(slug, patch),
+      remove: (slug: string) => api.remove(slug),
+      llmDirectory: () => api.llmDirectory(),
+      chatSkills: (from: string) => api.chatSkills(from),
+      loadAutoReplyStatus: (from: string) => api.autoReplyStatus(from),
+      autoReplyConfig: (
+        from: string,
+        patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
+      ) => api.autoReplyConfig(from, patch),
+      browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
+      botWallet: (slug: string) => api.botWallet(slug),
+      botBackup: (slug: string) => api.botBackup(slug),
+      botSetupRetry: (slug: string) => api.botSetupRetry(slug),
+      botHomepageUpload: (slug: string, fileName: string, contentType: string, base64: string) =>
+        api.botHomepageUpload(slug, fileName, contentType, base64),
+      metaappList: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
+    }),
+  }, BotPanel))
   // Services settings section hidden until the service plugin matures; the
   // ServicesPanel, its locale dictionary, and the host routes stay in tree.
   ctx.slots.inject('settings.section', () => ctx.slots.register({

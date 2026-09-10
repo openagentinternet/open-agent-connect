@@ -1,24 +1,40 @@
 /**
  * Browser-open wiring (client half).
  *
- * Two paths land on the same sidebar:
+ * Two paths land on the same right-Sidebar `bot-browser` tab:
  *
  * - daemon-driven: `metabot browser tab open` fans out over the daemon SSE;
  *   ABC inside an already-loaded iframe opens the tab itself, so the client
- *   only ensures the sidebar is visible (no iframe reload);
+ *   only reveals the tab (no iframe reload);
  * - host/UI-driven: Settings buttons and bot_browser_open_uri. If the iframe
- *   is already loaded, navigate via ABC postMessage; otherwise set iframe src.
+ *   is already loaded, navigate via ABC postMessage; otherwise the tab body
+ *   sets its iframe src from the navigation params.
+ *
+ * The reveal itself — select Conversation, then `openTab('bot-browser')`
+ * with its no-mounted-surface retry — lives in `browser-open-flow.ts`.
  */
 import { api } from './api.ts'
 import type { BotBrowserIframeBridge } from './browser-iframe.ts'
-import type { BotBrowserStore } from './browser-store.ts'
 import { decideBrowserOpenAction, type BrowserCatalogEntry, type BrowserCommandRequest, type BrowserOpenSource } from '../browser-protocol.ts'
+import {
+  openBotBrowser,
+  type BotBrowserOpenFace,
+  type BotBrowserTabParams,
+} from '../browser-open-flow.ts'
 import { rememberCatalog } from './browser-links.ts'
+
+/** How the daemon-event listener reaches the right-Sidebar tab. */
+export interface BrowserPanelFace {
+  /** The URL the live iframe loaded (null = no live tab body). */
+  liveUrl: () => string | null
+  /** Reveal the bot-browser tab with these navigation params. */
+  reveal: (params: BotBrowserTabParams) => Promise<void>
+}
 
 /** Subscribe to host-half browser-open + command events; returns an unsubscribe. */
 export function startBrowserEventSource(
-  store: BotBrowserStore,
-  iframe: BotBrowserIframeBridge,
+  bridge: BotBrowserIframeBridge,
+  panel: BrowserPanelFace,
 ): () => void {
   let source: EventSource | null = null
   try {
@@ -36,26 +52,27 @@ export function startBrowserEventSource(
       const url = typeof data.localUiUrl === 'string' ? data.localUiUrl : ''
       if (!url) return
       const origin: BrowserOpenSource = data.source === 'daemon' ? 'daemon' : 'host'
-      const snap = store.getSnapshot()
+      const liveUrl = panel.liveUrl()
       const decision = decideBrowserOpenAction({
         source: origin,
         uri: typeof data.uri === 'string' ? data.uri : null,
         localUiUrl: url,
-        hasIframeUrl: Boolean(snap.url),
+        hasIframeUrl: liveUrl !== null,
       })
       if (decision.kind === 'ensure-open') {
-        if (snap.url) store.ensureOpen()
-        else store.open(url)
-        iframe.reportNow()
+        // ABC already navigated inside the live iframe: reveal the tab on the
+        // SAME url so the body never resets the iframe src.
+        void panel.reveal({ url: liveUrl ?? url })
+        bridge.reportNow()
         return
       }
       if (decision.kind === 'open-tab') {
-        void iframe.runCommand({ requestId: 'ui-open', action: 'open-tab', uri: decision.uri })
-        store.ensureOpen()
+        void bridge.runCommand({ requestId: 'ui-open', action: 'open-tab', uri: decision.uri })
+        if (liveUrl !== null) void panel.reveal({ url: liveUrl })
         return
       }
-      store.open(decision.url)
-      iframe.reportNow()
+      void panel.reveal({ url: decision.url })
+      bridge.reportNow()
     } catch {
       // a malformed frame is not fatal; keep listening
     }
@@ -64,7 +81,7 @@ export function startBrowserEventSource(
     try {
       const command = JSON.parse(event.data) as BrowserCommandRequest
       if (!command || typeof command.requestId !== 'string' || typeof command.action !== 'string') return
-      void iframe.runCommand(command).then((result) => api.browserCommandResult(result))
+      void bridge.runCommand(command).then((result) => api.browserCommandResult(result))
     } catch {
       // keep listening
     }
@@ -84,22 +101,11 @@ export function startBrowserEventSource(
 }
 
 /**
- * Resolve a URI (or the Browser home) and open the sidebar on it. Resolves
- * once the sidebar has visibly reacted — opened on the resolved URL, or the
- * navigation was handed to the already-loaded iframe — and never rejects:
- * failures land in the landing-state error instead. Callers can hook the
- * resolution to sync follow-up UI (e.g. closing Settings) with the moment
- * the Browser appears.
+ * Resolve a URI (or the Browser home) and reveal the right-Sidebar tab on it.
+ * Resolves once the reveal finished (or the failure was reported) and never
+ * rejects, so callers can hook the resolution to sync follow-up UI (e.g.
+ * closing Settings) with the moment the Browser appears.
  */
-export function openBrowser(store: BotBrowserStore, uri: string | null): Promise<void> {
-  const snap = store.getSnapshot()
-  if (snap.open && snap.url && uri) {
-    return api.browserOpen(uri).then(() => undefined, (cause: unknown) => {
-      store.fail(cause instanceof Error ? cause.message : String(cause))
-    })
-  }
-  return api.browserOpen(uri).then(
-    (url) => { store.open(url) },
-    (cause: unknown) => { store.fail(cause instanceof Error ? cause.message : String(cause)) },
-  )
+export function openBrowser(face: BotBrowserOpenFace, bridge: BotBrowserIframeBridge, uri: string | null): Promise<void> {
+  return openBotBrowser(face, uri, bridge.liveUrl())
 }

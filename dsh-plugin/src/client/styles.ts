@@ -202,20 +202,15 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-link-button:hover { text-decoration: underline; }
 .oac-link-button:disabled { opacity: .6; cursor: default; text-decoration: none; }
 
-/* A2A conversation panel: the sidebar-foot trigger row above Settings and a
-   floating two-column dialog. Geometry and tokens follow the Settings shell
-   (mask + centered 24px panel) and the conversation row/bubble vocabulary. */
-.oac-a2a-trigger { flex: none; display: flex; align-items: center; gap: 8px; width: calc(100% + 8px); height: 34px; margin: 4px -4px 4px; padding: 6px 2px 6px 10px; box-sizing: border-box; border: none; border-radius: 12px; background: transparent; color: var(--dsw-alias-label-primary); font-family: inherit; font-size: 14px; line-height: 22px; cursor: pointer; overflow: hidden; }
-.oac-a2a-trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
+/* A2A conversation panel: a global main panel (main slot key oac-a2a) with a
+   sidebar panellist row glyph carrying the unread dot. The panel fills the
+   center column; geometry follows the conversation row/bubble vocabulary. */
 .oac-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3); }
-.oac-a2a-trigger-rail { width: 36px; height: 36px; margin: 8px 0 10px; justify-content: center; gap: 0; padding: 0; border-radius: 50%; }
-.oac-a2a-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
-.oac-a2a-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }
-.oac-a2a-panel { position: relative; z-index: 1; display: flex; flex-direction: column; width: min(980px, calc(100vw - 48px)); height: min(720px, calc(100vh - 48px)); border-radius: 24px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-shadow-lv3); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.oac-a2a-glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.oac-a2a-glyph .oac-unread-dot { position: absolute; top: -3px; right: -4px; box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-2); }
+.oac-a2a-panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-layer-2); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--dsw-alias-label-primary); }
-.oac-a2a-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 28px; background: transparent; cursor: pointer; color: var(--dsw-alias-label-primary); }
-.oac-a2a-close:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .oac-a2a-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
 .oac-a2a-list-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
@@ -641,32 +636,12 @@ export const HERO_CSS = `
 `
 
 export const BROWSER_CSS = `
-/* Right-sidebar Bot Browser (hosted in a body portal, like dsh-better-sidebar).
-   While open it OCCUPIES the layout: #root gives up the panel width, so the
-   conversation column lifts instead of the Browser floating over it.
-   Layering: the DSH convention is 1000 = full-viewport modal layer (Settings
-   shell, Modal dialogs, the A2A overlay below) and 1100 = above-modals
-   (menus, toasts). The shell sits at 990 — above in-app chrome, below every
-   modal — so an open modal masks and blocks the Browser like the rest of the
-   app instead of the Browser covering the dialog. */
-#root { margin-right: var(--oac-browser-width, 0px); transition: margin-right .18s cubic-bezier(.4, 0, .2, 1); }
-body[data-oac-browser-dragging] #root { transition: none; }
-body[data-oac-browser-dragging] { cursor: col-resize; user-select: none; }
-body[data-oac-browser-dragging] .oac-browser-frame { pointer-events: none; }
-.oac-browser-shell { position: fixed; top: 0; right: 0; bottom: 0; z-index: 990; width: var(--oac-browser-width, 0px); display: flex; pointer-events: none; }
-/* Sidebar-style divider: a 12px grab strip (half overlapping the conversation
-   column) carrying a hairline knob that lights up on hover/drag, matching the
-   left sidebar's resize affordance. */
-.oac-browser-resize { flex: none; width: 12px; margin-left: -6px; align-self: stretch; display: flex; justify-content: center; cursor: col-resize; touch-action: none; pointer-events: auto; }
-.oac-browser-resize-knob { width: 2px; height: 100%; background: transparent; transition: background .12s ease; }
-.oac-browser-resize:hover .oac-browser-resize-knob, .oac-browser-resize[data-active='true'] .oac-browser-resize-knob { background: var(--dsw-alias-brand-primary); }
-.oac-browser-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-2); border-left: 1px solid var(--dsw-alias-border-l2); overflow: hidden; pointer-events: auto; }
-.oac-browser-header { flex: none; display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 12px 0 16px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-.oac-browser-title { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); white-space: nowrap; }
-.oac-browser-uri { flex: 1; min-width: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oac-browser-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 18px; line-height: 1; cursor: pointer; }
-.oac-browser-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.oac-browser-body { flex: 1; min-height: 0; background: var(--dsw-alias-bg-layer-1); }
+/* Right-Sidebar bot-browser tab body: the local OAC Browser (/browser/*
+   localUiUrl) in an iframe inside the official right Sidebar. Pane geometry,
+   resize, and tab chrome belong to the Sidebar; these rules cover only the
+   tab content: the frame, the landing/error state, and the agent links the
+   conversation link interceptor rewrites. */
+.oac-browser-tab { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1); }
 .oac-browser-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--dsw-alias-bg-layer-0, #fff); }
 .oac-browser-landing { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; box-sizing: border-box; text-align: center; }
 .oac-browser-empty, .oac-browser-error { margin: 0; max-width: 380px; font-size: 13px; line-height: 20px; }
@@ -674,11 +649,6 @@ body[data-oac-browser-dragging] .oac-browser-frame { pointer-events: none; }
 .oac-browser-error { color: var(--dsw-alias-state-error-primary); }
 .oac-browser-home { padding: 7px 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
 .oac-browser-home:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--dsw-alias-label-dimmed); }
-.oac-browser-reopen { position: fixed; top: 64px; right: 0; z-index: 1075; display: flex; align-items: center; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-right: 0; border-radius: 10px 0 0 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 16px; cursor: pointer; pointer-events: auto; }
-.oac-browser-reopen:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.oac-browser-shell[data-open='false'] .oac-browser-resize, .oac-browser-shell[data-open='false'] .oac-browser-panel { display: none; }
-.oac-browser-shell[data-open='true'] .oac-browser-reopen { display: none; }
-.oac-browser-shell[data-open='false']:focus-within .oac-browser-reopen { outline: 2px solid var(--dsw-alias-brand-primary); }
 a.oac-agent-link, a[data-oac-agent-link] { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 `
 

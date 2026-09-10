@@ -1,90 +1,46 @@
 /**
  * Right-sidebar Bot Browser store.
  *
- * The DSH web shell exposes no right-sidebar seat, so the plugin owns one as
- * a body portal (the same approach dsh-better-sidebar uses). This tiny store
- * is the single source of truth for open state, the iframe URL, and the
- * panel width; it is shared by the mounted panel, the Settings > Bots entry
- * buttons, and the daemon-event listener.
+ * The Browser lives in the official right Sidebar as the `bot-browser` page
+ * tab kind; this tiny store is the reactive face the tab body and chip title
+ * read through the inject `hooks` compartment. It carries only what the tab
+ * components render: the live ABC active-tab URI (chip title) and the last
+ * open failure (the tab body's landing state). The iframe URL itself is
+ * navigation business — it travels as `openTab` params and is tracked by the
+ * iframe bridge (`liveUrl()`), not here.
  */
-
-/** Narrowest drag target: phone width. */
-export const BROWSER_WIDTH_MIN = 360
-/** Widest drag target: about three quarters of the viewport. */
-export const BROWSER_WIDTH_MAX = Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.75)
-/** Default open width: about half the viewport, capped. */
-export const BROWSER_WIDTH_DEFAULT = Math.min(
-  Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.5),
-  1280,
-)
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 export type BotBrowserState = {
-  open: boolean
-  /** The daemon `localUiUrl` currently loaded (null = landing/empty state). */
-  url: string | null
   /** Live ABC active-tab URI reported by the iframe bridge. */
   activeUri: string | null
-  /** Panel width in CSS px (drives `--oac-browser-width`). */
-  width: number
-  /** Last open failure message (landing state shows it when set). */
+  /** Last open failure message (the tab body's landing state shows it). */
   error: string | null
 }
 
-export class BotBrowserStore {
-  private state: BotBrowserState = {
-    open: false,
-    url: null,
-    activeUri: null,
-    width: BROWSER_WIDTH_DEFAULT,
-    error: null,
-  }
+export class BotBrowserStore implements SnapshotStore<BotBrowserState> {
+  private readonly inner = createSnapshotStore<BotBrowserState>({ activeUri: null, error: null })
 
-  private readonly listeners = new Set<() => void>()
+  readonly getSnapshot = (): BotBrowserState => this.inner.getSnapshot()
 
-  getSnapshot = (): BotBrowserState => this.state
+  readonly subscribe = (listener: () => void): (() => void) => this.inner.subscribe(listener)
 
-  subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener)
-    return () => { this.listeners.delete(listener) }
-  }
+  readonly update = (mutator: (draft: BotBrowserState) => void): void => this.inner.update(mutator)
 
-  private set(patch: Partial<BotBrowserState>): void {
-    this.state = { ...this.state, ...patch }
-    for (const listener of this.listeners) listener()
-  }
-
-  /** Open the sidebar, loading the given page (null keeps the landing state). */
-  open(url: string | null): void {
-    this.set({ open: true, url, error: null, ...(url === this.state.url ? {} : { activeUri: null }) })
-  }
-
-  /** Keep the sidebar open without changing the iframe src (daemon already navigated). */
-  ensureOpen(): void {
-    if (this.state.open) return
-    this.set({ open: true, error: null })
-  }
+  readonly set = (next: BotBrowserState): void => this.inner.set(next)
 
   setActiveUri(uri: string | null): void {
-    if (this.state.activeUri === uri) return
-    this.set({ activeUri: uri })
+    if (this.inner.getSnapshot().activeUri === uri) return
+    this.update((draft) => { draft.activeUri = uri })
   }
 
-  /** Open the sidebar to the landing state carrying an open failure message. */
+  /** Record an open failure for the tab body's landing state. */
   fail(message: string): void {
-    this.set({ open: true, url: null, error: message })
+    this.update((draft) => { draft.error = message })
   }
 
-  close(): void {
-    this.set({ open: false })
-  }
-
-  toggle(): void {
-    this.set({ open: !this.state.open })
-  }
-
-  setWidth(width: number): void {
-    const clamped = Math.min(BROWSER_WIDTH_MAX, Math.max(BROWSER_WIDTH_MIN, Math.round(width)))
-    if (clamped === this.state.width) return
-    this.set({ width: clamped })
+  clearError(): void {
+    if (this.inner.getSnapshot().error === null) return
+    this.update((draft) => { draft.error = null })
   }
 }
