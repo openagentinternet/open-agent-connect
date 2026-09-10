@@ -47,7 +47,7 @@ test('en and zh dictionaries stay in sync for Memory and User', async () => {
   assert.match(user, /nav: '用户'/)
 })
 
-test('client registers four settings sections and the A2A sidebar footer action', async () => {
+test('client registers four settings sections and the A2A main panel with its panellist glyph', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(text, /id: 'oac-bots'/)
   assert.doesNotMatch(text, /id: 'oac-services'/)
@@ -55,8 +55,11 @@ test('client registers four settings sections and the A2A sidebar footer action'
   assert.doesNotMatch(text, /id: 'oac-conversations'/)
   assert.match(text, /id: 'oac-memory'/)
   assert.match(text, /id: 'oac-user'/)
-  assert.match(text, /name: 'sidebar\.footer\.action'/)
+  assert.match(text, /name: 'main'/)
+  assert.match(text, /key: 'oac-a2a'/)
+  assert.match(text, /name: 'sidebar\.panellist'/)
   assert.match(text, /id: 'oac-a2a'/)
+  assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /order: 20/)
   assert.match(text, /order: 21/)
   assert.match(text, /order: 22/)

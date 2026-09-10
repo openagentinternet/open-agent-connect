@@ -15,15 +15,18 @@ write time: the Bot persona becomes the persona row's `prefix` (the copied
 `suffix` is kept), and legacy `text`-only rows from pre-split presets are
 healed in place on every reconcile — kernels ≥0.1.3-alpha.2 require `prefix`
 and ignore `text`, so older plugin releases silently lose the Bot persona
-there. Session format v3, the `ctx.agent` removal, the Inbox API change, and
-the `sidebar.panellist`/`main` panel API all miss this plugin: sessions are
-read only through the in-process `snapshotEvents()`, and none of those APIs
-were ever used. Peer ranges `^0.1.2-alpha.2 || ^0.1.3-alpha.1 ||
-^0.1.5-alpha.1` cover the 0.1.2, 0.1.3, and 0.1.5 kernel lines. It will not
+there. Session format v3, the `ctx.agent` removal, and the Inbox API change
+all miss this plugin: sessions are read only through the in-process
+`snapshotEvents()`. The native-panels UI — the `sidebar.panellist`/`main`
+panel API and the right-Sidebar tab-type API (`layout`, `sidebarRight`,
+`sidebarRightTabs` services) — exists only on the 0.1.5 kernel line, so the
+web client now loads there only; the wider `^0.1.2-alpha.2 ||
+^0.1.3-alpha.1` peer ranges remain on the packages the preset/persona
+surface still shares. It will not
 load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
 until their kernel is upgraded.
 
-After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The A2A Chat entry and each private-chat/group-task row carry unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
+After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a global main panel with a left-rail panellist row, and the Bot Browser is a right-Sidebar page tab). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The A2A Chat panellist row and each private-chat/group-task row carry unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
 
 ## LLM resolution: who generates what
 
@@ -85,13 +88,12 @@ corpus imports/edits and full rebuilds.
 
 ## Group Tasks (群任务) and OpenTeam
 
-The **A2A Chat** sidebar-footer panel has a second tab, **Group Tasks**: one
+The **A2A Chat** main panel has a second tab, **Group Tasks**: one
 on-chain MetaWeb group chat per task, chaired by your Twin Bot. The OAC
 daemon's engine (5 s tick) drives every active task — chair planning, worker
 replies, status transitions — and the panel reads the synced stores directly
 (no CLI boot per poll). The thread head's **Task panel** toggle opens a
-floating drawer (the IDBots group-task right rail, ported to the narrower
-panel): members with work/state badges, collapsible status history,
+floating drawer (the IDBots group-task right rail, ported into the panel): members with work/state badges, collapsible status history,
 transitions, integrity events (click to jump to the source message), and the
 deliverables list — kind pill, acceptance status, on-chain
 confirmation/verification pill, copyable/clickable URI, author — all read from
@@ -483,27 +485,38 @@ described in the repo `AGENTS.md`.
 
 ## Bot Browser
 
-The plugin adds a very wide right-sidebar Bot Browser to the DSH web GUI: the
-local OAC Browser (`/browser/*` `localUiUrl`) rendered in an iframe, with the
-conversation column giving up space (`#root { margin-right }` layout push, so
-the Browser occupies the layout instead of floating over it).
+The plugin registers a **right-Sidebar page tab kind** (`bot-browser`) in the
+DSH web GUI: the local OAC Browser (`/browser/*` `localUiUrl`) rendered in an
+iframe inside the official right Sidebar — native tab chip, drag resize, and
+dock/float chrome included, with no layout push against the conversation
+column. The right Sidebar's guide page (the `+` tab) gains a **Bot Browser**
+capsule that opens an empty tab.
 
 Entry points:
 
 - **Settings → Bots** header gains a **Bot Browser** button (closes Settings as the Browser home opens).
 - Each Bot card gains a **Bot Page** button that closes Settings as that Bot's
-  page (`metaid://<globalMetaId>`) opens in the right sidebar.
+  page (`metaid://<globalMetaId>`) opens in the tab.
 - In **A2A Chat** and **Group Tasks** transcripts, clicking any sender avatar
   (or the thread-header participant avatars) opens that Bot's page the same
-  way and closes the panel.
-- The Browser panel has a close button and a width drag handle (default
-  `min(50vw, 1280px)`).
+  way. The reveal first returns the main column to the Conversation (the
+  right Sidebar's seat mounts only there); the A2A panel stays selected in
+  the background, one panellist-row click away.
+
+Native tab semantics: switching to another right-Sidebar tab unmounts the
+body, so the iframe reloads on return and ABC reconstructs its page state
+from the daemon. A reveal carrying the URL the iframe already shows never
+resets the `src` (ABC inside already navigated — see Agent linkage), so
+same-page reveals keep the live page. Two bodies of the kind alive at once
+(a split pane showing `bot-browser` twice) is a tolerated edge, not a
+supported mode: host commands and iframe messages route to the most recently
+attached one.
 
 Agent linkage is two layers:
 
 - **CLI skills** (`/metabot-browser`, `/metabot-metaapp`) still work. The host
   half keeps a persistent SSE subscription to the daemon's `/api/browser/events`,
-  so `metabot browser tab open --uri` opens this sidebar. When the iframe is
+  so `metabot browser tab open --uri` opens this tab. When the iframe is
   already loaded, the plugin does **not** reload it: ABC inside the iframe
   already received the daemon event.
 - **Native Cordis tools** registered on the host global tool layer (so they are
@@ -534,10 +547,10 @@ Agent linkage is two layers:
 
 Each `oac-*` turn also injects a live `<browser_context>` block at the
 user-message tail (active tab URI/title, open tabs, MetaApp `source_dir` when
-known). If the sidebar is closed, the block says so — the model must not guess
-from earlier CLI opens.
+known). If no `bot-browser` tab is live, the block says so — the model must
+not guess from earlier CLI opens.
 
-**Theme following.** The Browser follows the DSH theme: the sidebar appends
+**Theme following.** The Browser follows the DSH theme: the tab body appends
 the DSH-resolved theme to the iframe URL (`?theme=dark|light`), the daemon
 bakes it into the served ABC page (no light flash in dark mode), and DSH
 theme flips are pushed into the loaded iframe as ABC
@@ -555,6 +568,7 @@ page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 ## Layout
 
 - Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`, `tools`, `systemPrompt`
-- Client: `dsh.client` bundle, no second `cordis.patch.yml` row
+- Client: `dsh.client` bundle, no second `cordis.patch.yml` row; inject `slots`, `locale`, `remote`, `remote.agentPresets`, `remote.session`, `layout`, `sidebarRight`, `sidebarRightTabs`
+- Client surfaces: the Settings sections (`oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic`), the A2A Chat global main panel (`main` key `oac-a2a`) with its `sidebar.panellist` row, and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule)
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
 - `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).

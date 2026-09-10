@@ -39,7 +39,7 @@ function isSkippable(el: Element): boolean {
   if (SKIP_WRAP.has(el.tagName)) return true
   // .oac-a2a-list is the A2A Chat / Group Tasks left column: navigation rows
   // whose name/summary text must stay plain — never linkify pinIDs/URIs there.
-  if (el.closest('a, code, pre, textarea, .oac-browser-shell, .oac-a2a-list')) return true
+  if (el.closest('a, code, pre, textarea, .oac-browser-tab, .oac-a2a-list')) return true
   // A streaming message re-parses and re-renders its tail on every chunk.
   // Wrapping a partially-arrived URI there leaves a stale truncated anchor in
   // the DOM when React rewrites its text nodes — the visible garble of a cut
@@ -98,7 +98,7 @@ function wrapCatalogTitle(textNode: Text): boolean {
 function rewriteExistingAnchors(root: ParentNode): void {
   for (const node of Array.from(root.querySelectorAll('a[href]'))) {
     const anchor = node as HTMLAnchorElement
-    if (anchor.closest('.oac-browser-shell')) continue
+    if (anchor.closest('.oac-browser-tab')) continue
     const uri = normalizeBotBrowserUri(anchor.getAttribute('href') || '')
     if (!uri) continue
     if (anchor.getAttribute('href') === uri && anchor.dataset.oacAgentLink === uri) continue

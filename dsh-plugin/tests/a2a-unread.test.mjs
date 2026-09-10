@@ -105,15 +105,23 @@ test('localProfilesRoot resolves through resolveMetabotManagerLayout, never a ba
   assert.doesNotMatch(localRead, /join\(.*'profiles'\)/)
 })
 
-test('client rides one all-events stream; the polling badge flag is gone', async () => {
+test('client rides one all-events stream at apply scope; the polling badge flag is gone', async () => {
+  const feed = await readFile(join(root, 'src/client/a2a-unread-store.ts'), 'utf8')
+  assert.match(feed, /\/oac\/api\/chat\/events\/all/)
+  assert.match(feed, /private-conversations-changed/)
+  assert.match(feed, /group-task-update/)
+  // The apply scope starts the feed so the panellist glyph dot works no
+  // matter which main panel is selected.
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /unreadController\.start\(\)/)
+  // The panellist glyph renders the dot from the shared feed.
+  const glyph = await readFile(join(root, 'src/client/A2APanelGlyph.tsx'), 'utf8')
+  assert.match(glyph, /hasAnyUnread\(state\)/)
+  assert.match(glyph, /oac-unread-dot/)
   const panel = await readFile(join(root, 'src/client/A2AConversation.tsx'), 'utf8')
-  assert.match(panel, /\/oac\/api\/chat\/events\/all/)
-  assert.match(panel, /private-conversations-changed/)
-  assert.match(panel, /group-task-update/)
-  assert.match(panel, /hasAnyUnread\(unread\)/)
   assert.doesNotMatch(panel, /UNREAD_BADGE_ENABLED/)
   assert.doesNotMatch(panel, /UNREAD_POLL_MS/)
-  // The per-Bot daemon proxy stays panel-open-only (warm-up refresh).
+  // The per-Bot daemon proxy stays panel-selected-only (warm-up refresh).
   const openOnly = panel.indexOf("/oac/api/chat/events?from=")
   assert.ok(openOnly > 0)
 })

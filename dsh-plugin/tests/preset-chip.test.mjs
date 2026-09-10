@@ -16,8 +16,11 @@ test('client manifest targets the 0.1.2 kernel surface', async () => {
   assert.ok(!pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime'))
   for (const row of [
     '@deepseek-ai/dsh-client-locale',
-    '@deepseek-ai/dsh-client-ui-slots',
+    '@deepseek-ai/dsh-client-ui-layout',
     '@deepseek-ai/dsh-client-ui-settings',
+    '@deepseek-ai/dsh-client-ui-sidebar',
+    '@deepseek-ai/dsh-client-ui-sidebar-right',
+    '@deepseek-ai/dsh-client-ui-slots',
     '@deepseek-ai/dsh-client-ui-conversation',
   ]) {
     assert.ok(pkg.dsh.client.inject.includes(row), `missing inject row ${row}`)
@@ -30,7 +33,10 @@ test('client manifest targets the 0.1.2 kernel surface', async () => {
 
 test('client plugin drives the Remote faces, not the removed connection api', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
-  assert.match(text, /export const inject = \['slots', 'locale', 'remote', 'remote\.agentPresets', 'remote\.session'\]/)
+  assert.match(
+    text,
+    /export const inject = \[\s*'slots',\s*'locale',\s*'remote',\s*'remote\.agentPresets',\s*'remote\.session',\s*'layout',\s*'sidebarRight',\s*'sidebarRightTabs',?\s*\]/,
+  )
   assert.doesNotMatch(text, /get\('connection'\)/)
 })
 

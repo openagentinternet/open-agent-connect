@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Button,
   IconCloseOutline16,
-  IconNewChatOutline16,
   IconPlusOutline16,
   IconSendOutline16,
   Input,
   MarkdownText,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
+import type { CommonKeyOf, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
   timestampLabel,
   txidPreview,
@@ -23,15 +23,8 @@ import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { pickDefaultBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
-import {
-  applyGroupUpdate,
-  applyPrivateLatest,
-  EMPTY_UNREAD,
-  hasAnyUnread,
-  privateRowStatus,
-  seedPrivateSeen,
-  type UnreadState,
-} from '../unread-logic.ts'
+import type { UnreadState } from '../unread-logic.ts'
+import type { A2AUnreadView } from './a2a-unread-store.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -53,29 +46,14 @@ export interface A2AConversationInjected {
   grouptask: GroupTaskInjectedApi
   /** Open the right-sidebar Bot Browser on a resource URI (e.g. `metaid://<globalMetaId>`). */
   browserOpen: (uri?: string) => Promise<void>
-}
-
-const UNREAD_STORAGE_KEY = 'oac-dsh:a2a-unread:v1'
-
-function readUnreadState(): UnreadState {
-  const fallback: UnreadState = EMPTY_UNREAD
-  try {
-    const raw = window.localStorage.getItem(UNREAD_STORAGE_KEY)
-    if (!raw) return fallback
-    const value = JSON.parse(raw) as Partial<UnreadState>
-    return {
-      private: value.private && typeof value.private === 'object' ? value.private : {},
-      group: value.group && typeof value.group === 'object' ? value.group : {},
-      privateSeen: value.privateSeen && typeof value.privateSeen === 'object' ? value.privateSeen : {},
-      groupSeen: value.groupSeen && typeof value.groupSeen === 'object' ? value.groupSeen : {},
-    }
-  } catch {
-    return fallback
+  hooks: {
+    /** The apply-scope A2A unread feed (row dots + Group Tasks badges). */
+    unread: SnapshotStore<UnreadState>
   }
-}
-
-function writeUnreadState(state: UnreadState): void {
-  try { window.localStorage.setItem(UNREAD_STORAGE_KEY, JSON.stringify(state)) } catch { /* storage may be disabled */ }
+  clearPrivateUnread: (from: string, peer: string) => void
+  clearGroupUnread: (key: string) => void
+  /** Feed this panel's live view to the unread controller; cleared on unmount. */
+  setView: (view: A2AUnreadView) => void
 }
 
 const GUIDANCE_POLL_MS = 1500
@@ -169,13 +147,14 @@ function MessageRow({
 }
 
 /**
- * Sidebar-foot A2A conversation entry: a trigger row above Settings (wide and
- * rail variants) that opens a floating two-column panel — peer conversation
- * list on the left, message thread with a composer on the right. Data comes
- * from the same daemon endpoints the OAC `/ui/conversations` page reads.
+ * Global main panel (main slot key `oac-a2a`): private peer conversations on
+ * the left, message thread with a composer on the right, plus the Group
+ * Tasks tab. Data comes from the same daemon endpoints the OAC
+ * `/ui/conversations` page reads. The panel is root-scoped — it must not
+ * assume a Session — and mounts only while selected in the main column, so
+ * the effects below run exactly while the panel is on screen.
  */
 export function A2AConversation({
-  wide,
   bots,
   list,
   thread,
@@ -184,9 +163,12 @@ export function A2AConversation({
   meta,
   grouptask,
   browserOpen,
+  useUnread,
+  clearPrivateUnread,
+  clearGroupUnread,
+  setView,
   t,
-}: A2AConversationInjected & { wide: boolean; t: Translate }): ReactNode {
-  const [open, setOpen] = useState(false)
+}: InjectFace<A2AConversationInjected> & { t: Translate }): ReactNode {
   const [mode, setMode] = useState<'private' | 'grouptask'>('private')
   const [gtCreateSignal, setGtCreateSignal] = useState(0)
   const [profiles, setProfiles] = useState<BotRow[]>([])
@@ -208,9 +190,10 @@ export function A2AConversation({
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renameBusy, setRenameBusy] = useState(false)
-  const [unread, setUnread] = useState<UnreadState>(() => readUnreadState())
-  const unreadRef = useRef(unread)
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  // The group task the user opened last; its live updates stay read while it
+  // is on screen.
+  const [taskKey, setTaskKey] = useState('')
+  const unread = useUnread((state) => state)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const guidanceTokenRef = useRef(0)
   const lastFromRef = useRef('')
@@ -225,16 +208,12 @@ export function A2AConversation({
     selectedPeerRef.current = selectedPeer
   }, [selectedPeer])
 
-  // Live view state for the unread feed below: it must know which thread the
-  // user is actually reading without re-subscribing on every change.
-  const liveRef = useRef({ open, mode, from, selectedPeer, list, thread })
+  // Feed the apply-scope unread controller the live view so the thread/task
+  // being read stays read; unmounting (another main panel selected) clears it.
   useEffect(() => {
-    liveRef.current = { open, mode, from, selectedPeer, list, thread }
-  }, [open, mode, from, selectedPeer, list, thread])
-
-  // The group task the user opened last; its live updates stay read while it
-  // is on screen (cleared when the panel closes).
-  const lastTaskReadRef = useRef('')
+    setView({ mode, from, selectedPeer, taskKey })
+    return () => setView(null)
+  }, [mode, from, selectedPeer, taskKey, setView])
 
   useEffect(() => {
     let current = true
@@ -252,153 +231,18 @@ export function A2AConversation({
     return () => { current = false }
   }, [bots])
 
-  const updateUnread = useCallback((next: UnreadState): void => {
-    unreadRef.current = next
-    setUnread(next)
-    writeUnreadState(next)
-  }, [])
-
-  const clearPrivateUnread = useCallback((peer: string): void => {
-    if (!from || !peer) return
-    const key = `${from}:${peer}`
-    if (!(key in unread.private)) return
-    const next = { ...unread, private: { ...unread.private } }
-    delete next.private[key]
-    next.privateSeen[key] = Math.max(next.privateSeen[key] ?? 0, unread.private[key] ?? 0)
-    updateUnread(next)
-  }, [from, unread, updateUnread])
-
-  const clearGroupUnread = useCallback((key: string): void => {
-    if (!(key in unread.group)) return
-    const next = { ...unread, group: { ...unread.group } }
-    delete next.group[key]
-    next.groupSeen[key] = Math.max(next.groupSeen[key] ?? 0, unread.group[key] ?? 0)
-    updateUnread(next)
-  }, [unread, updateUnread])
-
   // Opening a task clears its badge AND pins it as "being read" so live
   // updates for that task stay read while it is on screen.
   const handleTaskRead = useCallback((key: string): void => {
-    lastTaskReadRef.current = key
+    setTaskKey(key)
     clearGroupUnread(key)
   }, [clearGroupUnread])
-
-  useEffect(() => {
-    if (!open) lastTaskReadRef.current = ''
-  }, [open])
-
-  // Always-on unread feed (SSE rewrite of the 2026-09-07 polling badge): the
-  // host watches every Bot's conversation store file and the synced
-  // grouptask stores (chat-watcher.ts) and pushes change signals over one
-  // idle connection — no polling, so the browser connection pool the old
-  // O(bots × threads) poller starved stays free. Private changes re-check
-  // only the touched Bot's rows (a thread fetch tells peer messages from the
-  // local Bot's own sends/auto-replies); group updates arrive pre-diffed.
-  useEffect(() => {
-    let source: EventSource
-    try {
-      source = new EventSource('/oac/api/chat/events/all')
-    } catch {
-      return undefined
-    }
-    const privateTimers = new Map<string, ReturnType<typeof setTimeout>>()
-    const fold = (mutate: (state: UnreadState) => UnreadState): void => {
-      updateUnread(mutate(unreadRef.current))
-    }
-    // A first-sight row is almost always a brand-new conversation's first
-    // message (the stream only fires on real store changes) — mark it read
-    // only when the latest message is inbound AND fresh, so store rewrites
-    // of old threads never light a badge.
-    const FRESH_MS = 10 * 60_000
-    const checkThread = (from: string, peer: string, key: string, latestAt: number, firstSight: boolean): void => {
-      void liveRef.current.thread(from, peer).then((conversation) => {
-        const latest = conversation.messages[conversation.messages.length - 1]
-        if (latest === undefined) return
-        if (firstSight) {
-          const fresh = latest.timestamp >= Date.now() - FRESH_MS
-          fold((state) => applyPrivateLatest(
-            state,
-            key,
-            Math.max(latest.timestamp, latestAt),
-            isLocalMessage(latest) || !fresh,
-          ))
-          return
-        }
-        fold((state) => applyPrivateLatest(
-          state,
-          key,
-          Math.max(latest.timestamp, latestAt),
-          isLocalMessage(latest),
-        ))
-      }).catch(() => {
-        // transient read failure: the next change retries
-      })
-    }
-    const checkPrivate = (from: string): void => {
-      const timer = privateTimers.get(from)
-      if (timer !== undefined) clearTimeout(timer)
-      privateTimers.set(from, setTimeout(() => {
-        privateTimers.delete(from)
-        void liveRef.current.list(from).then((rows) => {
-          const live = liveRef.current
-          for (const row of rows) {
-            const key = `${from}:${row.peerGlobalMetaId}`
-            const status = privateRowStatus(unreadRef.current, key, row.latestAt)
-            if (status === 'seeded') {
-              checkThread(from, row.peerGlobalMetaId, key, row.latestAt, true)
-            } else if (status === 'changed') {
-              // The thread the user is reading right now stays read.
-              if (live.open && live.mode === 'private' && live.from === from
-                && live.selectedPeer === row.peerGlobalMetaId) {
-                fold((state) => seedPrivateSeen(state, key, row.latestAt))
-                continue
-              }
-              checkThread(from, row.peerGlobalMetaId, key, row.latestAt, false)
-            }
-          }
-        }).catch(() => {
-          // transient daemon/read failure: the next change retries
-        })
-      }, 600))
-    }
-    const onPrivateChanged = (event: MessageEvent<string>): void => {
-      try {
-        const from = (JSON.parse(event.data) as { from?: unknown }).from
-        if (typeof from === 'string' && from !== '') checkPrivate(from)
-      } catch {
-        // malformed frame
-      }
-    }
-    const onGroupUpdate = (event: MessageEvent<string>): void => {
-      try {
-        const updates = (JSON.parse(event.data) as { updates?: unknown }).updates
-        if (!Array.isArray(updates)) return
-        const live = liveRef.current
-        for (const update of updates) {
-          if (update === null || typeof update !== 'object') continue
-          const { key, updatedAt } = update as { key?: unknown; updatedAt?: unknown }
-          if (typeof key !== 'string' || typeof updatedAt !== 'number') continue
-          const viewing = live.open && live.mode === 'grouptask' && lastTaskReadRef.current === key
-          fold((state) => applyGroupUpdate(state, { key, updatedAt }, viewing))
-        }
-      } catch {
-        // malformed frame
-      }
-    }
-    source.addEventListener('private-conversations-changed', onPrivateChanged)
-    source.addEventListener('group-task-update', onGroupUpdate)
-    return () => {
-      source.close()
-      for (const timer of privateTimers.values()) clearTimeout(timer)
-      privateTimers.clear()
-    }
-  }, [updateUnread])
 
   // Conversation list follows the selected local Bot; newest first comes from
   // the api normalization. Switching Bots resets the selection; plain reloads
   // (refresh tick, live conversation events) keep it.
   useEffect(() => {
-    if (!open || !from) return
+    if (!from) return
     let current = true
     if (lastFromRef.current !== from) {
       lastFromRef.current = from
@@ -424,7 +268,7 @@ export function A2AConversation({
       },
     )
     return () => { current = false }
-  }, [open, from, list, tick])
+  }, [from, list, tick])
 
   const loadThread = useCallback(async (peer: string, options?: { quiet?: boolean }): Promise<ConversationThread | null> => {
     if (!from || !peer) return null
@@ -443,8 +287,8 @@ export function A2AConversation({
   }, [from, thread])
 
   useEffect(() => {
-    if (open && selectedPeer) void loadThread(selectedPeer)
-  }, [open, selectedPeer, loadThread])
+    if (selectedPeer) void loadThread(selectedPeer)
+  }, [selectedPeer, loadThread])
 
   // Newest messages live at the bottom of the scroll container. Switching
   // conversations forces a pin to the bottom; quiet live reloads only follow
@@ -476,7 +320,7 @@ export function A2AConversation({
   // and the open thread, so enriched names/avatars and new messages land
   // without reopening the panel.
   useEffect(() => {
-    if (!open || !from) return undefined
+    if (!from) return undefined
     let source: EventSource | null = null
     try {
       source = new EventSource(`/oac/api/chat/events?from=${encodeURIComponent(from)}`)
@@ -498,23 +342,16 @@ export function A2AConversation({
       if (timer !== null) clearTimeout(timer)
       source?.close()
     }
-  }, [open, from, reloadList, loadThread])
+  }, [from, reloadList, loadThread])
 
   useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    closeButtonRef.current?.focus()
     return () => {
-      document.removeEventListener('keydown', onKeyDown)
       if (guidanceTimerRef.current !== null) clearTimeout(guidanceTimerRef.current)
     }
-  }, [open])
+  }, [])
 
   const selectPeer = (peer: string): void => {
-    clearPrivateUnread(peer)
+    clearPrivateUnread(from, peer)
     if (peer === selectedPeer) {
       const el = messagesRef.current
       if (el) el.scrollTop = el.scrollHeight
@@ -525,12 +362,13 @@ export function A2AConversation({
     setGuidanceOpen(false)
   }
 
-  // Avatar click: open the sender's Bot page in the right-sidebar Bot Browser;
-  // the modal closes so the Browser is visible (same flow as the Bot cards).
+  // Avatar click: open the sender's Bot page in the right-sidebar Bot Browser
+  // (the reveal itself returns the main column to the Conversation; this panel
+  // stays selected in the background, one panellist-row click away).
   const openBotPage = useCallback((globalMetaId: string): void => {
     const gmid = globalMetaId.trim()
     if (!gmid) return
-    void browserOpen(`metaid://${gmid}`).then(() => setOpen(false))
+    void browserOpen(`metaid://${gmid}`)
   }, [browserOpen])
 
   // Row-menu writes (pin/archive/rename). One shared path: apply, then let the
@@ -564,7 +402,7 @@ export function A2AConversation({
   const openResource = useCallback((uri: string): void => {
     const target = uri.trim()
     if (!target) return
-    void browserOpen(target).then(() => setOpen(false))
+    void browserOpen(target)
   }, [browserOpen])
 
   const onSend = async (): Promise<void> => {
@@ -649,76 +487,52 @@ export function A2AConversation({
     : undefined
 
   return (
-    <>
-      <button
-        type="button"
-        className={wide ? 'oac-a2a-trigger' : 'oac-a2a-trigger oac-a2a-trigger-rail'}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-      >
-        <IconNewChatOutline16 />
-        {wide ? <span>{t('nav')}</span> : null}
-        {hasAnyUnread(unread) ? <span className="oac-unread-dot" aria-label={t('unread')} /> : null}
-      </button>
-      {open ? (
-        <div className="oac-a2a-overlay" role="presentation">
-          <div className="oac-a2a-mask" aria-hidden="true" onClick={() => setOpen(false)} />
-          <div className="oac-a2a-panel" role="dialog" aria-modal="true" aria-label={t('title')}>
-            <div className="oac-a2a-header">
-              <div className="oac-gt-header-left">
-                <h2>{t('title')}</h2>
-                <div className="oac-tablist oac-gt-mode-tabs" role="tablist">
-                  {(['private', 'grouptask'] as const).map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      role="tab"
-                      className="oac-tab"
-                      data-active={mode === key}
-                      onClick={() => setMode(key)}
-                    >
-                      {t(key === 'private' ? 'tabPrivate' : 'tabGroup')}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="oac-gt-header-right">
-                {mode === 'grouptask' ? (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    icon={<IconPlusOutline16 />}
-                    onClick={() => setGtCreateSignal((value) => value + 1)}
-                  >
-                    {t('gtNew')}
-                  </Button>
-                ) : null}
-                <button
-                  ref={closeButtonRef}
-                  type="button"
-                  className="oac-a2a-close"
-                  aria-label={t('close')}
-                  onClick={() => setOpen(false)}
-                >
-                  <IconCloseOutline16 size={14} />
-                </button>
-              </div>
-            </div>
-            {mode === 'grouptask' ? (
-              <GroupTaskView
-                bots={profiles}
-                gt={grouptask}
-                t={t}
-                createSignal={gtCreateSignal}
-                onOpenBotPage={openBotPage}
-                onOpenUri={openResource}
-                unreadTaskKeys={new Set(Object.keys(unread.group))}
-                onTaskRead={handleTaskRead}
-              />
-            ) : null}
-            <div className="oac-a2a-body" style={mode === 'grouptask' ? { display: 'none' } : undefined}>
+    <div className="oac-a2a-panel" aria-label={t('title')}>
+      <div className="oac-a2a-header">
+        <div className="oac-gt-header-left">
+          <h2>{t('title')}</h2>
+          <div className="oac-tablist oac-gt-mode-tabs" role="tablist">
+            {(['private', 'grouptask'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                className="oac-tab"
+                data-active={mode === key}
+                onClick={() => setMode(key)}
+              >
+                {t(key === 'private' ? 'tabPrivate' : 'tabGroup')}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="oac-gt-header-right">
+          {mode === 'grouptask' ? (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              icon={<IconPlusOutline16 />}
+              onClick={() => setGtCreateSignal((value) => value + 1)}
+            >
+              {t('gtNew')}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {mode === 'grouptask' ? (
+        <GroupTaskView
+          bots={profiles}
+          gt={grouptask}
+          t={t}
+          createSignal={gtCreateSignal}
+          onOpenBotPage={openBotPage}
+          onOpenUri={openResource}
+          unreadTaskKeys={new Set(Object.keys(unread.group))}
+          onTaskRead={handleTaskRead}
+        />
+      ) : null}
+      <div className="oac-a2a-body" style={mode === 'grouptask' ? { display: 'none' } : undefined}>
               <div className="oac-a2a-list">
                 <div className="oac-a2a-list-head">
                   <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-bot-avatar" />
@@ -994,9 +808,6 @@ export function A2AConversation({
                 </label>
               </div>
             </Modal>
-          </div>
-        </div>
-      ) : null}
-    </>
+    </div>
   )
 }

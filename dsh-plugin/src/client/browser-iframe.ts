@@ -4,6 +4,15 @@
  * Listens for `agent-browser:event` / command responses from the cross-origin
  * Browser iframe, keeps a live tab list, reports snapshots to the host, and
  * executes host SSE tab commands via postMessage.
+ *
+ * The Browser renders inside the right Sidebar's `bot-browser` tab body,
+ * which unmounts and remounts as the user switches tabs — so iframes attach
+ * and detach here over time. Every live iframe is tracked with the URL it
+ * loaded; commands and message routing target the most recently attached
+ * one (the visible tab's in practice — a remount re-attaches). Two tab
+ * bodies alive at once (a split pane showing the same kind) is a tolerated
+ * edge, not a supported mode: the older iframe keeps receiving nothing and
+ * the snapshot follows the newer.
  */
 import {
   activeTabOf,
@@ -35,8 +44,11 @@ function recordOf(value: unknown): Record<string, unknown> | null {
 }
 
 export class BotBrowserIframeBridge {
-  private iframe: HTMLIFrameElement | null = null
-  private attachedIframe: HTMLIFrameElement | null = null
+  /** Every live tab-body iframe with the URL it loaded, in attach order. */
+  private readonly frames = new Map<HTMLIFrameElement, string | null>()
+  /** The iframe commands and message routing target: the most recently attached. */
+  private active: HTMLIFrameElement | null = null
+  private readonly listened = new WeakSet<HTMLIFrameElement>()
   private tabs: BrowserTabState = emptyTabState()
   private rendererType: string | null = null
   private seq = 0
@@ -65,27 +77,55 @@ export class BotBrowserIframeBridge {
     }
   }
 
-  setIframe(iframe: HTMLIFrameElement | null): void {
-    if (iframe === this.iframe) return
-    this.iframe = iframe
-    if (iframe === null) {
+  /**
+   * Attach/detach a tab body's iframe. React fires the ref callback with the
+   * element on mount and `null` on unmount, so detach arrives carrying only
+   * the URL the body had loaded — the oldest frame with that URL is removed.
+   */
+  setIframe(iframe: HTMLIFrameElement | null, url: string | null = null): void {
+    if (iframe !== null) {
+      // Re-insert at the map's tail: the most recently attached frame is the
+      // command target. A re-attach of the same element keeps its tab state.
+      const known = this.frames.has(iframe)
+      this.frames.delete(iframe)
+      this.frames.set(iframe, url)
+      this.active = iframe
+      if (!this.listened.has(iframe)) {
+        this.listened.add(iframe)
+        iframe.addEventListener('load', () => {
+          void this.hydrateFromIframe()
+        })
+      }
+      if (!known) {
+        this.tabs = emptyTabState()
+        this.rendererType = null
+        this.store.setActiveUri(null)
+      }
       this.scheduleReport()
       return
     }
-    if (iframe !== this.attachedIframe) {
-      this.attachedIframe = iframe
-      this.tabs = emptyTabState()
-      this.rendererType = null
-      this.store.setActiveUri(null)
-      iframe.addEventListener('load', () => {
-        void this.hydrateFromIframe()
-      })
+    for (const [frame, frameUrl] of this.frames) {
+      if (frameUrl !== url) continue
+      this.frames.delete(frame)
+      if (this.active === frame) {
+        this.active = [...this.frames.keys()].pop() ?? null
+        this.tabs = emptyTabState()
+        this.rendererType = null
+        this.store.setActiveUri(null)
+      }
+      break
     }
     this.scheduleReport()
   }
 
+  /** The URL the active (most recently attached) iframe loaded, or null when no tab body is live. */
+  liveUrl(): string | null {
+    if (this.active === null) return null
+    return this.frames.get(this.active) ?? null
+  }
+
   private onMessage(event: MessageEvent): void {
-    if (this.iframe === null || event.source !== this.iframe.contentWindow) return
+    if (this.active === null || event.source !== this.active.contentWindow) return
     const data = recordOf(event.data)
     if (!data || typeof data.type !== 'string') return
     if (data.type === 'agent-browser:event' && typeof data.event === 'string') {
@@ -110,7 +150,7 @@ export class BotBrowserIframeBridge {
   }
 
   private postToIframe(message: Record<string, unknown>): boolean {
-    const target = this.iframe?.contentWindow
+    const target = this.active?.contentWindow
     if (!target) return false
     target.postMessage(message, '*')
     return true
@@ -163,7 +203,7 @@ export class BotBrowserIframeBridge {
 
   private async hydrateFromIframe(): Promise<void> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      if (this.stopped || this.iframe === null) return
+      if (this.stopped || this.active === null) return
       try {
         await this.refreshRenderer(undefined, 500)
         if (this.tabs.tabs.length > 0) return
@@ -176,7 +216,9 @@ export class BotBrowserIframeBridge {
 
   private snapshot(): BrowserSnapshot {
     return {
-      open: this.store.getSnapshot().open && this.iframe !== null,
+      // "Open" means a bot-browser tab body is live right now; the host reads
+      // this as the <browser_context> sidebar-closed signal.
+      open: this.active !== null,
       tabs: this.tabs.tabs,
       rendererType: this.rendererType,
     }
