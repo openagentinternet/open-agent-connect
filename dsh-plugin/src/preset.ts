@@ -3,6 +3,11 @@
  * rewrite the persona row, leave other composition rows (including `!!js`)
  * untouched. Persona edits rewrite the file in place so running sessions keep
  * DSH's composition stamp; later sessions see the new text.
+ *
+ * DSH 0.1.3-alpha.2 split the persona config into `prefix`/`suffix`; the Bot
+ * persona is the prefix, a copied row's `suffix` is kept, and any legacy
+ * `text` key is dropped (0.1.5's persona schema requires `prefix` and ignores
+ * `text`, so legacy rows must be healed here, not just appended to).
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -63,7 +68,8 @@ async function rewritePersona(ctx: HostContext, bot: BotPersonaInput, presetId: 
   if (persona === undefined) {
     throw new Error(`oac-dsh: source preset has no "persona" row to rewrite: ${compositionPath}`)
   }
-  persona.config = { ...(persona.config ?? {}), text: buildPersonaPrompt(bot) }
+  const { text: _legacyText, ...rest } = persona.config ?? {}
+  persona.config = { ...rest, prefix: buildPersonaPrompt(bot) }
   await writeFile(compositionPath, yaml.dump(entries, { schema: entryListSchema }), 'utf8')
 
   const metadataPath = join(dir, METADATA_FILE)

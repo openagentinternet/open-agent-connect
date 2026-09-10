@@ -8,15 +8,20 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
-Host kernel requirement: plugin 0.4.1 is built against the DSH **0.1.2-alpha.2**
-client surface — the `@Remote` gateway faces, the split client packages, and the
-0.1.2 locale keys — verified in lockstep through **0.1.2-rc.1** (npm `next`
-dist-tag) and against the **0.1.3-alpha.1** source tree (the attachment rename,
-file-upload split, and session format v2 all miss this plugin; 0.1.3-alpha.1 is
-not on npm yet, so that verification runs against the harness checkout's built
-packages). Peer ranges `^0.1.2-alpha.2 || ^0.1.3-alpha.1` cover both kernel
-lines. It will not load on 0.1.0-rc-era kernels; hosts still there should stay
-on plugin 0.3.x until their kernel is upgraded.
+Host kernel requirement: this plugin is built against the DSH **0.1.5-rc.2**
+client surface (npm `next` dist-tag) and verified against the **0.1.5-rc.1**
+source tree. The 0.1.3-alpha.2 persona prefix/suffix split is handled at preset
+write time: the Bot persona becomes the persona row's `prefix` (the copied
+`suffix` is kept), and legacy `text`-only rows from pre-split presets are
+healed in place on every reconcile — kernels ≥0.1.3-alpha.2 require `prefix`
+and ignore `text`, so older plugin releases silently lose the Bot persona
+there. Session format v3, the `ctx.agent` removal, the Inbox API change, and
+the `sidebar.panellist`/`main` panel API all miss this plugin: sessions are
+read only through the in-process `snapshotEvents()`, and none of those APIs
+were ever used. Peer ranges `^0.1.2-alpha.2 || ^0.1.3-alpha.1 ||
+^0.1.5-alpha.1` cover the 0.1.2, 0.1.3, and 0.1.5 kernel lines. It will not
+load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
+until their kernel is upgraded.
 
 After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The A2A Chat entry and each private-chat/group-task row carry unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
 

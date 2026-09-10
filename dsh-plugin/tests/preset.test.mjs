@@ -7,12 +7,13 @@ import test from 'node:test'
 
 const plugin = await import('../lib/index.js')
 
-const FIXTURE_COMPOSITION = `# fixture standard preset (test double)
+const FIXTURE_COMPOSITION = `# fixture standard preset (test double, DSH 0.1.5 persona split)
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+    suffix: Your working directory is {{cwd}}.
+    prefix: >-
+      You are a coding agent powered by the {{model}} model.
 - id: tool-bash
   name: '@deepseek-ai/dsh-tool-bash'
   disabled: !!js process.platform === 'win32'
@@ -24,6 +25,14 @@ const FIXTURE_COMPOSITION = `# fixture standard preset (test double)
   config:
     - id: tool-fs
       name: '@deepseek-ai/dsh-tool-fs'
+`
+
+const LEGACY_COMPOSITION = `# legacy 0.1.2-era preset: persona config is a single text row
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
 `
 
 const FIXTURE_METADATA = `name: Standard
@@ -137,6 +146,11 @@ test('generatePreset: persona rewritten, !!js preserved, in-place on second save
     assert.ok(first.includes('<slug>alice</slug>'))
     assert.match(first, /disabled: !!js process\.platform === 'win32'/)
     assert.equal(first.includes('{{model}}'), false)
+    // 0.1.5 persona split: the Bot persona lands in `prefix`, the copied
+    // `suffix` survives, and no legacy `text` key remains.
+    assert.match(first, /^ {4}prefix: >-/m)
+    assert.match(first, /^ {4}suffix: Your working directory is \{\{cwd\}\}\./m)
+    assert.equal(/^ {4}text:/m.test(first), false)
 
     await plugin.generatePreset(ctx, makeBot({ name: 'Second Name' }))
     assert.equal(mock.calls.copy.length, 1, 'second save does not copy again')
@@ -148,6 +162,26 @@ test('generatePreset: persona rewritten, !!js preserved, in-place on second save
 
     const metadata = await readFile(join(tmp, '.agent-presets', 'oac-alice', 'preset.yml'), 'utf8')
     assert.match(metadata, /name: Second Name/)
+  })
+})
+
+test('generatePreset: heals a legacy text-only persona row to the 0.1.5 prefix/suffix split', async () => {
+  await withPresetCtx(async (ctx, mock, tmp) => {
+    // Pre-create the preset the way plugin ≤0.6.0 left it: text-only persona.
+    const dir = join(tmp, '.agent-presets', 'oac-alice')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'agent.cordis.yml'), LEGACY_COMPOSITION, 'utf8')
+    await writeFile(join(dir, 'preset.yml'), FIXTURE_METADATA, 'utf8')
+
+    await plugin.generatePreset(ctx, makeBot({ name: 'Healed Name' }))
+    assert.deepEqual(mock.calls.copy, [], 'existing preset is rewritten in place, not re-copied')
+    const healed = await readFile(join(dir, 'agent.cordis.yml'), 'utf8')
+    assert.ok(healed.includes('<name>Healed Name</name>'))
+    assert.match(healed, /^ {4}prefix: >-/m)
+    assert.equal(/^ {4}text:/m.test(healed), false, 'legacy text key is dropped')
+    // A legacy row carries no suffix; none is invented (the deployment suffix
+    // stays shadowed, matching the row's pre-upgrade behavior).
+    assert.equal(/^ {4}suffix:/m.test(healed), false)
   })
 })
 
