@@ -400,7 +400,15 @@ async function readInstalledSkill(input) {
             };
         }
     }
-    throw new SkillInstallError('invalid_package', `No SKILL.md found for skill "${name}" under ${node_path_1.default.resolve(input.skillsRoot)}.`);
+    // Distinguish "never installed" from "installed but corrupt" — one shared
+    // "No SKILL.md found" line read like package corruption and gave no way
+    // forward (N-3).
+    const dirExists = await node_fs_1.promises.stat(skillDir).then(() => true, () => false);
+    const registry = await readInstalledSkillsRegistry(input.skillsRoot);
+    if (!dirExists && !registry.skills[name]) {
+        throw new SkillInstallError('invalid_package', `Skill "${name}" is not installed locally. Install it from its on-chain package first: read the skill pin for its pinId (or metafile URI), then run \`metabot skills install --pin <pinId> --confirm\` (agents: skill_tool install_skill).`);
+    }
+    throw new SkillInstallError('invalid_package', `Skill "${name}" is installed under ${skillDir} but its SKILL.md is missing — the package is corrupt. Reinstall it (\`metabot skills install --pin <pinId> --confirm --force\`, or uninstall then install again).`);
 }
 /** Remove one chain-installed skill (registry entry + directory). Built-in/local skills are refused. */
 async function uninstallInstalledSkill(input) {

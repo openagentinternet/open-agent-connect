@@ -30,7 +30,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LlmRelayError = exports.VISION_VIDEO_MAX_SECONDS = exports.VISION_VIDEO_MAX_RAW_BYTES = exports.VISION_AUDIO_MAX_BASE64_BYTES = exports.VISION_MAX_IMAGE_BYTES = exports.DEFAULT_LLM_RELAY_API_BASE_URL = void 0;
+exports.LlmRelayError = exports.MAX_SPELLED_LETTER_CONFIRMATIONS = exports.VISION_VIDEO_MAX_SECONDS = exports.VISION_VIDEO_MAX_RAW_BYTES = exports.VISION_AUDIO_MAX_BASE64_BYTES = exports.VISION_MAX_IMAGE_BYTES = exports.DEFAULT_LLM_RELAY_API_BASE_URL = void 0;
+exports.findSpelledLetterCandidates = findSpelledLetterCandidates;
+exports.buildSpelledLetterConfirmationPrompt = buildSpelledLetterConfirmationPrompt;
+exports.parseSpelledLetterConfirmation = parseSpelledLetterConfirmation;
 exports.buildLlmRelayBootstrapMessage = buildLlmRelayBootstrapMessage;
 exports.deriveVisionRecognizeUrl = deriveVisionRecognizeUrl;
 exports.inferAudioMimeType = inferAudioMimeType;
@@ -68,6 +71,65 @@ exports.VISION_AUDIO_MAX_BASE64_BYTES = 10 * 1024 * 1024;
 exports.VISION_VIDEO_MAX_RAW_BYTES = 6.8 * 1024 * 1024;
 /** Videos longer than this are truncated (the describe result says so). */
 exports.VISION_VIDEO_MAX_SECONDS = 180;
+// ---------------------------------------------------------------------------
+// Spelled-letter stabilization (FIX-4)
+// ---------------------------------------------------------------------------
+/**
+ * Prompt-level instructions cannot stop a stochastic ASR from merging
+ * letter-by-letter speech ("O A C") into a plausible word (OOC / OASIS / OIC
+ * on consecutive calls of the SAME audio). The pass below is deterministic
+ * post-processing instead: suspect all-caps tokens get one format-constrained
+ * confirmation call over the same audio (answer must be the letters or the
+ * word itself), and an unresolved token marks the transcript low-confidence
+ * instead of silently returning a corrupted acronym.
+ */
+/** All-caps tokens this common are near-always real acronyms — never spend a confirmation call on them. */
+const SPELLED_LETTER_CONFIRM_SKIP = new Set([
+    'AI', 'API', 'ASCII', 'ASR', 'CLI', 'CPU', 'CSS', 'DNS', 'DVD', 'EOF', 'ETA', 'FAQ', 'FYI', 'GMT', 'GPS',
+    'GPU', 'GUI', 'HTML', 'HTTP', 'HTTPS', 'ID', 'IDE', 'IMO', 'IO', 'IP', 'ISO', 'JSON', 'LLM', 'OCR', 'OK',
+    'PC', 'PDF', 'PIN', 'RAM', 'RGB', 'SDK', 'SIM', 'SMS', 'SQL', 'SSH', 'TCP', 'TLS', 'TTL', 'TV', 'UDP',
+    'UI', 'UK', 'URL', 'US', 'USA', 'USB', 'UTC', 'UUID', 'VPN', 'XML',
+]);
+/** At most this many confirmation calls per transcription (daily-quota guard). */
+exports.MAX_SPELLED_LETTER_CONFIRMATIONS = 3;
+/**
+ * Suspect all-caps runs (2-5 letters) in one transcript, deduped, in order.
+ * Hyphenated spelled forms (O-A-C) never match — they contain no 2+ letter
+ * run — so a transcript that already kept the letters is left untouched.
+ */
+function findSpelledLetterCandidates(content) {
+    const seen = new Set();
+    const candidates = [];
+    for (const match of content.matchAll(/\b[A-Z]{2,5}\b/g)) {
+        const token = match[0];
+        if (SPELLED_LETTER_CONFIRM_SKIP.has(token) || seen.has(token))
+            continue;
+        seen.add(token);
+        candidates.push(token);
+    }
+    return candidates;
+}
+/** The format-constrained confirmation prompt for one suspect token. */
+function buildSpelledLetterConfirmationPrompt(candidate) {
+    return [
+        `这段音频的转写中包含一个不确定的大写片段 "${candidate}"。请只核对音频中该片段对应的发音：`,
+        '如果说话者是逐字母念出这组字母，只回答这些字母并用连字符连接（例如 O-A-C）；',
+        '如果说话者念的就是这个完整单词/缩写，只回答该单词本身。',
+        '不要输出其他任何内容。',
+    ].join('');
+}
+/** Parse the confirmation answer: spelled letters win, an echoed word confirms, anything else is honest doubt. */
+function parseSpelledLetterConfirmation(answer, candidate) {
+    const normalized = answer.trim().replace(/^[\s"'`「『“‘]+|[\s"'`」』”’。.!！?？,，;；:：]+$/g, '');
+    if (/^[A-Za-z](?:[\s-]+[A-Za-z]){1,9}$/.test(normalized)) {
+        return { kind: 'letters', text: normalized.split(/[\s-]+/).join('-').toUpperCase() };
+    }
+    if (normalized.replace(/[\s-]+/g, '').toUpperCase() === candidate)
+        return { kind: 'word' };
+    if (/^[A-Z]{2,6}$/.test(normalized))
+        return { kind: 'unstable', heard: normalized };
+    return { kind: 'inconclusive' };
+}
 class LlmRelayError extends Error {
     /** Stable server-side message (backend error contract) when available. */
     relayMessage;
@@ -491,6 +553,42 @@ function createLlmRelayService(deps) {
             return await attempt();
         }
     }
+    /**
+     * FIX-4: deterministic post-processing for letter-by-letter speech. Each
+     * suspect all-caps token gets one format-constrained confirmation call over
+     * the same audio; a confirmed spelling replaces the merged word, and an
+     * unresolved token marks the transcript low-confidence instead of passing
+     * corruption off as a clean result.
+     */
+    async function stabilizeSpelledLetters(result, audioBody) {
+        const candidates = findSpelledLetterCandidates(result.content).slice(0, exports.MAX_SPELLED_LETTER_CONFIRMATIONS);
+        if (candidates.length === 0)
+            return result;
+        let content = result.content;
+        const notes = [];
+        for (const candidate of candidates) {
+            let parsed;
+            try {
+                const confirmation = await postRecognizeWithKeyRetry({ ...audioBody, prompt: buildSpelledLetterConfirmationPrompt(candidate) }, 'vision relay returned no audio transcription');
+                parsed = parseSpelledLetterConfirmation(confirmation.content, candidate);
+            }
+            catch {
+                parsed = { kind: 'inconclusive' };
+            }
+            if (parsed.kind === 'letters') {
+                content = content.replace(new RegExp(`(?<![A-Za-z])${candidate}(?![A-Za-z])`, 'g'), parsed.text);
+            }
+            else if (parsed.kind === 'unstable') {
+                notes.push(`the all-caps sequence "${candidate}" was not stably recognized (also heard as "${parsed.heard}")`);
+            }
+            else if (parsed.kind === 'inconclusive') {
+                notes.push(`the all-caps sequence "${candidate}" could not be confirmed as a word or as spelled-out letters`);
+            }
+        }
+        if (notes.length === 0)
+            return { ...result, content };
+        return { ...result, content: `${content}\n[low-confidence] ${notes.join('; ')} — verify against the audio.` };
+    }
     async function defaultLoadImageBase64(imagePath) {
         let buffer;
         try {
@@ -686,8 +784,11 @@ function createLlmRelayService(deps) {
                 }
             }
             // IDBots-parity default: full verbatim transcription, no summarizing.
-            body.prompt = prompt || '请完整转写这段音频，保留原语言、标点和说话内容，不要总结。';
-            return await postRecognizeWithKeyRetry(body, 'vision relay returned no audio transcription');
+            // Letter-by-letter spoken sequences (O A C) must survive as O-A-C —
+            // merging them into a new word (OOC) silently corrupts acronyms.
+            body.prompt = prompt || '请完整转写这段音频，保留原语言、标点和说话内容，不要总结。逐字母念出的字母序列按连字符保留（例如 "O A C" 转写为 O-A-C），绝不能把逐个念出的字母合并成新词。';
+            const result = await postRecognizeWithKeyRetry(body, 'vision relay returned no audio transcription');
+            return await stabilizeSpelledLetters(result, body);
         },
     };
 }

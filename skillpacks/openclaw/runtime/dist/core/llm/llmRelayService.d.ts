@@ -38,6 +38,29 @@ export declare const VISION_AUDIO_MAX_BASE64_BYTES: number;
 export declare const VISION_VIDEO_MAX_RAW_BYTES: number;
 /** Videos longer than this are truncated (the describe result says so). */
 export declare const VISION_VIDEO_MAX_SECONDS = 180;
+/** At most this many confirmation calls per transcription (daily-quota guard). */
+export declare const MAX_SPELLED_LETTER_CONFIRMATIONS = 3;
+/**
+ * Suspect all-caps runs (2-5 letters) in one transcript, deduped, in order.
+ * Hyphenated spelled forms (O-A-C) never match — they contain no 2+ letter
+ * run — so a transcript that already kept the letters is left untouched.
+ */
+export declare function findSpelledLetterCandidates(content: string): string[];
+/** The format-constrained confirmation prompt for one suspect token. */
+export declare function buildSpelledLetterConfirmationPrompt(candidate: string): string;
+export type SpelledLetterConfirmation = {
+    kind: 'letters';
+    text: string;
+} | {
+    kind: 'word';
+} | {
+    kind: 'unstable';
+    heard: string;
+} | {
+    kind: 'inconclusive';
+};
+/** Parse the confirmation answer: spelled letters win, an echoed word confirms, anything else is honest doubt. */
+export declare function parseSpelledLetterConfirmation(answer: string, candidate: string): SpelledLetterConfirmation;
 export declare class LlmRelayError extends Error {
     /** Stable server-side message (backend error contract) when available. */
     readonly relayMessage: string | null;

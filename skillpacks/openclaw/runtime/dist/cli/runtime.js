@@ -5513,6 +5513,10 @@ async function serveCliDaemonProcess(context) {
             try {
                 const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
                 for (const profile of profiles) {
+                    // Toggle-off Bots (Settings availability switch) skip the nightly
+                    // KB auto-learn and the study drain too.
+                    if (profile.isAvailable === false)
+                        continue;
                     // Nightly KB auto-learn (imported/raw files indexed once per local
                     // day in the window) rides the same tick as the study drain.
                     try {
@@ -5814,6 +5818,10 @@ async function serveCliDaemonProcess(context) {
             try {
                 const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
                 for (const profile of profiles) {
+                    // Toggle-off Bots (Settings availability switch) run no scheduled
+                    // tasks here either — unavailable Bots are hands-off everywhere.
+                    if (profile.isAvailable === false)
+                        continue;
                     const profileHomeDir = typeof profile.homeDir === 'string' ? node_path_1.default.resolve(profile.homeDir) : '';
                     if (!profileHomeDir)
                         continue;

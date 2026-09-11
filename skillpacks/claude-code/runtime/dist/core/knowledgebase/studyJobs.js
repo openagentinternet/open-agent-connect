@@ -10,7 +10,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.StudyJobStoreError = exports.DEFAULT_QA_SURF_BUDGET_PER_NIGHT = exports.STUDY_TICK_INTERVAL_MINUTES = exports.STUDY_WINDOW = exports.MAX_STUDY_CONSECUTIVE_FAILURES = exports.MAX_STUDY_RUNS_PER_JOB = exports.DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = void 0;
+exports.StudyJobStoreError = exports.DEFAULT_QA_SURF_BUDGET_PER_NIGHT = exports.STUDY_TICK_INTERVAL_MINUTES = exports.STUDY_WINDOW = exports.QA_SURF_TURN_MAX_TOOL_STEPS = exports.STUDY_TURN_MAX_TOOL_STEPS = exports.MAX_STUDY_CONSECUTIVE_FAILURES = exports.MAX_STUDY_RUNS_PER_JOB = exports.DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = void 0;
 exports.studyTopicFingerprint = studyTopicFingerprint;
 exports.createStudyJobStore = createStudyJobStore;
 exports.inStudyWindow = inStudyWindow;
@@ -25,6 +25,10 @@ const node_crypto_1 = require("node:crypto");
 exports.DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 20;
 exports.MAX_STUDY_RUNS_PER_JOB = 10;
 exports.MAX_STUDY_CONSECUTIVE_FAILURES = 3;
+/** Tool-step cap for one nightly study turn (topic jobs) — after this the turn must have reported. */
+exports.STUDY_TURN_MAX_TOOL_STEPS = 12;
+/** Tool-step cap for one nightly Q&A-surf turn (surf sessions page feeds and answer questions). */
+exports.QA_SURF_TURN_MAX_TOOL_STEPS = 24;
 /** Nightly drain window, local hours [0, 6). */
 exports.STUDY_WINDOW = { startHour: 0, endHour: 6 };
 exports.STUDY_TICK_INTERVAL_MINUTES = 30;
@@ -301,6 +305,20 @@ function createStudyJobStore(paths) {
             await writeFile(state);
             return job;
         }),
+        retryStudyJob: (id) => enqueue(async () => {
+            const state = await readFile();
+            const job = state.jobs.find((entry) => entry.id === id);
+            if (!job)
+                return null;
+            if (job.status !== 'failed')
+                return { job, retried: false };
+            job.status = 'pending';
+            job.consecutiveFailures = 0;
+            job.error = null;
+            job.updatedAt = Date.now();
+            await writeFile(state);
+            return { job, retried: true };
+        }),
         resetRunningToPending: (now, excludeId) => enqueue(async () => {
             const state = await readFile();
             let changed = 0;
@@ -553,7 +571,7 @@ function parseStudyJsonFence(reply) {
 async function runStudyTurnWithTools(prompt, deps) {
     // Surf sessions page the feed, open questions, answer, react, and save —
     // they need more tool steps than a topic read-and-save pass.
-    const maxSteps = deps.maxSteps ?? (deps.kind === 'qa-surf' ? 24 : 12);
+    const maxSteps = deps.maxSteps ?? (deps.kind === 'qa-surf' ? exports.QA_SURF_TURN_MAX_TOOL_STEPS : exports.STUDY_TURN_MAX_TOOL_STEPS);
     const maxResultChars = deps.maxResultChars ?? 12_000;
     const budget = { savedDocs: 0 };
     const allowlist = deps.kind === 'qa-surf' ? QA_SURF_TOOL_ALLOWLIST : STUDY_TOOL_ALLOWLIST;

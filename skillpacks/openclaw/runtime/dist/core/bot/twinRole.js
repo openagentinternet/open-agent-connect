@@ -123,6 +123,10 @@ async function buildTwinWorkerRoster(systemHomeDir, twinSlug) {
     for (const profile of profiles) {
         if (profile.slug === twinSlug)
             continue;
+        // Unavailable Bots (Settings toggle off, or no DSH LLM pair) are not
+        // delegation targets — the same rule group-task seat search applies.
+        if (!(0, metabotProfileManager_1.isMetabotProfileAvailable)(profile))
+            continue;
         const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
         const dreamStore = (0, dreamStore_1.createDreamStore)(paths);
         const orchestration = (0, orchestrationStore_1.createOrchestrationStore)(paths);
