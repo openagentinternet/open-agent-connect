@@ -637,6 +637,9 @@ export function GroupTaskView({
   const [newAcceptance, setNewAcceptance] = useState('')
   const [newChair, setNewChair] = useState('')
   const [newWorkers, setNewWorkers] = useState<string[]>([])
+  // IDBots NewGroupTaskModal parity: the create modal opens on the chat-first
+  // guide; the manual form is the fallback entry behind an expander.
+  const [createShowForm, setCreateShowForm] = useState(false)
 
   // Close modal
   const [closeOpen, setCloseOpen] = useState(false)
@@ -681,6 +684,7 @@ export function GroupTaskView({
     if (createSignal !== lastCreateSignal.current) {
       lastCreateSignal.current = createSignal
       setCreateError(null)
+      setCreateShowForm(false)
       setCreateOpen(true)
     }
   }, [createSignal])
@@ -1547,7 +1551,7 @@ export function GroupTaskView({
         onClose={() => { if (!createBusy) setCreateOpen(false) }}
         title={t('gtCreateTitle')}
         className="oac-dialog"
-        footer={(
+        footer={createShowForm ? (
           <>
             <Button type="button" variant="outline" disabled={createBusy} onClick={() => setCreateOpen(false)}>
               {t('gtCancel')}
@@ -1562,9 +1566,22 @@ export function GroupTaskView({
               {createBusy ? t('gtWorking') : t('gtCreate')}
             </Button>
           </>
+        ) : (
+          <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+            {t('gtCancel')}
+          </Button>
         )}
       >
+        {createShowForm ? (
         <div className="oac-gt-form">
+          <button
+            type="button"
+            className="oac-link-button"
+            disabled={createBusy}
+            onClick={() => setCreateShowForm(false)}
+          >
+            {t('gtBackToGuide')}
+          </button>
           {createError ? <p className="oac-note error">{createError}</p> : null}
           {createBusy ? <p className="oac-note saving">{t('gtCreating')}</p> : null}
           <label className="oac-gt-form-field">
@@ -1638,6 +1655,28 @@ export function GroupTaskView({
             </div>
           </div>
         </div>
+        ) : (
+        <div className="oac-gt-guide">
+          <p className="oac-gt-guide-title">{t('gtChatGuideTitle')}</p>
+          <blockquote className="oac-gt-guide-example">
+            <p>{t('gtChatGuideExample')}</p>
+          </blockquote>
+          <div className="oac-gt-guide-when">
+            <p className="oac-gt-guide-when-title">{t('gtWhenToUseTitle')}</p>
+            <ol className="oac-gt-guide-when-list">
+              <li>{t('gtWhenToUseHint1')}</li>
+              <li>{t('gtWhenToUseHint2')}</li>
+            </ol>
+          </div>
+          <button
+            type="button"
+            className="oac-link-button oac-gt-guide-manual"
+            onClick={() => setCreateShowForm(true)}
+          >
+            {t('gtManualEntry')}
+          </button>
+        </div>
+        )}
       </Modal>
 
       <Modal
