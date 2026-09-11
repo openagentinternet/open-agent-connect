@@ -531,6 +531,17 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-worker-picks { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
 .oac-gt-worker-pick { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; font-size: 13px; color: var(--dsw-alias-label-primary); cursor: pointer; }
 .oac-gt-worker-pick:hover { background: var(--dsw-alias-interactive-bg-hover); }
+/* Create modal guide (IDBots NewGroupTaskModal parity): the chat-first
+   explanation shows first; "Fill the form manually" expands the manual form,
+   "Back to guide" returns. */
+.oac-gt-guide { display: flex; flex-direction: column; gap: 14px; }
+.oac-gt-guide-title { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }
+.oac-gt-guide-example { margin: 0; padding: 10px 12px; border-left: 2px solid var(--dsw-alias-brand-primary); border-radius: 8px; background: var(--dsw-alias-fill-floating-secondary, transparent); }
+.oac-gt-guide-example p { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
+.oac-gt-guide-when { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.oac-gt-guide-when-title { margin: 0 0 4px; font-weight: 600; }
+.oac-gt-guide-when-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.oac-gt-guide-manual { font-size: 13px; font-weight: 600; }
 /* Task drawer: the IDBots group-task right rail (members / status history /
    transitions / integrity events / deliverables) ported as a floating drawer —
    absolutely positioned over the thread's right edge, never taking layout
