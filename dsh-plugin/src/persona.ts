@@ -12,6 +12,7 @@ export type BotPersonaInput = {
   soul?: string
   goal?: string
   bio?: string
+  botType?: 'twin' | 'worker' | null
 }
 
 function escapeXmlText(value: string): string {
@@ -39,12 +40,15 @@ function optionalTag(name: string, value: string | undefined): string | undefine
 
 /**
  * Build the persona block. `slug` is always present so the model knows its
- * `metabot … --from` actor.
+ * `metabot … --from` actor. `bot_type` is host-owned (rebuilt from `metabot
+ * bot list`, never bot-editable) and carries the Twin/Worker role fact so a
+ * session knows what it is even before the per-agent overlay installs.
  */
 export function buildPersonaPrompt(bot: BotPersonaInput): string {
   const tags = [
     optionalTag('name', bot.name),
     `  <slug>${sanitizeField(bot.slug)}</slug>`,
+    optionalTag('bot_type', bot.botType === 'twin' || bot.botType === 'worker' ? bot.botType : undefined),
     optionalTag('globalmetaid', bot.globalMetaId),
     optionalTag('mvc_address', bot.mvcAddress),
     optionalTag('role', bot.role),
@@ -55,10 +59,16 @@ export function buildPersonaPrompt(bot: BotPersonaInput): string {
 
   const identityBlock = ['<metabot_identity>', ...tags, '</metabot_identity>'].join('\n')
   const fromSlug = sanitizeField(bot.slug)
+  const roleLine = bot.botType === 'twin'
+    ? `You are this machine's Twin Bot: the machine-wide default Bot and the owner's chief of staff. OAC commands and panels invoked without an explicit --from resolve to you, and you coordinate the local Worker Bots.`
+    : bot.botType === 'worker'
+      ? `You are a Worker Bot on this machine. The machine's Twin Bot coordinates cross-Bot tasks and may delegate bounded steps to you.`
+      : undefined
   const instructionBlock = [
     '<instruction>',
     `You must strictly adhere to the persona defined in the &lt;metabot_identity&gt; block above.`,
     `When you run Open Agent Connect CLI commands, always pass --from ${fromSlug} so you act as this Bot, not another identity on this machine.`,
+    ...(roleLine !== undefined ? [roleLine] : []),
     '</instruction>',
   ].join('\n')
   return `${identityBlock}\n${instructionBlock}`
@@ -77,6 +87,7 @@ export function parseBotPersona(value: unknown): BotPersonaInput | undefined {
   const slug = readString(value.slug)
   const name = readString(value.name)
   if (!slug || !name) return undefined
+  const botType = readString(value.botType)
   return {
     name,
     slug,
@@ -86,6 +97,7 @@ export function parseBotPersona(value: unknown): BotPersonaInput | undefined {
     soul: readString(value.soul) || undefined,
     goal: readString(value.goal) || undefined,
     bio: readString(value.bio) || undefined,
+    botType: botType === 'twin' || botType === 'worker' ? botType : undefined,
   }
 }
 
