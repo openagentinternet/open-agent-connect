@@ -12,6 +12,7 @@ import type { ChipBot, ChipPresetOption } from '../chip-logic.ts'
 import {
   botsBySlugFromList,
   filterSelectablePresets,
+  isChipBotAvailable,
   modelSelectionToApply,
   orderPresetsTwinFirst,
   presetIdForSlug,
@@ -127,9 +128,12 @@ export class BotPresetSeatController {
   /** The Twin's preset id, used as the default for new blank sessions. */
   private twinPresetId(): string | undefined {
     const bots = this.store.getSnapshot().botsBySlug
-    const twinSlug = Object.values(bots).find((bot) => bot.botType === 'twin')?.slug
-    if (!twinSlug) return undefined
-    return presetIdForSlug(twinSlug)
+    const twin = Object.values(bots).find((bot) => bot.botType === 'twin')
+    // An unavailable Twin (toggle off / no DSH LLM pair) is not a default:
+    // its preset is filtered out of the options, so staging it would strand
+    // the blank session on a Bot the picker deliberately hides.
+    if (twin === undefined || !isChipBotAvailable(twin)) return undefined
+    return presetIdForSlug(twin.slug)
   }
 
   async apply(): Promise<void> {

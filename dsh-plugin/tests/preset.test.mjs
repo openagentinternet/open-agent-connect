@@ -223,6 +223,48 @@ test('reconcilePresets: create missing oac-* bots, remove plugin orphans, leave 
   })
 })
 
+test('reconcilePresets: removes the legacy shared `oac` preset and heals a dangling default', async () => {
+  await withPresetCtx(async (ctx, mock, tmp) => {
+    await mkdir(join(tmp, '.agent-presets', 'oac'), { recursive: true })
+    await writeFile(join(tmp, 'settings.yaml'), 'agent-presets:\n  default: oac\nlocale:\n  preference: zh\n', 'utf8')
+    const result = await plugin.reconcilePresets(ctx, async () => ({
+      ok: true,
+      state: 'success',
+      data: { profiles: [makeBot({ name: 'Alice', slug: 'alice' })] },
+    }))
+    assert.deepEqual(result.removed, ['oac'])
+    const listed = await mock.agentPresets.list()
+    assert.deepEqual(listed.map((row) => row.id).sort(), ['oac-alice'])
+    const healed = await readFile(join(tmp, 'settings.yaml'), 'utf8')
+    assert.match(healed, /default: standard/)
+    assert.match(healed, /preference: zh/)
+  })
+})
+
+test('reconcilePresets: leaves a non-legacy default setting and a missing settings file alone', async () => {
+  await withPresetCtx(async (ctx, mock, tmp) => {
+    await mkdir(join(tmp, '.agent-presets', 'oac'), { recursive: true })
+    await writeFile(join(tmp, 'settings.yaml'), 'agent-presets:\n  default: my-own\n', 'utf8')
+    await plugin.reconcilePresets(ctx, async () => ({
+      ok: true,
+      state: 'success',
+      data: { profiles: [makeBot({ name: 'Alice', slug: 'alice' })] },
+    }))
+    const kept = await readFile(join(tmp, 'settings.yaml'), 'utf8')
+    assert.match(kept, /default: my-own/)
+
+    // No settings.yaml at all: heal is a no-op and never throws.
+    await rm(join(tmp, 'settings.yaml'))
+    await mkdir(join(tmp, '.agent-presets', 'oac'), { recursive: true })
+    await plugin.reconcilePresets(ctx, async () => ({
+      ok: true,
+      state: 'success',
+      data: { profiles: [makeBot({ name: 'Alice', slug: 'alice' })] },
+    }))
+    assert.equal(existsSync(join(tmp, 'settings.yaml')), false)
+  })
+})
+
 test('removePreset deletes oac-<slug> and ignores unknown ids', async () => {
   await withPresetCtx(async (ctx, mock) => {
     await plugin.generatePreset(ctx, makeBot())

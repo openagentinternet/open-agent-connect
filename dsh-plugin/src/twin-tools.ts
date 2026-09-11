@@ -30,7 +30,7 @@
 import { randomUUID } from 'node:crypto'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
-import { presetIdForSlug, slugFromPresetId } from './chip-logic.js'
+import { isChipBotAvailable, presetIdForSlug, slugFromPresetId } from './chip-logic.js'
 import type { HostAgentLike, HostAgentsRegistryLike, HostContext, HostToolDefinition, HostUserMessage } from './context-types.js'
 
 /** Twin orchestration overlay, ported verbatim from IDBots coworkRunner.ts. */
@@ -338,6 +338,15 @@ export function createTwinOrchestrator(
         return failure('worker_not_found', `Worker Bot not found: ${workerSlug}`)
       }
       const workerProfile = (workerShow.data as { profile?: Record<string, unknown> } | undefined)?.profile
+      // Unavailable Bots (Settings toggle off, or no DSH LLM pair) are not
+      // delegation targets — the same rule local_workers_list filters by.
+      if (!isChipBotAvailable({
+        isAvailable: workerProfile?.isAvailable !== false,
+        dshLlmProvider: typeof workerProfile?.dshLlmProvider === 'string' ? workerProfile.dshLlmProvider : null,
+        dshLlmModel: typeof workerProfile?.dshLlmModel === 'string' ? workerProfile.dshLlmModel : null,
+      })) {
+        return failure('worker_unavailable', `Worker Bot "${workerSlug}" is unavailable (Settings → Bots toggle off, or no DSH LLM pair configured). Re-enable it and configure its DSH LLM pair before delegating.`)
+      }
       const agentsRegistry = agentsRegistryOf(ctx)
       if (!agentsRegistry?.create || !ctx.agentPresets?.mount) {
         return failure('delegation_unavailable', 'The DSH agent registry or preset service is unavailable.')

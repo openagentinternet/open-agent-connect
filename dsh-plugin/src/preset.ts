@@ -23,6 +23,12 @@ export const STANDARD_PRESET_ID = 'standard'
 export const USER_PRESET_DIR = '.agent-presets'
 export const COMPOSITION_FILE = 'agent.cordis.yml'
 export const METADATA_FILE = 'preset.yml'
+/**
+ * Pre-per-Bot installs (the oac-dsh-adaptation template) left one shared bare
+ * `oac` preset ("Open Agent Connect (MetaBot)") mounting stale `metabot_*`
+ * tool rows. The per-Bot design never creates it, so reconcile removes it.
+ */
+export const LEGACY_SHARED_PRESET_ID = 'oac'
 
 export {
   isOacPresetId,
@@ -30,15 +36,19 @@ export {
   PRESET_ID_PREFIX,
 } from './chip-logic.js'
 
-export function presetDir(ctx: HostContext, presetId: string): string {
+function dshHomeFile(ctx: HostContext, ...segments: string[]): string {
   const fromGet = ctx.get?.('dshHomePath')
   if (typeof fromGet === 'function') {
-    return (fromGet as (...segments: string[]) => string)(USER_PRESET_DIR, presetId)
+    return (fromGet as (...parts: string[]) => string)(...segments)
   }
   if (typeof ctx.dshHomePath === 'function') {
-    return ctx.dshHomePath(USER_PRESET_DIR, presetId)
+    return ctx.dshHomePath(...segments)
   }
-  return join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), USER_PRESET_DIR, presetId)
+  return join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), ...segments)
+}
+
+export function presetDir(ctx: HostContext, presetId: string): string {
+  return dshHomeFile(ctx, USER_PRESET_DIR, presetId)
 }
 
 interface EntryRow {
@@ -119,9 +129,37 @@ export type ReconcileResult = {
 }
 
 /**
+ * A host whose `agent-presets.default` still points at the legacy shared
+ * `oac` preset (removed by reconcile) heals to the stock `standard` preset —
+ * a dangling default would otherwise break or silently degrade new sessions.
+ * Returns true when the setting was rewritten. Only an exact `oac` default
+ * is touched; any other value is the host's own choice.
+ */
+export async function healLegacyDefaultPresetSetting(ctx: HostContext): Promise<boolean> {
+  const settingsPath = dshHomeFile(ctx, 'settings.yaml')
+  let raw: string
+  try {
+    raw = await readFile(settingsPath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+  const settings = (yaml.load(raw) ?? {}) as Record<string, unknown>
+  const presets = settings['agent-presets']
+  if (presets === null || typeof presets !== 'object' || Array.isArray(presets)) return false
+  const row = presets as Record<string, unknown>
+  if (row.default !== LEGACY_SHARED_PRESET_ID) return false
+  row.default = STANDARD_PRESET_ID
+  await writeFile(settingsPath, yaml.dump(settings), 'utf8')
+  return true
+}
+
+/**
  * Every `metabot bot list` entry ↔ `oac-<slug>`. Create missing, rewrite
  * persona, remove plugin-owned `oac-*` presets whose Bot is gone. Never touch
- * non-`oac-*` presets.
+ * non-`oac-*` presets — except the legacy shared `oac` preset from pre
+ * per-Bot installs, which is removed (and a dangling `agent-presets.default`
+ * pointing at it healed to `standard`).
  */
 export async function reconcilePresets(
   ctx: HostContext,
@@ -146,6 +184,11 @@ export async function reconcilePresets(
     if (wantedSet.has(id)) continue
     await presets.remove(id)
     removed.push(id)
+  }
+  if (existing.some((row) => row.id === LEGACY_SHARED_PRESET_ID)) {
+    await presets.remove(LEGACY_SHARED_PRESET_ID)
+    removed.push(LEGACY_SHARED_PRESET_ID)
+    await healLegacyDefaultPresetSetting(ctx)
   }
   return { wanted, createdOrUpdated, removed }
 }

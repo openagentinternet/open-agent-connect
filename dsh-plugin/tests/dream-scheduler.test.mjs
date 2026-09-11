@@ -79,6 +79,46 @@ test('scheduler tick dreams only dream-enabled bots with a DSH LLM, one date eac
   assert.equal(llm.requests.length, 3)
 })
 
+test('scheduler tick skips toggle-off Bots for both the dream pass and the hygiene tail', async () => {
+  const llm = fakeLlm()
+  const hygieneProbed = []
+  const policyProbed = []
+  const run = async (args) => {
+    const verb = args.slice(0, 2).join(' ')
+    if (verb === 'bot list') {
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          profiles: [
+            { slug: 'off', isAvailable: false, dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' },
+            { slug: 'on', dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' },
+          ],
+        },
+      }
+    }
+    if (verb === 'memory policy') {
+      policyProbed.push(args[args.indexOf('--from') + 1])
+      return { ok: true, state: 'success', data: { effective: { dreamEnabled: true } } }
+    }
+    if (verb === 'dream due') {
+      return { ok: true, state: 'success', data: { dueDates: [], repairDates: [] } }
+    }
+    if (verb === 'memory hygiene') {
+      hygieneProbed.push(args[args.indexOf('--from') + 1])
+      return { ok: true, state: 'success', data: { due: false } }
+    }
+    return { ok: true, state: 'success', data: {} }
+  }
+  const outcomes = await plugin.runDreamSchedulerTick({ run, llm })
+  const off = outcomes.find((outcome) => outcome.slug === 'off')
+  assert.equal(off.skipped, 'bot unavailable (Settings toggle off)')
+  assert.deepEqual(off.dreamed, [])
+  // A toggle-off Bot gets no policy probe, no dream-due probe, no hygiene run.
+  assert.deepEqual(policyProbed, ['on'])
+  assert.deepEqual(hygieneProbed, ['on'])
+})
+
 test('scheduler tick skips bots with no due dates and never throws on per-bot failure', async () => {
   const llm = fakeLlm()
   const run = async (args) => {

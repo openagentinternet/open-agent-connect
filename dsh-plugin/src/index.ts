@@ -762,8 +762,10 @@ export {
   chipDisplayName,
   filterSelectablePresets,
   heroIdentityFor,
+  isChipBotAvailable,
   isOacPresetId,
   modelSelectionToApply,
+  orderPresetsTwinFirst,
   presetIdForSlug,
   shouldApplyStagedPreset,
   slugFromPresetId,
@@ -855,6 +857,8 @@ export { generateLlmText } from './llm-generate.js'
 export { uploadFileBytes } from './file-upload.js'
 export {
   generatePreset,
+  healLegacyDefaultPresetSetting,
+  LEGACY_SHARED_PRESET_ID,
   presetDir,
   reconcilePresets,
   removePreset,

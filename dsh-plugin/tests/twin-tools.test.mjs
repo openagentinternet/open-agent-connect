@@ -23,6 +23,7 @@ function runScript(options = {}) {
               slug,
               name: slug,
               botType: slug === 'alice' ? 'twin' : 'worker',
+              ...(options.unavailable ? { isAvailable: false } : {}),
               ...(options.noModel ? {} : { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-chat' }),
             },
           },
@@ -188,22 +189,25 @@ test('delegate runs a worker sub-session, returns the handoff, and keeps the ses
   assert.equal(marked[0][1].attemptId, 'att_1')
 })
 
-test('delegate falls back to the host default model when the worker Bot has no DSH LLM pair', async () => {
+test('delegate refuses a worker Bot with no DSH LLM pair, even with a host default model', async () => {
   const { run } = runScript({ noModel: true })
   const dsh = fakeDsh('done', { hostModel: { provider: 'host-provider', model: 'host-model' } })
   const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
   const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
-  assert.equal(result.ok, true, result.message)
-  assert.deepEqual(dsh.created[0].agentOptions, { provider: 'host-provider', model: 'host-model' })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'worker_unavailable')
+  assert.match(result.message, /no DSH LLM pair/)
+  assert.equal(dsh.created.length, 0)
 })
 
-test('delegate refuses when neither the Bot pair nor a host default model exists', async () => {
-  const { run } = runScript({ noModel: true })
-  const dsh = fakeDsh('done')
+test('delegate refuses a worker Bot whose Settings availability toggle is off', async () => {
+  const { run } = runScript({ unavailable: true })
+  const dsh = fakeDsh('done', { hostModel: { provider: 'host-provider', model: 'host-model' } })
   const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
   const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
   assert.equal(result.ok, false)
-  assert.equal(result.code, 'delegation_unavailable')
+  assert.equal(result.code, 'worker_unavailable')
+  assert.match(result.message, /toggle off/)
   assert.equal(dsh.created.length, 0)
 })
 

@@ -67,7 +67,11 @@ const MODEL_PAIR = () => ({ provider: 'deepseek', model: 'deepseek-v4-flash' })
 async function runStub(args) {
   const verb = args.slice(0, 2).join(' ')
   if (verb === 'bot list') {
-    return { ok: true, state: 'success', data: { profiles: [{ slug: 'alice' }] } }
+    return {
+      ok: true,
+      state: 'success',
+      data: { profiles: [{ slug: 'alice', dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' }] },
+    }
   }
   return { ok: true, state: 'success', data: {} }
 }
@@ -145,7 +149,11 @@ test('schedule tick falls back to the CLI verbs when the daemon is unreachable',
     cli.push(args)
     const verb = args.slice(0, 2).join(' ')
     if (verb === 'bot list') {
-      return { ok: true, state: 'success', data: { profiles: [{ slug: 'alice' }] } }
+      return {
+        ok: true,
+        state: 'success',
+        data: { profiles: [{ slug: 'alice', dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' }] },
+      }
     }
     if (verb === 'schedule due') {
       return DUE_OK
@@ -269,6 +277,39 @@ test('schedule tick settles as error when no LLM model route exists for the bot'
   assert.equal(registry.calls.created.length, 0)
   const [, , completeInput] = daemon.calls.complete[0]
   assert.match(completeInput.error, /No LLM model/)
+})
+
+test('schedule tick skips unavailable Bots (toggle off or no DSH LLM pair) without heartbeating', async () => {
+  const daemon = fakeDaemon({ due: () => DUE_OK })
+  const registry = fakeRegistry()
+  const run = async (args) => {
+    const verb = args.slice(0, 2).join(' ')
+    if (verb === 'bot list') {
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          profiles: [
+            { slug: 'off', isAvailable: false, dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' },
+            { slug: 'no-llm' },
+          ],
+        },
+      }
+    }
+    return { ok: true, state: 'success', data: {} }
+  }
+  const outcomes = await plugin.runScheduleSchedulerTick({
+    run,
+    daemon,
+    agents: registry,
+    agentPresets: { mount: async () => {} },
+    modelPair: MODEL_PAIR,
+  })
+  assert.deepEqual(outcomes.map((entry) => entry.slug), ['off', 'no-llm'])
+  assert.ok(outcomes.every((entry) => entry.skipped === 'bot unavailable (toggle off or no DSH LLM pair)'))
+  assert.equal(daemon.calls.heartbeat.length, 0)
+  assert.equal(daemon.calls.due.length, 0)
+  assert.equal(registry.calls.created.length, 0)
 })
 
 test('applyScheduleScheduler runs a boot tick and reports outcomes', async (t) => {

@@ -52,6 +52,9 @@ export async function runDreamSchedulerTick(
   options: DreamSchedulerOptions & { run: RunFn; llm?: LlmStreamLike },
 ): Promise<DreamBotOutcome[]> {
   const outcomes: DreamBotOutcome[] = []
+  // Toggle-off Bots (Settings → Bots availability switch) run neither dreams
+  // nor memory hygiene — an unavailable Bot is hands-off for every pass.
+  const toggleOffSlugs = new Set<string>()
   const list = await options.run(['bot', 'list'], { timeoutMs: LIST_TIMEOUT_MS })
   const profiles = list.ok && list.data && typeof list.data === 'object'
     ? ((list.data as { profiles?: Array<Record<string, unknown>> }).profiles ?? [])
@@ -61,6 +64,11 @@ export async function runDreamSchedulerTick(
     if (!slug) continue
     const outcome: DreamBotOutcome = { slug, dreamed: [] }
     outcomes.push(outcome)
+    if (profile.isAvailable === false) {
+      toggleOffSlugs.add(slug)
+      outcome.skipped = 'bot unavailable (Settings toggle off)'
+      continue
+    }
     if (options.dreamEnabled === false) continue
     const llm = options.llm
     if (!llm) {
@@ -118,6 +126,7 @@ export async function runDreamSchedulerTick(
   // (eligible once per local date, all-day catch-up; the CLI decides).
   if (options.hygieneEnabled !== false) {
     for (const outcome of outcomes) {
+      if (toggleOffSlugs.has(outcome.slug)) continue
       const hygiene = await runHygieneTail(options.run, outcome.slug)
       outcome.hygieneRan = hygiene.ran
       if (hygiene.error) outcome.hygieneError = hygiene.error

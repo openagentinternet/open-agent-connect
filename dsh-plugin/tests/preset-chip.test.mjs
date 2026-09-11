@@ -113,12 +113,13 @@ test('chip description shows the Bot persona role over the static preset copy', 
   )
 })
 
-test('preset dropdown lists the Twin Bot first', async () => {
+test('preset dropdown orders the Twin Bot first, then local Bots by creation time', async () => {
   const { orderPresetsTwinFirst } = await import('../lib/chip-logic.js')
+  const llm = { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-chat' }
   const botsBySlug = {
-    worker1: { botType: 'worker' },
-    bob: { botType: 'twin' },
-    worker2: { botType: 'worker' },
+    worker1: { botType: 'worker', createdAt: 300, ...llm },
+    bob: { botType: 'twin', createdAt: 200, ...llm },
+    worker2: { botType: 'worker', createdAt: 100, ...llm },
   }
   const options = [
     { id: 'standard', trust: 'system' },
@@ -126,11 +127,30 @@ test('preset dropdown lists the Twin Bot first', async () => {
     { id: 'oac-bob', trust: 'user' },
     { id: 'oac-worker2', trust: 'user' },
   ]
+  // The Twin leads; workers follow oldest-first (worker2 before worker1);
+  // stock presets keep their roster slot.
   const ordered = orderPresetsTwinFirst(options, botsBySlug)
-  assert.deepEqual(ordered.map((option) => option.id), ['oac-bob', 'standard', 'oac-worker1', 'oac-worker2'])
-  // No twin / twin preset absent: order unchanged.
-  assert.deepEqual(
-    orderPresetsTwinFirst(options, { worker1: { botType: 'worker' } }).map((option) => option.id),
-    ['standard', 'oac-worker1', 'oac-bob', 'oac-worker2'],
-  )
+  assert.deepEqual(ordered.map((option) => option.id), ['oac-bob', 'standard', 'oac-worker2', 'oac-worker1'])
+})
+
+test('preset dropdown drops unavailable Bots and keeps roster-missing presets', async () => {
+  const { orderPresetsTwinFirst } = await import('../lib/chip-logic.js')
+  const llm = { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-chat' }
+  const botsBySlug = {
+    off: { botType: 'worker', isAvailable: false, ...llm },
+    nollm: { botType: 'worker' },
+    // An unavailable Twin (no DSH LLM pair) no longer leads the list.
+    bob: { botType: 'twin' },
+  }
+  const options = [
+    { id: 'standard', trust: 'system' },
+    { id: 'oac-off', trust: 'user' },
+    { id: 'oac-nollm', trust: 'user' },
+    { id: 'oac-bob', trust: 'user' },
+    { id: 'oac-ghost', trust: 'user' },
+  ]
+  const ordered = orderPresetsTwinFirst(options, botsBySlug)
+  // Toggle-off, LLM-unset, and the unavailable Twin are hidden; a preset
+  // whose Bot is absent from the roster stays visible in its slot.
+  assert.deepEqual(ordered.map((option) => option.id), ['standard', 'oac-ghost'])
 })
