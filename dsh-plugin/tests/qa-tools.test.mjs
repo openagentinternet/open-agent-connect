@@ -231,6 +231,8 @@ test('post_simplequestion: workspace files publish freely, external files need o
   approve = false
   const denied = await tool.execute({ title: 'T3', attachments: [outside] }, {})
   assert.match(denied, /Owner declined/)
+  assert.match(denied, /copy the file into the session workspace/, 'E-1: the decline must name the actionable next step')
+  assert.match(denied, /Do not retry the same path/)
   assert.equal(calls.length, 2, 'declined publish never spawns the CLI write')
 
   const relative = await tool.execute({ title: 'T4', attachments: ['rel/shot.png'] }, {})

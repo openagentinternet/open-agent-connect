@@ -131,6 +131,36 @@ test('hub.open(null) loads the homepage and marks the snapshot open', async () =
   }
 })
 
+test('hub folds successful command results into the shared snapshot (N-2)', async () => {
+  const hub = new BrowserEventHub({ METABOT_DAEMON_BASE_URL: '' })
+  try {
+    hub.applySnapshot({ open: true, tabs: [{ id: 1, uri: null, title: 'Welcome', isActive: true }] })
+    assert.equal(hub.getLastOpenAt(), 0)
+    const requestIds = []
+    const off = hub.addClient((frame) => {
+      if (frame.event === 'browser-command') requestIds.push(frame.data.requestId)
+    })
+    const listed = hub.requestCommand({ action: 'list' })
+    hub.completeCommand({
+      requestId: requestIds[0],
+      ok: true,
+      action: 'list',
+      tabs: [{ id: 2, uri: 'metaapp://abc', title: 'App', isActive: true }],
+    })
+    assert.equal((await listed).ok, true)
+    assert.deepEqual(hub.getSnapshot().tabs, [{ id: 2, uri: 'metaapp://abc', title: 'App', isActive: true }])
+    assert.ok(hub.getSnapshotAt() > 0)
+
+    const opened = hub.requestCommand({ action: 'open-tab', uri: 'metaapp://abc' })
+    hub.completeCommand({ requestId: requestIds[1], ok: true, action: 'open-tab', tabs: [] })
+    assert.equal((await opened).ok, true)
+    assert.ok(hub.getLastOpenAt() > 0)
+    off()
+  } finally {
+    hub.stop()
+  }
+})
+
 test('hub forwards agent-browser:open-tab events to web listeners', async () => {
   const received = []
   const server = createServer((req, res) => {

@@ -25,6 +25,30 @@ function makeProfile(prefix) {
   return resolveMetabotPaths(homeDir);
 }
 
+test('retryStudyJob requeues a failed job and clears its failure counters (N-4)', async () => {
+  const paths = makeProfile('metabot-study-retry-');
+  const jobs = createStudyJobStore(paths);
+  const { job } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'T' });
+
+  for (let index = 0; index < MAX_STUDY_CONSECUTIVE_FAILURES; index += 1) {
+    await jobs.failRun(job.id, 'Study turn exceeded 12 tool steps without a final report.');
+  }
+  let current = await jobs.getStudyJob(job.id);
+  assert.equal(current.status, 'failed');
+  assert.equal(current.consecutiveFailures, MAX_STUDY_CONSECUTIVE_FAILURES);
+
+  const retried = await jobs.retryStudyJob(job.id);
+  assert.equal(retried.retried, true);
+  current = await jobs.getStudyJob(job.id);
+  assert.equal(current.status, 'pending');
+  assert.equal(current.consecutiveFailures, 0);
+  assert.equal(current.error, null);
+
+  const again = await jobs.retryStudyJob(job.id);
+  assert.equal(again.retried, false, 'a pending job is not re-requeued');
+  assert.equal(await jobs.retryStudyJob('study-missing'), null);
+});
+
 test('enqueue dedupes active jobs per topic, clamps budget, lists oldest-first', async () => {
   const paths = makeProfile('metabot-study-enqueue-');
   const jobs = createStudyJobStore(paths);

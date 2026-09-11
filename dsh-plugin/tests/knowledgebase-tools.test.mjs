@@ -52,6 +52,7 @@ test('bindKnowledgeBaseToolInstall registers all tools incl. the qa-surf pair', 
       'metaweb_qa_surf_disable',
       'metaweb_qa_surf_enqueue',
       'metaweb_study_enqueue',
+      'metaweb_study_retry',
       'metaweb_study_status',
       'procedure_archive',
       'procedure_recall',
@@ -313,4 +314,43 @@ test('metaweb_study_enqueue dedupes and status reports', async () => {
   const status = await byName.get('metaweb_study_status').execute({}, exec)
   assert.match(String(status), /前端框架趋势/)
   assert.match(String(status), /\[pending\]/)
+})
+
+test('failed study jobs surface why + how to retry, and metaweb_study_retry requeues them (N-4)', async () => {
+  const { homeDir, exec, resolve } = profileSetup('kb-study-fail-')
+  const bound = fakeHost()
+  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot', resolve)
+  const byName = new Map(bound.tools.map((tool) => [tool.name, tool]))
+
+  await byName.get('metaweb_study_enqueue').execute({ topic: '排障与验收经验' }, exec)
+
+  // Drive the job into the failed state through the same core store the tools use.
+  const paths = localRead.core('core/state/paths.js').resolveMetabotPaths(homeDir)
+  const store = localRead.core('core/knowledgebase/studyJobs.js').createStudyJobStore(paths)
+  const [job] = await store.listStudyJobs('test-bot')
+  for (let index = 0; index < 3; index += 1) {
+    await store.failRun(job.id, 'Study turn exceeded 12 tool steps without a final report.')
+  }
+
+  const enqueueAgain = await byName.get('metaweb_study_enqueue').execute({ topic: '另一个主题' }, exec)
+  assert.match(String(enqueueAgain), /1 of your study jobs have FAILED/)
+
+  const status = String(await byName.get('metaweb_study_status').execute({}, exec))
+  assert.match(status, /1 study job\(s\) have FAILED/)
+  assert.match(status, /error: Study turn exceeded 12 tool steps/)
+  assert.match(status, new RegExp(`metaweb_study_retry \\(jobId: ${job.id}\\)`))
+
+  const retried = await byName.get('metaweb_study_retry').execute({ jobId: job.id }, exec)
+  assert.match(String(retried), /Retried 1 study job/)
+  assert.match(String(retried), /排障与验收经验.*\[pending\]/)
+
+  const after = String(await byName.get('metaweb_study_status').execute({}, exec))
+  assert.doesNotMatch(after, /have FAILED/)
+  assert.match(after, /排障与验收经验.*\[pending\] runs: 3, failures: 0/)
+
+  const noneLeft = await byName.get('metaweb_study_retry').execute({}, exec)
+  assert.match(String(noneLeft), /No failed study jobs to retry/)
+
+  const missing = await byName.get('metaweb_study_retry').execute({ jobId: 'study-nope' }, exec)
+  assert.match(String(missing), /No study job with id "study-nope"/)
 })

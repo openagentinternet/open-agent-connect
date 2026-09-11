@@ -35,6 +35,15 @@ test('post_simplenote registers on the global layer', () => {
   assert.deepEqual(host.tools.map((tool) => tool.name), ['post_simplenote'])
 })
 
+test('post_simplenote description documents the attachment path rules (E-1)', () => {
+  const host = fakeHost()
+  plugin.bindSimpleNoteToolInstall(host.ctx)
+  const description = host.tools[0].description
+  assert.match(description, /ABSOLUTE \(relative paths are rejected\)/)
+  assert.match(description, /approval prompts are disabled .* auto-declined/)
+  assert.match(description, /copy the file into the session workspace first/)
+})
+
 test('metafile URIs and in-workspace files publish without asking; external files require approval', async () => {
   const workspace = mkdtempSync(path.join(tmpdir(), 'sn-ws-'))
   const inside = path.join(workspace, 'cover.png')
@@ -77,6 +86,8 @@ test('metafile URIs and in-workspace files publish without asking; external file
   approve = false
   const denied = await tool.execute({ title: 'T', content: 'B', cover: outside }, {})
   assert.match(denied, /Owner declined/)
+  assert.match(denied, /copy the file into the session workspace/, 'E-1: the decline must name the actionable next step')
+  assert.match(denied, /Do not retry the same path/)
   assert.equal(calls.length, 2, 'declined publish never spawns the CLI write')
 
   const relative = await tool.execute({ title: 'T', content: 'B', cover: './rel.png' }, {})

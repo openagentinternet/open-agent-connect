@@ -236,6 +236,8 @@ export class BrowserEventHub {
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private started = false
   private snapshot: BrowserSnapshot = EMPTY_SNAPSHOT
+  private snapshotAt = 0
+  private lastOpenTabAt = 0
   private catalog: BrowserCatalogEntry[] = []
 
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
@@ -267,6 +269,22 @@ export class BrowserEventHub {
     return this.snapshot
   }
 
+  /** When the current snapshot was last refreshed (ms epoch; 0 = never). */
+  getSnapshotAt(): number {
+    return this.snapshotAt
+  }
+
+  /**
+   * When an open (open event or open-tab command) was last issued (ms epoch;
+   * 0 = never). A just-opened page registers in the tab state only when the
+   * navigation commits — no-arg readers use this to tell "nothing is open"
+   * from "the new page has not landed yet" instead of reporting a false
+   * terminal "no page" (N-1).
+   */
+  getLastOpenAt(): number {
+    return this.lastOpenTabAt
+  }
+
   /** Replace the last-reported client snapshot (POST /oac/api/browser/state). */
   applySnapshot(snapshot: BrowserSnapshot): void {
     this.snapshot = {
@@ -274,6 +292,7 @@ export class BrowserEventHub {
       tabs: Array.isArray(snapshot.tabs) ? snapshot.tabs : [],
       rendererType: typeof snapshot.rendererType === 'string' ? snapshot.rendererType : snapshot.rendererType ?? null,
     }
+    this.snapshotAt = Date.now()
   }
 
   clientCount(): number {
@@ -323,11 +342,13 @@ export class BrowserEventHub {
       localUiUrl: resolved ? `${baseUrl}${resolveBrowserPath(resolved)}` : `${baseUrl}/browser`,
       source,
     }
+    this.lastOpenTabAt = Date.now()
     this.snapshot = {
       ...this.snapshot,
       open: true,
       ...(resolved ? {} : { tabs: [], rendererType: null }),
     }
+    this.snapshotAt = Date.now()
     this.emitFrame({ event: 'browser-open', data: event })
     for (const listener of this.listeners.values()) {
       try {
@@ -375,8 +396,26 @@ export class BrowserEventHub {
     if (!pending) return false
     this.pending.delete(result.requestId)
     clearTimeout(pending.timeout)
+    this.noteCommandResult(result)
     pending.resolve(result)
     return true
+  }
+
+  /**
+   * Fold one successful client command result into the shared snapshot. The
+   * command answer is the freshest client contact (the pushed state report
+   * lags behind it), so every reader of getSnapshot() — bot_browser_tabs and
+   * the per-turn <browser_context> alike — samples the same, latest truth
+   * (N-2). An open-tab answer is a pre-navigation snapshot; that is still the
+   * client's own tab list at that moment, and the following state report
+   * overwrites it when the page commits.
+   */
+  private noteCommandResult(result: BrowserCommandResult): void {
+    if (!result.ok) return
+    if (result.action === 'open-tab') this.lastOpenTabAt = Date.now()
+    if (!Array.isArray(result.tabs)) return
+    this.snapshot = { ...this.snapshot, open: true, tabs: result.tabs }
+    this.snapshotAt = Date.now()
   }
 
   private emitFrame(frame: BrowserSseFrame): void {

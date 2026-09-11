@@ -16,11 +16,14 @@ const { mvc } = require('meta-contract');
 const {
   LlmRelayError,
   buildLlmRelayBootstrapMessage,
+  buildSpelledLetterConfirmationPrompt,
   createLlmRelayService,
   deriveVisionRecognizeUrl,
+  findSpelledLetterCandidates,
   formatMediaRelayError,
   inferAudioMimeType,
   parseFfmpegDuration,
+  parseSpelledLetterConfirmation,
   sniffImageMime,
 } = require('../../dist/core/llm/llmRelayService.js');
 const { importOwnerIdentity } = require('../../dist/core/owner/ownerIdentity.js');
@@ -323,4 +326,102 @@ test('describeAudio rejects unsupported local audio formats and oversized payloa
   const big = path.join(systemHomeDir, 'big.wav');
   await fs.writeFile(big, Buffer.alloc(9 * 1024 * 1024));
   await assert.rejects(() => service.describeAudio({ source: big }), /audio too large/);
+});
+
+test('findSpelledLetterCandidates flags merged words, skips common acronyms and spelled forms', () => {
+  assert.deepEqual(findSpelledLetterCandidates('这是 OASIS 工具冒烟测试'), ['OASIS']);
+  assert.deepEqual(findSpelledLetterCandidates('这是 O-A-C 工具冒烟测试'), [], 'hyphenated spelled form is already correct');
+  assert.deepEqual(findSpelledLetterCandidates('call the API over HTTP'), [], 'common acronyms never trigger a confirmation call');
+  assert.deepEqual(findSpelledLetterCandidates('OIC and OOC and OIC again'), ['OIC', 'OOC'], 'deduped, in order');
+  assert.deepEqual(findSpelledLetterCandidates('lowercase only'), []);
+});
+
+test('parseSpelledLetterConfirmation classifies letters, words, and honest doubt', () => {
+  assert.deepEqual(parseSpelledLetterConfirmation('O-A-C', 'OASIS'), { kind: 'letters', text: 'O-A-C' });
+  assert.deepEqual(parseSpelledLetterConfirmation('O A C', 'OASIS'), { kind: 'letters', text: 'O-A-C' });
+  assert.deepEqual(parseSpelledLetterConfirmation('o-a-c。', 'OASIS'), { kind: 'letters', text: 'O-A-C' });
+  assert.deepEqual(parseSpelledLetterConfirmation('OASIS', 'OASIS'), { kind: 'word' });
+  assert.deepEqual(parseSpelledLetterConfirmation('oasis', 'OASIS'), { kind: 'word' });
+  assert.deepEqual(parseSpelledLetterConfirmation('OOC', 'OIC'), { kind: 'unstable', heard: 'OOC' });
+  assert.deepEqual(parseSpelledLetterConfirmation('I think it is a word', 'OASIS'), { kind: 'inconclusive' });
+  assert.ok(buildSpelledLetterConfirmationPrompt('OASIS').includes('OASIS'));
+});
+
+test('describeAudio stabilizes a merged spelled-letter sequence through one confirmation call (FIX-4)', async () => {
+  const systemHomeDir = await mkdtempTempRoot('oac-llm-relay-test-');
+  const audioFile = path.join(systemHomeDir, 'note.wav');
+  await fs.writeFile(audioFile, Buffer.from('RIFF----WAVEfmt '));
+  const bodies = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    const confirmation = bodies.length > 1;
+    return jsonResponse({
+      code: 0,
+      data: { content: confirmation ? 'O-A-C' : '这是 OASIS 工具冒烟测试，今天天气不错。', remainingToday: 30 },
+    });
+  };
+  const service = createLlmRelayService({
+    systemHomeDir,
+    fetchImpl,
+    staticCredentials: { apiKey: 'mrk_test', baseUrl: 'https://gw.example.test/assist-open-api' },
+  });
+  const result = await service.describeAudio({ source: audioFile });
+  assert.equal(result.content, '这是 O-A-C 工具冒烟测试，今天天气不错。');
+  assert.equal(bodies.length, 2, 'one transcript call + one confirmation call');
+  assert.ok(bodies[1].prompt.includes('OASIS'), 'confirmation prompt names the suspect token');
+  assert.equal(bodies[1].audioBase64, bodies[0].audioBase64, 'confirmation re-uses the same audio payload');
+});
+
+test('describeAudio keeps a confirmed word and flags an unstable sequence (FIX-4)', async () => {
+  const systemHomeDir = await mkdtempTempRoot('oac-llm-relay-test-');
+  const audioFile = path.join(systemHomeDir, 'note.wav');
+  await fs.writeFile(audioFile, Buffer.from('RIFF----WAVEfmt '));
+
+  // The word confirms as itself: content unchanged, no low-confidence note.
+  let bodies = 0;
+  const wordService = createLlmRelayService({
+    systemHomeDir,
+    fetchImpl: async () => {
+      bodies += 1;
+      return jsonResponse({ code: 0, data: { content: bodies > 1 ? 'OASIS' : 'the OASIS was quiet', remainingToday: 30 } });
+    },
+    staticCredentials: { apiKey: 'mrk_test', baseUrl: 'https://gw.example.test/assist-open-api' },
+  });
+  const wordResult = await wordService.describeAudio({ source: audioFile });
+  assert.equal(wordResult.content, 'the OASIS was quiet');
+
+  // A different all-caps merge on the confirmation pass = unstable: keep the
+  // original token and say so instead of guessing.
+  let unstableCalls = 0;
+  const unstableService = createLlmRelayService({
+    systemHomeDir,
+    fetchImpl: async () => {
+      unstableCalls += 1;
+      return jsonResponse({ code: 0, data: { content: unstableCalls > 1 ? 'OOC' : '这是 OIC 测试', remainingToday: 30 } });
+    },
+    staticCredentials: { apiKey: 'mrk_test', baseUrl: 'https://gw.example.test/assist-open-api' },
+  });
+  const unstableResult = await unstableService.describeAudio({ source: audioFile });
+  assert.match(unstableResult.content, /这是 OIC 测试/);
+  assert.match(unstableResult.content, /\[low-confidence\]/);
+  assert.match(unstableResult.content, /"OIC" was not stably recognized \(also heard as "OOC"\)/);
+});
+
+test('describeAudio leaves a transcript without suspect tokens on a single call', async () => {
+  const systemHomeDir = await mkdtempTempRoot('oac-llm-relay-test-');
+  const audioFile = path.join(systemHomeDir, 'note.wav');
+  await fs.writeFile(audioFile, Buffer.from('RIFF----WAVEfmt '));
+  let calls = 0;
+  const service = createLlmRelayService({
+    systemHomeDir,
+    fetchImpl: async () => {
+      calls += 1;
+      return jsonResponse({ code: 0, data: { content: '这是 O-A-C 工具冒烟测试。', remainingToday: 30 } });
+    },
+    staticCredentials: { apiKey: 'mrk_test', baseUrl: 'https://gw.example.test/assist-open-api' },
+  });
+  const result = await service.describeAudio({ source: audioFile });
+  assert.equal(result.content, '这是 O-A-C 工具冒烟测试。');
+  assert.equal(calls, 1, 'an already-spelled form needs no confirmation call');
 });

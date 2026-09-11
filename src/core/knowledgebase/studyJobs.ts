@@ -14,6 +14,10 @@ import type { MetabotPaths } from '../state/paths';
 export const DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 20;
 export const MAX_STUDY_RUNS_PER_JOB = 10;
 export const MAX_STUDY_CONSECUTIVE_FAILURES = 3;
+/** Tool-step cap for one nightly study turn (topic jobs) — after this the turn must have reported. */
+export const STUDY_TURN_MAX_TOOL_STEPS = 12;
+/** Tool-step cap for one nightly Q&A-surf turn (surf sessions page feeds and answer questions). */
+export const QA_SURF_TURN_MAX_TOOL_STEPS = 24;
 /** Nightly drain window, local hours [0, 6). */
 export const STUDY_WINDOW = { startHour: 0, endHour: 6 } as const;
 export const STUDY_TICK_INTERVAL_MINUTES = 30;
@@ -126,6 +130,12 @@ export interface StudyJobStore {
     learnedSomethingNew: boolean;
   }): Promise<StudyJobRecord | null>;
   failRun(id: string, error: string): Promise<StudyJobRecord | null>;
+  /**
+   * Requeue one FAILED job (owner/tool-initiated retry): back to pending with
+   * the failure counters cleared, so the next nightly window drains it again.
+   * `retried: false` when the job exists but is not failed.
+   */
+  retryStudyJob(id: string): Promise<{ job: StudyJobRecord; retried: boolean } | null>;
   resetRunningToPending(now: number, excludeId?: string): Promise<number>;
 }
 
@@ -343,6 +353,19 @@ export function createStudyJobStore(paths: MetabotPaths): StudyJobStore {
         : 'pending';
       await writeFile(state);
       return job;
+    }),
+
+    retryStudyJob: (id) => enqueue(async () => {
+      const state = await readFile();
+      const job = state.jobs.find((entry) => entry.id === id);
+      if (!job) return null;
+      if (job.status !== 'failed') return { job, retried: false };
+      job.status = 'pending';
+      job.consecutiveFailures = 0;
+      job.error = null;
+      job.updatedAt = Date.now();
+      await writeFile(state);
+      return { job, retried: true };
     }),
 
     resetRunningToPending: (now, excludeId) => enqueue(async () => {
@@ -655,7 +678,7 @@ export async function runStudyTurnWithTools(
 ): Promise<string> {
   // Surf sessions page the feed, open questions, answer, react, and save —
   // they need more tool steps than a topic read-and-save pass.
-  const maxSteps = deps.maxSteps ?? (deps.kind === 'qa-surf' ? 24 : 12);
+  const maxSteps = deps.maxSteps ?? (deps.kind === 'qa-surf' ? QA_SURF_TURN_MAX_TOOL_STEPS : STUDY_TURN_MAX_TOOL_STEPS);
   const maxResultChars = deps.maxResultChars ?? 12_000;
   const budget = { savedDocs: 0 };
   const allowlist = deps.kind === 'qa-surf' ? QA_SURF_TOOL_ALLOWLIST : STUDY_TOOL_ALLOWLIST;
