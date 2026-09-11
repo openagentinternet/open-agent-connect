@@ -129,7 +129,9 @@ function hrefOfAnchor(anchor: HTMLAnchorElement): string {
 }
 
 /** Capture chat / tool-card clicks so Agent Internet hrefs open the Bot Browser. */
-export function startAgentLinkInterceptor(openUri: (uri: string) => void): () => void {
+export function startAgentLinkInterceptor(
+  openUri: (uri: string, anchor: HTMLAnchorElement) => void,
+): () => void {
   const onClick = (event: MouseEvent): void => {
     const target = event.target
     if (!(target instanceof Element)) return
@@ -139,7 +141,7 @@ export function startAgentLinkInterceptor(openUri: (uri: string) => void): () =>
     if (!uri) return
     event.preventDefault()
     event.stopPropagation()
-    openUri(uri)
+    openUri(uri, anchor)
   }
   document.addEventListener('click', onClick, true)
 
