@@ -164,5 +164,85 @@ test('bot-browser tab body reads navigation params and guards same-url reveals',
   assert.match(text, /tab\.navigation\.params/)
   assert.match(text, /tab\.navigation\.revision/)
   assert.match(text, /shouldResetIframeSrc\(paramsUrl, loadedUrl\)/)
-  assert.match(text, /key=\{loadedUrl\}/)
+  assert.match(text, /<BrowserStage/)
+})
+
+test('the shared browser stage keys the iframe by url and bakes the theme into the src', async () => {
+  const text = await readFile(join(root, 'src/client/browser-stage.tsx'), 'utf8')
+  assert.match(text, /key=\{url\}/)
+  assert.match(text, /withThemeParam\(url, readDshTheme\(\)\)/)
+  assert.match(text, /watchDshTheme/)
+  assert.match(text, /onIframe\(element, url\)/)
+})
+
+function fakeDockFace(overrides = {}) {
+  const calls = []
+  const face = {
+    browserOpen: async (uri) => {
+      calls.push(['browserOpen', uri])
+      return overrides.url ?? 'http://127.0.0.1:4242/browser/home'
+    },
+    show: (url, uri) => { calls.push(['show', url, uri]) },
+    reportError: (message) => { calls.push(['reportError', message]) },
+    ...overrides.face,
+  }
+  return { face, calls }
+}
+
+test('a2a dock cold open resolves the url then shows it with the uri', async () => {
+  const { face, calls } = fakeDockFace({ url: 'http://x/browser/bot' })
+  await flow.openA2ABrowserDock(face, 'metaid://abc', null)
+  assert.deepEqual(calls, [
+    ['browserOpen', 'metaid://abc'],
+    ['show', 'http://x/browser/bot', 'metaid://abc'],
+  ])
+})
+
+test('a2a dock home open (null uri) shows the home url without a uri', async () => {
+  const { face, calls } = fakeDockFace({ url: 'http://x/browser/home' })
+  await flow.openA2ABrowserDock(face, null, null)
+  assert.deepEqual(calls, [
+    ['browserOpen', null],
+    ['show', 'http://x/browser/home', null],
+  ])
+})
+
+test('a2a dock live iframe + uri keeps the CURRENT live url (duplicate-nav guard)', async () => {
+  const { face, calls } = fakeDockFace({ url: 'http://x/browser/fresh' })
+  await flow.openA2ABrowserDock(face, 'metaid://abc', 'http://x/browser/live')
+  assert.deepEqual(calls, [
+    ['browserOpen', 'metaid://abc'],
+    ['show', 'http://x/browser/live', 'metaid://abc'],
+  ])
+})
+
+test('a2a dock live iframe + no uri falls through to a fresh resolve (home navigation)', async () => {
+  const { face, calls } = fakeDockFace({ url: 'http://x/browser/home' })
+  await flow.openA2ABrowserDock(face, null, 'http://x/browser/live')
+  assert.deepEqual(calls, [
+    ['browserOpen', null],
+    ['show', 'http://x/browser/home', null],
+  ])
+})
+
+test('a2a dock browserOpen rejection lands in reportError and never rejects', async () => {
+  const { face, calls } = fakeDockFace({
+    face: {
+      browserOpen: async () => { throw new Error('daemon unreachable') },
+    },
+  })
+  await flow.openA2ABrowserDock(face, 'metaid://abc', null)
+  assert.deepEqual(calls, [['reportError', 'daemon unreachable']])
+})
+
+test('a2a-originated opens route to the in-panel dock, not the right-Sidebar reveal', async () => {
+  const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(text, /openA2ABrowserDock/)
+  assert.match(text, /anchor\.closest\('\.oac-a2a-panel'\)/)
+  assert.match(text, /browserOpen: \(uri\?: string\) => openA2ADockNow\(uri \?\? null\)/)
+  const links = await readFile(join(root, 'src/client/browser-links.ts'), 'utf8')
+  assert.match(links, /openUri\(uri, anchor\)/)
+  const panel = await readFile(join(root, 'src/client/A2AConversation.tsx'), 'utf8')
+  assert.match(panel, /<A2ABrowserDock/)
+  assert.match(panel, /useDock\(\(state\) => state\)/)
 })

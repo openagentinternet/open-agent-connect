@@ -26,6 +26,7 @@ import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
+import { A2ABrowserDockStore } from './a2a-browser-dock-store.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
@@ -33,6 +34,7 @@ import { BotBrowserIframeBridge } from './browser-iframe.ts'
 import {
   BOT_BROWSER_TAB_ID,
   BOT_BROWSER_TAB_KIND,
+  openA2ABrowserDock,
   revealBotBrowserTab,
   type BotBrowserOpenFace,
 } from '../browser-open-flow.ts'
@@ -122,6 +124,19 @@ export function apply(ctx: ClientContext): void {
     },
   }
   const openBrowserNow = (uri: string | null): Promise<void> => openBrowser(openFace, iframeBridge, uri)
+  // A2A in-panel browser dock: opens originating in the A2A global main panel
+  // (link, avatar, and group-task clicks) land here. The official right
+  // Sidebar's Session seat unmounts while a global main panel is selected, so
+  // revealing it would flip the main column back to the Conversation.
+  const a2aDock = new A2ABrowserDockStore()
+  const openA2ADockNow = (uri: string | null): Promise<void> => openA2ABrowserDock({
+    browserOpen: (target) => api.browserOpen(target),
+    show: (url, target) => a2aDock.show(url, target),
+    reportError: (message) => {
+      console.error(`[oac-dsh] a2a browser dock open: ${message}`)
+      a2aDock.fail(message)
+    },
+  }, uri, iframeBridge.liveUrl())
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: BOT_BROWSER_TAB_ID,
     kind: BOT_BROWSER_TAB_KIND,
@@ -154,7 +169,12 @@ export function apply(ctx: ClientContext): void {
       liveUrl: () => iframeBridge.liveUrl(),
       reveal: (params) => revealBotBrowserTab(openFace, params),
     })
-    const stopLinks = startAgentLinkInterceptor((uri) => { void openBrowserNow(uri) })
+    const stopLinks = startAgentLinkInterceptor((uri, anchor) => {
+      // Clicks inside the A2A panel dock in-panel: revealing the official
+      // right Sidebar would switch the main column back to the Conversation.
+      if (anchor.closest('.oac-a2a-panel') !== null) void openA2ADockNow(uri)
+      else void openBrowserNow(uri)
+    })
     return () => {
       stopEvents()
       stopLinks()
@@ -183,7 +203,12 @@ export function apply(ctx: ClientContext): void {
       guidance: (from: string, peer: string, guidance: string) =>
         api.conversationGuidance(from, peer, guidance),
       meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
-      browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
+      browserOpen: (uri?: string) => openA2ADockNow(uri ?? null),
+      dock: {
+        close: () => a2aDock.close(),
+        onIframe: (element, url) => iframeBridge.setIframe(element, url),
+        t: tBrowser,
+      },
       grouptask: {
         list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
         detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
@@ -203,7 +228,11 @@ export function apply(ctx: ClientContext): void {
         staffingDecide: (chair, proposalId, decision) => api.grouptaskStaffingDecide(chair, proposalId, decision),
         staffingCreate: (proposalId) => api.grouptaskStaffingCreate(proposalId),
       },
-      hooks: { unread: unreadController.source },
+      hooks: {
+        unread: unreadController.source,
+        dock: a2aDock,
+        browser: browserStore,
+      },
       clearPrivateUnread: (from, peer) => unreadController.clearPrivateUnread(from, peer),
       clearGroupUnread: (key) => unreadController.clearGroupUnread(key),
       setView: (view) => unreadController.setView(view),

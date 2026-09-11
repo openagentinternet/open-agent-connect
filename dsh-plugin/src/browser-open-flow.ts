@@ -9,6 +9,12 @@
  * wiring and the node tests drive: the kind/id constants, the navigation
  * params the body reads, the same-URL no-reload decision, and the
  * selectConversation → openTab reveal with its no-mounted-surface retry.
+ *
+ * One exception: opens that originate INSIDE the A2A global main panel (link,
+ * avatar, and group-task clicks) go to the panel's own browser dock instead —
+ * see `openA2ABrowserDock`. The official right Sidebar's Session seat
+ * unmounts while a global main panel is selected, so revealing it would flip
+ * the main column back to the Conversation and take the A2A view away.
  */
 
 /** The page tab kind `openTab` names. */
@@ -122,6 +128,52 @@ export async function openBotBrowser(
   try {
     const url = await face.browserOpen(target)
     await revealBotBrowserTab(face, target === null ? { url } : { url, uri: target }, delays)
+  } catch (cause) {
+    face.reportError(errorMessage(cause))
+  }
+}
+
+/** The services the A2A in-panel dock open needs, bound by the client apply closure. */
+export type A2ABrowserDockFace = {
+  /** Resolve a resource URI (or the Browser home when null) to its `localUiUrl`. */
+  browserOpen: (uri: string | null) => Promise<string>
+  /**
+   * Show the dock on a URL. Showing the URL the dock's iframe already loaded
+   * is a no-op for the iframe (it is keyed by URL) — it only keeps the dock
+   * visible and refreshes the target URI shown in the header.
+   */
+  show: (url: string, uri: string | null) => void
+  /** Surface an open failure (dock landing copy + log). */
+  reportError: (message: string) => void
+}
+
+/**
+ * Open the Bot Browser inside the A2A panel's own dock, for opens that
+ * originate in the A2A panel. The official right Sidebar cannot host it
+ * there: its Session seat unmounts while a global main panel is selected, so
+ * revealing it would switch the main column back to the Conversation. Same
+ * duplicate-navigation guard as `openBotBrowser`: a live iframe keeps its src
+ * (the host navigates ABC inside it over SSE) and the dock just stays shown.
+ * Never rejects; failures land in `reportError`.
+ */
+export async function openA2ABrowserDock(
+  face: A2ABrowserDockFace,
+  uri: string | null,
+  liveUrl: string | null,
+): Promise<void> {
+  const target = uri !== null && uri.trim() !== '' ? uri : null
+  if (liveUrl !== null && target !== null) {
+    try {
+      await face.browserOpen(target)
+      face.show(liveUrl, target)
+    } catch (cause) {
+      face.reportError(errorMessage(cause))
+    }
+    return
+  }
+  try {
+    const url = await face.browserOpen(target)
+    face.show(url, target)
   } catch (cause) {
     face.reportError(errorMessage(cause))
   }

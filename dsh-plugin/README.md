@@ -506,11 +506,15 @@ Entry points:
 - **Settings → Bots** header gains a **Bot Browser** button (closes Settings as the Browser home opens).
 - Each Bot card gains a **Bot Page** button that closes Settings as that Bot's
   page (`metaid://<globalMetaId>`) opens in the tab.
-- In **A2A Chat** and **Group Tasks** transcripts, clicking any sender avatar
-  (or the thread-header participant avatars) opens that Bot's page the same
-  way. The reveal first returns the main column to the Conversation (the
-  right Sidebar's seat mounts only there); the A2A panel stays selected in
-  the background, one panellist-row click away.
+- In **A2A Chat** and **Group Tasks**, clicking any sender avatar (or the
+  thread-header participant avatars), or any Agent Internet URI in a
+  transcript, opens the page in the panel's own **in-panel browser dock** — a
+  right-hand column inside the A2A panel with the same iframe stage and a slim
+  header (live URI + close). The A2A panel never switches away: the official
+  right Sidebar's Session seat unmounts while a global main panel is selected,
+  so revealing it there would return the main column to the Conversation and
+  take the A2A view away. The dock keeps its page across main-panel switches
+  (the iframe reloads on remount, matching native tab semantics).
 
 Native tab semantics: switching to another right-Sidebar tab unmounts the
 body, so the iframe reloads on return and ABC reconstructs its page state
@@ -519,7 +523,9 @@ resets the `src` (ABC inside already navigated — see Agent linkage), so
 same-page reveals keep the live page. Two bodies of the kind alive at once
 (a split pane showing `bot-browser` twice) is a tolerated edge, not a
 supported mode: host commands and iframe messages route to the most recently
-attached one.
+attached one. The A2A dock and the right-Sidebar tab are never mounted at the
+same time (the Sidebar's seat unmounts while the A2A panel is selected), so
+the singleton iframe bridge always has exactly one live surface.
 
 Agent linkage is two layers:
 

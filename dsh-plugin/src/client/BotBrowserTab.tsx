@@ -8,14 +8,12 @@
  * SAME url must not reset the iframe src — the host/daemon already navigated
  * ABC inside the live iframe (see `shouldResetIframeSrc`). Switching tabs
  * unmounts this body (native right-Sidebar semantic), so the iframe reloads
- * on return and ABC reconstructs from the daemon.
+ * on return and ABC reconstructs from the daemon. The iframe stage itself
+ * (keyed remount, theme baking, bridge reporting) is `BrowserStage`.
  */
 import {
   Component,
-  useCallback,
   useEffect,
-  useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -24,7 +22,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { shouldResetIframeSrc, type BotBrowserTabParams } from '../browser-open-flow.ts'
-import { postBrowserThemeMessage, readDshTheme, watchDshTheme, withThemeParam } from './browser-theme.ts'
+import { BrowserStage } from './browser-stage.tsx'
 import type { BotBrowserState } from './browser-store.ts'
 import type { BrowserLocaleKey } from './locale-browser.ts'
 
@@ -105,35 +103,13 @@ function BotBrowserTabBody({
   const error = useBrowser((state) => state.error)
 
   // The URL the iframe currently shows. A navigation carrying a NEW url
-  // replaces it (the keyed iframe remounts); a bumped revision with the same
-  // url leaves it alone — ABC inside already navigated (daemon/host SSE).
+  // replaces it (the stage's keyed iframe remounts); a bumped revision with
+  // the same url leaves it alone — ABC inside already navigated (daemon/host
+  // SSE).
   const [loadedUrl, setLoadedUrl] = useState<string | null>(paramsUrl)
   useEffect(() => {
     if (shouldResetIframeSrc(paramsUrl, loadedUrl)) setLoadedUrl(paramsUrl)
   }, [paramsUrl, tab.navigation.revision, loadedUrl])
-
-  const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  // Stable per loadedUrl: React then fires the ref only on real mount/unmount
-  // (the keyed iframe remounts on a URL change), not on every render.
-  const reportIframe = useCallback((element: HTMLIFrameElement | null): void => {
-    iframeRef.current = element
-    onIframe(element, loadedUrl)
-  }, [loadedUrl, onIframe])
-
-  // The iframe src bakes the DSH-resolved theme once per URL change so the
-  // daemon-served ABC page paints in the right palette from the first frame.
-  // Live theme flips must NOT rewrite the src (that would reload the iframe
-  // and drop Browser page state) — the watcher below pushes them as
-  // set-theme postMessages instead.
-  const iframeSrc = useMemo(
-    () => (loadedUrl === null ? null : withThemeParam(loadedUrl, readDshTheme())),
-    [loadedUrl],
-  )
-
-  useEffect(() => {
-    if (loadedUrl === null) return undefined
-    return watchDshTheme((theme) => postBrowserThemeMessage(iframeRef.current, theme))
-  }, [loadedUrl])
 
   if (loadedUrl === null) {
     return (
@@ -153,15 +129,7 @@ function BotBrowserTabBody({
   }
   return (
     <div className="oac-browser-tab">
-      <iframe
-        key={loadedUrl}
-        className="oac-browser-frame"
-        src={iframeSrc ?? undefined}
-        title={t('title')}
-        allow="clipboard-read; clipboard-write; fullscreen"
-        ref={reportIframe}
-        onLoad={() => postBrowserThemeMessage(iframeRef.current, readDshTheme())}
-      />
+      <BrowserStage url={loadedUrl} title={t('title')} onIframe={onIframe} />
     </div>
   )
 }
