@@ -356,6 +356,14 @@ export async function runScheduleSchedulerTick(deps: ScheduleTickDeps): Promise<
     if (!slug) continue
     const outcome: ScheduleBotOutcome = { slug, claimed: 0, ran: 0, failed: 0 }
     outcomes.push(outcome)
+    // Unavailable Bots (Settings toggle off, or no DSH LLM pair) run no
+    // scheduled sessions on this host — the same pickers/delegation rule.
+    const provider = typeof profile.dshLlmProvider === 'string' ? profile.dshLlmProvider.trim() : ''
+    const model = typeof profile.dshLlmModel === 'string' ? profile.dshLlmModel.trim() : ''
+    if (profile.isAvailable === false || !provider || !model) {
+      outcome.skipped = 'bot unavailable (toggle off or no DSH LLM pair)'
+      continue
+    }
     try {
       // Heartbeat is daemon-only (there is no CLI verb; a dead daemon holds no
       // lease to refresh). A failure here must not stop the bot — due may

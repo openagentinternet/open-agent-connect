@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { writeBotRoleInfo, readBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const { writeDshLlmBinding } = require('../../dist/core/bot/dshLlm.js');
 const {
   applyTwinInvariant,
   buildTwinWorkerRoster,
@@ -95,6 +96,7 @@ test('worker roster is sanitized and renders the roster block', async () => {
   await addProfile(base, 'alice', 1000);
   const pathsB = await addProfile(base, 'bob', 2000);
   await fs.writeFile(resolveMetabotPaths(pathsB.profileRoot).roleMdPath, '代码审查员', 'utf8');
+  await writeDshLlmBinding(pathsB.dshLlmPath, { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' });
   await applyTwinInvariant(base, { preferredTwinSlug: 'alice' });
 
   const roster = await buildTwinWorkerRoster(base, 'alice');
@@ -108,4 +110,19 @@ test('worker roster is sanitized and renders the roster block', async () => {
   assert.match(block, /## Local Worker Roster/);
   assert.match(block, /bob/);
   assert.match(block, /代码审查员/);
+});
+
+test('worker roster excludes unavailable Bots (toggle off or no DSH LLM pair)', async () => {
+  const base = await createTempSystemHome();
+  await addProfile(base, 'alice', 1000);
+  const pathsOff = await addProfile(base, 'offbot', 2000);
+  await writeDshLlmBinding(pathsOff.dshLlmPath, { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' });
+  await addProfile(base, 'nollm', 3000);
+  const pathsOk = await addProfile(base, 'okbot', 4000);
+  await writeDshLlmBinding(pathsOk.dshLlmPath, { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' });
+  await applyTwinInvariant(base, { preferredTwinSlug: 'alice' });
+  await writeBotRoleInfo(pathsOff.botRoleStatePath, { isAvailable: false });
+
+  const roster = await buildTwinWorkerRoster(base, 'alice');
+  assert.deepEqual(roster.map((entry) => entry.slug), ['okbot']);
 });

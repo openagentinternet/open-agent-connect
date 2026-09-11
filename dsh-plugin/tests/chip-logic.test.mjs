@@ -68,3 +68,13 @@ test('slugFromPresetId only unwraps oac-* ids', () => {
   assert.equal(plugin.slugFromPresetId('standard'), undefined)
   assert.equal(plugin.isOacPresetId('oac-'), false)
 })
+
+test('isChipBotAvailable requires the Settings toggle and a configured DSH LLM pair', () => {
+  const llm = { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-chat' }
+  assert.equal(plugin.isChipBotAvailable({ ...llm }), true)
+  assert.equal(plugin.isChipBotAvailable({ ...llm, isAvailable: true }), true)
+  assert.equal(plugin.isChipBotAvailable({ ...llm, isAvailable: false }), false)
+  assert.equal(plugin.isChipBotAvailable({ dshLlmProvider: 'deepseek' }), false)
+  assert.equal(plugin.isChipBotAvailable({ dshLlmProvider: '  ', dshLlmModel: 'deepseek-chat' }), false)
+  assert.equal(plugin.isChipBotAvailable({}), false)
+})

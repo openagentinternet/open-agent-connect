@@ -28,6 +28,21 @@ until their kernel is upgraded.
 
 After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a global main panel with a left-rail panellist row, and the Bot Browser is a right-Sidebar page tab). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The A2A Chat panellist row and each private-chat/group-task row carry unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
 
+**Chip order and unavailable Bots.** The chip lists the available Twin Bot
+first, then every other row in roster order, with local Bots sorted among
+themselves by profile creation time (oldest first — the newest Bot lands at
+the bottom of the Bot block). A Bot is **unavailable** when its Settings →
+Bots availability toggle is off OR no DSH LLM pair is configured (the same
+rule the daemon's group-task seat search applies). Unavailable Bots are
+hidden from the chip, excluded from the Twin's `local_workers_list` roster
+and refused by `local_worker_delegate`, skipped by the dream/hygiene and
+scheduled-task host schedulers, and filtered from group-task seat candidates
+(daemon-side, as before); the daemon's own headless scheduled-task and study
+ticks also skip toggle-off Bots. One legacy cleanup rides the preset
+reconcile: the shared bare `oac` preset ("Open Agent Connect (MetaBot)")
+from pre-per-Bot installs is removed, and an `agent-presets.default: oac`
+setting pointing at it heals to `standard`.
+
 ## LLM resolution: who generates what
 
 Two LLM chains coexist, and every generation site uses exactly one of them:
@@ -439,7 +454,7 @@ The A2A Chat panel reads `conversations/list` and `conversations/messages` from 
 
 Every row in the private-chat list and the Group Tasks list carries the DSH home-list hover menu (the relative time swaps for a "…" button): **Copy Session ID** (the private conversation id, or the task's on-chain group id), **Rename** (a display-name override — empty clears back to the peer/task title), **Pin** (pinned rows float to the top and keep a ★ marker), and **Archive** (the row folds out of the list; records are fully preserved — the archived-with-restore surface is a follow-up; group-task archive asks for confirmation, IDBots parity). Private-chat pin/rename/archive persist through the OAC core conversation meta (`metabot conversations rename|pin|unpin|archive|unarchive` → daemon `POST /api/conversations/meta`, which also publishes the SSE refresh); group tasks reuse the existing `grouptask` verbs.
 
-On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone. The persona carries the host-owned `<bot_type>` fact (rebuilt from the Bot registry on every apply, never bot-editable), so the Twin Bot always knows it is this machine's Twin Bot — and a Worker knows its role — even before the per-agent twin overlay section installs. An `oac-*` agent's per-agent tool set installs idempotently when the agent is created, and sessions that select the preset afterwards (the create-then-select flow) get the same set installed on the `agent-preset/selected` session event — no conversation starts without its tools.
+On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone — with one legacy exception: the bare shared `oac` preset installed by pre-per-Bot releases is removed on reconcile (a dangling `agent-presets.default: oac` heals to `standard`). The persona carries the host-owned `<bot_type>` fact (rebuilt from the Bot registry on every apply, never bot-editable), so the Twin Bot always knows it is this machine's Twin Bot — and a Worker knows its role — even before the per-agent twin overlay section installs. An `oac-*` agent's per-agent tool set installs idempotently when the agent is created, and sessions that select the preset afterwards (the create-then-select flow) get the same set installed on the `agent-preset/selected` session event — no conversation starts without its tools.
 
 ## Live DSH binding and the parallel-branch loop
 

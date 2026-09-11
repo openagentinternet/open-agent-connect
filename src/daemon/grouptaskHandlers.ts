@@ -61,6 +61,7 @@ import { sendPrivateChat } from '../core/chat/privateChat';
 import type { GroupTaskListTab, GroupTaskMemberStatus } from '../core/grouptask/types';
 import {
   getMetabotProfile,
+  isMetabotProfileAvailable,
   listMetabotProfiles,
   type MetabotProfileFull,
 } from '../core/bot/metabotProfileManager';
@@ -261,7 +262,7 @@ export function createGroupTaskServiceContext(
       const profiles = await listMetabotProfiles(input.systemHomeDir).catch(() => [] as MetabotProfileFull[]);
       return Promise.all(
         profiles
-          .filter((profile) => profile.isAvailable !== false && Boolean(profile.dshLlmProvider?.trim() && profile.dshLlmModel?.trim()))
+          .filter((profile) => isMetabotProfileAvailable(profile))
           .map(async (profile) => toProfileRef(profile, await readProfileMetaId(profile.homeDir))),
       );
     },
@@ -639,7 +640,7 @@ export function createGroupTaskDaemonHandlers(
       const twinGmid = twin?.globalMetaId?.trim() || null;
       return searchGroupTaskSeatCandidates({
         listLocalWorkers: async () => profiles
-          .filter((profile) => profile.botType !== 'twin' && profile.isAvailable !== false && Boolean(profile.dshLlmProvider?.trim() && profile.dshLlmModel?.trim()))
+          .filter((profile) => profile.botType !== 'twin' && isMetabotProfileAvailable(profile))
           .map((profile) => ({
             slug: profile.slug,
             name: profile.name,

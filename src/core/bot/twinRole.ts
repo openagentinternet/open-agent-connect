@@ -6,6 +6,7 @@
 // Bot create/delete repair a missing twin by promoting the earliest-created
 // remaining Bot.
 import {
+  isMetabotProfileAvailable,
   listMetabotProfiles,
   type MetabotProfileFull,
 } from './metabotProfileManager';
@@ -156,6 +157,9 @@ export async function buildTwinWorkerRoster(
   const roster: TwinWorkerRosterEntry[] = [];
   for (const profile of profiles) {
     if (profile.slug === twinSlug) continue;
+    // Unavailable Bots (Settings toggle off, or no DSH LLM pair) are not
+    // delegation targets — the same rule group-task seat search applies.
+    if (!isMetabotProfileAvailable(profile)) continue;
     const paths = resolveMetabotPaths(profile.homeDir);
     const dreamStore = createDreamStore(paths);
     const orchestration = createOrchestrationStore(paths);

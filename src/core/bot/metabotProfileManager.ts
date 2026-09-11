@@ -512,6 +512,21 @@ export async function listMetabotProfiles(systemHomeDir: string): Promise<Metabo
   });
 }
 
+/**
+ * A Bot is available for picker lists and passive invocation (delegation,
+ * group-task seats, host scheduler turns) when its Settings toggle is on AND
+ * a DSH LLM pair is configured. Toggle-off or LLM-unset Bots are unavailable
+ * and stay out of those surfaces. Daemon-side ticks that exist precisely to
+ * serve bots without a DSH pair (headless scheduled tasks, nightly study)
+ * gate on `isAvailable === false` only.
+ */
+export function isMetabotProfileAvailable(
+  profile: Pick<MetabotProfileFull, 'isAvailable' | 'dshLlmProvider' | 'dshLlmModel'>,
+): boolean {
+  if (profile.isAvailable === false) return false;
+  return Boolean(profile.dshLlmProvider?.trim() && profile.dshLlmModel?.trim());
+}
+
 export async function getMetabotProfile(systemHomeDir: string, slug: string): Promise<MetabotProfileFull | null> {
   const normalizedSlug = normalizeText(slug);
   if (!normalizedSlug) return null;

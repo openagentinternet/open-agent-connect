@@ -390,6 +390,8 @@ export function apply(ctx: ClientContext): void {
         dshLlmProvider: bot.dshLlmProvider,
         dshLlmModel: bot.dshLlmModel,
         ...(bot.role === undefined || bot.role === null ? {} : { role: bot.role }),
+        ...(bot.createdAt === undefined ? {} : { createdAt: bot.createdAt }),
+        isAvailable: bot.isAvailable !== false,
       })),
       (): SeatSessionSummary | undefined => {
         const state = sessionsList.getSnapshot()
