@@ -5,6 +5,36 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
+## 0.7.0 - 2026-09-11
+
+### Added
+
+- Native DSH panels: the Bot Browser is available as a right-Sidebar tab kind
+  and A2A Chat is a global main panel, so A2A-originated browser opens stay in
+  the A2A panel via an in-panel dock.
+- Guide-first new group task modal in the A2A panel.
+- A2A conversation row menu: copy session id, rename, pin, archive (IDBots
+  parity).
+- Memory panel parity: hygiene card, dream retry rows, facts archive/restore.
+
+### Changed
+
+- DSH 0.1.5 compatibility: persona prefix/suffix split and 0.1.5 peer/dev
+  ranges; preset chips order the Twin first, hide unavailable Bots, and the
+  legacy shared preset is removed; the Twin Bot always knows it is the twin
+  (host-owned bot_type in the preset persona).
+- Smoke-test R2/R3 fixes: publish-ledger ownership, slug-keyed previews,
+  navigation commit wait, cost echo, acronym-safe transcription, per-agent
+  tool install on preset select, spelled-letter audio stabilization, browser
+  tab timing, study retry, external-file guidance; qa-surf/study turns gained
+  tool-step caps.
+- Skill install errors now guide the agent to install from the on-chain
+  package (pin id or metafile URI) instead of reporting a bare missing
+  SKILL.md.
+- Security: adm-zip bumped to 0.6.1 (GHSA-vwc7-r8mq-g2x9, moderate —
+  extraction follows destination symlinks).
+- Regenerated all host skillpack dists (60 files).
+
 ## 0.6.0 - 2026-09-09
 
 ### Added
