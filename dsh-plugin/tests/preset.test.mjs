@@ -136,6 +136,37 @@ test('presetIdForSlug uses oac-<slug>', () => {
   assert.equal(plugin.isOacPresetId('standard'), false)
 })
 
+test('buildPersonaPrompt: host-owned bot_type makes the Twin/Worker role explicit', () => {
+  const twin = plugin.buildPersonaPrompt(makeBot({ botType: 'twin' }))
+  assert.ok(twin.includes('<bot_type>twin</bot_type>'))
+  assert.ok(twin.includes("You are this machine's Twin Bot: the machine-wide default Bot"))
+
+  const worker = plugin.buildPersonaPrompt(makeBot({ botType: 'worker' }))
+  assert.ok(worker.includes('<bot_type>worker</bot_type>'))
+  assert.ok(worker.includes('You are a Worker Bot on this machine.'))
+  assert.ok(worker.includes("The machine's Twin Bot coordinates cross-Bot tasks"))
+
+  const untyped = plugin.buildPersonaPrompt(makeBot())
+  assert.equal(untyped.includes('<bot_type>'), false)
+  assert.equal(untyped.includes('Twin Bot:'), false)
+  assert.equal(untyped.includes('Worker Bot on this machine'), false)
+})
+
+test('parseBotListData: botType maps twin/worker and drops unknown values', () => {
+  const bots = plugin.parseBotListData({
+    profiles: [
+      makeBot({ slug: 'a', botType: 'twin' }),
+      makeBot({ slug: 'b', botType: 'worker' }),
+      makeBot({ slug: 'c', botType: null }),
+      makeBot({ slug: 'd', botType: 'admin' }),
+    ],
+  })
+  assert.equal(bots[0].botType, 'twin')
+  assert.equal(bots[1].botType, 'worker')
+  assert.equal(bots[2].botType, undefined)
+  assert.equal(bots[3].botType, undefined)
+})
+
 test('generatePreset: persona rewritten, !!js preserved, in-place on second save', async () => {
   await withPresetCtx(async (ctx, mock, tmp) => {
     await plugin.generatePreset(ctx, makeBot({ name: 'First Name' }))
@@ -208,8 +239,8 @@ test('reconcilePresets: create missing oac-* bots, remove plugin orphans, leave 
       state: 'success',
       data: {
         profiles: [
-          makeBot({ name: 'Alice', slug: 'alice' }),
-          makeBot({ name: 'Bob', slug: 'bob' }),
+          makeBot({ name: 'Alice', slug: 'alice', botType: 'worker' }),
+          makeBot({ name: 'Bob', slug: 'bob', botType: 'twin' }),
         ],
       },
     }))
@@ -220,6 +251,10 @@ test('reconcilePresets: create missing oac-* bots, remove plugin orphans, leave 
     assert.deepEqual(ids, ['my-custom', 'oac-alice', 'oac-bob'])
     const alice = await readFile(join(tmp, '.agent-presets', 'oac-alice', 'agent.cordis.yml'), 'utf8')
     assert.ok(alice.includes('<slug>alice</slug>'))
+    assert.ok(alice.includes('<bot_type>worker</bot_type>'))
+    const bob = await readFile(join(tmp, '.agent-presets', 'oac-bob', 'agent.cordis.yml'), 'utf8')
+    assert.ok(bob.includes('<bot_type>twin</bot_type>'))
+    assert.ok(bob.includes("You are this machine's Twin Bot"))
   })
 })
 
