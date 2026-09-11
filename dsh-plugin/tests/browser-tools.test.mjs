@@ -86,7 +86,7 @@ test('bot_browser_tabs list uses the live snapshot and does not invent pages whe
   const openHub = fakeHub({
     open: true,
     tabs: [{ id: 1, uri: `metaapp://${PIN}`, title: '半糖牌局', isActive: true }],
-  }, async () => ({ requestId: 'x', ok: true, tabs: [] }))
+  }, async () => ({ requestId: 'x', ok: true, tabs: [{ id: 1, uri: `metaapp://${PIN}`, title: '半糖牌局', isActive: true }] }))
   const { tools: openTools, agent: openAgent } = fakeAgent()
   for (const definition of plugin.buildBrowserToolDefinitions({
     slug: 'alice',
@@ -100,6 +100,26 @@ test('bot_browser_tabs list uses the live snapshot and does not invent pages whe
   const listed = await openTools.find((tool) => tool.name === 'bot_browser_tabs').execute({ action: 'list' }, {})
   assert.match(listed, /半糖牌局/)
   assert.match(listed, new RegExp(`metaapp://${PIN}`))
+})
+
+test('bot_browser_tabs list falls back to the pushed snapshot with a may-lag note when the live read fails', async () => {
+  const { agent, tools } = fakeAgent()
+  const hub = fakeHub({
+    open: true,
+    tabs: [{ id: 1, uri: `metaapp://${PIN}`, title: '半糖牌局', isActive: true }],
+  }, async () => ({ requestId: 'x', ok: false, error: 'timeout' }))
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: {} }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const listed = await tools.find((tool) => tool.name === 'bot_browser_tabs').execute({ action: 'list' }, {})
+  assert.match(listed, /半糖牌局/)
+  assert.match(listed, /may lag/)
 })
 
 test('search_metaapps formats CLI hits as markdown links', async () => {
@@ -491,6 +511,103 @@ test('bot_browser_fork_current_app asks the live iframe when snapshot tabs are e
     if (previousLocal === undefined) delete process.env.OAC_DSH_NO_LOCAL_READ
     else process.env.OAC_DSH_NO_LOCAL_READ = previousLocal
   }
+})
+
+test('bot_browser_fork_current_app waits out the just-opened registration window (N-1)', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'oac-dsh-fork-'))
+  const previousHome = process.env.HOME
+  const previousLocal = process.env.OAC_DSH_NO_LOCAL_READ
+  process.env.HOME = home
+  process.env.OAC_DSH_NO_LOCAL_READ = '1'
+  const commands = []
+  try {
+    const { agent, tools } = fakeAgent()
+    const hub = fakeHub({ open: true, tabs: [{ id: 1, uri: null, title: 'Welcome', isActive: true }] }, async (command) => {
+      commands.push(command)
+      const landed = commands.length >= 2
+      return {
+        requestId: 'x',
+        ok: true,
+        action: 'get-tab-info',
+        info: {
+          id: 1,
+          uri: landed ? `metaapp://${PIN}` : null,
+          title: landed ? '番茄钟' : 'Welcome',
+          isActive: true,
+          current: null,
+        },
+      }
+    })
+    hub.getLastOpenAt = () => Date.now()
+    for (const definition of plugin.buildBrowserToolDefinitions({
+      slug: 'alice',
+      hub,
+      cache: plugin.createBrowserSourceCache(),
+      hostAgent: agent,
+      run: async () => ({
+        ok: true,
+        state: 'success',
+        data: { dir: join(home, 'fork'), indexFile: 'index.html', title: '番茄钟' },
+      }),
+    })) {
+      agent.ctx.tools.register(definition)
+    }
+    const text = await tools.find((tool) => tool.name === 'bot_browser_fork_current_app').execute({}, {})
+    assert.ok(commands.length >= 2, `expected the fork to re-poll the tab info, got ${commands.length} call(s)`)
+    assert.match(text, /Forked "番茄钟"/)
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    if (previousLocal === undefined) delete process.env.OAC_DSH_NO_LOCAL_READ
+    else process.env.OAC_DSH_NO_LOCAL_READ = previousLocal
+  }
+})
+
+test('bot_browser_fork_current_app inside the registration window says retry, never "no page" (N-1)', async () => {
+  const { agent, tools } = fakeAgent()
+  const hub = fakeHub({ open: true, tabs: [{ id: 1, uri: null, title: 'Welcome', isActive: true }] }, async () => ({
+    requestId: 'x',
+    ok: true,
+    action: 'get-tab-info',
+    info: { id: 1, uri: null, title: 'Welcome', isActive: true, current: null },
+  }))
+  hub.getLastOpenAt = () => Date.now()
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: {} }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  await assert.rejects(
+    () => tools.find((tool) => tool.name === 'bot_browser_fork_current_app').execute({}, {}),
+    (error) => {
+      assert.match(error.message, /not registered yet — retry in a moment/)
+      assert.match(error.message, /Do NOT open it again/)
+      assert.doesNotMatch(error.message, /No page is currently open/)
+      return true
+    },
+  )
+})
+
+test('bot_browser_fork_current_app with no recent open keeps the terminal no-page message', async () => {
+  const { agent, tools } = fakeAgent()
+  const hub = fakeHub({ open: true, tabs: [] }, async () => ({ requestId: 'x', ok: false, error: 'tab not found' }))
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: {} }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  await assert.rejects(
+    () => tools.find((tool) => tool.name === 'bot_browser_fork_current_app').execute({}, {}),
+    /No page is currently open/,
+  )
 })
 
 test('approvalOf and bindBrowserToolInstall survive Cordis uninjected approval access', () => {

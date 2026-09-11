@@ -23,6 +23,7 @@ import {
   readRendererFromEnvelope,
   slugifyTitle,
   type BrowserCommandResult,
+  type BrowserTabInfo,
   type MetaAppSearchCandidate,
   type OnlineBotPresence,
 } from './browser-protocol.js'
@@ -57,6 +58,34 @@ const TEXT_OUTPUT = {
 }
 
 const SURFACE_HINT = 'The Bot Browser surface may not be open; ask the user to open it, or call bot_browser_open_uri.'
+
+/**
+ * A just-opened page registers in the Browser's tab state only when the
+ * navigation commits. Inside this window a no-arg reader must retry/annotate
+ * instead of concluding "no page is open" (N-1).
+ */
+const PAGE_REGISTER_WINDOW_MS = 10_000
+const PAGE_REGISTER_RETRY_MS = 3_000
+
+/** Snapshot age line for readers that had to fall back to the pushed state. */
+function snapshotAgeNote(hub: BrowserEventHub): string {
+  const at = hub.getSnapshotAt?.() ?? 0
+  if (!at) return '(snapshot from the Browser\'s last push; live refresh unavailable — tab state may lag)'
+  const ageSeconds = Math.max(0, Math.round((Date.now() - at) / 1000))
+  return `(snapshot as of ${ageSeconds}s ago; live refresh unavailable — tab state may lag)`
+}
+
+/**
+ * Sample the tab list live from the connected Browser client. Returns null
+ * when no client answers — callers then render the pushed snapshot with an
+ * explicit may-lag note (N-2).
+ */
+async function listTabsLive(hub: BrowserEventHub): Promise<BrowserTabInfo[] | null> {
+  if (hub.clientCount() === 0) return null
+  const result = await hub.requestCommand({ action: 'list' }, 5_000)
+  if (!result.ok || !Array.isArray(result.tabs)) return null
+  return result.tabs
+}
 
 function textArg(args: Record<string, unknown>, key: string): string {
   const value = args[key]
@@ -522,7 +551,10 @@ export function buildBrowserToolDefinitions(input: {
     if (event === null) {
       return `Failed to open ${resolved}: OAC daemon is not reachable. ${SURFACE_HINT}`
     }
-    return `Opened ${resolved} in the Bot Browser (${event.localUiUrl}).`
+    return [
+      `Opened ${resolved} in the Bot Browser (${event.localUiUrl}).`,
+      'The tab registers when the page commits — the next browser_context or bot_browser_tabs action "list" shows the final state. Do not open it again.',
+    ].join('\n')
   }
 
   return [
@@ -543,9 +575,16 @@ export function buildBrowserToolDefinitions(input: {
       async execute(args) {
         const action = textArg(args, 'action') as 'list' | 'open' | 'close' | 'switch'
         if (action === 'list') {
+          // Sample live from the connected client first so this answer agrees
+          // with the <browser_context> sampled at turn start (N-2); only a
+          // failed live read falls back to the pushed snapshot, annotated.
+          const live = await listTabsLive(hub)
+          if (live !== null) {
+            return `Open tabs (* = active):\n${formatBotBrowserTabs(live)}`
+          }
           const snapshot = hub.getSnapshot()
           if (!snapshot.open) return `Open tabs (* = active):\n${formatBotBrowserTabs([])}\n(${SURFACE_HINT})`
-          return `Open tabs (* = active):\n${formatBotBrowserTabs(snapshot.tabs)}`
+          return `Open tabs (* = active):\n${formatBotBrowserTabs(snapshot.tabs)}\n${snapshotAgeNote(hub)}`
         }
         if (action === 'open') {
           return openUri(textArg(args, 'uri'))
@@ -784,7 +823,24 @@ export function buildBrowserToolDefinitions(input: {
         let uri = textArg(args, 'uri')
         let titleGuess = ''
         if (!uri) {
-          const active = await resolveActiveBrowserTab(hub)
+          let active = await resolveActiveBrowserTab(hub)
+          if (!active?.uri && hub.clientCount() > 0) {
+            // A page that was opened seconds ago registers only when its
+            // navigation commits (N-1): wait briefly for it instead of
+            // concluding "no page" — that terminal answer made callers open a
+            // duplicate tab.
+            const recentOpen = Date.now() - (hub.getLastOpenAt?.() ?? 0) < PAGE_REGISTER_WINDOW_MS
+            if (recentOpen) {
+              const deadline = Date.now() + PAGE_REGISTER_RETRY_MS
+              while (Date.now() < deadline && !active?.uri) {
+                await new Promise((resolve) => setTimeout(resolve, 250))
+                active = await resolveActiveBrowserTab(hub)
+              }
+            }
+            if (!active?.uri && recentOpen) {
+              throw new Error('A page was just opened in the Bot Browser and is not registered yet — retry in a moment. Do NOT open it again; that would create a duplicate tab.')
+            }
+          }
           uri = active?.uri ?? ''
           titleGuess = active?.title ?? ''
         }

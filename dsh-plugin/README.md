@@ -305,7 +305,13 @@ whether the session's model is multimodal — the relay's VLM/ASR reads the
 media and the tool returns plain text. The relay key is bootstrapped by the
 machine-wide owner identity (same signing flow as traffic) and cached in
 `~/.metabot/owner/llm-relay.json` (0600); per-identity daily media quotas
-apply and the tool output reports the remaining units. Video transcoding and
+apply and the tool output reports the remaining units. Audio transcriptions
+additionally run a spelled-letter stabilization pass: when the ASR output
+looks like letter-by-letter spelling (codes, addresses, names), a
+format-constrained confirmation call re-checks the ambiguous runs against
+the same audio; confirmed spellings replace the merged words, and runs that
+stay uncertain are flagged with a `[low-confidence] ...` note at the end of
+the output instead of passing silently as text. Video transcoding and
 audio extraction use the system ffmpeg (`OAC_FFMPEG_PATH`, else `ffmpeg` on
 PATH) when needed. CLI-first surface: `metabot media describe
 <image|video|audio> --path <file-or-url> [--question|--prompt <text>]`.
@@ -346,7 +352,10 @@ job never completes on success (quiet nights included), survives up to 3
 consecutive failures, caps its stored handled list at 400 pins, and a
 mid-night disable sticks even while a session is in flight. Progress shows in
 `metaweb_study_status` (`[recurring Q&A surfing]` label) and the Knowledge
-tab's study panel.
+tab's study panel. Failures are visible instead of silent: the status output
+headlines each failed job with its error and how to re-queue it, and
+`metaweb_study_retry` retries one failed job (by id or topic) or every failed
+job in one call. Study turns cap at 12 tool steps (Q&A-surf turns at 24).
 
 **Q&A viewer** - the bundled `qanda` MetaApp (`/ui/qanda/...`) renders the
 latest/unanswered feeds and ZhiHu-style question pages (ranked answers,
@@ -430,7 +439,7 @@ The A2A Chat panel reads `conversations/list` and `conversations/messages` from 
 
 Every row in the private-chat list and the Group Tasks list carries the DSH home-list hover menu (the relative time swaps for a "…" button): **Copy Session ID** (the private conversation id, or the task's on-chain group id), **Rename** (a display-name override — empty clears back to the peer/task title), **Pin** (pinned rows float to the top and keep a ★ marker), and **Archive** (the row folds out of the list; records are fully preserved — the archived-with-restore surface is a follow-up; group-task archive asks for confirmation, IDBots parity). Private-chat pin/rename/archive persist through the OAC core conversation meta (`metabot conversations rename|pin|unpin|archive|unarchive` → daemon `POST /api/conversations/meta`, which also publishes the SSE refresh); group tasks reuse the existing `grouptask` verbs.
 
-On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone.
+On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone. An `oac-*` agent's per-agent tool set installs idempotently when the agent is created, and sessions that select the preset afterwards (the create-then-select flow) get the same set installed on the `agent-preset/selected` session event — no conversation starts without its tools.
 
 ## Live DSH binding and the parallel-branch loop
 

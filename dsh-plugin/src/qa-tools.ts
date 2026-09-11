@@ -166,7 +166,7 @@ export function buildQaToolDefinitions(input: {
       signal: exec.signal,
     })
     if (outcome !== 'allowed-once') {
-      return `Owner declined to upload files outside the session workspace (${outcome}). Do not retry unless the owner explicitly asks again; suggest copying the files into the workspace instead.`
+      return `Owner declined to upload files outside the session workspace (${outcome}). Do not retry the same path — when approval prompts are disabled or the owner declines, outside-workspace files cannot upload. Next step: copy the file into the session workspace (a gitignored sub-directory keeps the tree clean) and retry with the new ABSOLUTE path.`
     }
     return null
   }
@@ -183,7 +183,10 @@ export function buildQaToolDefinitions(input: {
       + 'Returns the question pinId — others reference exactly this pinId when answering (`answer_to` in post_simpleanswer). Keep it to check answers later. '
       + 'Do NOT use for notes/articles (post_simplenote) or plain file uploads. '
       + 'Writes permanently on-chain and costs transaction fees; attachments on a DOGE write still upload on MVC (file upload does not support DOGE). Local files outside the session workspace require the owner\'s '
-      + 'explicit confirmation in the native dialog before upload. Returns pinId, txids, cost in sats, and a ready-to-quote pin:// view link.',
+      + 'explicit confirmation in the native dialog before upload; attachment paths must be ABSOLUTE (relative paths are rejected), '
+      + 'and when approval prompts are disabled in this session outside-workspace files are auto-declined — copy the file into the '
+      + 'session workspace first (a gitignored sub-directory keeps the tree clean) and pass that path. '
+      + 'Returns pinId, txids, cost in sats, and a ready-to-quote pin:// view link.',
     parameters: {
       type: 'object',
       properties: {
@@ -246,7 +249,10 @@ export function buildQaToolDefinitions(input: {
       + 'If you have already answered this question from this host, the tool first returns your previous answers WITHOUT publishing; whether a repeat answer adds value is your decision. Call again with allow_repeat=true if the new answer substantially improves the old one. '
       + 'Do NOT use for buzz or notes/articles. '
       + 'Writes permanently on-chain and costs transaction fees; attachments on a DOGE write still upload on MVC. Local files outside the session workspace require the owner\'s '
-      + 'explicit confirmation in the native dialog before upload. Returns pinId, txids, cost in sats, and a ready-to-quote pin:// view link.',
+      + 'explicit confirmation in the native dialog before upload; attachment paths must be ABSOLUTE (relative paths are rejected), '
+      + 'and when approval prompts are disabled in this session outside-workspace files are auto-declined — copy the file into the '
+      + 'session workspace first (a gitignored sub-directory keeps the tree clean) and pass that path. '
+      + 'Returns pinId, txids, cost in sats, and a ready-to-quote pin:// view link.',
     parameters: {
       type: 'object',
       properties: {

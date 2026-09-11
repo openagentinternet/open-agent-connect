@@ -450,6 +450,7 @@ type StudyModule = {
     enqueueQaSurfJob(input: { metabotSlug: string; budgetPins?: number }): Promise<{ job: Record<string, unknown>; created: boolean }>
     disableQaSurfJob(metabotSlug: string): Promise<boolean>
     listStudyJobs(slug?: string): Promise<Array<Record<string, unknown>>>
+    retryStudyJob(id: string): Promise<{ job: Record<string, unknown>; retried: boolean } | null>
   }
 }
 
@@ -475,7 +476,10 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
         'Queue an autonomous nightly study job: the daemon drains this topic into your knowledge base during '
         + 'the nightly window (00:00-06:00), saving up to budgetPins metaweb documents per night and distilling '
         + 'reusable procedures. NOT for tasks the user wants right now — say you will study it over coming '
-        + 'nights and answer from what accumulated. Use for long-horizon learning the user assigns.',
+        + 'nights and answer from what accumulated. Use for long-horizon learning the user assigns. '
+        + 'Limits: one nightly run is capped at 12 tool steps (24 for recurring Q&A surfing) and must end with '
+        + 'a final report; a job that fails 3 nights in a row stops as [failed] — metaweb_study_status then says '
+        + 'why, and metaweb_study_retry puts it back into the queue.',
       parameters: {
         type: 'object',
         properties: {
@@ -492,13 +496,21 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
         const topic = textArg(args, 'topic')
         if (!topic) return toolError('metaweb_study_enqueue', 'topic is required.')
         try {
-          const result = await studyStoreFor(session.homeDir).enqueueStudyJob({
+          const store = studyStoreFor(session.homeDir)
+          const result = await store.enqueueStudyJob({
             metabotSlug: session.slug,
             topic,
             ...(numberArg(args, 'budgetPins') ? { budgetPins: numberArg(args, 'budgetPins') } : {}),
           })
+          // A failed job is silent unless a tool return surfaces it (N-4).
+          const failedCount = (await store.listStudyJobs(session.slug))
+            .filter((job) => job.status === 'failed').length
+          const failedNote = failedCount > 0
+            ? ` Note: ${failedCount} of your study jobs have FAILED — metaweb_study_status says why; metaweb_study_retry requeues them.`
+            : ''
           return `${result.created ? 'Queued' : 'Already queued'} study job "${topic}" (${result.job.budgetPins} pins/night). `
             + 'It runs nightly 00:00-06:00; check metaweb_study_status later. Answer the user from current knowledge now.'
+            + failedNote
         } catch (error) {
           return toolError('metaweb_study_enqueue', error)
         }
@@ -569,7 +581,7 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
     },
     {
       name: 'metaweb_study_status',
-      description: 'List your study jobs with status, runs, failures, and summaries (the morning report).',
+      description: 'List your study jobs with status, runs, failures, and summaries (the morning report). Failed jobs explain why they failed and how to retry them (metaweb_study_retry).',
       parameters: { type: 'object', properties: {} },
       output: { schema: { type: 'string' }, render },
       timeoutMs: 15_000,
@@ -579,14 +591,74 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
         try {
           const rows = await studyStoreFor(session.homeDir).listStudyJobs(session.slug)
           if (!rows.length) return 'No study jobs yet.'
-          return rows.map((job) => [
+          const failedCount = rows.filter((job) => job.status === 'failed').length
+          const header = failedCount > 0
+            ? [`${failedCount} study job(s) have FAILED — each failed row below says why and how to retry (metaweb_study_retry).`]
+            : []
+          const body = rows.map((job) => [
             `- "${job.topic}"${job.kind === 'qa-surf' ? ' [recurring Q&A surfing]' : ''} [${job.status}] runs: ${job.runCount}, failures: ${job.consecutiveFailures}`,
             `  ${job.kind === 'qa-surf' ? 'pins handled' : 'pins'}: ${Array.isArray(job.processedPinIds) ? job.processedPinIds.length : 0}/${job.budgetPins} per night`,
             job.summary ? `  last: ${String(job.summary).slice(0, 200)}` : '',
             job.error ? `  error: ${job.error}` : '',
+            job.status === 'failed'
+              ? `  → failed after ${job.consecutiveFailures} consecutive nightly failures. Retry with metaweb_study_retry (jobId: ${job.id}) — the job goes back into the nightly queue.`
+              : '',
           ].filter(Boolean).join('\n')).join('\n')
+          return [...header, body].join('\n')
         } catch (error) {
           return toolError('metaweb_study_status', error)
+        }
+      },
+    },
+    {
+      name: 'metaweb_study_retry',
+      description:
+        'Put FAILED nightly study jobs back into the nightly queue — use after metaweb_study_status shows a job '
+        + '[failed] (a job stops after 3 consecutive nightly failures, e.g. a study turn that exceeded the 12-step '
+        + 'tool cap without a final report). Pass the jobId from metaweb_study_status to retry one job, a topic '
+        + 'substring to retry matching failed jobs, or nothing to retry every failed job of this bot. The retry '
+        + 'clears the failure counters; the job drains again in the next nightly window (00:00-06:00).',
+      parameters: {
+        type: 'object',
+        properties: {
+          jobId: { type: 'string', description: 'One failed job id from metaweb_study_status.' },
+          topic: { type: 'string', description: 'Retry failed jobs whose topic contains this text.' },
+        },
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 15_000,
+      execute: async (args, exec) => {
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('metaweb_study_retry', NO_SESSION)
+        const store = studyStoreFor(session.homeDir)
+        try {
+          const rows = await store.listStudyJobs(session.slug)
+          const jobId = textArg(args, 'jobId')
+          const topic = textArg(args, 'topic')
+          if (jobId && rows.every((job) => job.id !== jobId)) {
+            return toolError('metaweb_study_retry', `No study job with id "${jobId}" for this bot. Check metaweb_study_status.`)
+          }
+          const targets = rows.filter((job) => {
+            if (job.status !== 'failed') return false
+            if (jobId) return job.id === jobId
+            if (topic) return String(job.topic).toLowerCase().includes(topic.toLowerCase())
+            return true
+          })
+          if (targets.length === 0) {
+            return `No failed study jobs to retry${topic ? ` matching "${topic}"` : ''}.`
+          }
+          const retried: Array<Record<string, unknown>> = []
+          for (const job of targets) {
+            const result = await store.retryStudyJob(String(job.id))
+            if (result?.retried) retried.push(job)
+          }
+          return [
+            `Retried ${retried.length} study job(s) — back in the nightly queue:`,
+            ...retried.map((job) => `- "${job.topic}" [pending]`),
+            'They drain in the next nightly window (00:00-06:00); check metaweb_study_status afterwards.',
+          ].join('\n')
+        } catch (error) {
+          return toolError('metaweb_study_retry', error)
         }
       },
     },

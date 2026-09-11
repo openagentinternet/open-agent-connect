@@ -245,6 +245,36 @@ test('list, read, and uninstall round-trip one installed skill', async () => {
   );
 });
 
+test('read_skill says "not installed" with an install path for unknown skills, and "corrupt" for broken ones (N-3)', async () => {
+  const root = mkdtempTempRootSync('skill-read-errors-');
+  const skillsRoot = path.join(root, '.metabot', 'skills');
+
+  await assert.rejects(
+    readInstalledSkill({ skillsRoot, name: 'never-installed' }),
+    (error) => {
+      assert.ok(error instanceof SkillInstallError);
+      assert.match(error.message, /Skill "never-installed" is not installed locally/);
+      assert.match(error.message, /metabot skills install --pin <pinId> --confirm/);
+      assert.doesNotMatch(error.message, /No SKILL\.md found/);
+      return true;
+    },
+  );
+
+  // A registry entry (or leftover directory) without SKILL.md = installed but corrupt.
+  const archive = await makeSkillZip(path.join(root, 'pkg'), { 'SKILL.md': skillDoc('broken-one', '1.0.0') });
+  await installSkillArchive({ skillsRoot, archive, source: { creatorMetaId: 'IDQ1' } });
+  await fs.rm(path.join(skillsRoot, 'broken-one', 'SKILL.md'));
+  await assert.rejects(
+    readInstalledSkill({ skillsRoot, name: 'broken-one' }),
+    (error) => {
+      assert.ok(error instanceof SkillInstallError);
+      assert.match(error.message, /is installed under .* but its SKILL\.md is missing — the package is corrupt/);
+      assert.match(error.message, /Reinstall/);
+      return true;
+    },
+  );
+});
+
 test('bindPlatformSkills binds registry-installed skills into existing host roots', async () => {
   const root = mkdtempTempRootSync('skill-bind-');
   const systemHome = root;

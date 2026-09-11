@@ -46,7 +46,7 @@ import {
   localConversationsList,
   localConversationsMessages,
 } from './local-read.js'
-import type { HostAgentLike, HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
+import type { HostAgentLike, HostContext, HostSessionEventLike, HostSessionLike, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { uploadFileBytes } from './file-upload.js'
 import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
@@ -65,6 +65,7 @@ import { installGroupTaskOnAgent } from './group-task-tools.js'
 import { applyGroupTaskRelayDrain } from './group-task-relay.js'
 import { applyGroupTaskWorkerSessions } from './group-task-worker.js'
 import { slugFromPresetId } from './chip-logic.js'
+import { createPerAgentInstaller } from './per-agent-install.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
 import { isTrustedApiRequest } from './trust-fence.js'
@@ -615,46 +616,30 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   // so this is only an upgrade-time cleanup.
   const notifiedBacklogs = new Set<string>()
   if (memoryEnabled && config.memory?.tools !== false && ctx.on) {
+    // Create-then-select sessions fire agent/created with the global default
+    // preset (e.g. `oac`), which resolves no Bot slug — the installer retries
+    // on the agent-preset/selected session event and logs every skip/failure.
+    const installer = createPerAgentInstaller(ctx, {
+      twinEnabled: config.twin?.enabled !== false,
+      twinStepTimeoutMs: config.twin?.stepTimeoutMs,
+      liveOacAgents,
+      notifiedBacklogs,
+      log: (message) => warn(ctx, message),
+    })
     ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
-      void (async () => {
-        try {
-          const agent = payload.agent
-          const preset = agent?.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
-          const slug = preset ? slugFromPresetId(preset) : undefined
-          if (!slug) return
-          liveOacAgents.set(slug, agent)
-          installMemoryToolsOnAgent(agent, slug)
-          installChainHistoryRecallOnAgent(ctx, agent)
-          if (config.twin?.enabled === false) return
-          // Daemon-pinned: this fires on every oac-* session creation, i.e. at
-          // chat-open frequency — it must never probe-and-replace a busy
-          // daemon (see daemon-pinned-run.ts).
-          const shown = await runMetabotPinned(['bot', 'show', '--from', slug], { timeoutMs: 30_000 })
-          const profile = shown.ok
-            ? (shown.data as { profile?: { botType?: string } } | undefined)?.profile
-            : undefined
-          if (profile?.botType !== 'twin') return
-          const orchestrator = installTwinOnAgent(ctx, agent, slug, {
-            stepTimeoutMs: config.twin?.stepTimeoutMs,
-          })
-          installGroupTaskOnAgent(agent, slug)
-          if (!notifiedBacklogs.has(slug)) {
-            notifiedBacklogs.add(slug)
-            await orchestrator.clearPendingNotifications(slug)
-          }
-        } catch {
-          // tool installation is best-effort per agent
-        }
-      })()
+      installer.handleAgentCreated(payload?.agent)
     })
     // Drop disposed agents from the live map: a stale entry would let the
     // cross-session tools message a detached agent and silently run a zombie
     // turn (the DSH registry no longer holds it, but the map still does).
     ctx.on('agent/disposed', (payload: { agent: HostAgentLike }) => {
-      const agent = payload?.agent
-      if (!agent) return
-      for (const [slug, entry] of liveOacAgents) {
-        if (entry === agent) liveOacAgents.delete(slug)
+      installer.handleAgentDisposed(payload?.agent)
+    })
+    ctx.on('session/event', (session: HostSessionLike, event: HostSessionEventLike) => {
+      try {
+        installer.handlePresetSelected(session, event)
+      } catch (error) {
+        warn(ctx, `per-agent tool install failed at agent-preset/selected: ${error instanceof Error ? error.message : String(error)}`)
       }
     })
   }
@@ -840,6 +825,11 @@ export {
 } from './group-task-tools.js'
 export { applyGroupTaskRelayDrain } from './group-task-relay.js'
 export { applyGroupTaskWorkerSessions, GROUP_TASK_WORK_SYSTEM_PROMPT } from './group-task-worker.js'
+export {
+  createPerAgentInstaller,
+  type PerAgentInstaller,
+  type PerAgentInstallOptions,
+} from './per-agent-install.js'
 export {
   bindGlobalKnowledgeToolInstall,
   buildGlobalKnowledgeToolDefinitions,
