@@ -7,7 +7,7 @@
  * the iframe and drop Browser page state) — they arrive as set-theme
  * postMessages instead. The live iframe (and the URL it loaded) is reported
  * to the bridge on every real mount/unmount. Used by the right-Sidebar tab
- * body (`BotBrowserTab`) and the A2A in-panel dock (`A2ABrowserDock`).
+ * body (`BotBrowserTab`).
  */
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { postBrowserThemeMessage, readDshTheme, watchDshTheme, withThemeParam } from './browser-theme.ts'

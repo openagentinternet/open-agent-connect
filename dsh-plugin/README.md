@@ -26,7 +26,19 @@ surface still shares. It will not
 load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
 until their kernel is upgraded.
 
-After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a global main panel with a left-rail panellist row, and the Bot Browser is a right-Sidebar page tab). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The A2A Chat panellist row and each private-chat/group-task row carry unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
+After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a center-column overlay panel with a left-rail panellist row, and the Bot Browser is a right-Sidebar page tab). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The A2A Chat panellist row and each private-chat/group-task row carry unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
+
+**A2A Chat panel shape.** A2A Chat is a `shell.overlay` entry (id `oac-a2a`),
+not a kernel global main panel: it covers the center conversation column
+ONLY, so the official right Sidebar (Bot Browser included) stays mounted and
+interactive beside it — a global main panel would unmount that Sidebar. The
+overlay mirrors the frame's column template, tracking resizes, sidebar
+collapse, and right-Sidebar open/close exactly; the panellist row's click is
+capture-intercepted into an overlay toggle (never `layout.selectPanel`),
+navigating to another session closes the overlay, and the conversation
+underneath never unmounts (drafts and scroll survive). Every Agent Internet
+URI clicked inside A2A — private chat or Group Tasks — opens in the
+right-Sidebar Bot Browser tab, the same reveal every other surface uses.
 
 **Chip order and unavailable Bots.** The chip lists the available Twin Bot
 first, then every other row in roster order, with local Bots sorted among
@@ -108,7 +120,7 @@ corpus imports/edits and full rebuilds.
 
 ## Group Tasks (群任务) and OpenTeam
 
-The **A2A Chat** main panel has a second tab, **Group Tasks**: one
+The **A2A Chat** panel has a second tab, **Group Tasks**: one
 on-chain MetaWeb group chat per task, chaired by your Twin Bot. The OAC
 daemon's engine (5 s tick) drives every active task — chair planning, worker
 replies, status transitions — and the panel reads the synced stores directly
@@ -528,13 +540,9 @@ Entry points:
   page (`metaid://<globalMetaId>`) opens in the tab.
 - In **A2A Chat** and **Group Tasks**, clicking any sender avatar (or the
   thread-header participant avatars), or any Agent Internet URI in a
-  transcript, opens the page in the panel's own **in-panel browser dock** — a
-  right-hand column inside the A2A panel with the same iframe stage and a slim
-  header (live URI + close). The A2A panel never switches away: the official
-  right Sidebar's Session seat unmounts while a global main panel is selected,
-  so revealing it there would return the main column to the Conversation and
-  take the A2A view away. The dock keeps its page across main-panel switches
-  (the iframe reloads on remount, matching native tab semantics).
+  transcript, opens the page in this right-Sidebar tab — the A2A surface is a
+  center-column overlay, so the Sidebar it lives in stays mounted (there is
+  no in-panel browser dock; one reveal path serves every surface).
 
 Native tab semantics: switching to another right-Sidebar tab unmounts the
 body, so the iframe reloads on return and ABC reconstructs its page state
@@ -543,9 +551,7 @@ resets the `src` (ABC inside already navigated — see Agent linkage), so
 same-page reveals keep the live page. Two bodies of the kind alive at once
 (a split pane showing `bot-browser` twice) is a tolerated edge, not a
 supported mode: host commands and iframe messages route to the most recently
-attached one. The A2A dock and the right-Sidebar tab are never mounted at the
-same time (the Sidebar's seat unmounts while the A2A panel is selected), so
-the singleton iframe bridge always has exactly one live surface.
+attached one.
 
 Agent linkage is two layers:
 
@@ -604,6 +610,6 @@ page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
 - Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`, `tools`, `systemPrompt`
 - Client: `dsh.client` bundle, no second `cordis.patch.yml` row; inject `slots`, `locale`, `remote`, `remote.agentPresets`, `remote.session`, `layout`, `sidebarRight`, `sidebarRightTabs`
-- Client surfaces: the Settings sections (`oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic`), the A2A Chat global main panel (`main` key `oac-a2a`) with its `sidebar.panellist` row, and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule)
+- Client surfaces: the Settings sections (`oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic`), the A2A Chat `shell.overlay` panel (id `oac-a2a`, center column only) with its `sidebar.panellist` row, and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule)
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
 - `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).

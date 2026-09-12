@@ -10,8 +10,8 @@
  *   is already loaded, navigate via ABC postMessage; otherwise the tab body
  *   sets its iframe src from the navigation params.
  *
- * The reveal itself — select Conversation, then `openTab('bot-browser')`
- * with its no-mounted-surface retry — lives in `browser-open-flow.ts`.
+ * The reveal itself — openTab-first with the conversation-flip fallback —
+ * lives in `browser-open-flow.ts`.
  */
 import { api } from './api.ts'
 import type { BotBrowserIframeBridge } from './browser-iframe.ts'

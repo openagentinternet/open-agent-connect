@@ -4,17 +4,15 @@
  * The Bot Browser lives in the official right Sidebar as one page tab kind
  * (`bot-browser`): the client registers the type into `ctx.sidebarRightTabs`
  * and a keyed `sidebar.right.pane.tab` body, and every entry point (Settings
- * buttons, avatar clicks, daemon SSE) reveals it through
+ * buttons, avatar clicks, transcript links, daemon SSE) reveals it through
  * `ctx.sidebarRight.openTab`. This module carries the pieces both the client
  * wiring and the node tests drive: the kind/id constants, the navigation
  * params the body reads, the same-URL no-reload decision, and the
- * selectConversation → openTab reveal with its no-mounted-surface retry.
+ * openTab-first reveal with its conversation-flip fallback.
  *
- * One exception: opens that originate INSIDE the A2A global main panel (link,
- * avatar, and group-task clicks) go to the panel's own browser dock instead —
- * see `openA2ABrowserDock`. The official right Sidebar's Session seat
- * unmounts while a global main panel is selected, so revealing it would flip
- * the main column back to the Conversation and take the A2A view away.
+ * A2A-originated opens land here too: the A2A Chat surface is a
+ * `shell.overlay` entry that keeps the right Sidebar mounted, so there is no
+ * in-panel browser dock anymore — one reveal path serves every surface.
  */
 
 /** The page tab kind `openTab` names. */
@@ -72,17 +70,27 @@ function errorMessage(cause: unknown): string {
 }
 
 /**
- * Reveal the Bot Browser tab, creating it on `params` when absent. Always
- * returns the main column to the Conversation first (the right Sidebar's
- * Session seat is unmounted while a global main panel is selected), then
- * retries openTab through the seat-remount window. Never rejects: a failure
- * after the last retry lands in `reportError`.
+ * Reveal the Bot Browser tab, creating it on `params` when absent. The
+ * mounted-surface fast path opens immediately, never touching the main
+ * column (the A2A Chat overlay keeps the right Sidebar mounted, so nearly
+ * every open lands here). When the seat is unmounted — a kernel global main
+ * panel is selected, or the seat is mid-remount — the flow first returns the
+ * main column to the Conversation, then retries openTab through the
+ * seat-remount window. Never rejects: a failure after the last retry lands
+ * in `reportError`.
  */
 export async function revealBotBrowserTab(
   face: BotBrowserOpenFace,
   params: BotBrowserTabParams,
   delays: readonly number[] = OPEN_TAB_RETRY_DELAYS_MS,
 ): Promise<void> {
+  try {
+    face.openTab(params)
+    return
+  } catch {
+    // No mounted Session surface right now: flip back to the Conversation
+    // and retry through the remount window below.
+  }
   try {
     face.selectConversation()
   } catch {
@@ -128,52 +136,6 @@ export async function openBotBrowser(
   try {
     const url = await face.browserOpen(target)
     await revealBotBrowserTab(face, target === null ? { url } : { url, uri: target }, delays)
-  } catch (cause) {
-    face.reportError(errorMessage(cause))
-  }
-}
-
-/** The services the A2A in-panel dock open needs, bound by the client apply closure. */
-export type A2ABrowserDockFace = {
-  /** Resolve a resource URI (or the Browser home when null) to its `localUiUrl`. */
-  browserOpen: (uri: string | null) => Promise<string>
-  /**
-   * Show the dock on a URL. Showing the URL the dock's iframe already loaded
-   * is a no-op for the iframe (it is keyed by URL) — it only keeps the dock
-   * visible and refreshes the target URI shown in the header.
-   */
-  show: (url: string, uri: string | null) => void
-  /** Surface an open failure (dock landing copy + log). */
-  reportError: (message: string) => void
-}
-
-/**
- * Open the Bot Browser inside the A2A panel's own dock, for opens that
- * originate in the A2A panel. The official right Sidebar cannot host it
- * there: its Session seat unmounts while a global main panel is selected, so
- * revealing it would switch the main column back to the Conversation. Same
- * duplicate-navigation guard as `openBotBrowser`: a live iframe keeps its src
- * (the host navigates ABC inside it over SSE) and the dock just stays shown.
- * Never rejects; failures land in `reportError`.
- */
-export async function openA2ABrowserDock(
-  face: A2ABrowserDockFace,
-  uri: string | null,
-  liveUrl: string | null,
-): Promise<void> {
-  const target = uri !== null && uri.trim() !== '' ? uri : null
-  if (liveUrl !== null && target !== null) {
-    try {
-      await face.browserOpen(target)
-      face.show(liveUrl, target)
-    } catch (cause) {
-      face.reportError(errorMessage(cause))
-    }
-    return
-  }
-  try {
-    const url = await face.browserOpen(target)
-    face.show(url, target)
   } catch (cause) {
     face.reportError(errorMessage(cause))
   }
