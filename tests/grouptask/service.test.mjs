@@ -387,6 +387,75 @@ test('reopenGroupTask only works from review and rejects pending deliverables', 
   assert.ok(await store.kvGet(`${service.GROUP_TASK_REWORK_AT_KV_PREFIX}${task.id}`));
 });
 
+test('getGroupTaskDetail derives settled member statuses in review and done', async () => {
+  const { ctx, profiles } = createFakeContext('metabot-gts-settled-');
+  const { task } = await createGroupTask(ctx, {
+    title: 'T', goal: 'G', workerSlugs: ['worker-1', 'worker-2'],
+  });
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const store = createGroupTaskStore(resolveMetabotPaths(profiles[0].homeDir));
+
+  // Execution-phase runtime statuses, frozen mid-flight: worker-1 was marked
+  // unreachable but DID deliver; worker-2 was 'working' when the task moved on.
+  await store.updateTaskStatus(task.id, 'executing');
+  await store.setMemberStatus(task.id, 'worker-1', 'unreachable');
+  await store.setMemberStatus(task.id, 'worker-2', 'working');
+  await store.addDeliverable({ taskId: task.id, msgPinId: 'pin-d1', authorGlobalMetaId: 'IDWORKER1' });
+
+  // Executing: the live view passes runtime statuses through untouched.
+  const live = await getGroupTaskDetail(ctx, 'twin-bot', task.id, { sync: false });
+  const liveBySlug = Object.fromEntries(live.members.map((member) => [member.slug, member]));
+  assert.equal(liveBySlug['worker-1'].status, 'unreachable');
+  assert.equal(liveBySlug['worker-2'].status, 'working');
+
+  // Review: the delivered member reads 'delivered', everyone else 'standby',
+  // and the execution-phase work badge is suppressed.
+  await store.updateTaskStatus(task.id, 'review');
+  const review = await getGroupTaskDetail(ctx, 'twin-bot', task.id, { sync: false });
+  const reviewBySlug = Object.fromEntries(review.members.map((member) => [member.slug, member]));
+  assert.equal(reviewBySlug['worker-1'].status, 'delivered');
+  assert.equal(reviewBySlug['worker-2'].status, 'standby');
+  assert.equal(reviewBySlug['twin-bot'].status, 'standby');
+  for (const member of review.members) assert.equal(member.workStatus, 'unknown');
+
+  // Stored runtime rows are untouched — a rework back to executing resumes the
+  // live view.
+  const stored = await store.listMembers(task.id);
+  assert.equal(stored.find((member) => member.slug === 'worker-1').status, 'unreachable');
+  assert.equal(stored.find((member) => member.slug === 'worker-2').status, 'working');
+
+  // Done: everyone reads 'done', work badge stays suppressed.
+  await store.updateTaskStatus(task.id, 'done');
+  const done = await getGroupTaskDetail(ctx, 'twin-bot', task.id, { sync: false });
+  assert.ok(done.members.length > 0);
+  for (const member of done.members) {
+    assert.equal(member.status, 'done');
+    assert.equal(member.workStatus, 'unknown');
+  }
+});
+
+test('getGroupTaskDetail does not count a rejected-only deliverable as delivered', async () => {
+  const { ctx, profiles } = createFakeContext('metabot-gts-settledrej-');
+  const { task } = await createGroupTask(ctx, {
+    title: 'T', goal: 'G', workerSlugs: ['worker-1'],
+  });
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const store = createGroupTaskStore(resolveMetabotPaths(profiles[0].homeDir));
+
+  await store.updateTaskStatus(task.id, 'executing');
+  const rejected = await store.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-r1', authorGlobalMetaId: 'IDWORKER1',
+  });
+  await store.updateDeliverableVerification(rejected.id, null, 'unconfirmed', 'rejected');
+  await store.updateTaskStatus(task.id, 'review');
+
+  const review = await getGroupTaskDetail(ctx, 'twin-bot', task.id, { sync: false });
+  const worker = review.members.find((member) => member.slug === 'worker-1');
+  assert.equal(worker.status, 'standby', 'rejected-only deliverable stays standby, not delivered');
+});
+
 // ---------------------------------------------------------------------------
 // Kick
 // ---------------------------------------------------------------------------

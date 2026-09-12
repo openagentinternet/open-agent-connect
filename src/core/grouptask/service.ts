@@ -627,6 +627,7 @@ export async function getGroupTaskDetail(
 
   const view = opts?.view ?? 'full';
   const members = await store.listMembers(taskId);
+  const deliverables = await store.listDeliverables(taskId);
   const profiles = await ctx.listProfiles();
   const profileBySlug = new Map(profiles.map((profile) => [profile.slug, profile]));
 
@@ -638,23 +639,47 @@ export async function getGroupTaskDetail(
     ? await store.getMembersWorkingAt(task.groupId, gmids)
     : new Map<string, number>();
 
+  // Phase-aware display status (live-run round 3): runtime member statuses
+  // ('working'/'unreachable') are execution-phase signals and freeze at whatever
+  // they were when the task moved on. Once the task reaches review/done they are
+  // noise — present the settled truth instead: members with a non-rejected
+  // deliverable 'delivered', everyone else 'standby' in review and 'done' once
+  // accepted. The stored runtime status is left untouched so a rework back to
+  // executing resumes the live view. The work badge is execution-phase too —
+  // suppressed ('unknown') in review/done.
+  const settledPhase = task.status === 'review' || task.status === 'done';
+  const deliveredGmids = new Set(
+    deliverables
+      .filter((row) => row.status !== 'rejected')
+      .map((row) => (row.authorGlobalMetaId ?? '').trim().toLowerCase())
+      .filter((gmid) => gmid.length > 0),
+  );
+
   const memberSummaries: GroupTaskMemberSummary[] = members.map((member) => {
     const gmid = (member.globalMetaId ?? '').trim().toLowerCase();
     const lastSpeakAt = gmid ? (speakMap.get(gmid) ?? null) : null;
     const lastWorkingAtSec = gmid ? (workingMap.get(gmid) ?? null) : null;
     const lastWorkingAt = lastWorkingAtSec != null ? lastWorkingAtSec * 1000 : null;
     const memberProfile = member.slug ? profileBySlug.get(member.slug) : undefined;
+    const settledStatus: GroupTaskMemberStatus | null = task.status === 'done'
+      ? 'done'
+      : task.status === 'review'
+        ? (deliveredGmids.has(gmid) ? 'delivered' : 'standby')
+        : null;
     return {
       ...member,
+      status: settledStatus ?? member.status,
       displayName: memberDisplayName(member, memberProfile?.name) || member.displayName,
       avatar: memberProfile?.avatar ?? null,
       lastSpeakAt,
       lastWorkingAt,
-      workStatus: computeGroupTaskMemberWorkStatus({
-        lastSpeakAt,
-        lastWorkingAt,
-        memberStatus: member.status,
-      }),
+      workStatus: settledPhase
+        ? 'unknown'
+        : computeGroupTaskMemberWorkStatus({
+          lastSpeakAt,
+          lastWorkingAt,
+          memberStatus: member.status,
+        }),
       inviteStatus: member.slug != null
         ? 'none'
         : (member.joinedPinId ? 'joined' : 'invite_pending'),
@@ -677,7 +702,7 @@ export async function getGroupTaskDetail(
   return {
     ...task,
     members: memberSummaries,
-    deliverables: await store.listDeliverables(taskId),
+    deliverables,
     transitions: await store.listTransitions(taskId),
     integrityEvents: await store.listIntegrityEvents(taskId),
     messages: messagesPage.messages,
@@ -1494,6 +1519,7 @@ export const GROUP_TASK_MEMBER_STATUSES: GroupTaskMemberStatus[] = [
   'standby',
   'done',
   'unreachable',
+  'delivered',
 ];
 
 export async function setGroupTaskMemberStatus(

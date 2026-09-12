@@ -2650,7 +2650,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'close', summary: 'Close a task as done (optionally rated) or cancelled.' },
       { name: 'reopen', summary: 'Send a review task back to executing (rework).' },
       { name: 'kick', summary: 'Remove a member from the task group (chair-signed on-chain).' },
-      { name: 'member-status', summary: 'Set a member seat status (assigned|working|standby|done|unreachable).' },
+      { name: 'member-status', summary: 'Set a member seat status (assigned|working|standby|done|unreachable|delivered).' },
       { name: 'rename', summary: 'Set a local display name for a task.' },
       { name: 'pin', summary: 'Pin a task to the top of the list (unpin to revert).' },
       { name: 'archive', summary: 'Archive a task locally (unarchive to revert).' },

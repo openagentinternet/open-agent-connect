@@ -129,13 +129,15 @@ function memberStatusKey(status: string): ConversationsLocaleKey {
     case 'standby': return 'gtMStatusStandby'
     case 'done': return 'gtMStatusDone'
     case 'unreachable': return 'gtMStatusUnreachable'
+    case 'delivered': return 'gtMStatusDelivered'
     default: return 'gtMStatusAssigned'
   }
 }
 
 /** Known state-machine statuses get their own pill class; rest fall back. */
 function memberStatusClass(status: string): string {
-  return status === 'working' || status === 'standby' || status === 'done' || status === 'unreachable'
+  return status === 'working' || status === 'standby' || status === 'done'
+    || status === 'unreachable' || status === 'delivered'
     ? status
     : 'assigned'
 }
