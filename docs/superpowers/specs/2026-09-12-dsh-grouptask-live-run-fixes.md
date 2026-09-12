@@ -171,3 +171,91 @@ Persist the staffing proposal's seat role onto the member row at `create_from_pr
   seat roles (`domain:<label>` for domain seats) into `createGroupTask`; `buildSeats` maps them to
   `promptSeats.roleText`, rendering the `## Roster profiles` prompt section for the first time.
 - Tests: `tests/grouptask/liveRunFixes.test.mjs` (7 tests) + full suite green.
+
+## Round-2 live verification (task 180, 2026-09-12 evening)
+
+Task `b2386181d89c63f8421867803bbfe889c6bbf2199d5419013012539e5dadf634i0`
+("YuE2 音乐生成项目介绍 MetaApp（本机五人组）", chair `bob`, 4 workers, **direct create** — no
+staffing slate, no source session) watched to a stable `review` at 21:04.
+
+### Fixed, verified live
+
+- **P1**: all 5 member rows persisted within 57 ms of task creation; the plan named every seat with
+  an explicit assignment （内容/设计/视频/工程）. No coverage note needed.
+- **P2**: exactly two transitions (planning→executing, executing→review). Stale
+  `[STATUS:EXECUTING]` tags in the backlog (msgs 14–16) no longer flap anything; acceptanceSummary
+  written exactly once.
+- **P4**: every completed work request logged exactly once (#188/#190/#195).
+- **P3 (partial)**: the review verdict (msg 18) arrived complete with its tag — no wedge. BUT the
+  truncation heuristic missed msg 10: the chair's reply was cut **mid-URI** (`pin://99e980c`),
+  which matches none of the structural shapes (table row / code fence / opening punctuation).
+  Extend `looksLikeTruncatedReply` with an incomplete-trailing-URI rule:
+  `(metaid|pin|metafile|metaapp|map)://[0-9a-z]{1,63}$` at end of text (a pinId is 64 hex + `i0`).
+
+### New findings
+
+- **F7 — an unavailable Bot is seated silently and can never be driven.** `mb-d0734df1`
+  （短视频脚本工坊） has no DSH LLM pair → `isMetabotProfileAvailable` false → filtered from the
+  engine's `listProfiles` → dropped from `seats` (but still in `promptSeats`, so the chair plans a
+  seat for it). Every responder decision for it hits `if (!seat) continue` — no work request, no
+  fallback turn, no log line, no host note. Direct `createGroupTask` performs no availability
+  validation. The chair chased the ghost seat for ~30 min (msgs 8/15/16, incl. one hallucinated
+  "你上一条 [WORKING]" — the bot never spoke once). Fixes to consider: refuse/warn on seating
+  unavailable bots at create; log + host-note the chair when a decided responder is undrivable;
+  reconsider whether local CLI bindings should satisfy drivability (unified passive-LLM priority
+  would cover them) instead of DSH-pair-only.
+- **F8 — engine-posted messages carry no resolved `mention` array**, and `trackAssignmentAcks`
+  reads only `message.mention` (not the `@Name` fallback `isMentioned` uses). Result: the whole
+  monitor ladder never arms for engine dispatches — no 3-min no-ACK note, no `[DEADLINE]` clock
+  (all four per-seat deadlines in this run were inert), no L2/L3 escalation. Fix: resolve @tokens
+  against the member roster at post time (`postGroupTaskMessage` or `enginePost`) and/or make
+  `trackAssignmentAcks` use the same @Name matching as `isMentioned`.
+- **F9 — delivered members go "stale working" and get marked unreachable.** `long_turn` keys off
+  the last `[WORKING]` timestamp; a `[DELIVERABLE]` does not settle it. Both delivered workers got
+  `long_turn` notes (one twice) and were then set `unreachable` (line ~1060) despite delivering —
+  the drawer badges showed 失败 for members that did their jobs, and the chair burned turns chasing
+  them (msg 15). Fix: a recorded delivery resets the watch (member status back to `assigned`/`done`
+  on delivery) and/or baseline the monitor on `max(lastWorkingAt, lastDeliverableAt)`.
+- **F10 — raw DSML tool-call markup posted as group messages.** Msg 11 (fable-1, bare-LLM fallback
+  after its session timed out) and msg 12 (chair) are literally `<｜｜DSML｜｜ calls>…` blocks
+  on-chain. Detect tool-call markup in turn output: retry once, else refuse to post (treat as
+  `[NO_REPLY]`) with a `parse` note.
+- **F11 — `unreachable` has no chair-facing signal.** The 30-min no-speech mark writes only an
+  engine log line; the chair learned about the dead seat purely from silence. Record a host note
+  (single-commander channel) when a member is marked unreachable.
+- **F12 — `WORKER_TURN_TIMED_OUT after 900s` killed a legit build turn** (#191, fable-1 rendering
+  the video + publishing). 15 min is tight for build+chain-publish turns; the fallback bare-LLM
+  turn that followed is what produced the F10 garbage. Consider a longer/step-scoped timeout for
+  work-request sessions, and treat the fallback's first turn after a timeout as high-risk for
+  tool-call leakage.
+- Chair coherence under backlog (carried from round 1): msgs 14→15→16 contradicted each other
+  within 4 minutes (fold video into engineering → keep chasing the video seat → demand ETA). The
+  P2 deferral hides status flaps from the owner, but per-turn context drift still makes the chair
+  waffle; the chair state line could include its own latest PLAN_CHANGE to anchor decisions.
+
+## Round-2 implementation record (branch `dsh-grouptask-fix`, second commit)
+
+F7 was fixed in a parallel session (`dsh-bot-availability-fix`, merged as c6d04fef): create-time
+skip of unavailable Bots with `skippedWorkers` reporting, propose-time slate validation, picker
+surfaces. Deliberately NOT duplicated here; this round adds the complementary engine-side signals:
+
+- **F8** `service.ts:postGroupTaskMessage` resolves `@Name` tokens against the roster into the
+  on-chain mention array (shared `resolveAtMentions` in tags.ts, same matching as `isMentioned`);
+  `engine.ts:trackAssignmentAcks` additionally accepts the @Name body form, so the ACK watch and
+  `[DEADLINE]` clocks arm even for messages that arrive without a mention array (any client).
+- **F9** the stale-`[WORKING]` monitor (L2/L3) baselines on `max(lastWorkingAt, lastSpeakAt)` —
+  any speech after the work claim, a `[DELIVERABLE]` above all, resets the clock. Delivered members
+  are no longer flagged `long_turn` or marked `unreachable`.
+- **F10** `tags.ts:containsToolCallMarkup` (DSML / `<tool_call>` / `<invoke>`): engine seat turns
+  retry once in plain text and drop persistent markup (nothing posts);
+  `submitGroupTaskWork` fails a markup handoff (`WORKER_TOOLCALL_HANDOFF`) so the bare-LLM fallback
+  answers instead.
+- **F11** the 30-min no-speech `unreachable` mark now records a deduped host note for the chair;
+  addressing a roster member the engine cannot drive (unavailable mid-task) records an `undrivable`
+  host note and logs the skip.
+- **F12** plugin `DEFAULT_TURN_TIMEOUT_MS` 900 s → 1500 s (still under the engine claimed TTL),
+  engine `WORK_REQUEST_CLAIMED_TTL_MS` 20 min → 30 min.
+- **P3 (round-2)** `looksLikeTruncatedReply` also flags an incomplete trailing MetaWeb URI
+  (`(pin|metafile|metaapp|map)://[0-9a-f]{1,65}$` — a complete pinId is 64 hex + `i0`).
+- Tests: `tests/grouptask/liveRunFixesRound2.test.mjs` (8 tests); scoped suites 161 + 430 green;
+  full `npm test` green.

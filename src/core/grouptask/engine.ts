@@ -57,6 +57,7 @@ import { extractDeliverablePinId, verifyTaskDeliverables } from './deliverableVe
 import { uploadLocalFileToChain } from '../files/uploadFile';
 import { createPrivateChatStateStore } from '../chat/privateChatStateStore';
 import {
+  containsToolCallMarkup,
   decideGroupTaskResponders,
   isEnforceableDependencyToken,
   isHostNotice,
@@ -102,7 +103,7 @@ export const GROUP_TASK_WORK_REQ_KV_PREFIX = 'group_task_work_req:';
  * replies instead — a missing host can never stall a task.
  */
 const WORK_REQUEST_PENDING_TTL_MS = 8 * 60_000;
-const WORK_REQUEST_CLAIMED_TTL_MS = 20 * 60_000;
+const WORK_REQUEST_CLAIMED_TTL_MS = 30 * 60_000; // build+publish turns legitimately pass 15 min (F12)
 /**
  * IDBots roster-settle cap: the one-shot planning turn waits at most this long
  * for OpenTeam invites to resolve before planning with whatever roster exists.
@@ -407,6 +408,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if ((trimmed.match(/```/g) ?? []).length % 2 === 1) return true;
     const lastLine = trimmed.split('\n').pop()!.trim();
     if (lastLine.startsWith('|') && !lastLine.endsWith('|')) return true;
+    // A MetaWeb URI cut mid-pinId (a complete pinId is 64 hex + `i0` = 66 chars).
+    if (/(?:pin|metafile|metaapp|map):\/\/[0-9a-f]{1,65}$/u.test(trimmed)) return true;
     if (/\[[A-Z_]+(?::[^\]]*)?\]$/.test(lastLine)) return false; // honored tag line
     return /[(\[（【:：,，、/]$/.test(lastLine);
   }
@@ -457,6 +460,24 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       prompt,
     };
     const reply = await options.runLlmTurn(turn);
+    // Raw tool-call markup must never reach the chain (live-run F10: bare
+    // turns have no tools — a DSML reply is the model misfiring). Retry once
+    // in plain text; a persistent markup reply is dropped so NOTHING posts.
+    if (containsToolCallMarkup(reply)) {
+      log(`[GroupTaskEngine] ${input.seat.role} reply for task ${input.task.id} is raw tool-call `
+        + 'markup; retrying once in plain text');
+      const retry = (await options.runLlmTurn({
+        ...turn,
+        prompt: `${prompt}\n\n[Host note: your previous reply was raw tool-call markup `
+          + '(DSML <invoke> blocks). You have NO tools in this turn — answer in plain text only.]',
+      })).trim();
+      if (!retry || containsToolCallMarkup(retry)) {
+        log(`[GroupTaskEngine] ${input.seat.role} reply for task ${input.task.id} still tool-call `
+          + 'markup after retry; dropped (nothing posted)');
+        return '';
+      }
+      return retry;
+    }
     // A truncated chair reply can silently drop a lifecycle tag (live-run F3:
     // an acceptance verdict cut off mid-table wedged the task in executing).
     // Retry once with an explicit complete-it instruction.
@@ -842,7 +863,15 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (fromChair) {
       const mentioned = new Set((message.mention ?? []).map((gmid) => normalizeGmid(gmid)).filter(Boolean));
       for (const member of workers) {
-        if (!mentioned.has(normalizeGmid(member.globalMetaId))) continue;
+        // Mention detection mirrors the responder decision: the on-chain
+        // mention array first, then the @Name body form (live-run F8: engine
+        // posts without the array used to leave this whole watch disarmed).
+        const wasMentioned = mentioned.has(normalizeGmid(member.globalMetaId))
+          || isMentioned(message, {
+            globalMetaId: member.globalMetaId,
+            name: member.displayName ?? member.slug ?? '',
+          });
+        if (!wasMentioned) continue;
         // Single deadline clock: the chair's [DEADLINE: Nm] tag is the ONLY
         // deadline source; it arms (starts ticking) on the worker's ACK.
         if (tags.deadlineMinutes != null) {
@@ -1048,13 +1077,27 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           await store.setMemberStatus(task.id, member.slug!, 'unreachable', member.globalMetaId);
           log(`[GroupTaskEngine] Task ${task.id}: member ${member.slug} marked unreachable `
             + '(no speech for 30+ min)');
+          // The mark was previously log-only — the chair learned nothing and
+          // kept chasing the ghost seat (live-run F11).
+          await recordHostNote(store, task.id, {
+            kind: 'unreachable',
+            target: member.displayName ?? member.slug,
+            body: `${member.displayName ?? member.slug} has had no speech for 30+ minutes and is now `
+              + 'marked unreachable. Outstanding assignments to them need your call: chase with a fresh '
+              + '@-mention, re-assign the work, or put them on [STANDBY] by name.',
+            dedupeKey: `unreachable:${task.id}:${member.slug}`,
+          }).catch(() => undefined);
         }
       }
       // Timeout L2: [WORKING] signal stale past 20 min → one `long_turn` fact
-      // for the chair; L3 past +10 min → private owner brief.
+      // for the chair; L3 past +10 min → private owner brief. ANY speech after
+      // the [WORKING] claim — a [DELIVERABLE] above all — resets the baseline
+      // (live-run F9: delivered members were flagged long_turn and even marked
+      // unreachable while their work was already on the ledger).
       const lastWorkingMs = (workingMap.get(gmid) ?? 0) * 1000;
       if (!lastWorkingMs) continue;
-      const staleMs = now() - lastWorkingMs;
+      const lastActivityMs = Math.max(lastWorkingMs, (speakMap.get(gmid) ?? 0) * 1000);
+      const staleMs = now() - lastActivityMs;
       if (staleMs <= MEMBER_TIMEOUT_AFTER_MS) continue;
       if (outstanding) continue; // live DSH turn in flight: engaged, not timed out
       await store.setMemberStatus(task.id, member.slug!, 'unreachable', member.globalMetaId).catch(() => undefined);
@@ -1830,6 +1873,12 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     const counters: TickCounters = { workerReplies: 0, chairAutoReplies: 0 };
     /** Owner-facing review effects queued by chair status tags this pass (P2). */
     const deferredReview: { current: DeferredReviewEffects | null } = { current: null };
+    /** Rostered workers the engine cannot drive (unavailable → no local seat):
+     *  addressing them is silently dropped by the responder path, so surface
+     *  it to the chair instead (live-run F7 residue/F11). */
+    const undrivableWorkers = members.filter((member) =>
+      member.role === 'worker' && member.removedAt == null && member.slug != null
+      && !seats.some((seat) => seat.slug === member.slug));
 
     for (const message of pending) {
       const retryKey = `${GROUP_TASK_MSG_RETRY_KV_PREFIX}${current.id}:${message.index}`;
@@ -1839,6 +1888,23 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           store, current, profile.slug, message, tags, seats, ownerGmid, profile, promptSeats, deferredReview,
         );
         await trackAssignmentAcks(store, current, message, members, tags).catch(() => undefined);
+        for (const member of undrivableWorkers) {
+          if (!isMentioned(message, {
+            globalMetaId: member.globalMetaId,
+            name: member.displayName ?? member.slug ?? '',
+          })) continue;
+          await recordHostNote(store, current.id, {
+            kind: 'undrivable',
+            target: member.displayName ?? member.slug,
+            body: `${member.displayName ?? member.slug} was addressed but cannot be driven by the engine `
+              + '(Bot unavailable: Settings availability toggle off, or no DSH LLM pair configured). '
+              + 'Their turn was skipped — re-assign the work to an available member or set this seat '
+              + '[STANDBY] by name.',
+            dedupeKey: `undrivable:${current.id}:${member.slug}`,
+          }).catch(() => undefined);
+          log(`[GroupTaskEngine] Task ${current.id}: ${member.slug} addressed in message `
+            + `${message.index} but is not drivable (unavailable)`);
+        }
         if (current.status === 'done' || current.status === 'cancelled') {
           await store.updateTaskCursor(current.id, message.index);
           break;

@@ -66,7 +66,7 @@ export const GROUP_TASK_WORK_SYSTEM_PROMPT =
   + 'Do not broaden your permission scope or claim unverifiable completion.'
 
 const DEFAULT_POLL_MS = 8_000
-const DEFAULT_TURN_TIMEOUT_MS = 900_000
+const DEFAULT_TURN_TIMEOUT_MS = 1_500_000 // 25 min: build+publish turns legitimately pass 15 (F12); stays under the engine's 30-min claimed TTL
 /** work-submit retries: transient daemon hiccups must not silently drop a finished turn. */
 const SUBMIT_RETRY_DELAYS_MS = [0, 2_000, 5_000]
 
