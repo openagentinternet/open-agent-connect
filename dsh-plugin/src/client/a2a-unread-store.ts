@@ -2,12 +2,12 @@
  * A2A unread feed (client half, apply scope).
  *
  * The unread dots used to live inside the A2A overlay panel, so they only
- * worked while the panel was open. The panel is now a global main panel
- * (`main` key `oac-a2a`) with a `sidebar.panellist` glyph, and the feed lives
- * here at apply scope so the glyph's dot works no matter which panel is
- * selected: one SSE subscription to `/oac/api/chat/events/all` folds private
- * and group-task changes into one persisted UnreadState both the glyph and
- * the panel read through the inject `hooks` compartment.
+ * worked while the panel was open. The panel now opens from a
+ * `sidebar.panellist` glyph (a `shell.overlay` entry, id `oac-a2a`), and the
+ * feed lives here at apply scope so the glyph's dot works no matter which
+ * panel is selected: one SSE subscription to `/oac/api/chat/events/all` folds
+ * private and group-task changes into one persisted UnreadState both the
+ * glyph and the panel read through the inject `hooks` compartment.
  *
  * The panel feeds its live view (`setView`) so the thread/task the user is
  * reading right now stays read; unmounting the panel clears the feed.

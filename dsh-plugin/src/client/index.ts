@@ -1,8 +1,8 @@
 /**
  * Browser half of open-agent-connect-dsh: locale dictionaries, the Settings
  * sections, the new-session preset chip, the right-Sidebar `bot-browser` tab
- * type, and the A2A Chat main panel with its `sidebar.panellist` glyph. Does
- * not shadow Settings → Agent presets.
+ * type, and the A2A Chat `shell.overlay` panel with its `sidebar.panellist`
+ * glyph. Does not shadow Settings → Agent presets.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
@@ -18,7 +18,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import { IconBrowseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api } from './api.ts'
-import { A2AConversation, type A2AConversationInjected } from './A2AConversation.tsx'
+import { A2AOverlay, type A2AOverlayInjected } from './A2AOverlay.tsx'
 import { A2APanelGlyph, type A2APanelGlyphInjected } from './A2APanelGlyph.tsx'
 import { AppsPanel } from './AppsPanel.tsx'
 import { BotBrowserTab, BotBrowserTabTitle, type BotBrowserTabInjected } from './BotBrowserTab.tsx'
@@ -26,7 +26,8 @@ import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
-import { A2ABrowserDockStore } from './a2a-browser-dock-store.ts'
+import { A2APanelStore } from './a2a-panel-store.ts'
+import { startA2APanelRowInterceptor } from './a2a-panel-row.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
@@ -34,7 +35,6 @@ import { BotBrowserIframeBridge } from './browser-iframe.ts'
 import {
   BOT_BROWSER_TAB_ID,
   BOT_BROWSER_TAB_KIND,
-  openA2ABrowserDock,
   revealBotBrowserTab,
   type BotBrowserOpenFace,
 } from '../browser-open-flow.ts'
@@ -124,19 +124,10 @@ export function apply(ctx: ClientContext): void {
     },
   }
   const openBrowserNow = (uri: string | null): Promise<void> => openBrowser(openFace, iframeBridge, uri)
-  // A2A in-panel browser dock: opens originating in the A2A global main panel
-  // (link, avatar, and group-task clicks) land here. The official right
-  // Sidebar's Session seat unmounts while a global main panel is selected, so
-  // revealing it would flip the main column back to the Conversation.
-  const a2aDock = new A2ABrowserDockStore()
-  const openA2ADockNow = (uri: string | null): Promise<void> => openA2ABrowserDock({
-    browserOpen: (target) => api.browserOpen(target),
-    show: (url, target) => a2aDock.show(url, target),
-    reportError: (message) => {
-      console.error(`[oac-dsh] a2a browser dock open: ${message}`)
-      a2aDock.fail(message)
-    },
-  }, uri, iframeBridge.liveUrl())
+  // A2A Chat overlay: one apply-scope open state. The panellist row's click
+  // is capture-intercepted into a toggle (a kernel global-panel selection
+  // would unmount the right Sidebar); session navigation closes it again.
+  const a2aPanel = new A2APanelStore()
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: BOT_BROWSER_TAB_ID,
     kind: BOT_BROWSER_TAB_KIND,
@@ -169,33 +160,35 @@ export function apply(ctx: ClientContext): void {
       liveUrl: () => iframeBridge.liveUrl(),
       reveal: (params) => revealBotBrowserTab(openFace, params),
     })
-    const stopLinks = startAgentLinkInterceptor((uri, anchor) => {
-      // Clicks inside the A2A panel dock in-panel: revealing the official
-      // right Sidebar would switch the main column back to the Conversation.
-      if (anchor.closest('.oac-a2a-panel') !== null) void openA2ADockNow(uri)
-      else void openBrowserNow(uri)
-    })
+    const stopPanelRow = startA2APanelRowInterceptor(() => a2aPanel.toggle())
+    // Every Agent Internet URI click (any surface) reveals the right-Sidebar
+    // Bot Browser — the A2A overlay keeps that Sidebar mounted, so one path
+    // serves transcripts, avatars, and group-task links alike.
+    const stopLinks = startAgentLinkInterceptor((uri) => { void openBrowserNow(uri) })
     return () => {
       stopEvents()
       stopLinks()
+      stopPanelRow()
       stopBridge()
     }
   }, 'oac-dsh: bot browser wiring')
 
-  // A2A Chat: a global main panel (key `oac-a2a`) plus its panellist glyph.
-  // The unread feed lives at apply scope so the glyph's dot works no matter
-  // which panel is selected; the panel feeds its live view back through
-  // setView so the thread being read stays read.
+  // A2A Chat: a `shell.overlay` panel (id `oac-a2a`) covering the center
+  // column only, plus its panellist glyph. The unread feed lives at apply
+  // scope so the glyph's dot works no matter which panel is selected; the
+  // panel feeds its live view back through setView so the thread being read
+  // stays read.
   const unreadController = new A2AUnreadController({
     list: (from) => api.conversations(from),
     thread: (from, peer) => api.conversationThread(from, peer),
   })
   ctx.effect(() => unreadController.start(), 'oac-dsh: a2a unread feed')
-  ctx.slots.inject('main', () => ctx.slots.register({
-    name: 'main',
-    key: 'oac-a2a',
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'oac-a2a',
+    order: 0,
     locale: CONV_NS,
-    inject: (): A2AConversationInjected => ({
+    inject: (): A2AOverlayInjected => ({
       bots: () => api.list(),
       list: (from: string) => api.conversations(from),
       thread: (from: string, peer: string) => api.conversationThread(from, peer),
@@ -203,12 +196,7 @@ export function apply(ctx: ClientContext): void {
       guidance: (from: string, peer: string, guidance: string) =>
         api.conversationGuidance(from, peer, guidance),
       meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
-      browserOpen: (uri?: string) => openA2ADockNow(uri ?? null),
-      dock: {
-        close: () => a2aDock.close(),
-        onIframe: (element, url) => iframeBridge.setIframe(element, url),
-        t: tBrowser,
-      },
+      browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
       grouptask: {
         list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
         detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
@@ -230,21 +218,34 @@ export function apply(ctx: ClientContext): void {
       },
       hooks: {
         unread: unreadController.source,
-        dock: a2aDock,
-        browser: browserStore,
+        panel: a2aPanel,
       },
       clearPrivateUnread: (from, peer) => unreadController.clearPrivateUnread(from, peer),
       clearGroupUnread: (key) => unreadController.clearGroupUnread(key),
       setView: (view) => unreadController.setView(view),
     }),
-  }, A2AConversation))
+  }, A2AOverlay))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist',
     id: 'oac-a2a',
     order: 0,
     label: () => tConv('nav'),
-    inject: (): A2APanelGlyphInjected => ({ hooks: { unread: unreadController.source } }),
+    inject: (): A2APanelGlyphInjected => ({ hooks: { unread: unreadController.source, panel: a2aPanel } }),
   }, A2APanelGlyph))
+  // Session navigation closes the A2A overlay (the conversation underneath
+  // never unmounted, so the switch shows the moment it closes).
+  ctx.inject(['sessions'], (scope: ClientContext) => {
+    // Captured once while the context is active (the preset chip below does
+    // the same): re-resolving after the context retires throws.
+    const sessionsList = scope.sessions.list
+    let previous = sessionsList.getSnapshot().current
+    scope.effect(() => sessionsList.subscribe(() => {
+      const current = sessionsList.getSnapshot().current
+      const navigated = current !== previous
+      previous = current
+      if (navigated) a2aPanel.close()
+    }), 'oac-dsh: a2a overlay session watch')
+  })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',

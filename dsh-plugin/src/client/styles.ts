@@ -202,26 +202,33 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-link-button:hover { text-decoration: underline; }
 .oac-link-button:disabled { opacity: .6; cursor: default; text-decoration: none; }
 
-/* A2A conversation panel: a global main panel (main slot key oac-a2a) with a
-   sidebar panellist row glyph carrying the unread dot. The panel fills the
-   center column; geometry follows the conversation row/bubble vocabulary. */
+/* A2A Chat overlay: a shell.overlay entry (id oac-a2a) covering the center
+   column only, driven by the apply-scope panel store (the panellist row's
+   intercepted click toggles it). The three-column grid mirrors the frame's
+   inline grid-template-columns, so the opaque center cell tracks column
+   resizes, sidebar collapse, and right-Sidebar open/close; the side cells
+   stay transparent and click-through. */
+.oac-a2a-overlay[class] { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr); pointer-events: none; transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out); }
+[data-dragging] .oac-a2a-overlay,
+[data-rightbar-instant] .oac-a2a-overlay,
+[data-rightbar-fullscreen] .oac-a2a-overlay { transition: none; }
+[data-rightbar-fullscreen] .oac-a2a-overlay { display: none; }
+@media (prefers-reduced-motion: reduce) { .oac-a2a-overlay { transition: none; } }
+.oac-a2a-overlay-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; background: var(--dsw-alias-bg-layer-2); }
+
+/* A2A conversation panel: fills the overlay's center cell; geometry follows
+   the conversation row/bubble vocabulary. The panellist glyph draws its own
+   open state (the row's kernel active highlight never fires for an overlay). */
 .oac-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3); }
 .oac-a2a-glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.oac-a2a-glyph[data-open='true'] { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-interactive-bg-active); border-radius: 8px; outline: 4px solid var(--dsw-alias-interactive-bg-active); }
 .oac-a2a-glyph .oac-unread-dot { position: absolute; top: -3px; right: -4px; box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-2); }
 .oac-a2a-panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-layer-2); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--dsw-alias-label-primary); }
 .oac-a2a-body { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-/* Row wrapper below the header: the conversation/group-task body plus the
-   in-panel Bot Browser dock for A2A-originated opens. */
+/* Row wrapper below the header: the private-chat / group-task body. */
 .oac-a2a-main { flex: 1; min-height: 0; display: flex; }
-.oac-a2a-dock { flex: none; width: min(520px, 42%); display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
-.oac-a2a-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 12px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-.oac-a2a-dock-title { flex: none; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--dsw-alias-label-primary); }
-.oac-a2a-dock-uri { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
-.oac-a2a-dock-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
-.oac-a2a-dock-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.oac-a2a-dock-body { flex: 1; min-height: 0; }
 .oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
 .oac-a2a-list-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-bot-avatar { flex: none; width: 32px; height: 32px; font-size: 12px; }

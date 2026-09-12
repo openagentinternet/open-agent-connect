@@ -19,18 +19,14 @@ import {
   type ConversationThread,
 } from './api.ts'
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
-import { A2ABrowserDock } from './A2ABrowserDock.tsx'
 import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { pickDefaultBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import type { UnreadState } from '../unread-logic.ts'
 import type { A2AUnreadView } from './a2a-unread-store.ts'
-import type { A2ABrowserDockState } from './a2a-browser-dock-store.ts'
-import type { BotBrowserState } from './browser-store.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
-import type { BrowserLocaleKey } from './locale-browser.ts'
 import { markdownLabels } from './markdown-labels.ts'
 
 type Translate = (key: ConversationsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
@@ -48,21 +44,11 @@ export interface A2AConversationInjected {
     displayName?: string | null
   }) => Promise<unknown>
   grouptask: GroupTaskInjectedApi
-  /** Open the in-panel Bot Browser dock on a resource URI (e.g. `metaid://<globalMetaId>`). */
+  /** Open a resource URI (e.g. `metaid://<globalMetaId>`) in the right-Sidebar Bot Browser tab. */
   browserOpen: (uri?: string) => Promise<void>
-  /** In-panel Bot Browser dock: close, iframe reporting, and browser-namespace copy. */
-  dock: {
-    close: () => void
-    onIframe: (iframe: HTMLIFrameElement | null, url: string | null) => void
-    t: (key: BrowserLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
-  }
   hooks: {
     /** The apply-scope A2A unread feed (row dots + Group Tasks badges). */
     unread: SnapshotStore<UnreadState>
-    /** The apply-scope in-panel browser dock state. */
-    dock: SnapshotStore<A2ABrowserDockState>
-    /** Shared Browser face: the live ABC active-tab URI for the dock header. */
-    browser: SnapshotStore<BotBrowserState>
   }
   clearPrivateUnread: (from: string, peer: string) => void
   clearGroupUnread: (key: string) => void
@@ -161,12 +147,12 @@ function MessageRow({
 }
 
 /**
- * Global main panel (main slot key `oac-a2a`): private peer conversations on
- * the left, message thread with a composer on the right, plus the Group
- * Tasks tab. Data comes from the same daemon endpoints the OAC
- * `/ui/conversations` page reads. The panel is root-scoped — it must not
- * assume a Session — and mounts only while selected in the main column, so
- * the effects below run exactly while the panel is on screen.
+ * A2A Chat surface (mounted by the `shell.overlay` entry `oac-a2a` inside its
+ * center-column cell): private peer conversations on the left, message thread
+ * with a composer on the right, plus the Group Tasks tab. Data comes from the
+ * same daemon endpoints the OAC `/ui/conversations` page reads. The panel is
+ * root-scoped — it must not assume a Session — and mounts only while the
+ * overlay is open, so the effects below run exactly while it is on screen.
  */
 export function A2AConversation({
   bots,
@@ -177,10 +163,7 @@ export function A2AConversation({
   meta,
   grouptask,
   browserOpen,
-  dock,
   useUnread,
-  useDock,
-  useBrowser,
   clearPrivateUnread,
   clearGroupUnread,
   setView,
@@ -211,8 +194,6 @@ export function A2AConversation({
   // is on screen.
   const [taskKey, setTaskKey] = useState('')
   const unread = useUnread((state) => state)
-  const dockState = useDock((state) => state)
-  const dockActiveUri = useBrowser((state) => state.activeUri)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const guidanceTokenRef = useRef(0)
   const lastFromRef = useRef('')
@@ -381,9 +362,8 @@ export function A2AConversation({
     setGuidanceOpen(false)
   }
 
-  // Avatar click: open the sender's Bot page in the panel's own browser dock
-  // (the panel never switches; the official right Sidebar unmounts while a
-  // global main panel is selected).
+  // Avatar click: open the sender's Bot page in the right-Sidebar Bot
+  // Browser tab (the overlay keeps the right Sidebar mounted).
   const openBotPage = useCallback((globalMetaId: string): void => {
     const gmid = globalMetaId.trim()
     if (!gmid) return
@@ -417,7 +397,8 @@ export function A2AConversation({
     }
   }
 
-  // Group-task drawer: open one deliverable/resource URI in the in-panel dock.
+  // Group-task drawer: open one deliverable/resource URI in the right-Sidebar
+  // Bot Browser tab.
   const openResource = useCallback((uri: string): void => {
     const target = uri.trim()
     if (!target) return
@@ -791,18 +772,6 @@ export function A2AConversation({
                 </div>
               </div>
             </div>
-      {/* In-panel Bot Browser dock: A2A-originated opens land here instead of
-          the official right Sidebar, whose Session seat unmounts while this
-          global main panel is selected. */}
-      {dockState.open ? (
-        <A2ABrowserDock
-          state={dockState}
-          activeUri={dockActiveUri}
-          onClose={dock.close}
-          onIframe={dock.onIframe}
-          t={dock.t}
-        />
-      ) : null}
       </div>
             {/* Row-menu rename modal (DSH home-list rename pattern). */}
             <Modal

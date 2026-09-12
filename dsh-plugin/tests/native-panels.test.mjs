@@ -27,7 +27,6 @@ test('cold open resolves the url then reveals the tab with url + uri', async () 
   await flow.openBotBrowser(face, 'metaid://abc', null, [0])
   assert.deepEqual(calls, [
     ['browserOpen', 'metaid://abc'],
-    ['selectConversation'],
     ['openTab', { url: 'http://x/browser/bot', uri: 'metaid://abc' }],
   ])
 })
@@ -37,7 +36,6 @@ test('home open (null uri) reveals the tab without a uri param', async () => {
   await flow.openBotBrowser(face, null, null, [0])
   assert.deepEqual(calls, [
     ['browserOpen', null],
-    ['selectConversation'],
     ['openTab', { url: 'http://x/browser/home' }],
   ])
 })
@@ -47,7 +45,6 @@ test('live iframe + uri reveals on the CURRENT live url (duplicate-nav guard)', 
   await flow.openBotBrowser(face, 'metaid://abc', 'http://x/browser/live', [0])
   assert.deepEqual(calls, [
     ['browserOpen', 'metaid://abc'],
-    ['selectConversation'],
     ['openTab', { url: 'http://x/browser/live', uri: 'metaid://abc' }],
   ])
 })
@@ -57,12 +54,17 @@ test('live iframe + no uri falls through to a fresh resolve (home navigation)', 
   await flow.openBotBrowser(face, null, 'http://x/browser/live', [0])
   assert.deepEqual(calls, [
     ['browserOpen', null],
-    ['selectConversation'],
     ['openTab', { url: 'http://x/browser/home' }],
   ])
 })
 
-test('openTab retries through the no-mounted-surface window, then succeeds', async () => {
+test('a mounted surface opens the tab WITHOUT touching the main column', async () => {
+  const { face, calls } = fakeFace()
+  await flow.revealBotBrowserTab(face, { url: 'http://x/browser/home' }, [0])
+  assert.deepEqual(calls, [['openTab', { url: 'http://x/browser/home' }]])
+})
+
+test('an unmounted surface flips to the conversation, then retries openTab through the window', async () => {
   let attempts = 0
   const { face, calls } = fakeFace({
     face: {
@@ -138,12 +140,13 @@ test('client registers the bot-browser tab type, body, and title on the right Si
   assert.doesNotMatch(text, /BotBrowserSidebar/)
 })
 
-test('client registers the A2A main panel and its panellist glyph, not the footer action', async () => {
+test('client registers the A2A overlay panel and its panellist glyph, not a global main panel', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
-  assert.match(text, /name: 'main'/)
-  assert.match(text, /key: 'oac-a2a'/)
-  assert.match(text, /name: 'sidebar\.panellist'/)
+  assert.match(text, /name: 'shell\.overlay'/)
   assert.match(text, /id: 'oac-a2a'/)
+  assert.match(text, /name: 'sidebar\.panellist'/)
+  assert.doesNotMatch(text, /name: 'main'/)
+  assert.doesNotMatch(text, /key: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /unreadController\.start\(\)/)
 })
@@ -175,74 +178,38 @@ test('the shared browser stage keys the iframe by url and bakes the theme into t
   assert.match(text, /onIframe\(element, url\)/)
 })
 
-function fakeDockFace(overrides = {}) {
-  const calls = []
-  const face = {
-    browserOpen: async (uri) => {
-      calls.push(['browserOpen', uri])
-      return overrides.url ?? 'http://127.0.0.1:4242/browser/home'
-    },
-    show: (url, uri) => { calls.push(['show', url, uri]) },
-    reportError: (message) => { calls.push(['reportError', message]) },
-    ...overrides.face,
-  }
-  return { face, calls }
-}
-
-test('a2a dock cold open resolves the url then shows it with the uri', async () => {
-  const { face, calls } = fakeDockFace({ url: 'http://x/browser/bot' })
-  await flow.openA2ABrowserDock(face, 'metaid://abc', null)
-  assert.deepEqual(calls, [
-    ['browserOpen', 'metaid://abc'],
-    ['show', 'http://x/browser/bot', 'metaid://abc'],
-  ])
-})
-
-test('a2a dock home open (null uri) shows the home url without a uri', async () => {
-  const { face, calls } = fakeDockFace({ url: 'http://x/browser/home' })
-  await flow.openA2ABrowserDock(face, null, null)
-  assert.deepEqual(calls, [
-    ['browserOpen', null],
-    ['show', 'http://x/browser/home', null],
-  ])
-})
-
-test('a2a dock live iframe + uri keeps the CURRENT live url (duplicate-nav guard)', async () => {
-  const { face, calls } = fakeDockFace({ url: 'http://x/browser/fresh' })
-  await flow.openA2ABrowserDock(face, 'metaid://abc', 'http://x/browser/live')
-  assert.deepEqual(calls, [
-    ['browserOpen', 'metaid://abc'],
-    ['show', 'http://x/browser/live', 'metaid://abc'],
-  ])
-})
-
-test('a2a dock live iframe + no uri falls through to a fresh resolve (home navigation)', async () => {
-  const { face, calls } = fakeDockFace({ url: 'http://x/browser/home' })
-  await flow.openA2ABrowserDock(face, null, 'http://x/browser/live')
-  assert.deepEqual(calls, [
-    ['browserOpen', null],
-    ['show', 'http://x/browser/home', null],
-  ])
-})
-
-test('a2a dock browserOpen rejection lands in reportError and never rejects', async () => {
-  const { face, calls } = fakeDockFace({
-    face: {
-      browserOpen: async () => { throw new Error('daemon unreachable') },
-    },
-  })
-  await flow.openA2ABrowserDock(face, 'metaid://abc', null)
-  assert.deepEqual(calls, [['reportError', 'daemon unreachable']])
-})
-
-test('a2a-originated opens route to the in-panel dock, not the right-Sidebar reveal', async () => {
+test('every transcript URI click reveals the right-Sidebar Bot Browser (no in-panel dock)', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
-  assert.match(text, /openA2ABrowserDock/)
-  assert.match(text, /anchor\.closest\('\.oac-a2a-panel'\)/)
-  assert.match(text, /browserOpen: \(uri\?: string\) => openA2ADockNow\(uri \?\? null\)/)
-  const links = await readFile(join(root, 'src/client/browser-links.ts'), 'utf8')
-  assert.match(links, /openUri\(uri, anchor\)/)
+  assert.match(text, /startAgentLinkInterceptor\(\(uri\) => \{ void openBrowserNow\(uri\) \}\)/)
+  assert.doesNotMatch(text, /openA2ABrowserDock|openA2ADockNow|a2a-browser-dock|A2ABrowserDock/)
+  assert.match(text, /browserOpen: \(uri\?: string\) => openBrowserNow\(uri \?\? null\)/)
+  const flow2 = await readFile(join(root, 'src/browser-open-flow.ts'), 'utf8')
+  assert.doesNotMatch(flow2, /openA2ABrowserDock|A2ABrowserDockFace/)
   const panel = await readFile(join(root, 'src/client/A2AConversation.tsx'), 'utf8')
-  assert.match(panel, /<A2ABrowserDock/)
-  assert.match(panel, /useDock\(\(state\) => state\)/)
+  assert.doesNotMatch(panel, /A2ABrowserDock|useDock|a2a-browser-dock/)
+})
+
+test('the A2A overlay mirrors the frame columns and the panellist row is capture-intercepted', async () => {
+  const overlay = await readFile(join(root, 'src/client/A2AOverlay.tsx'), 'utf8')
+  assert.match(overlay, /closest\('\[data-shell-overlay\]'\)/)
+  assert.match(overlay, /MutationObserver/)
+  assert.match(overlay, /gridTemplateColumns/)
+  assert.match(overlay, /usePanelInfo/)
+  const row = await readFile(join(root, 'src/client/a2a-panel-row.ts'), 'utf8')
+  assert.match(row, /document\.addEventListener\('click', onClick, true\)/)
+  assert.match(row, /event\.stopPropagation\(\)/)
+  const glyph = await readFile(join(root, 'src/client/A2APanelGlyph.tsx'), 'utf8')
+  assert.match(glyph, /data-oac-a2a-panellist|A2A_PANEL_ROW_MARK/)
+  assert.match(glyph, /data-open/)
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /startA2APanelRowInterceptor\(\(\) => a2aPanel\.toggle\(\)\)/)
+  assert.match(index, /sessionsList\.subscribe/)
+})
+
+test('the A2A overlay styles keep the side columns click-through and hide under a fullscreen rightbar', async () => {
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /\.oac-a2a-overlay\[class\] \{[^}]*pointer-events: none/)
+  assert.match(styles, /\.oac-a2a-overlay-center \{[^}]*pointer-events: auto/)
+  assert.match(styles, /\[data-rightbar-fullscreen\] \.oac-a2a-overlay \{ display: none/)
+  assert.doesNotMatch(styles, /oac-a2a-dock/)
 })
