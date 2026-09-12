@@ -280,6 +280,31 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
+/** Raw tool-call markup leaked into plain-text output (DSML / generic invoke forms). */
+const TOOL_CALL_MARKUP_PATTERN = /｜｜DSML｜｜|<\/?tool_call[\s>]|<invoke[\s>]/iu;
+
+/** True when a model reply contains raw tool-call markup instead of plain text. */
+export function containsToolCallMarkup(text: string): boolean {
+  return TOOL_CALL_MARKUP_PATTERN.test(text);
+}
+
+/**
+ * Resolve `@Name` tokens in a message body against a roster (the same matching
+ * `isMentioned` uses): `@` + exact name with a non-word, non-Han boundary.
+ * Returns the matched candidates.
+ */
+export function resolveAtMentions<T extends { name: string }>(
+  content: string,
+  candidates: T[],
+): T[] {
+  return candidates.filter((candidate) => {
+    const name = candidate.name.trim();
+    if (!name) return false;
+    const pattern = new RegExp(`@${escapeRegExp(name)}(?![\\w\\p{Script=Han}])`, 'iu');
+    return pattern.test(content);
+  });
+}
+
 /**
  * A bot is mentioned when the message mention array carries its
  * GlobalMetaID/MetaID, or the body contains an explicit `@Name` with word

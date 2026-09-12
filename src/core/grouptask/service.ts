@@ -24,7 +24,7 @@ import {
   type GroupTaskTransportOptions,
 } from './transport';
 import { syncGroupMessages } from './backfill';
-import { isNoReplyResponse } from './tags';
+import { containsToolCallMarkup, isNoReplyResponse, resolveAtMentions } from './tags';
 import {
   GROUP_TASK_TERMINAL_STATUSES,
   filterGroupTasksByTab,
@@ -737,6 +737,22 @@ export async function postGroupTaskMessage(
   const content = input.content?.trim();
   if (!content) throw new GroupTaskServiceError('content_required', 'content is required');
 
+  // Resolve `@Name` tokens against the roster into the on-chain mention array
+  // (live-run F8: engine posts carried no mention array, so the ACK watch and
+  // every [DEADLINE] clock — all keyed on message.mention — never armed).
+  const roster = await store.listMembers(taskId);
+  const mentioned = resolveAtMentions(
+    content,
+    roster
+      .filter((member) => member.removedAt == null && member.globalMetaId)
+      .map((member) => ({
+        name: (member.displayName ?? member.slug ?? '').trim(),
+        globalMetaId: member.globalMetaId!,
+      })),
+  );
+  const mention = [...new Set([...(input.mention ?? []), ...mentioned.map((member) => member.globalMetaId)])];
+  const mentionArg = mention.length > 0 ? mention : undefined;
+
   if (input.asOwner) {
     const owner = await ctx.ownerIdentity();
     if (!owner) {
@@ -747,13 +763,12 @@ export async function postGroupTaskMessage(
       content,
       nickName: owner.name,
       replyPin: input.replyPin,
-      mention: input.mention,
+      mention: mentionArg,
     });
   }
 
   const senderSlug = input.asSlug?.trim() || chairSlug;
-  const members = await store.listMembers(taskId);
-  const member = members.find((entry) => entry.slug === senderSlug);
+  const member = roster.find((entry) => entry.slug === senderSlug);
   if (!member) {
     throw new GroupTaskServiceError(
       'not_a_member',
@@ -766,7 +781,7 @@ export async function postGroupTaskMessage(
     content,
     nickName: senderProfile.name.trim() || senderSlug,
     replyPin: input.replyPin,
-    mention: input.mention,
+    mention: mentionArg,
   });
 }
 
@@ -1258,6 +1273,11 @@ export async function submitGroupTaskWork(
     };
     if (input.error?.trim()) return fail(input.error.trim());
     if (!handoff) return fail('WORKER_EMPTY_HANDOFF: the worker session produced no handoff text');
+    // A raw tool-call markup handoff is a misfire, not a reply (live-run F10):
+    // fail the request so the engine's bare-LLM fallback answers in plain text.
+    if (containsToolCallMarkup(handoff)) {
+      return fail('WORKER_TOOLCALL_HANDOFF: the handoff is raw tool-call markup (DSML), not a reply');
+    }
     if (isNoReplyResponse(handoff)) {
       await store.updateWorkRequest(request.id, {
         status: 'completed',
