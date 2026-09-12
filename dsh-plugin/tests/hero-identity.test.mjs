@@ -32,7 +32,7 @@ test('heroIdentityFor keeps the stock hero for stock presets, unknown slugs, and
   assert.equal(plugin.heroIdentityFor({ current: 'oac-mute', botsBySlug }), undefined)
 })
 
-test('hero identity mount climbs past slot wrappers to a width-validated headline', async () => {
+test('hero identity mount climbs past slot wrappers to a span-validated headline', async () => {
   const mount = await readFile(join(root, 'src/client/hero-identity.ts'), 'utf8')
   assert.match(mount, /\[data-phase="hero"\]/)
   assert.match(mount, /\[data-composer-seat\]/)
@@ -44,6 +44,23 @@ test('hero identity mount climbs past slot wrappers to a width-validated headlin
   assert.match(mount, /dataset\.slot === undefined/)
   assert.match(mount, /dataset\.chainOverlayFallback === undefined/)
   assert.match(mount, /getBoundingClientRect\(\)\.width >= columnWidth \/ 2/)
+  // 0.1.5-rc regression: while the whale is briefly absent (multi-pass hero
+  // commits) the first seat svg is the workspace folder / an input icon, and
+  // a bare width climb anchored the block on those persistent rows — the
+  // avatar then stuck above the input box after the first message. Only a
+  // row the brand svg reaches through a DIRECT span child (the fish hitbox)
+  // may anchor.
+  assert.match(mount, /spansBrandMark/)
+  assert.match(mount, /HTMLSpanElement/)
+  // Duplicate-proof: orphaned hosts (stale client instance, exception-
+  // stranded node) are swept before every attach.
+  assert.match(mount, /querySelectorAll\('\[data-oac-hero-identity\]'\)/)
+  assert.match(mount, /stray\.remove\(\)/)
+  // Self-healing: a connected host must still sit directly above the live
+  // headline, or it releases and re-anchors.
+  assert.match(mount, /nextElementSibling === headline/)
+  // Exception-safe release: a throwing unmount must not strand the host.
+  assert.match(mount, /finally \{/)
   // Positional walks and bare ancestor matches each shipped a wrong spot —
   // they must not come back.
   assert.doesNotMatch(mount, /firstElementChild/)
