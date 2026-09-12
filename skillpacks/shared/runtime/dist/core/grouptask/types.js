@@ -32,7 +32,7 @@ function isGroupTaskStatus(value) {
 }
 function isGroupTaskMemberStatus(value) {
     return value === 'assigned' || value === 'working' || value === 'standby'
-        || value === 'done' || value === 'unreachable';
+        || value === 'done' || value === 'unreachable' || value === 'delivered';
 }
 function filterGroupTasksByTab(tasks, tab) {
     if (tab === 'all')

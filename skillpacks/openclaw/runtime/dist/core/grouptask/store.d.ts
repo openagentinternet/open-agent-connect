@@ -47,6 +47,7 @@ export interface AddGroupTaskMemberInput {
     role: GroupTaskMemberRole;
     joinedPinId?: string | null;
     displayName?: string | null;
+    seatRole?: string | null;
 }
 export interface MarkGroupTaskMemberRemovedInput {
     taskId: number;

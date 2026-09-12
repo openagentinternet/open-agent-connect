@@ -21,6 +21,19 @@ export interface GroupTaskProfileRef {
     metaId: string | null;
     botType: 'twin' | 'worker' | null;
     avatar: string | null;
+    /**
+     * Picker/passive-invocation availability (Settings toggle on AND a DSH LLM
+     * pair configured — the same rule the seat candidate search applies).
+     * Undefined reads as available so lightweight/test contexts need no LLM
+     * state; the daemon context always sets it.
+     */
+    available?: boolean;
+}
+/** One local worker seat refused at create time, with the reason. */
+export interface GroupTaskSkippedWorker {
+    slug: string;
+    name: string;
+    reason: string;
 }
 export interface GroupTaskOwnerRef {
     globalMetaId: string;
@@ -131,6 +144,7 @@ export declare function resolveChairProfile(ctx: GroupTaskServiceContext, prefer
 export declare function createGroupTask(ctx: GroupTaskServiceContext, input: CreateGroupTaskInput): Promise<{
     chairSlug: string;
     task: GroupTaskDetail;
+    skippedWorkers: GroupTaskSkippedWorker[];
 }>;
 export interface ListGroupTasksOptions {
     tab?: GroupTaskListTab;

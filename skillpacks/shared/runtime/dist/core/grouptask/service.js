@@ -285,6 +285,8 @@ async function createGroupTask(ctx, input) {
         displayName: chairName,
     });
     const memberNames = [];
+    const seatedWorkers = [];
+    const skippedWorkers = [];
     for (const workerSlug of workerSlugs) {
         const worker = await ctx.getProfile(workerSlug);
         if (!worker) {
@@ -292,14 +294,31 @@ async function createGroupTask(ctx, input) {
             continue;
         }
         const workerName = worker.name.trim() || worker.slug;
+        // Availability backstop (Settings toggle off, or no DSH LLM pair): an
+        // unavailable Bot never takes a seat, whichever surface named it (panel
+        // picker, CLI --workers, the chat tool, or a stale staffing plan).
+        if (worker.available === false) {
+            const reason = 'Bot is unavailable (Settings availability toggle off, or no DSH LLM pair configured)';
+            log(`[GroupTask] Member ${workerSlug} skipped: ${reason}`);
+            skippedWorkers.push({ slug: worker.slug, name: workerName, reason });
+            continue;
+        }
+        // Roster rows land BEFORE any on-chain join: an engine tick can fire the
+        // moment createTask returns, and the planning turn must see every seat —
+        // interleaving the slow joins here used to let the chair plan with a
+        // partial roster (live-run F1).
         await store.addMember({
             taskId: task.id,
             slug: worker.slug,
             globalMetaId: worker.globalMetaId,
             role: 'worker',
             displayName: workerName,
+            ...(input.seatRoles?.[worker.slug] ? { seatRole: input.seatRoles[worker.slug] } : {}),
         });
         memberNames.push(workerName);
+        seatedWorkers.push(worker);
+    }
+    for (const worker of seatedWorkers) {
         try {
             const workerSigner = await ctx.signerForSlug(worker.slug);
             const { pinId: joinPinId } = await (0, transport_1.joinGroupOnChain)(workerSigner, groupId, {
@@ -339,7 +358,11 @@ async function createGroupTask(ctx, input) {
             + `${error instanceof Error ? error.message : String(error)}`);
     }
     await emitGroupTaskRelay(ctx, chair, task, 'created', `Task created and the on-chain group is open. The engine posts the kickoff and runs planning next.`);
-    return { chairSlug: chair.slug, task: await getGroupTaskDetail(ctx, chair.slug, task.id) };
+    return {
+        chairSlug: chair.slug,
+        task: await getGroupTaskDetail(ctx, chair.slug, task.id),
+        skippedWorkers,
+    };
 }
 // ---------------------------------------------------------------------------
 // List / detail
@@ -461,6 +484,7 @@ async function getGroupTaskDetail(ctx, chairSlug, taskId, opts) {
     }
     const view = opts?.view ?? 'full';
     const members = await store.listMembers(taskId);
+    const deliverables = await store.listDeliverables(taskId);
     const profiles = await ctx.listProfiles();
     const profileBySlug = new Map(profiles.map((profile) => [profile.slug, profile]));
     const gmids = members.map((member) => member.globalMetaId);
@@ -470,23 +494,44 @@ async function getGroupTaskDetail(ctx, chairSlug, taskId, opts) {
     const workingMap = task.groupId
         ? await store.getMembersWorkingAt(task.groupId, gmids)
         : new Map();
+    // Phase-aware display status (live-run round 3): runtime member statuses
+    // ('working'/'unreachable') are execution-phase signals and freeze at whatever
+    // they were when the task moved on. Once the task reaches review/done they are
+    // noise — present the settled truth instead: members with a non-rejected
+    // deliverable 'delivered', everyone else 'standby' in review and 'done' once
+    // accepted. The stored runtime status is left untouched so a rework back to
+    // executing resumes the live view. The work badge is execution-phase too —
+    // suppressed ('unknown') in review/done.
+    const settledPhase = task.status === 'review' || task.status === 'done';
+    const deliveredGmids = new Set(deliverables
+        .filter((row) => row.status !== 'rejected')
+        .map((row) => (row.authorGlobalMetaId ?? '').trim().toLowerCase())
+        .filter((gmid) => gmid.length > 0));
     const memberSummaries = members.map((member) => {
         const gmid = (member.globalMetaId ?? '').trim().toLowerCase();
         const lastSpeakAt = gmid ? (speakMap.get(gmid) ?? null) : null;
         const lastWorkingAtSec = gmid ? (workingMap.get(gmid) ?? null) : null;
         const lastWorkingAt = lastWorkingAtSec != null ? lastWorkingAtSec * 1000 : null;
         const memberProfile = member.slug ? profileBySlug.get(member.slug) : undefined;
+        const settledStatus = task.status === 'done'
+            ? 'done'
+            : task.status === 'review'
+                ? (deliveredGmids.has(gmid) ? 'delivered' : 'standby')
+                : null;
         return {
             ...member,
+            status: settledStatus ?? member.status,
             displayName: memberDisplayName(member, memberProfile?.name) || member.displayName,
             avatar: memberProfile?.avatar ?? null,
             lastSpeakAt,
             lastWorkingAt,
-            workStatus: computeGroupTaskMemberWorkStatus({
-                lastSpeakAt,
-                lastWorkingAt,
-                memberStatus: member.status,
-            }),
+            workStatus: settledPhase
+                ? 'unknown'
+                : computeGroupTaskMemberWorkStatus({
+                    lastSpeakAt,
+                    lastWorkingAt,
+                    memberStatus: member.status,
+                }),
             inviteStatus: member.slug != null
                 ? 'none'
                 : (member.joinedPinId ? 'joined' : 'invite_pending'),
@@ -506,7 +551,7 @@ async function getGroupTaskDetail(ctx, chairSlug, taskId, opts) {
     return {
         ...task,
         members: memberSummaries,
-        deliverables: await store.listDeliverables(taskId),
+        deliverables,
         transitions: await store.listTransitions(taskId),
         integrityEvents: await store.listIntegrityEvents(taskId),
         messages: messagesPage.messages,
@@ -541,6 +586,18 @@ async function postGroupTaskMessage(ctx, chairSlug, taskId, input) {
     const content = input.content?.trim();
     if (!content)
         throw new GroupTaskServiceError('content_required', 'content is required');
+    // Resolve `@Name` tokens against the roster into the on-chain mention array
+    // (live-run F8: engine posts carried no mention array, so the ACK watch and
+    // every [DEADLINE] clock — all keyed on message.mention — never armed).
+    const roster = await store.listMembers(taskId);
+    const mentioned = (0, tags_1.resolveAtMentions)(content, roster
+        .filter((member) => member.removedAt == null && member.globalMetaId)
+        .map((member) => ({
+        name: (member.displayName ?? member.slug ?? '').trim(),
+        globalMetaId: member.globalMetaId,
+    })));
+    const mention = [...new Set([...(input.mention ?? []), ...mentioned.map((member) => member.globalMetaId)])];
+    const mentionArg = mention.length > 0 ? mention : undefined;
     if (input.asOwner) {
         const owner = await ctx.ownerIdentity();
         if (!owner) {
@@ -551,12 +608,11 @@ async function postGroupTaskMessage(ctx, chairSlug, taskId, input) {
             content,
             nickName: owner.name,
             replyPin: input.replyPin,
-            mention: input.mention,
+            mention: mentionArg,
         });
     }
     const senderSlug = input.asSlug?.trim() || chairSlug;
-    const members = await store.listMembers(taskId);
-    const member = members.find((entry) => entry.slug === senderSlug);
+    const member = roster.find((entry) => entry.slug === senderSlug);
     if (!member) {
         throw new GroupTaskServiceError('not_a_member', `Bot ${senderSlug} is not a member of group task ${taskId}`);
     }
@@ -566,7 +622,7 @@ async function postGroupTaskMessage(ctx, chairSlug, taskId, input) {
         content,
         nickName: senderProfile.name.trim() || senderSlug,
         replyPin: input.replyPin,
-        mention: input.mention,
+        mention: mentionArg,
     });
 }
 // ---------------------------------------------------------------------------
@@ -647,12 +703,13 @@ async function reopenGroupTask(ctx, chairSlug, taskId, opts) {
     if (task.status !== 'review') {
         throw new GroupTaskServiceError('not_in_review', `Group task ${taskId} is ${task.status}; only review tasks can be reopened to executing`);
     }
-    await store.updateTaskStatus(taskId, 'executing', {
+    const updated = await store.updateTaskStatus(taskId, 'executing', {
         actor: opts?.actor ?? { kind: 'owner' },
         reason: opts?.reason ?? null,
     });
     await clearGroupTaskReviewDeliveryGuards(store, taskId);
     await store.kvSet(`${exports.GROUP_TASK_REWORK_AT_KV_PREFIX}${taskId}`, String(Date.now()));
+    await emitGroupTaskRelay(ctx, chair, updated, 'rework', 'The owner sent the task back to work — pending deliverables were rejected; the chair re-plans from here.');
     try {
         await store.updateDeliverablesStatusByTask(taskId, 'pending', 'rejected');
     }
@@ -936,6 +993,11 @@ async function submitGroupTaskWork(ctx, input) {
             return fail(input.error.trim());
         if (!handoff)
             return fail('WORKER_EMPTY_HANDOFF: the worker session produced no handoff text');
+        // A raw tool-call markup handoff is a misfire, not a reply (live-run F10):
+        // fail the request so the engine's bare-LLM fallback answers in plain text.
+        if ((0, tags_1.containsToolCallMarkup)(handoff)) {
+            return fail('WORKER_TOOLCALL_HANDOFF: the handoff is raw tool-call markup (DSML), not a reply');
+        }
         if ((0, tags_1.isNoReplyResponse)(handoff)) {
             await store.updateWorkRequest(request.id, {
                 status: 'completed',
@@ -1088,6 +1150,7 @@ exports.GROUP_TASK_MEMBER_STATUSES = [
     'standby',
     'done',
     'unreachable',
+    'delivered',
 ];
 async function setGroupTaskMemberStatus(ctx, chairSlug, taskId, input) {
     const chair = await requireProfile(ctx, chairSlug);

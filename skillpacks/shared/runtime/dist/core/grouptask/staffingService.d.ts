@@ -49,6 +49,8 @@ export interface CreateFromProposalResult {
     chairSlug: string;
     task: Awaited<ReturnType<typeof createGroupTask>>;
     pendingRemoteSeats: GroupTaskStaffingSeat[];
+    /** Local seats dropped at create time (became unavailable after the gate). */
+    skippedWorkers: Awaited<ReturnType<typeof createGroupTask>>['skippedWorkers'];
     decision: GroupTaskStaffingOwnerDecision;
 }
 export declare function createGroupTaskFromProposal(ctx: GroupTaskServiceContext, input: EvaluateStaffingGateInput): Promise<CreateFromProposalResult>;

@@ -5451,7 +5451,14 @@ async function serveCliDaemonProcess(context) {
             // connected), then the local-runtime chain below.
             const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
                 dshLlmPath: profilePaths.dshLlmPath,
-            })({ botSlug: turn.profile.slug, system: turn.systemPrompt, user: turn.prompt });
+            })({
+                botSlug: turn.profile.slug,
+                system: turn.systemPrompt,
+                user: turn.prompt,
+                // Chair turns carry the lifecycle tags; a provider default cap once
+                // truncated an acceptance verdict mid-table and wedged the task.
+                ...(turn.role === 'chair' ? { maxTokens: 8192 } : {}),
+            });
             if (hostText !== null)
                 return hostText;
             const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({

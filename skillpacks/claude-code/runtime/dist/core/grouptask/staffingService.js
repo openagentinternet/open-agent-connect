@@ -31,6 +31,26 @@ async function proposeGroupTaskStaffing(ctx, input, now = Date.now) {
     if (!validation.ok) {
         throw new staffing_1.GroupTaskStaffingError('STAFFING_PLAN_INVALID', `Staffing plan invalid: ${validation.errors.join('; ')}`);
     }
+    // Local seats must name an existing, available Bot (Settings toggle on AND
+    // a DSH LLM pair configured — the same rule search_candidates filters by).
+    // The chair gets the rejection here, at propose time, so it can re-pick
+    // before the owner ever sees the slate.
+    const localSeatProblems = [];
+    for (const seat of plan.seats) {
+        if (seat.source !== 'local' || !seat.candidateSlug)
+            continue;
+        const profile = await ctx.getProfile(seat.candidateSlug).catch(() => null);
+        if (!profile) {
+            localSeatProblems.push(`"${seat.candidateSlug}" is not a local Bot`);
+        }
+        else if (profile.available === false) {
+            localSeatProblems.push(`"${seat.candidateSlug}" (${profile.name}) is unavailable (Settings availability toggle off, or no DSH LLM pair configured)`);
+        }
+    }
+    if (localSeatProblems.length > 0) {
+        throw new staffing_1.GroupTaskStaffingError('STAFFING_PLAN_INVALID', `Staffing plan seats unavailable or unknown local Bots: ${localSeatProblems.join('; ')}. `
+            + 'Run search_candidates again and pick from the available roster.');
+    }
     const triggeringWish = input.triggeringWish?.trim() ?? '';
     const skipAuthorized = (0, staffing_1.detectSkipConfirmInWish)(triggeringWish);
     const store = (0, service_1.staffingStoreFor)(ctx, chair);
@@ -106,11 +126,20 @@ async function createGroupTaskFromProposal(ctx, input) {
     // CAS claim: a concurrent create cannot double-open the on-chain group.
     await store.claimProposal(input.proposalId);
     try {
+        const seatRoles = {};
+        for (const seat of plan.seats) {
+            if (seat.source === 'local' && seat.candidateSlug) {
+                seatRoles[seat.candidateSlug] = seat.role === 'domain'
+                    ? `domain:${seat.domainLabel ?? 'unspecified'}`
+                    : seat.role;
+            }
+        }
         const created = await (0, service_1.createGroupTask)(ctx, {
             title: gate.proposal.title,
             goal: gate.proposal.goal,
             acceptanceCriteria: gate.proposal.acceptanceCriteria,
             workerSlugs: (0, staffing_1.localSeatSlugs)(plan),
+            seatRoles: Object.keys(seatRoles).length > 0 ? seatRoles : null,
             chairSlug: gate.proposal.chairSlug,
             createdBy: 'twinbot',
             sourceSessionId: gate.proposal.sourceSessionId,
@@ -120,6 +149,7 @@ async function createGroupTaskFromProposal(ctx, input) {
             chairSlug: gate.proposal.chairSlug,
             task: created,
             pendingRemoteSeats: (0, staffing_1.remoteSeats)(plan),
+            skippedWorkers: created.skippedWorkers,
             decision: gate.decision,
         };
     }

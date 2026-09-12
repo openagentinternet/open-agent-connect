@@ -95,6 +95,16 @@ export interface GroupTaskMentionTarget {
     globalMetaId: string | null;
     metaId?: string | null;
 }
+/** True when a model reply contains raw tool-call markup instead of plain text. */
+export declare function containsToolCallMarkup(text: string): boolean;
+/**
+ * Resolve `@Name` tokens in a message body against a roster (the same matching
+ * `isMentioned` uses): `@` + exact name with a non-word, non-Han boundary.
+ * Returns the matched candidates.
+ */
+export declare function resolveAtMentions<T extends {
+    name: string;
+}>(content: string, candidates: T[]): T[];
 /**
  * A bot is mentioned when the message mention array carries its
  * GlobalMetaID/MetaID, or the body contains an explicit `@Name` with word
