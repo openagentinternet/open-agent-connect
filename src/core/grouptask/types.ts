@@ -120,6 +120,7 @@ export type GroupTaskRelayKind =
   | 'dispatch'
   | 'checkpoint'
   | 'review'
+  | 'rework'
   | 'closed'
   | 'paused'
   | 'resumed'
@@ -179,6 +180,8 @@ export interface GroupTaskMember {
   createdAt: number;
   /** Name snapshot (required for remote members without a local profile). */
   displayName: string | null;
+  /** Staffing slate seat role (e.g. "content", "domain:legal"); null for direct-created seats. */
+  seatRole?: string | null;
   /** Set when the member was kicked; active members have null. */
   removedAt: number | null;
   /** On-chain /protocols/simplegroupremoveuser pin of the removal. */
@@ -403,6 +406,8 @@ export interface CreateGroupTaskInput {
   acceptanceCriteria?: string | null;
   /** Worker profile slugs; the chair is added automatically. */
   workerSlugs?: string[];
+  /** Optional seat role per worker slug (staffing slate); rendered into the chair/worker roster profiles. */
+  seatRoles?: Record<string, string> | null;
   /** Explicit chair slug; defaults to the machine twin, else fails. */
   chairSlug?: string;
   createdBy?: 'user' | 'twinbot';

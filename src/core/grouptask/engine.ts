@@ -324,6 +324,9 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
   /** Lifetime reply counts and last-reply stamps per `${chair}:${task}:${slug}`. */
   const replyCounts = new Map<string, number>();
   const lastReplyAt = new Map<string, number>();
+  /** Work requests whose completion was already logged (P4: the 'done' branch
+   *  re-fires every tick while a later responder still defers). */
+  const loggedCompletedWorkRequests = new Set<number>();
 
   let timer: ReturnType<typeof setInterval> | null = null;
   let ticking = false;
@@ -370,7 +373,12 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       if (member.removedAt != null) continue;
       const profile = member.slug ? profileBySlug.get(member.slug) : undefined;
       const name = member.displayName?.trim() || profile?.name || member.slug || member.globalMetaId || 'member';
-      promptSeats.push({ name, role: member.role, remote: member.slug == null });
+      promptSeats.push({
+        name,
+        role: member.role,
+        remote: member.slug == null,
+        ...(member.seatRole ? { roleText: member.seatRole } : {}),
+      });
       if (!member.slug || !profile) continue; // remote members never get local turns
       seats.push({
         slug: member.slug,
@@ -384,6 +392,23 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     }
     const chair = seats.find((seat) => seat.role === 'chair') ?? null;
     return { seats, promptSeats, chair };
+  }
+
+  /**
+   * Heuristic for a generation cut off mid-structure (provider cap / aborted
+   * stream): unbalanced code fence, an unfinished markdown table row, or a
+   * trailing opening/continuation punctuation mark. A legit reply ends with a
+   * tag line or terminal punctuation, so false positives stay rare; the retry
+   * is bounded to one attempt either way.
+   */
+  function looksLikeTruncatedReply(text: string): boolean {
+    const trimmed = text.trimEnd();
+    if (!trimmed) return false;
+    if ((trimmed.match(/```/g) ?? []).length % 2 === 1) return true;
+    const lastLine = trimmed.split('\n').pop()!.trim();
+    if (lastLine.startsWith('|') && !lastLine.endsWith('|')) return true;
+    if (/\[[A-Z_]+(?::[^\]]*)?\]$/.test(lastLine)) return false; // honored tag line
+    return /[(\[（【:：,，、/]$/.test(lastLine);
   }
 
   async function runSeatTurn(input: {
@@ -425,12 +450,28 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         stateLine: input.stateLine,
         nowMs: now(),
       });
-    return options.runLlmTurn({
+    const turn = {
       profile: input.seat.profile,
       role: input.seat.role,
       systemPrompt,
       prompt,
-    });
+    };
+    const reply = await options.runLlmTurn(turn);
+    // A truncated chair reply can silently drop a lifecycle tag (live-run F3:
+    // an acceptance verdict cut off mid-table wedged the task in executing).
+    // Retry once with an explicit complete-it instruction.
+    if (input.seat.role === 'chair' && looksLikeTruncatedReply(reply)) {
+      log(`[GroupTaskEngine] Chair reply for task ${input.task.id} looks truncated `
+        + `(${reply.length} chars); retrying once`);
+      const retry = (await options.runLlmTurn({
+        ...turn,
+        prompt: `${prompt}\n\n[Host note: your previous reply was cut off mid-structure `
+          + `(${reply.length} chars). Rewrite the complete reply, more concisely, and keep any `
+          + '[STATUS:*]/[DEADLINE:*] tag on its own final line.]',
+      })).trim();
+      if (retry) return retry;
+    }
+    return reply;
   }
 
   // -------------------------------------------------------------------------
@@ -529,6 +570,16 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     return `[Authoritative task state (host DB): status=${task.status}; deliverables on ledger: ${deliverables.length} (${confirmed} on-chain confirmed); ${reviewClause}]`;
   }
 
+  /** Owner-facing review effects deferred to the end of a message pass (P2). */
+  interface DeferredReviewEffects {
+    store: GroupTaskStore;
+    task: GroupTaskRecord;
+    chairSlug: string;
+    message: GroupTaskMessage;
+    ownerGmid: string | null;
+    chairProfile: GroupTaskProfileRef;
+  }
+
   async function applyChairStatusTag(
     store: GroupTaskStore,
     task: GroupTaskRecord,
@@ -537,6 +588,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     message: GroupTaskMessage,
     ownerGmid: string | null,
     chairProfile: GroupTaskProfileRef,
+    promptSeats: GroupTaskPromptSeat[],
+    deferredReview: { current: DeferredReviewEffects | null },
   ): Promise<GroupTaskRecord> {
     if (task.status === target) return task;
     if (!GROUP_TASK_LEGAL_TRANSITIONS[task.status].includes(target)) {
@@ -577,21 +630,39 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (target === 'executing' && task.status === 'planning') {
       await emitGroupTaskRelay(ctx, chairProfile, updated, 'dispatch',
         'The plan is out and work is underway; members have been @-assigned.');
-    }
-    if (target === 'review') {
-      await emitGroupTaskRelay(ctx, chairProfile, updated, 'review',
-        'The chair entered review — the task awaits your acceptance in the Group Tasks panel.');
+      // Coverage safety net (live-run F1): the planning turn can race member
+      // seating and post a plan built on a stale partial roster — re-check the
+      // posted plan against THIS tick's fresh roster when the bootstrap
+      // transition lands.
+      await notePlanningCoverage(store, updated, promptSeats, message.content);
     }
 
     if (target === 'executing' && task.status === 'review') {
+      // A still-pending deferred review never reached the owner; drop it.
+      if (deferredReview.current) {
+        deferredReview.current = null;
+        log(`[GroupTaskEngine] Task ${task.id}: review entry reverted to executing within `
+          + 'the same message pass; owner-facing review effects skipped');
+      }
+      const hadDelivery = await store.kvGet(`${GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX}${task.id}`);
       await store.kvSet(`${GROUP_TASK_REWORK_AT_KV_PREFIX}${task.id}`, String(now()));
       await clearGroupTaskReviewDeliveryGuards(store, task.id);
       await store.kvDelete(`${GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX}${task.id}`);
+      if (hadDelivery) {
+        // The review WAS announced (settled in an earlier pass): the origin
+        // chat must hear about the rework as well (live-run F2).
+        await emitGroupTaskRelay(ctx, chairProfile, updated, 'rework',
+          'The chair sent the task back to work after review — acceptance is off the table for now.');
+      }
     }
     if (target === 'review') {
       await store.kvDelete(`${GROUP_TASK_REWORK_AT_KV_PREFIX}${task.id}`);
       await store.closeOpenCheckpoints(task.id, 'resolved', 'superseded by review entry');
-      await runReviewCeremony(store, updated, chairSlug, message, ownerGmid, chairProfile);
+      // Owner-facing effects (relay + acceptance summary + private report) are
+      // deferred to the end of the message pass: they fire only when the task
+      // is STILL in review, so a backlog replay can never flap the owner
+      // (live-run F2: review entered and reverted within 15 seconds).
+      deferredReview.current = { store, task: updated, chairSlug, message, ownerGmid, chairProfile };
     }
     return updated;
   }
@@ -1029,6 +1100,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     seats: SeatInfo[],
     ownerGmid: string | null,
     chairProfile: GroupTaskProfileRef,
+    promptSeats: GroupTaskPromptSeat[],
+    deferredReview: { current: DeferredReviewEffects | null },
   ): Promise<GroupTaskRecord> {
     if (message.senderSuspect) return task;
     const senderGmid = normalizeGmid(message.senderGlobalMetaId);
@@ -1039,6 +1112,19 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
 
     // Chair-only tags
     if (fromChair) {
+      if (looksLikeTruncatedReply(message.content)) {
+        // Live-run F3: a chair message cut off mid-structure silently loses any
+        // trailing lifecycle tag and can wedge the task — tell the chair to
+        // re-issue (one deduped note per message).
+        await recordHostNote(store, task.id, {
+          kind: 'parse',
+          body: `Your message #${message.index} arrived cut off mid-structure `
+            + `(${message.content.length} chars) — the group received it as-is. If you intended a `
+            + 'lifecycle move ([STATUS:REVIEW] etc.) or a complete table/list, re-issue it now '
+            + 'in a shorter form.',
+          dedupeKey: `truncated:${task.id}:${message.index}`,
+        }).catch(() => undefined);
+      }
       for (const summary of tags.planChanges) {
         const existing = await store.listPlanChanges(task.id);
         const duplicate = existing.some((change) =>
@@ -1085,7 +1171,9 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       }
 
       if (tags.status) {
-        current = await applyChairStatusTag(store, current, chairSlug, tags.status, message, ownerGmid, chairProfile);
+        current = await applyChairStatusTag(
+          store, current, chairSlug, tags.status, message, ownerGmid, chairProfile, promptSeats, deferredReview,
+        );
       }
     }
 
@@ -1266,8 +1354,11 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       return 'defer';
     }
     if (request.status === 'completed') {
-      log(`[GroupTaskEngine] Task ${task.id}: work request #${request.id} completed by the host; `
-        + 'advancing the cursor');
+      if (!loggedCompletedWorkRequests.has(request.id)) {
+        loggedCompletedWorkRequests.add(request.id);
+        log(`[GroupTaskEngine] Task ${task.id}: work request #${request.id} completed by the host; `
+          + 'advancing the cursor');
+      }
       return 'done';
     }
     return 'fallback'; // failed or expired
@@ -1737,12 +1828,16 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
 
     const pending = page.messages.filter((message) => message.index > current.lastProcessedIndex);
     const counters: TickCounters = { workerReplies: 0, chairAutoReplies: 0 };
+    /** Owner-facing review effects queued by chair status tags this pass (P2). */
+    const deferredReview: { current: DeferredReviewEffects | null } = { current: null };
 
     for (const message of pending) {
       const retryKey = `${GROUP_TASK_MSG_RETRY_KV_PREFIX}${current.id}:${message.index}`;
       try {
         const tags = parseGroupTaskTags(message.content);
-        current = await applyTagSideEffects(store, current, profile.slug, message, tags, seats, ownerGmid, profile);
+        current = await applyTagSideEffects(
+          store, current, profile.slug, message, tags, seats, ownerGmid, profile, promptSeats, deferredReview,
+        );
         await trackAssignmentAcks(store, current, message, members, tags).catch(() => undefined);
         if (current.status === 'done' || current.status === 'cancelled') {
           await store.updateTaskCursor(current.id, message.index);
@@ -1801,6 +1896,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
               seats,
               ownerGmid,
               profile,
+              promptSeats,
+              deferredReview,
             );
           } catch {
             // Tag reprocess is best-effort; the cursor advances regardless.
@@ -1816,6 +1913,22 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     // Review stragglers: NO host re-assert (single-commander — a straggler
     // message after review entry is recorded on the ledger but the host stays
     // silent; the human gate already keeps workers quiet).
+
+    // Settle the deferred review effects (P2): the owner hears about a review
+    // entry only when the task is STILL in review after the whole batch —
+    // a backlog replay that flips review on and off inside one pass never
+    // reaches the origin chat or the acceptance ledger (live-run F2).
+    if (deferredReview.current) {
+      if (current.status === 'review') {
+        const settled = deferredReview.current;
+        await emitGroupTaskRelay(ctx, settled.chairProfile, current, 'review',
+          'The chair entered review — the task awaits your acceptance in the Group Tasks panel.');
+        await runReviewCeremony(
+          settled.store, current, settled.chairSlug, settled.message, settled.ownerGmid, settled.chairProfile,
+        );
+      }
+      deferredReview.current = null;
+    }
 
     // Assignment ACK watch + member monitors (host-note facts, unreachable,
     // deadline ring, timeout escalation with the L3 private owner brief).
