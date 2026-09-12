@@ -79,6 +79,30 @@ export async function proposeGroupTaskStaffing(
     );
   }
 
+  // Local seats must name an existing, available Bot (Settings toggle on AND
+  // a DSH LLM pair configured — the same rule search_candidates filters by).
+  // The chair gets the rejection here, at propose time, so it can re-pick
+  // before the owner ever sees the slate.
+  const localSeatProblems: string[] = [];
+  for (const seat of plan.seats) {
+    if (seat.source !== 'local' || !seat.candidateSlug) continue;
+    const profile = await ctx.getProfile(seat.candidateSlug).catch(() => null);
+    if (!profile) {
+      localSeatProblems.push(`"${seat.candidateSlug}" is not a local Bot`);
+    } else if (profile.available === false) {
+      localSeatProblems.push(
+        `"${seat.candidateSlug}" (${profile.name}) is unavailable (Settings availability toggle off, or no DSH LLM pair configured)`,
+      );
+    }
+  }
+  if (localSeatProblems.length > 0) {
+    throw new GroupTaskStaffingError(
+      'STAFFING_PLAN_INVALID',
+      `Staffing plan seats unavailable or unknown local Bots: ${localSeatProblems.join('; ')}. `
+      + 'Run search_candidates again and pick from the available roster.',
+    );
+  }
+
   const triggeringWish = input.triggeringWish?.trim() ?? '';
   const skipAuthorized = detectSkipConfirmInWish(triggeringWish);
   const store = staffingStoreFor(ctx, chair);
@@ -175,6 +199,8 @@ export interface CreateFromProposalResult {
   chairSlug: string;
   task: Awaited<ReturnType<typeof createGroupTask>>;
   pendingRemoteSeats: GroupTaskStaffingSeat[];
+  /** Local seats dropped at create time (became unavailable after the gate). */
+  skippedWorkers: Awaited<ReturnType<typeof createGroupTask>>['skippedWorkers'];
   decision: GroupTaskStaffingOwnerDecision;
 }
 
@@ -227,6 +253,7 @@ export async function createGroupTaskFromProposal(
       chairSlug: gate.proposal.chairSlug,
       task: created,
       pendingRemoteSeats: remoteSeats(plan),
+      skippedWorkers: created.skippedWorkers,
       decision: gate.decision,
     };
   } catch (error) {

@@ -161,6 +161,7 @@ function toProfileRef(profile: MetabotProfileFull, metaId: string | null): Group
     metaId,
     botType: profile.botType === 'twin' ? 'twin' : profile.botType === 'worker' ? 'worker' : null,
     avatar: normalizeText(profile.avatarDataUrl) || null,
+    available: isMetabotProfileAvailable(profile),
   };
 }
 
@@ -327,7 +328,7 @@ export function createGroupTaskDaemonHandlers(
         chairSlug: normalizeText(body.chairSlug) || undefined,
         createdBy: body.createdBy === 'twinbot' ? 'twinbot' : 'user',
       });
-      return { chairSlug: created.chairSlug, task: created.task };
+      return { chairSlug: created.chairSlug, task: created.task, skippedWorkers: created.skippedWorkers };
     }),
 
     list: async (body) => run(async () => {
@@ -627,6 +628,7 @@ export function createGroupTaskDaemonHandlers(
         task: created.task.task,
         taskId: created.task.task.id,
         pendingRemoteSeats: created.pendingRemoteSeats,
+        skippedWorkers: created.skippedWorkers,
         decision: created.decision,
       };
     }),

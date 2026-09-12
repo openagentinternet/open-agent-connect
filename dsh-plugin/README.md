@@ -36,8 +36,13 @@ Bots availability toggle is off OR no DSH LLM pair is configured (the same
 rule the daemon's group-task seat search applies). Unavailable Bots are
 hidden from the chip, excluded from the Twin's `local_workers_list` roster
 and refused by `local_worker_delegate`, skipped by the dream/hygiene and
-scheduled-task host schedulers, and filtered from group-task seat candidates
-(daemon-side, as before); the daemon's own headless scheduled-task and study
+scheduled-task host schedulers, and kept out of group-task staffing end to
+end: `search_candidates` never returns them, the Group Tasks create modal's
+worker picker hides them, `propose` refuses a plan that seats one (the chair
+re-picks before the owner sees the slate), and every create — direct or from
+a proposal — skips an unavailable slug and reports the dropped seats as
+`skippedWorkers` (the chat tool prints them, the panel shows an info note);
+the daemon's own headless scheduled-task and study
 ticks also skip toggle-off Bots. One legacy cleanup rides the preset
 reconcile: the shared bare `oac` preset ("Open Agent Connect (MetaBot)")
 from pre-per-Bot installs is removed, and an `agent-presets.default: oac`

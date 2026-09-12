@@ -238,6 +238,28 @@ test('createGroupTask writes create/join/kickoff pins and persists the roster', 
   assert.equal(summaries[0].openTeam, false);
 });
 
+test('createGroupTask skips unavailable local workers and reports them', async () => {
+  const { ctx, pins, profiles } = createFakeContext('metabot-gts-skip-');
+  profiles.find((profile) => profile.slug === 'worker-2').available = false;
+  const { task, skippedWorkers } = await createGroupTask(ctx, {
+    title: 'T', goal: 'G', workerSlugs: ['worker-1', 'worker-2'],
+  });
+
+  assert.equal(skippedWorkers.length, 1);
+  assert.equal(skippedWorkers[0].slug, 'worker-2');
+  assert.match(skippedWorkers[0].reason, /unavailable/u);
+
+  // Chair + the one available worker; the skipped Bot has no member row.
+  assert.equal(task.members.length, 2);
+  const roles = Object.fromEntries(task.members.map((member) => [member.slug, member.role]));
+  assert.deepEqual(roles, { 'twin-bot': 'chair', 'worker-1': 'worker' });
+
+  // No join pin for the skipped worker (2 joins: worker-1 + owner).
+  const joins = pins.filter((pin) => pin.path === '/protocols/simplegroupjoin');
+  assert.equal(joins.length, 2);
+  assert.ok(!joins.some((pin) => pin.label === 'worker-2'));
+});
+
 test('createGroupTask requires title and goal', async () => {
   const { ctx } = createFakeContext('metabot-gts-createval-');
   await assert.rejects(

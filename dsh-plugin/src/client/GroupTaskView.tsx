@@ -22,6 +22,7 @@ import {
   type GroupTaskListTab,
   type GroupTaskMemberRow,
   type GroupTaskMessageRow,
+  type GroupTaskSkippedWorkerRow,
   type GroupTaskStaffingProposalRow,
   type GroupTaskSummaryRow,
   type OpenTeamCollabRow,
@@ -31,6 +32,7 @@ import {
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
 import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
+import { isChipBotAvailable } from '../chip-logic.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -46,7 +48,7 @@ export interface GroupTaskInjectedApi {
     acceptanceCriteria?: string
     workerSlugs?: string[]
     chairSlug?: string
-  }) => Promise<{ chairSlug: string; taskId: number }>
+  }) => Promise<{ chairSlug: string; taskId: number; skippedWorkers: GroupTaskSkippedWorkerRow[] }>
   post: (chair: string, taskId: number, input: { content: string; asSlug?: string; asOwner?: boolean }) => Promise<unknown>
   close: (
     chair: string,
@@ -68,7 +70,7 @@ export interface GroupTaskInjectedApi {
   health: () => Promise<GroupTaskHealthPayload>
   staffingList: () => Promise<GroupTaskStaffingProposalRow[]>
   staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip') => Promise<unknown>
-  staffingCreate: (proposalId: number) => Promise<{ taskId: number; pendingRemoteSeats: number }>
+  staffingCreate: (proposalId: number) => Promise<{ taskId: number; pendingRemoteSeats: number; skippedWorkers: GroupTaskSkippedWorkerRow[] }>
 }
 
 const DETAIL_POLL_MS = 15_000
@@ -865,6 +867,11 @@ export function GroupTaskView({
       setNewWorkers([])
       setFilter('active')
       setSelected({ chair: created.chairSlug, taskId: created.taskId })
+      if (created.skippedWorkers.length > 0) {
+        setInfoNote(t('gtCreateSkippedWorkers', {
+          names: created.skippedWorkers.map((row) => row.name || row.slug).join(', '),
+        }))
+      }
       reload()
     } catch (cause) {
       setCreateError(`${t('gtCreateFailed')} ${errorText(cause)}`)
@@ -943,8 +950,18 @@ export function GroupTaskView({
   }, [gt, runAction, t])
 
   const createFromStaffing = useCallback(async (proposal: GroupTaskStaffingProposalRow): Promise<void> => {
-    const created = await runAction(async () => gt.staffingCreate(proposal.id), true)
-    if (created) setInfoNote(t('gtStaffingCreated'))
+    let skipped: GroupTaskSkippedWorkerRow[] = []
+    const created = await runAction(async () => {
+      const result = await gt.staffingCreate(proposal.id)
+      skipped = result.skippedWorkers
+    }, true)
+    if (created) {
+      setInfoNote(skipped.length > 0
+        ? `${t('gtStaffingCreated')} ${t('gtCreateSkippedWorkers', {
+          names: skipped.map((row) => row.name || row.slug).join(', '),
+        })}`
+        : t('gtStaffingCreated'))
+    }
   }, [gt, runAction, t])
 
   const terminal = detail !== null && (detail.status === 'done' || detail.status === 'cancelled')
@@ -1635,7 +1652,7 @@ export function GroupTaskView({
             <span className="oac-gt-field-label">{t('gtFieldWorkers')}</span>
             <div className="oac-gt-worker-picks">
               {bots
-                .filter((bot) => bot.slug !== (newChair || twinBot?.slug))
+                .filter((bot) => bot.slug !== (newChair || twinBot?.slug) && isChipBotAvailable(bot))
                 .map((bot) => (
                   <label key={bot.slug} className="oac-gt-worker-pick">
                     <input
