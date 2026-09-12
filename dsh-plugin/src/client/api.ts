@@ -327,6 +327,13 @@ export type GroupTaskSummaryRow = {
   updatedAt: number
 }
 
+/** A local worker seat refused at group-task create time (unavailable Bot). */
+export type GroupTaskSkippedWorkerRow = {
+  slug: string
+  name: string
+  reason: string
+}
+
 export type GroupTaskMemberRow = {
   id: number
   slug: string | null
@@ -797,12 +804,13 @@ export const api = {
     acceptanceCriteria?: string
     workerSlugs?: string[]
     chairSlug?: string
-  }): Promise<{ chairSlug: string; taskId: number }> => {
-    const data = await post<{ chairSlug?: unknown; task?: unknown }>('grouptask/create', input)
+  }): Promise<{ chairSlug: string; taskId: number; skippedWorkers: GroupTaskSkippedWorkerRow[] }> => {
+    const data = await post<{ chairSlug?: unknown; task?: unknown; skippedWorkers?: unknown }>('grouptask/create', input)
     const task = recordOf(data.task)
     return {
       chairSlug: textOf(data.chairSlug),
       taskId: Math.trunc(toNumber(task.id)),
+      skippedWorkers: normalizeSkippedWorkers(data.skippedWorkers),
     }
   },
   grouptaskPost: async (
@@ -871,8 +879,8 @@ export const api = {
     proposalId: number,
     decision: 'confirm' | 'revise' | 'skip',
   ): Promise<CommandEnvelope> => postEnvelope('grouptask/staffing/decide', { chairSlug: chair, proposalId, decision }),
-  grouptaskStaffingCreate: async (proposalId: number): Promise<{ taskId: number; pendingRemoteSeats: number }> => {
-    const data = await post<{ taskId?: unknown; pendingRemoteSeats?: unknown }>(
+  grouptaskStaffingCreate: async (proposalId: number): Promise<{ taskId: number; pendingRemoteSeats: number; skippedWorkers: GroupTaskSkippedWorkerRow[] }> => {
+    const data = await post<{ taskId?: unknown; pendingRemoteSeats?: unknown; skippedWorkers?: unknown }>(
       'grouptask/staffing/create',
       { proposalId },
     )
@@ -880,6 +888,7 @@ export const api = {
     return {
       taskId: Math.trunc(toNumber(data.taskId)),
       pendingRemoteSeats: seats.length,
+      skippedWorkers: normalizeSkippedWorkers(data.skippedWorkers),
     }
   },
   chatPrivate: async (from: string, to: string, content: string): Promise<CommandEnvelope> =>
@@ -1249,6 +1258,18 @@ function normalizeGroupTaskSummary(value: unknown): GroupTaskSummaryRow {
     createdAt: toNumber(record.createdAt),
     updatedAt: toNumber(record.updatedAt),
   }
+}
+
+function normalizeSkippedWorkers(value: unknown): GroupTaskSkippedWorkerRow[] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => {
+    const record = recordOf(entry)
+    return {
+      slug: textOf(record.slug),
+      name: textOf(record.name),
+      reason: textOf(record.reason),
+    }
+  }).filter((row) => row.slug !== '')
 }
 
 function normalizeGroupTaskMember(value: unknown): GroupTaskMemberRow {

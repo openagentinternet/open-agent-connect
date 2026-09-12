@@ -117,6 +117,44 @@ test('propose validates the plan, persists a proposal, and returns the slate', a
   );
 });
 
+test('propose refuses seats naming unknown or unavailable local Bots', async () => {
+  const { ctx, profiles } = createFakeContext('metabot-gt-propose-avail-');
+  profiles.find((profile) => profile.slug === 'worker-1').available = false;
+
+  await assert.rejects(
+    proposeGroupTaskStaffing(ctx, { title: 'T', goal: 'G', plan: validPlan, triggeringWish: '做个任务' }),
+    (error) => error instanceof GroupTaskStaffingError
+      && error.code === 'STAFFING_PLAN_INVALID'
+      && /worker-1/u.test(error.message)
+      && /unavailable/u.test(error.message),
+  );
+
+  const ghostPlan = {
+    seats: [{ role: 'content', candidateName: 'Ghost', candidateSlug: 'ghost', source: 'local' }],
+  };
+  await assert.rejects(
+    proposeGroupTaskStaffing(ctx, { title: 'T', goal: 'G', plan: ghostPlan }),
+    (error) => error instanceof GroupTaskStaffingError
+      && error.code === 'STAFFING_PLAN_INVALID'
+      && /not a local Bot/u.test(error.message),
+  );
+});
+
+test('create-from-proposal reports seats that turned unavailable after the gate', async () => {
+  const { ctx, profiles } = createFakeContext('metabot-gt-gate-skip-');
+  const { proposal } = await proposeGroupTaskStaffing(ctx, {
+    title: 'T', goal: 'G', plan: validPlan, triggeringWish: '做个任务',
+  });
+  await recordStaffingOwnerDecision(ctx, 'twin-bot', proposal.id, 'confirm');
+
+  // The Bot goes unavailable between the owner gate and the create.
+  profiles.find((profile) => profile.slug === 'worker-1').available = false;
+  const created = await createGroupTaskFromProposal(ctx, { proposalId: proposal.id });
+  assert.equal(created.skippedWorkers.length, 1);
+  assert.equal(created.skippedWorkers[0].slug, 'worker-1');
+  assert.equal(created.task.task.status, 'planning');
+});
+
 test('create gate: awaiting owner blocks; explicit decision and chat replies open', async () => {
   const { ctx } = createFakeContext('metabot-gt-gate-');
 

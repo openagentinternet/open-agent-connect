@@ -57,6 +57,20 @@ export interface GroupTaskProfileRef {
   metaId: string | null;
   botType: 'twin' | 'worker' | null;
   avatar: string | null;
+  /**
+   * Picker/passive-invocation availability (Settings toggle on AND a DSH LLM
+   * pair configured — the same rule the seat candidate search applies).
+   * Undefined reads as available so lightweight/test contexts need no LLM
+   * state; the daemon context always sets it.
+   */
+  available?: boolean;
+}
+
+/** One local worker seat refused at create time, with the reason. */
+export interface GroupTaskSkippedWorker {
+  slug: string;
+  name: string;
+  reason: string;
 }
 
 export interface GroupTaskOwnerRef {
@@ -329,7 +343,7 @@ export async function resolveChairProfile(
 export async function createGroupTask(
   ctx: GroupTaskServiceContext,
   input: CreateGroupTaskInput,
-): Promise<{ chairSlug: string; task: GroupTaskDetail }> {
+): Promise<{ chairSlug: string; task: GroupTaskDetail; skippedWorkers: GroupTaskSkippedWorker[] }> {
   const log = logOf(ctx);
   const title = input.title?.trim();
   const goal = input.goal?.trim();
@@ -381,6 +395,7 @@ export async function createGroupTask(
 
   const memberNames: string[] = [];
   const seatedWorkers: Array<{ slug: string }> = [];
+  const skippedWorkers: GroupTaskSkippedWorker[] = [];
   for (const workerSlug of workerSlugs) {
     const worker = await ctx.getProfile(workerSlug);
     if (!worker) {
@@ -388,6 +403,15 @@ export async function createGroupTask(
       continue;
     }
     const workerName = worker.name.trim() || worker.slug;
+    // Availability backstop (Settings toggle off, or no DSH LLM pair): an
+    // unavailable Bot never takes a seat, whichever surface named it (panel
+    // picker, CLI --workers, the chat tool, or a stale staffing plan).
+    if (worker.available === false) {
+      const reason = 'Bot is unavailable (Settings availability toggle off, or no DSH LLM pair configured)';
+      log(`[GroupTask] Member ${workerSlug} skipped: ${reason}`);
+      skippedWorkers.push({ slug: worker.slug, name: workerName, reason });
+      continue;
+    }
     // Roster rows land BEFORE any on-chain join: an engine tick can fire the
     // moment createTask returns, and the planning turn must see every seat —
     // interleaving the slow joins here used to let the chair plan with a
@@ -451,7 +475,11 @@ export async function createGroupTask(
   await emitGroupTaskRelay(ctx, chair, task, 'created',
     `Task created and the on-chain group is open. The engine posts the kickoff and runs planning next.`);
 
-  return { chairSlug: chair.slug, task: await getGroupTaskDetail(ctx, chair.slug, task.id) };
+  return {
+    chairSlug: chair.slug,
+    task: await getGroupTaskDetail(ctx, chair.slug, task.id),
+    skippedWorkers,
+  };
 }
 
 // ---------------------------------------------------------------------------

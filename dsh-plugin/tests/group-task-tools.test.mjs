@@ -140,6 +140,30 @@ test('create passes the roster and renders the created task with follow-up hints
   assert.match(output, /alice chairs it/)
 })
 
+test('create reports skipped unavailable seats', async () => {
+  const { run } = fakeRun(() => ({
+    ok: true,
+    state: 'success',
+    data: {
+      chairSlug: 'alice',
+      task: { id: 8, groupId: 'group-pin-9', title: 'T', status: 'planning' },
+      skippedWorkers: [
+        {
+          slug: 'carol',
+          name: 'Carol',
+          reason: 'Bot is unavailable (Settings availability toggle off, or no DSH LLM pair configured)',
+        },
+      ],
+    },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const output = await controller.run('create', { title: 'T', goal: 'G', workerSlugs: ['bob', 'carol'] })
+  assert.match(output, /task 8, group group-pin-9/)
+  assert.match(output, /Skipped unavailable local seats \(1\)/)
+  assert.match(output, /Carol \(slug=carol\): Bot is unavailable/)
+  assert.match(output, /Settings → Bots/)
+})
+
 test('propose forwards the plan, wish, language, and the source session id', async () => {
   const { calls, run } = fakeRun((args) => ({
     ok: true,
