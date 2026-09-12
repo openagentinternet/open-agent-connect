@@ -10,7 +10,7 @@
 
 export type GroupTaskStatus = 'planning' | 'executing' | 'review' | 'done' | 'cancelled';
 export type GroupTaskMemberRole = 'chair' | 'worker';
-export type GroupTaskMemberStatus = 'assigned' | 'working' | 'standby' | 'done' | 'unreachable';
+export type GroupTaskMemberStatus = 'assigned' | 'working' | 'standby' | 'done' | 'unreachable' | 'delivered';
 
 /**
  * Deliverable ledger status. 'pending' = recorded, awaiting verification;
@@ -437,7 +437,7 @@ export function isGroupTaskStatus(value: unknown): value is GroupTaskStatus {
 
 export function isGroupTaskMemberStatus(value: unknown): value is GroupTaskMemberStatus {
   return value === 'assigned' || value === 'working' || value === 'standby'
-    || value === 'done' || value === 'unreachable';
+    || value === 'done' || value === 'unreachable' || value === 'delivered';
 }
 
 export function filterGroupTasksByTab<T extends { status: GroupTaskStatus }>(

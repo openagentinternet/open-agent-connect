@@ -259,3 +259,27 @@ surfaces. Deliberately NOT duplicated here; this round adds the complementary en
   (`(pin|metafile|metaapp|map)://[0-9a-f]{1,65}$` — a complete pinId is 64 hex + `i0`).
 - Tests: `tests/grouptask/liveRunFixesRound2.test.mjs` (8 tests); scoped suites 161 + 430 green;
   full `npm test` green.
+
+## Round-3 implementation record (branch `dsh-grouptask-fix`, third commit)
+
+Panel member statuses in review/done tasks were frozen execution-phase signals: seats marked
+`unreachable` or left `working` mid-execution kept showing 失联/工作中 forever — nothing in the
+member lifecycle ever reached a settled state (the persisted status machine has no transition into
+`done` at all).
+
+- **Phase-aware member display status** (`service.ts:getGroupTaskDetail`, read-time derivation —
+  stored runtime rows untouched, so a rework back to executing resumes the live view, and tasks
+  already sitting in review/done are fixed without any migration):
+  - `review` (待验收): a member with at least one non-rejected deliverable on the ledger reads
+    `delivered` (已交付); everyone else reads `standby` (待命).
+  - `done` (已完成): every member reads `done` (已完成).
+  - The execution-phase work badge (`working`/`timeout`/…) is suppressed (`unknown`) in both
+    phases, so 工作中/超时 pills no longer appear next to settled tasks.
+- **`delivered` added to the member status machine** (`GroupTaskMemberStatus`,
+  `isGroupTaskMemberStatus`, `GROUP_TASK_MEMBER_STATUSES`): valid for the chair's member-status
+  verb and the store, and rendered by the panel with its own pill (cyan, light + dark) and en/zh
+  locale strings (`gtMStatusDelivered`: delivered / 已交付).
+- CLI help and the dsh `member_status` tool description list the new value.
+- Tests: `tests/grouptask/service.test.mjs` gains two cases (review/done derivation incl. the
+  live-view pass-through in executing and store immutability; rejected-only deliverables do not
+  count as delivered).

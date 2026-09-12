@@ -487,7 +487,7 @@ export function buildGroupTaskToolDefinition(controller: GroupTaskController): H
         reason: { type: 'string' },
         member: { type: 'string', description: 'Member Bot slug (kick/member_status).' },
         globalMetaId: { type: 'string', description: 'Remote member GlobalMetaId (kick/member_status/invite).' },
-        status: { type: 'string', description: 'Member status: assigned|working|standby|done|unreachable.' },
+        status: { type: 'string', description: 'Member status: assigned|working|standby|done|unreachable|delivered.' },
         name: { type: 'string', description: 'Display name for an invited remote Bot.' },
         skills: { type: 'array', items: { type: 'string' } },
         allowReinvite: { type: 'boolean', description: 'Re-send an invite to an already-invited remote Bot.' },

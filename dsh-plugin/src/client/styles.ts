@@ -585,11 +585,13 @@ body[data-ds-dark-theme] .oac-gt-workbadge-timeout { background: rgba(124, 45, 1
 .oac-gt-mstatus-standby { background: #e2e8f0; color: #475569; }
 .oac-gt-mstatus-done { background: #d1fae5; color: #047857; }
 .oac-gt-mstatus-unreachable { background: #fee2e2; color: #b91c1c; }
+.oac-gt-mstatus-delivered { background: #cffafe; color: #0e7490; }
 .oac-gt-mstatus-assigned { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
 body[data-ds-dark-theme] .oac-gt-mstatus-working { background: rgba(30, 58, 138, .4); color: #93c5fd; }
 body[data-ds-dark-theme] .oac-gt-mstatus-standby { background: rgba(51, 65, 85, .5); color: #cbd5e1; }
 body[data-ds-dark-theme] .oac-gt-mstatus-done { background: rgba(6, 78, 59, .4); color: #6ee7b7; }
 body[data-ds-dark-theme] .oac-gt-mstatus-unreachable { background: rgba(127, 29, 29, .4); color: #fca5a5; }
+body[data-ds-dark-theme] .oac-gt-mstatus-delivered { background: rgba(21, 94, 117, .4); color: #67e8f9; }
 /* Deliverable cards: kind pill + acceptance status + on-chain confirmation /
    verification pill, full copyable URI (clickable when openable), author. */
 .oac-gt-dcards { display: flex; flex-direction: column; gap: 8px; }
