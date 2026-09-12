@@ -5,6 +5,25 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
+## 0.8.0 - 2026-09-13
+
+### Fixed
+
+- Group-task live-run round 1: roster race, review flap, truncation recovery,
+  log spam, and seat roles.
+- Group-task live-run round 2: F8 mentions, F9 delivered-member watch, F10 DSML
+  guard, F11 unreachable/undrivable notes, F12 turn timeouts.
+- Settled member statuses in review/done grouptasks (delivered pill, work badge
+  suppressed).
+- Unavailable Bots stay out of group-task seating end to end.
+
+### Changed
+
+- A2A Chat is a center-column overlay: the right Sidebar is kept and the
+  in-panel dock is dropped.
+- The hero Bot identity anchor survives the DSH 0.1.5-rc hero commits.
+- Regenerated all host skillpack dists (84 files).
+
 ## 0.7.0 - 2026-09-11
 
 ### Added
