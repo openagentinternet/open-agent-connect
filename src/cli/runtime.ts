@@ -6322,7 +6322,14 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       // connected), then the local-runtime chain below.
       const hostText = await createHostFirstCompletion({
         dshLlmPath: profilePaths.dshLlmPath,
-      })({ botSlug: turn.profile.slug, system: turn.systemPrompt, user: turn.prompt });
+      })({
+        botSlug: turn.profile.slug,
+        system: turn.systemPrompt,
+        user: turn.prompt,
+        // Chair turns carry the lifecycle tags; a provider default cap once
+        // truncated an acceptance verdict mid-table and wedged the task.
+        ...(turn.role === 'chair' ? { maxTokens: 8192 } : {}),
+      });
       if (hostText !== null) return hostText;
       const runtimeResolver = createLlmRuntimeResolver({
         runtimeStore: createLlmRuntimeStore(profilePaths),

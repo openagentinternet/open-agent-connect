@@ -380,6 +380,7 @@ export async function createGroupTask(
   });
 
   const memberNames: string[] = [];
+  const seatedWorkers: Array<{ slug: string }> = [];
   for (const workerSlug of workerSlugs) {
     const worker = await ctx.getProfile(workerSlug);
     if (!worker) {
@@ -387,14 +388,22 @@ export async function createGroupTask(
       continue;
     }
     const workerName = worker.name.trim() || worker.slug;
+    // Roster rows land BEFORE any on-chain join: an engine tick can fire the
+    // moment createTask returns, and the planning turn must see every seat —
+    // interleaving the slow joins here used to let the chair plan with a
+    // partial roster (live-run F1).
     await store.addMember({
       taskId: task.id,
       slug: worker.slug,
       globalMetaId: worker.globalMetaId,
       role: 'worker',
       displayName: workerName,
+      ...(input.seatRoles?.[worker.slug] ? { seatRole: input.seatRoles[worker.slug] } : {}),
     });
     memberNames.push(workerName);
+    seatedWorkers.push(worker);
+  }
+  for (const worker of seatedWorkers) {
     try {
       const workerSigner = await ctx.signerForSlug(worker.slug);
       const { pinId: joinPinId } = await joinGroupOnChain(workerSigner, groupId, {
@@ -833,12 +842,14 @@ export async function reopenGroupTask(
       `Group task ${taskId} is ${task.status}; only review tasks can be reopened to executing`,
     );
   }
-  await store.updateTaskStatus(taskId, 'executing', {
+  const updated = await store.updateTaskStatus(taskId, 'executing', {
     actor: opts?.actor ?? { kind: 'owner' },
     reason: opts?.reason ?? null,
   });
   await clearGroupTaskReviewDeliveryGuards(store, taskId);
   await store.kvSet(`${GROUP_TASK_REWORK_AT_KV_PREFIX}${taskId}`, String(Date.now()));
+  await emitGroupTaskRelay(ctx, chair, updated, 'rework',
+    'The owner sent the task back to work — pending deliverables were rejected; the chair re-plans from here.');
   try {
     await store.updateDeliverablesStatusByTask(taskId, 'pending', 'rejected');
   } catch (error) {

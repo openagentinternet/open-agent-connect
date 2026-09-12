@@ -204,11 +204,20 @@ export async function createGroupTaskFromProposal(
   // CAS claim: a concurrent create cannot double-open the on-chain group.
   await store.claimProposal(input.proposalId);
   try {
+    const seatRoles: Record<string, string> = {};
+    for (const seat of plan.seats) {
+      if (seat.source === 'local' && seat.candidateSlug) {
+        seatRoles[seat.candidateSlug] = seat.role === 'domain'
+          ? `domain:${seat.domainLabel ?? 'unspecified'}`
+          : seat.role;
+      }
+    }
     const created = await createGroupTask(ctx, {
       title: gate.proposal.title,
       goal: gate.proposal.goal,
       acceptanceCriteria: gate.proposal.acceptanceCriteria,
       workerSlugs: localSeatSlugs(plan),
+      seatRoles: Object.keys(seatRoles).length > 0 ? seatRoles : null,
       chairSlug: gate.proposal.chairSlug,
       createdBy: 'twinbot',
       sourceSessionId: gate.proposal.sourceSessionId,
