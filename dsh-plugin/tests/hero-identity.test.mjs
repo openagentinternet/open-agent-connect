@@ -56,9 +56,17 @@ test('hero identity mount climbs past slot wrappers to a span-validated headline
   // stranded node) are swept before every attach.
   assert.match(mount, /querySelectorAll\('\[data-oac-hero-identity\]'\)/)
   assert.match(mount, /stray\.remove\(\)/)
-  // Self-healing: a connected host must still sit directly above the live
-  // headline, or it releases and re-anchors.
+  // Self-healing: a connected host must still sit inside the hero phase and
+  // directly above the live headline, or it releases and re-anchors; the
+  // whale's transient absence mid-pass must NOT churn a correct mount away.
+  assert.match(mount, /phaseRoot\.contains\(host\)/)
   assert.match(mount, /nextElementSibling === headline/)
+  // Heartbeat: the observer only sees committed mutations, so an idempotent
+  // attach re-check must run on an interval (missed commit windows heal; a
+  // dead observer cannot silence the mount) and the heartbeat must die with
+  // the mount.
+  assert.match(mount, /setInterval\(attach/)
+  assert.match(mount, /clearInterval\(heartbeat\)/)
   // Exception-safe release: a throwing unmount must not strand the host.
   assert.match(mount, /finally \{/)
   // Positional walks and bare ancestor matches each shipped a wrong spot —
