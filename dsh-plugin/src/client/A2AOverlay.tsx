@@ -12,8 +12,10 @@
  * fallback covers the full frame — the old global-panel behavior.
  *
  * Open state comes from the apply-scope A2APanelStore (the panellist row's
- * intercepted click toggles it; session navigation closes it — the apply
- * wiring watches `ctx.sessions.list`). The entry renders nothing while a
+ * intercepted click toggles it; navigation back to the conversation column
+ * closes it — the apply wiring watches `ctx.sessions.list` AND wraps
+ * `ctx.layout.selectPanel(null)`, because 新会话 reusing the already-current
+ * blank session changes neither). The entry renders nothing while a
  * kernel global panel is active or the right Sidebar is fullscreen (the
  * frame's `data-rightbar-fullscreen` attribute, pure CSS).
  */

@@ -35,8 +35,14 @@ interactive beside it — a global main panel would unmount that Sidebar. The
 overlay mirrors the frame's column template, tracking resizes, sidebar
 collapse, and right-Sidebar open/close exactly; the panellist row's click is
 capture-intercepted into an overlay toggle (never `layout.selectPanel`),
-navigating to another session closes the overlay, and the conversation
-underneath never unmounts (drafts and scroll survive). Every Agent Internet
+navigating to another session closes the overlay — and so does every path
+back to the conversation column, including 新会话 reusing the
+already-current blank session (the apply wiring watches `sessions.list` AND
+wraps `layout.selectPanel(null)`, since that reuse changes neither) — and
+the conversation underneath never unmounts (drafts and scroll survive).
+While the overlay is open the panellist row carries the kernel's selected
+look (`.oac-a2a-row-active`, synced by the glyph, `aria-current` included)
+and clears it the moment the overlay closes. Every Agent Internet
 URI clicked inside A2A — private chat or Group Tasks — opens in the
 right-Sidebar Bot Browser tab, the same reveal every other surface uses.
 

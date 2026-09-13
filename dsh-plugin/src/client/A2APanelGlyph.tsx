@@ -11,10 +11,14 @@
  * unmount the right Sidebar): it is capture-intercepted and toggles the A2A
  * overlay store instead (see `a2a-panel-row.ts`). The glyph carries the
  * `data-oac-a2a-panellist` marker the interceptor matches on, and draws its
- * own open state from the same store (the row's kernel `active` highlight
- * never fires now).
+ * own open state from the same store. Because the kernel `active` highlight
+ * on the row button never fires for an overlay, the glyph syncs the selected
+ * look onto the row itself (`.oac-a2a-row-active`, the kernel panelActive
+ * vocabulary) plus `aria-current`, and clears both whenever the overlay
+ * closes — including when session navigation or a new-session click closed
+ * it.
  */
-import type { ReactNode } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { IconNewChatOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -41,8 +45,23 @@ export type A2APanelGlyphProps =
 export function A2APanelGlyph({ size, useUnread, usePanel }: A2APanelGlyphProps): ReactNode {
   const hasUnread = useUnread((state) => hasAnyUnread(state))
   const open = usePanel((state) => state.open)
+  const markRef = useRef<HTMLSpanElement | null>(null)
+  // The row button is the sidebar's; mirror the overlay-open state onto it so
+  // the row reads as selected (and stops reading as selected the moment the
+  // store closes, whichever path closed it).
+  useLayoutEffect(() => {
+    const row = markRef.current?.closest('button')
+    if (!(row instanceof HTMLElement)) return
+    row.classList.toggle('oac-a2a-row-active', open)
+    if (open) row.setAttribute('aria-current', 'page')
+    else row.removeAttribute('aria-current')
+    return () => {
+      row.classList.remove('oac-a2a-row-active')
+      row.removeAttribute('aria-current')
+    }
+  }, [open])
   return (
-    <span className="oac-a2a-glyph" {...{ [A2A_PANEL_ROW_MARK]: '' }} data-open={open || undefined}>
+    <span ref={markRef} className="oac-a2a-glyph" {...{ [A2A_PANEL_ROW_MARK]: '' }} data-open={open || undefined}>
       <IconNewChatOutline16 size={size} />
       {hasUnread ? <span className="oac-unread-dot" /> : null}
     </span>

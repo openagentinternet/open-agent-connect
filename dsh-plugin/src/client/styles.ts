@@ -217,11 +217,14 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-a2a-overlay-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; background: var(--dsw-alias-bg-layer-2); }
 
 /* A2A conversation panel: fills the overlay's center cell; geometry follows
-   the conversation row/bubble vocabulary. The panellist glyph draws its own
-   open state (the row's kernel active highlight never fires for an overlay). */
+   the conversation row/bubble vocabulary. The panellist row's selected look
+   is synced onto the sidebar's row button while the overlay is open (the
+   kernel .panelActive never fires for an overlay) — same vocabulary as the
+   kernel's selected panel row; the glyph itself just tints brand-primary. */
 .oac-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3); }
 .oac-a2a-glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; }
-.oac-a2a-glyph[data-open='true'] { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-interactive-bg-active); border-radius: 8px; outline: 4px solid var(--dsw-alias-interactive-bg-active); }
+.oac-a2a-glyph[data-open='true'] { color: var(--dsw-alias-brand-primary); }
+button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); font-weight: 500; }
 .oac-a2a-glyph .oac-unread-dot { position: absolute; top: -3px; right: -4px; box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-2); }
 .oac-a2a-panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-layer-2); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
