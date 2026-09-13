@@ -28,8 +28,17 @@
  * that — so a missing whale fails safe instead of mis-anchoring, (b) sweeps
  * orphaned identity hosts (a stale client instance would render a second
  * block), (c) re-validates the placement on every mutation and re-anchors
- * when the hero reconciles around the foreign node, and (d) releases with
- * try/finally so a React unmount throw cannot strand the host in the DOM.
+ * when the hero reconciles around the foreign node, (d) releases with
+ * try/finally so a React unmount throw cannot strand the host in the DOM,
+ * and (e) re-checks on a 300ms heartbeat: the rc hero mounts in multi-pass
+ * React commits whose intermediate states come and go BETWEEN observer
+ * deliveries, so a mount decision that raced one of those windows would
+ * otherwise never be revisited (the observed "avatar appears only sometimes"
+ * regression). A correctly-placed host survives the whale's transient
+ * absence — release-on-every-mutation churned live mounts away mid-pass and
+ * left nothing to re-mount — and `phaseRoot.contains(host)` keeps that
+ * tolerance from preserving a host the reconciliation displaced outside the
+ * hero (the stuck-avatar-on-active-session shape).
  * The host inserts directly before the headline row, making the block a
  * regular child of the hero stack's stretch flex column — horizontally
  * centered, above the whale and slogan. When the first message flips the
@@ -105,6 +114,7 @@ export function startHeroIdentityMount(store: SnapshotStore<BotPresetSeatState>)
   let host: HTMLElement | null = null
 
   const release = (): void => {
+    clearInterval(heartbeat)
     // try/finally: a throwing root.unmount() must not skip the host removal —
     // a stranded host is exactly the stuck-avatar bug this mount exists to
     // avoid.
@@ -124,18 +134,23 @@ export function startHeroIdentityMount(store: SnapshotStore<BotPresetSeatState>)
     for (const stray of document.querySelectorAll('[data-oac-hero-identity]')) {
       if (stray !== host) stray.remove()
     }
-    const headline = heroHeadline()
-    if (host !== null) {
-      if (host.isConnected) {
-        // Connected AND still directly above the live headline: nothing to
-        // do. Anything else — the hero reconciled around the foreign node, or
-        // the headline subtree was replaced/removed (avatar-without-whale) —
-        // releases so the mount re-anchors (or fails safe when the whale is
-        // gone).
-        if (headline !== null && host.nextElementSibling === headline) return
+    if (host !== null && host.isConnected) {
+      const phaseRoot = document.querySelector('[data-phase="hero"]')
+      if (phaseRoot instanceof HTMLElement && phaseRoot.contains(host)) {
+        const headline = heroHeadline()
+        // Still inside the hero and either directly above the live headline
+        // or in a whale-absent commit window (the headline is momentarily
+        // undetectable): keep the mount — releasing here churned correct
+        // mounts away mid-pass. A headline that EXISTS but is not adjacent
+        // means reconciliation displaced or rebuilt the row: re-anchor.
+        if (headline === null || host.nextElementSibling === headline) return
       }
       release()
+    } else if (host !== null) {
+      // The hero unmounted underneath us (session left the blank phase).
+      release()
     }
+    const headline = heroHeadline()
     if (headline === null) return
     host = document.createElement('div')
     host.dataset.oacHeroIdentity = ''
@@ -146,6 +161,11 @@ export function startHeroIdentityMount(store: SnapshotStore<BotPresetSeatState>)
 
   const observer = new MutationObserver(() => { attach() })
   observer.observe(document.body, { childList: true, subtree: true })
+  // The observer only sees committed mutations; React 18's concurrent hero
+  // commits can pass through states we must re-decide after. The heartbeat
+  // re-runs the idempotent attach so any missed window heals within one tick
+  // (and a dead observer cannot silence the mount).
+  const heartbeat = setInterval(attach, 300)
   attach()
   return release
 }
