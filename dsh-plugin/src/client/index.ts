@@ -126,7 +126,9 @@ export function apply(ctx: ClientContext): void {
   const openBrowserNow = (uri: string | null): Promise<void> => openBrowser(openFace, iframeBridge, uri)
   // A2A Chat overlay: one apply-scope open state. The panellist row's click
   // is capture-intercepted into a toggle (a kernel global-panel selection
-  // would unmount the right Sidebar); session navigation closes it again.
+  // would unmount the right Sidebar); navigation back to the conversation
+  // column — session switch or 新会话 — closes it again (the two watchers
+  // below).
   const a2aPanel = new A2APanelStore()
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: BOT_BROWSER_TAB_ID,
@@ -246,6 +248,23 @@ export function apply(ctx: ClientContext): void {
       if (navigated) a2aPanel.close()
     }), 'oac-dsh: a2a overlay session watch')
   })
+  // ...but 新会话 (startSession) REUSES the workspace's existing blank
+  // session: when that session is already the current one, sessions.list
+  // never changes and the watch above cannot fire — the overlay stayed stuck
+  // over the new-session page. Every kernel path back to the conversation
+  // column (openSession from the tree, startSession with or without a
+  // target) routes through layout.selectPanel(null), so wrap it: selecting
+  // the conversation column closes the overlay too. Re-equips when the
+  // layout service reloads; cleanup restores the prototype method.
+  ctx.inject(['layout'], (scope: ClientContext) => {
+    const layout = scope.layout
+    const original = layout.selectPanel.bind(layout)
+    layout.selectPanel = (panelId: Parameters<typeof original>[0]): void => {
+      if (panelId === null) a2aPanel.close()
+      original(panelId)
+    }
+    return () => { delete (layout as { selectPanel?: unknown }).selectPanel }
+  }, 'oac-dsh: a2a overlay navigation close')
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',

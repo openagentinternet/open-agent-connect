@@ -206,6 +206,37 @@ test('the A2A overlay mirrors the frame columns and the panellist row is capture
   assert.match(index, /sessionsList\.subscribe/)
 })
 
+test('new-session and same-session navigation close the overlay via the selectPanel wrap', async () => {
+  // startSession reuses the workspace's existing blank session; when it is
+  // already current, sessions.list never changes — the close must ride
+  // layout.selectPanel(null), which every conversation-column navigation
+  // calls, not only the sessions.list watch.
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /ctx\.inject\(\['layout'\], \(scope: ClientContext\) =>/)
+  assert.match(index, /layout\.selectPanel = \(panelId: Parameters<typeof original>\[0\]\): void => \{/)
+  assert.match(index, /if \(panelId === null\) a2aPanel\.close\(\)/)
+  // the wrap must restore the service method on cleanup (no stacked wrappers
+  // across layout reloads)
+  assert.match(index, /delete \(layout as \{ selectPanel\?: unknown \}\)\.selectPanel/)
+})
+
+test('the A2A panellist row carries a selected style while the overlay is open', async () => {
+  // The kernel panelActive highlight never fires for an overlay, so the
+  // glyph syncs the row's selected look (kernel vocabulary) + aria-current
+  // and clears them on close.
+  const glyph = await readFile(join(root, 'src/client/A2APanelGlyph.tsx'), 'utf8')
+  assert.match(glyph, /useLayoutEffect/)
+  assert.match(glyph, /closest\('button'\)/)
+  assert.match(glyph, /classList\.toggle\('oac-a2a-row-active', open\)/)
+  assert.match(glyph, /setAttribute\('aria-current', 'page'\)/)
+  assert.match(glyph, /removeAttribute\('aria-current'\)/)
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /button\.oac-a2a-row-active \{[^}]*--dsw-alias-interactive-bg-active/)
+  // the glyph itself tints brand-primary instead of drawing its own pill
+  assert.match(styles, /\.oac-a2a-glyph\[data-open='true'\] \{ color: var\(--dsw-alias-brand-primary\); \}/)
+  assert.doesNotMatch(styles, /\.oac-a2a-glyph\[data-open='true'\] \{[^}]*background/)
+})
+
 test('the A2A overlay styles keep the side columns click-through and hide under a fullscreen rightbar', async () => {
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
   assert.match(styles, /\.oac-a2a-overlay\[class\] \{[^}]*pointer-events: none/)
