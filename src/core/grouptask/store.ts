@@ -169,6 +169,7 @@ export interface GroupTaskStore {
   updateTaskRating(taskId: number, rating: number, ratingComment?: string | null): Promise<GroupTaskRecord>;
   updateTaskCursor(taskId: number, lastProcessedIndex: number): Promise<void>;
   touchTaskDriven(taskId: number, atMs?: number): Promise<void>;
+  setTaskChairDegraded(taskId: number, atMs: number | null): Promise<void>;
   renameTask(taskId: number, displayName: string): Promise<GroupTaskRecord>;
   setTaskPinned(taskId: number, pinned: boolean): Promise<GroupTaskRecord>;
   archiveTask(taskId: number): Promise<GroupTaskRecord>;
@@ -423,6 +424,7 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
         createdBy: input.createdBy,
         lastProcessedIndex: -1,
         lastDrivenAt: null,
+        chairDegradedAt: null,
         createPinId: input.createPinId ?? null,
         createdAt: now,
         updatedAt: now,
@@ -548,6 +550,14 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       const state = await readState();
       const task = requireTask(state, taskId);
       task.lastDrivenAt = atMs ?? Date.now();
+      await writeState(state);
+    }),
+
+    setTaskChairDegraded: (taskId, atMs) => enqueue(async () => {
+      const state = await readState();
+      const task = requireTask(state, taskId);
+      task.chairDegradedAt = atMs;
+      task.updatedAt = Date.now();
       await writeState(state);
     }),
 

@@ -46,6 +46,13 @@ export interface GroupTaskRecord {
   lastProcessedIndex: number;
   /** Epoch ms of the engine's last drive of this task (stall heartbeat). */
   lastDrivenAt: number | null;
+  /**
+   * Chair-channel degradation marker (epoch ms; null = healthy). Set once the
+   * chair's reply turns keep failing with LLM-unavailable errors past the
+   * degrade window, cleared on the next successful chair turn. Independent of
+   * lastDrivenAt: the engine can be alive while the chair's LLM chain is dead.
+   */
+  chairDegradedAt: number | null;
   createPinId: string | null;
   createdAt: number;
   updatedAt: number;
