@@ -43,13 +43,12 @@ test('hero identity mount climbs past slot wrappers to a span-validated headline
   assert.match(mount, /querySelector\('svg'\)/)
   assert.match(mount, /dataset\.slot === undefined/)
   assert.match(mount, /dataset\.chainOverlayFallback === undefined/)
-  assert.match(mount, /getBoundingClientRect\(\)\.width >= columnWidth \/ 2/)
-  // 0.1.5-rc regression: while the whale is briefly absent (multi-pass hero
-  // commits) the first seat svg is the workspace folder / an input icon, and
-  // a bare width climb anchored the block on those persistent rows — the
-  // avatar then stuck above the input box after the first message. Only a
-  // row the brand svg reaches through a DIRECT span child (the fish hitbox)
-  // may anchor.
+  // Round 3: a seat-relative width threshold rejects the real headline on a
+  // wide window (the hero card caps the headline at max-width while the seat
+  // spans the column), so the width test may only exclude zero-width hidden
+  // geometry — never scale with the seat.
+  assert.match(mount, /getBoundingClientRect\(\)\.width > 0/)
+  assert.doesNotMatch(mount, /columnWidth \/ 2/)
   assert.match(mount, /spansBrandMark/)
   assert.match(mount, /HTMLSpanElement/)
   // Duplicate-proof: orphaned hosts (stale client instance, exception-
