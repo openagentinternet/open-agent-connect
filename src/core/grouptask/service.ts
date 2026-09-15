@@ -831,7 +831,32 @@ export async function closeGroupTask(
   }
   const chair = await requireProfile(ctx, chairSlug);
   const store = storeFor(ctx, chair);
-  await requireTask(store, taskId);
+  const task = await requireTask(store, taskId);
+  if (task.status === 'done' || task.status === 'cancelled') {
+    throw new GroupTaskServiceError('task_terminal', `Group task ${taskId} is already ${task.status}`);
+  }
+  // OT-06 R18: the acceptance verdict is broadcast as the group's FINAL
+  // message — members learn the outcome without polling a frozen group (the
+  // task-213 workers never heard anything after close). Authored by the
+  // chair (a participant — single-commander-compatible), riding the inert
+  // [GROUP_TASK_NOTICE:*] channel so the engine never replies to it.
+  // Best-effort: a chain failure here never blocks the owner's close.
+  if (task.groupId) {
+    const verdict = opts.status === 'done'
+      ? `outcome=done${opts.rating != null ? `, rating=${opts.rating}/5` : ''}`
+      : 'outcome=cancelled';
+    const comment = opts.ratingComment?.trim();
+    const content = `[GROUP_TASK_NOTICE:closed] The owner has closed this task (${verdict}).`
+      + (comment ? `\n${comment}` : '')
+      + '\nThank you all for the work — the group is read-only from this point on.';
+    await postGroupTaskMessage(ctx, chairSlug, taskId, {
+      asSlug: chairSlug,
+      content,
+    }).catch((error: unknown) => {
+      logOf(ctx)(`[GroupTask] Closing broadcast failed for task ${taskId}: `
+        + `${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
   const closed = await store.updateTaskStatus(taskId, opts.status, {
     actor: opts.actor ?? { kind: 'owner' },
     reason: opts.reason ?? null,

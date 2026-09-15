@@ -381,6 +381,39 @@ test('closeGroupTask stamps owner_via_twin attribution for Twin-executed closes 
   assert.equal(close.actorKind, 'owner_via_twin', 'the proxy execution must not read as a bare owner');
 });
 
+test('closeGroupTask broadcasts the verdict as the group final message (OT-06 R18)', async () => {
+  const { ctx, pins } = createFakeContext('metabot-gts-close-broadcast-');
+  const { decryptGroupContent } = require('../../dist/core/appSession/groupChat.js');
+  const pinPlaintext = (pin) => {
+    try {
+      const payload = JSON.parse(pin.payload);
+      return decryptGroupContent(String(payload.content ?? ''), String(payload.groupId ?? ''));
+    } catch {
+      return '';
+    }
+  };
+  const { task } = await createGroupTask(ctx, { title: 'T', goal: 'G', workerSlugs: ['worker-1'] });
+  const pinsBefore = pins.length;
+
+  await closeGroupTask(ctx, 'twin-bot', task.id, {
+    status: 'done',
+    rating: 5,
+    ratingComment: '交付全部合格，辛苦各位',
+  });
+
+  assert.equal(pins.length, pinsBefore + 1, 'exactly one closing broadcast');
+  const text = pinPlaintext(pins.at(-1));
+  assert.match(text, /\[GROUP_TASK_NOTICE:closed\]/, 'rides the inert host-notice channel');
+  assert.match(text, /outcome=done, rating=5\/5/);
+  assert.match(text, /交付全部合格，辛苦各位/);
+  // The task still closed cleanly.
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const chairProfile = await ctx.getProfile('twin-bot');
+  const store2 = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
+  assert.equal((await store2.getTaskById(task.id)).status, 'done');
+});
+
 test('reopenGroupTask only works from review and rejects pending deliverables', async () => {
   const { ctx, profiles } = createFakeContext('metabot-gts-reopen-');
   const { task } = await createGroupTask(ctx, { title: 'T', goal: 'G' });
