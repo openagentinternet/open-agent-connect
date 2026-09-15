@@ -478,6 +478,37 @@ export const GROUPTASK_CSS = `
 .oac-gt-header-right { display: flex; align-items: center; gap: 10px; }
 .oac-gt-mode-tabs { border-bottom: none; margin-top: 0; align-self: stretch; align-items: center; }
 .oac-gt-mode-tabs .oac-tab { font-size: 14px; }
+
+/** A2A panel "Scheduled" tab (scheduled tasks) — same card chrome as Group Tasks. */
+.oac-sch-view { display: flex; flex-direction: column; gap: 10px; width: 100%; height: 100%; overflow: auto; padding: 14px 18px; }
+.oac-sch-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.oac-sch-filters { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.oac-sch-filters .oac-tab { font-size: 13px; }
+.oac-sch-hint { margin: 0; }
+.oac-sch-list { display: grid; gap: 10px; align-content: start; }
+.oac-sch-card { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.oac-sch-card.off { opacity: 0.72; }
+.oac-sch-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.oac-sch-card-title { display: flex; align-items: center; gap: 8px; padding: 0; border: none; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; min-width: 0; }
+.oac-sch-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-sch-pill { flex: none; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-tertiary); }
+.oac-sch-pill.surf { color: var(--dsw-alias-brand-primary); border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 40%, transparent); }
+.oac-sch-pill.warn { color: var(--dsw-alias-state-warn-label); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-label) 40%, transparent); }
+.oac-sch-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.oac-sch-card-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.oac-sch-schedule { font-weight: 600; }
+.oac-sch-times { color: var(--dsw-alias-label-tertiary); }
+.oac-sch-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--dsw-alias-label-dimmed); }
+.oac-sch-dot.success { background: var(--dsw-alias-state-success-primary); }
+.oac-sch-dot.error { background: var(--dsw-alias-state-error-primary); }
+.oac-sch-dot.running { background: var(--dsw-alias-brand-primary); animation: oac-sch-pulse 1.4s ease-in-out infinite; }
+.oac-sch-detail { display: grid; gap: 8px; border-top: 1px solid var(--dsw-alias-border-l2); padding-top: 8px; }
+.oac-sch-prompt { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); font-size: 12px; line-height: 18px; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
+.oac-sch-runs { display: grid; gap: 4px; }
+.oac-sch-runs-title { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
+.oac-sch-run { display: flex; align-items: baseline; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.oac-sch-run-meta { color: var(--dsw-alias-label-tertiary); }
+@keyframes oac-sch-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .oac-gt-badge { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 11px; line-height: 18px; white-space: nowrap; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
 /* Status badges mirror the IDBots group-task palette (Tailwind colors, light
    + body[data-ds-dark-theme] variants); the DSH --dsw-alias-state-*-secondary

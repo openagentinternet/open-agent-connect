@@ -199,6 +199,12 @@ export function apply(ctx: ClientContext): void {
         api.conversationGuidance(from, peer, guidance),
       meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
       browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
+      schedule: {
+        list: (from) => api.scheduleList(from),
+        runs: (from, id, limit) => api.scheduleRuns(from, id, limit),
+        setEnabled: (from, id, enabled) => api.scheduleSetEnabled(from, id, enabled),
+        runNow: (from, id) => api.scheduleRunNow(from, id),
+      },
       grouptask: {
         list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
         detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
