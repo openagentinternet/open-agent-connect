@@ -39,6 +39,12 @@
  * left nothing to re-mount — and `phaseRoot.contains(host)` keeps that
  * tolerance from preserving a host the reconciliation displaced outside the
  * hero (the stuck-avatar-on-active-session shape).
+ * (f) the climb's width test only excludes zero-width hidden geometry: the
+ * hero card caps the headline with max-width while the composer seat spans
+ * the full column, so a seat-relative threshold (`seat / 2`) rejects every
+ * real headline on a wide window — the "avatar never appears after a
+ * restart on a large display" regression; the span check carries the whole
+ * identity proof on its own.
  * The host inserts directly before the headline row, making the block a
  * regular child of the hero stack's stretch flex column — horizontally
  * centered, above the whale and slogan. When the first message flips the
@@ -83,18 +89,21 @@ function heroHeadline(): HTMLElement | null {
   const brand = seat.querySelector('svg')
   if (!(brand instanceof SVGElement)) return null
   // Climb past every slot wrapper (content-hugging display:contents divs) to
-  // the wide, un-wrapped div that can only be the headline grid. The span
-  // check keeps the climb from adopting the workspace row or the input bar
-  // when the whale is the absent one; zero-width (hidden) seats never anchor.
-  const columnWidth = seat.getBoundingClientRect().width
-  if (columnWidth <= 0) return null
+  // the un-wrapped div that can only be the headline grid. The span check is
+  // the identity proof (round 1); the width test only excludes degenerate
+  // hidden geometry — the hero card caps the headline with max-width, so on
+  // a wide window the headline is never half the seat, and the old `seat/2`
+  // comparison rejected every real headline there (the "avatar never
+  // appears on a large window" regression). Zero-width (hidden) seats never
+  // anchor either.
+  if (seat.getBoundingClientRect().width <= 0) return null
   let node: HTMLElement | null = brand.parentElement
   while (node !== null && node !== seat) {
     if (node instanceof HTMLElement
       && node.tagName === 'DIV'
       && node.dataset.slot === undefined
       && node.dataset.chainOverlayFallback === undefined
-      && node.getBoundingClientRect().width >= columnWidth / 2
+      && node.getBoundingClientRect().width > 0
       && spansBrandMark(node, brand)) {
       return node
     }
