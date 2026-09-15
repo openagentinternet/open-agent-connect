@@ -1255,6 +1255,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     message: GroupTaskMessage,
     tags: ParsedGroupTaskTags,
     seats: SeatInfo[],
+    members: GroupTaskMember[],
     ownerGmid: string | null,
     chairProfile: GroupTaskProfileRef,
     promptSeats: GroupTaskPromptSeat[],
@@ -1334,11 +1335,22 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       }
     }
 
-    // Member tags (non-chair local members)
-    if (senderSeat && !fromChair) {
+    // Member tags (local seats AND remote OpenTeam members): remote workers
+    // have no staffing seat, so the old senderSeat-only guard silently
+    // dropped every remote [DELIVERABLE]/[WORKING] line (task-213 defect #2
+    // — the deliverables ledger stayed empty while the panel showed nothing
+    // to accept). Keying on the members table records remote artifacts;
+    // local-seat behavior (deadline clocks, local-file upload) is unchanged.
+    const senderMember = !fromChair
+      ? members.find((entry) => entry.removedAt == null
+        && normalizeGmid(entry.globalMetaId ?? '') === senderGmid) ?? null
+      : null;
+    if ((senderSeat || senderMember) && !fromChair) {
       if (tags.deliverables.length > 0 && message.pinId) {
         // A delivery settles the chair-stated deadline clock for this member.
-        await store.kvDelete(`${GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${senderSeat.slug}`);
+        if (senderSeat) {
+          await store.kvDelete(`${GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${senderSeat.slug}`);
+        }
         let recordedAny = false;
         for (const candidate of tags.deliverables) {
           // Per-(msgPin, uri, kind) dedupe (IDBots parity): the same line
@@ -1386,10 +1398,13 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
             : '';
           const localPath = (looksLikeLocalFilePath(candidate.uri) ? candidate.uri : null)
             ?? (looksLikeLocalFilePath(payloadPath) ? payloadPath : null);
-          if (localPath) {
+          if (localPath && senderSeat) {
+            // Local-seat only: the upload seam reads the SENDER's workspace.
+            // A remote member's path rows stay raw until the cross-host
+            // transfer channel exists (remote paths are same-machine-only).
             try {
               const uploaded = await uploadDeliverableFile({
-                slug: senderSeat.slug!,
+                slug: senderSeat.slug,
                 filePath: localPath,
               });
               await store.updateDeliverableUri(recorded.id, uploaded.metafileUri, 'metafile');
@@ -1435,10 +1450,14 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           await verifyTaskDeliverables(store, task.id, options.verifyPin, { now, log }).catch(() => undefined);
         }
       }
-      if (tags.working) {
-        await store.setMemberStatus(task.id, senderSeat.slug, 'working', senderSeat.globalMetaId);
-      } else if (tags.standby) {
-        await store.setMemberStatus(task.id, senderSeat.slug, 'standby', senderSeat.globalMetaId);
+      if (tags.working || tags.standby) {
+        if (senderSeat) {
+          await store.setMemberStatus(
+            task.id, senderSeat.slug, tags.working ? 'working' : 'standby', senderSeat.globalMetaId);
+        } else if (senderMember) {
+          await store.setMemberStatus(
+            task.id, null, tags.working ? 'working' : 'standby', senderMember.globalMetaId);
+        }
       }
     }
 
@@ -2077,7 +2096,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       try {
         const tags = parseGroupTaskTags(message.content);
         current = await applyTagSideEffects(
-          store, current, profile.slug, message, tags, seats, ownerGmid, profile, promptSeats, deferredReview,
+          store, current, profile.slug, message, tags, seats, members, ownerGmid, profile, promptSeats, deferredReview,
         );
         await trackAssignmentAcks(store, current, message, members, tags).catch(() => undefined);
         for (const member of undrivableWorkers) {
@@ -2186,6 +2205,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
               message,
               parseGroupTaskTags(message.content),
               seats,
+              members,
               ownerGmid,
               profile,
               promptSeats,

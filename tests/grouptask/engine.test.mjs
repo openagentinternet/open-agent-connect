@@ -1027,3 +1027,43 @@ test('engine: a markdown-wrapped chair status tag on its own line still applies'
   assert.equal((await h2.chairStore.getTaskById(task2.id)).status, 'executing',
     'a mid-prose mention never transitions');
 });
+
+// ---------------------------------------------------------------------------
+// Remote OpenTeam members: deliverables and member tags reach the ledger
+// ---------------------------------------------------------------------------
+
+test('engine: a remote member [DELIVERABLE] is recorded (the old senderSeat guard dropped it)', async () => {
+  const h = createHarness('metabot-gt-engine-remote-deliverable-');
+  const task = await h.seedTask('executing');
+  await h.chairStore.addMember({
+    taskId: task.id, slug: null, globalMetaId: 'IDREMOTE', role: 'worker', displayName: 'Lucy',
+  });
+  const pin = 'b'.repeat(64) + 'i0';
+  h.pushHistory('IDREMOTE', `@Bob 【交付】文案定稿已上链\n[DELIVERABLE] note: pin://${pin}`);
+  h.llmTurns.push('[NO_REPLY]'); // the chair turn consumes the message silently
+
+  await h.engine.tick();
+
+  const rows = await h.chairStore.listDeliverables(task.id);
+  assert.equal(rows.length, 1, 'remote deliverable recorded on the ledger');
+  assert.equal(rows[0].authorGlobalMetaId, 'IDREMOTE');
+  assert.equal(rows[0].kind, 'pin');
+  assert.match(rows[0].uri ?? '', new RegExp(pin));
+  assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, 0);
+});
+
+test('engine: a remote member [WORKING] ack updates the member status by globalMetaId', async () => {
+  const h = createHarness('metabot-gt-engine-remote-working-');
+  const task = await h.seedTask('executing');
+  await h.chairStore.addMember({
+    taskId: task.id, slug: null, globalMetaId: 'IDREMOTE', role: 'worker', displayName: 'eleven',
+  });
+  h.pushHistory('IDREMOTE', '[WORKING] 收到，开始制作封面图（约 20 分钟）');
+  h.llmTurns.push('[NO_REPLY]');
+
+  await h.engine.tick();
+
+  const members = await h.chairStore.listMembers(task.id);
+  const remote = members.find((member) => member.globalMetaId === 'IDREMOTE');
+  assert.equal(remote.status, 'working', 'remote ack recorded by globalMetaId');
+});
