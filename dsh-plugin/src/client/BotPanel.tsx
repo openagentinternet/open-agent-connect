@@ -24,6 +24,7 @@ import {
   type LlmDirectory
 } from './api.ts'
 import { sortBotsTwinFirst } from '../bot-order.ts'
+import { isChipBotAvailable } from '../chip-logic.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
@@ -34,6 +35,17 @@ type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string
 
 /** Mirror of the daemon's MAX_LOCAL_BOT_PROFILES (metabotProfileManager.ts). */
 const MAX_LOCAL_BOT_PROFILES = 100
+
+/** The Bots-panel "only available Bots" filter preference, remembered per browser. */
+const AVAILABLE_ONLY_STORAGE_KEY = 'oac-dsh:bots-available-only:v1'
+
+function readAvailableOnly(): boolean {
+  try { return window.localStorage.getItem(AVAILABLE_ONLY_STORAGE_KEY) === '1' } catch { return false }
+}
+
+function writeAvailableOnly(value: boolean): void {
+  try { window.localStorage.setItem(AVAILABLE_ONLY_STORAGE_KEY, value ? '1' : '0') } catch { /* storage may be disabled */ }
+}
 
 /** Create-modal phases: form -> publishing -> success / setup-pending / error. */
 type CreatePhase =
@@ -101,6 +113,7 @@ export function BotPanel({
 }: BotPanelInjected & { close: () => void; t: Translate }): ReactNode {
   const [bots, setBots] = useState<BotRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [availableOnly, setAvailableOnly] = useState<boolean>(readAvailableOnly)
   const [creating, setCreating] = useState(false)
   const [createPhase, setCreatePhase] = useState<CreatePhase>({ kind: 'form' })
   const [lastCreateInput, setLastCreateInput] = useState<CreateBotInput | null>(null)
@@ -411,9 +424,28 @@ export function BotPanel({
       {bots && bots.length === 0 ? <div className="oac-bot-intro">{t('empty')}</div> : null}
       {bots && bots.length > 0 ? (
         <>
-          <p className="oac-bot-intro">{t('count', { count: bots.length }).replace('{count}', String(bots.length))}</p>
+          <div className="oac-bot-listing-head">
+            <p className="oac-bot-intro">{t('count', { count: bots.length }).replace('{count}', String(bots.length))}</p>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={availableOnly}
+              className={availableOnly ? 'oac-switch on' : 'oac-switch'}
+              onClick={() => {
+                const next = !availableOnly
+                writeAvailableOnly(next)
+                setAvailableOnly(next)
+              }}
+            >
+              <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
+              <span className="oac-switch-text">{t('availableOnly')}</span>
+            </button>
+          </div>
+          {availableOnly && bots.every((bot) => !isChipBotAvailable(bot)) ? (
+            <div className="oac-muted">{t('availableOnlyEmpty')}</div>
+          ) : null}
           <ul className="oac-bot-grid">
-            {bots.map((bot) => {
+            {(availableOnly ? bots.filter((bot) => isChipBotAvailable(bot)) : bots).map((bot) => {
               const setupPending = bot.setup != null && bot.setup.state !== 'ready'
               const llmUnset = !bot.dshLlmProvider?.trim() || !bot.dshLlmModel?.trim()
               return (

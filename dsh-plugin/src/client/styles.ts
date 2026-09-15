@@ -4,6 +4,7 @@ export const BOTS_CSS = `
 .oac-row h2 { margin: 0; font-size: 18px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); }
 .oac-muted { opacity: 0.72; font-size: 12px; }
 .oac-bot-intro { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }
+.oac-bot-listing-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .oac-error { color: var(--dsh-color-danger, #c44); }
 .oac-card { border: 1px solid var(--dsh-border, rgba(127,127,127,.3)); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
 .oac-card-list { display: flex; flex-direction: column; gap: 8px; }
