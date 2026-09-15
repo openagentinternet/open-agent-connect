@@ -71,16 +71,35 @@ test('seat search merges local + remote, match-first with local tie-break', asyn
 test('local wins within the tie margin, remote wins beyond it', async () => {
   const deps = baseDeps({
     searchRemote: async () => [
-      { globalMetaId: 'idr1', name: 'Remote High', bio: 'content', chatSkills: [], score: 100 },
+      // OT-04: remote quality is judged by VISIBLE signals + on-chain
+      // experience, never by the index's coarse flat score — a rich resume
+      // beats a bare-name local regardless of the remote score field.
+      { globalMetaId: 'idr1', name: 'Remote High', bio: 'content writer — essays, posts, reviews', chatSkills: ['content writing', 'editing'], score: 100, groupTaskCount: 12 },
       { globalMetaId: 'idr2', name: 'Remote Near', bio: 'content', chatSkills: [], score: 8 },
     ],
   });
   const result = await searchGroupTaskSeatCandidates(deps, { query: 'content' });
-  assert.equal(result.candidates[0].name, 'Remote High');
-  // Writer One (local, small score) vs Remote Near (8): within margin → local first.
+  assert.equal(result.candidates[0].name, 'Remote High',
+    'a genuinely richer resume outranks locals (experience bonus included)');
+  assert.ok(result.candidates[0].matchReasons.some(
+    (reason) => reason.token.includes('prior group tasks')), 'experience is explainable');
+  // Writer One (local, small score) vs Remote Near (tie): within margin → local first.
   const nearIdx = result.candidates.findIndex((c) => c.name === 'Remote Near');
   const writerIdx = result.candidates.findIndex((c) => c.name === 'Writer One');
   assert.ok(nearIdx > 0 && writerIdx >= 0 && writerIdx < nearIdx, JSON.stringify(result.candidates.map((c) => [c.name, c.score])));
+});
+
+test('OT-04: a flat all-zero remote field warns that order is not meaningful', async () => {
+  const deps = baseDeps({
+    listLocalWorkers: async () => [],
+    searchRemote: async () => [
+      { globalMetaId: 'idr1', name: 'Aaa Bot', bio: '', chatSkills: [], score: 0.5 },
+      { globalMetaId: 'idr2', name: 'Bbb Bot', bio: '', chatSkills: [], score: 0.5 },
+    ],
+  });
+  const result = await searchGroupTaskSeatCandidates(deps, { query: 'unrelated-widget' });
+  assert.ok(result.warnings.some((warning) => warning.includes('order does NOT reflect fit')),
+    `warnings: ${JSON.stringify(result.warnings)}`);
 });
 
 test('impression verdicts boost/demote/block with IDBots deltas', async () => {

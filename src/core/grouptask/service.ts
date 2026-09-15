@@ -472,8 +472,15 @@ export async function createGroupTask(
     );
   }
 
+  // OT-07 R21/R22: the origin-session receipt carries the taskId and describes
+  // COMPLETED state in past tense — a future-tense receipt ("planning runs
+  // next") arriving after everything already happened invited duplicate
+  // create/dispatch calls from literal-minded agents.
+  const memberCount = (await store.listMembers(task.id)).length;
   await emitGroupTaskRelay(ctx, chair, task, 'created',
-    `Task created and the on-chain group is open. The engine posts the kickoff and runs planning next.`);
+    `Group task ${task.id} created; the on-chain group is open (task status: ${task.status}). `
+    + `Kickoff posted, roster ${memberCount} member(s). Track it in the Group Tasks panel or with `
+    + `{action:"detail", taskId:${task.id}}.`);
 
   return {
     chairSlug: chair.slug,

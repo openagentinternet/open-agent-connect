@@ -160,7 +160,11 @@ function toProfileRef(profile: MetabotProfileFull, metaId: string | null): Group
     globalMetaId: normalizeText(profile.globalMetaId) || null,
     metaId,
     botType: profile.botType === 'twin' ? 'twin' : profile.botType === 'worker' ? 'worker' : null,
-    avatar: normalizeText(profile.avatarDataUrl) || null,
+    // OT-03 R9: never inline the base64 avatar here — this ref feeds the
+    // detail/list payloads that agents consume, and an 8KB data URL per
+    // member per call was a silent context tax. The panel resolves local Bot
+    // avatars client-side from the bots API (a UI-specific surface).
+    avatar: null,
     available: isMetabotProfileAvailable(profile),
   };
 }
