@@ -59,7 +59,20 @@ export async function runSurfCommand(
   if (subcommand === 'budget') {
     const handler = requireSurfHandler(context, 'budget');
     if (isFailure(handler)) return handler;
-    const positional = args.filter((arg) => !arg.startsWith('--') && arg !== 'budget');
+    // Positionals = bare tokens only: flags AND their values are skipped, so
+    // `--from bob 30` yields ['30'] (the flag's value must never read as the
+    // budget — live-smoke catch, 2026-09-15).
+    const VALUE_FLAGS = new Set(['--from', '--trigger', '--limit', '--value']);
+    const positional: string[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]!;
+      if (arg === 'budget') continue;
+      if (arg.startsWith('--')) {
+        if (VALUE_FLAGS.has(arg) && !arg.includes('=')) index += 1;
+        continue;
+      }
+      positional.push(arg);
+    }
     const raw = positional[0] ?? readFlagValue(args, '--value');
     if (raw === undefined || raw === null) {
       return commandMissingFlag('budget value (metabot surf budget --from <slug> <0-100>)');
