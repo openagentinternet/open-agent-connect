@@ -395,6 +395,49 @@ page (definitive negatives cached, positives always re-probed for fresh
 counts). Human CLI: `metabot qanda search|latest|detail|answers` and the
 `--request-file` write verbs.
 
+## Metaprotocol registry: browse, read, publish protocols
+
+IDBots feat/metaprotocol-registry-tools parity on the on-chain protocol
+registry (`/protocols/metaprotocol` — the authoritative catalog where every
+public MetaID protocol is registered, spec
+`docs/metaid_protocols/metaprotocol-registry-agent-tools.md`). Two native
+tools on the host global layer (every session sees them):
+
+- **`metaprotocol_registry`** (read-only): `list` (registered protocols,
+  current version, path, title, intro, publisher; keyword filter + cursor
+  pagination), `read` (one protocol's full authoritative latest-version body,
+  `protocolContent` JSON5 verbatim, wrapped as untrusted on-chain data in
+  `<metaweb_protocol_content>`), `versions` (full version history: pinId,
+  version, timestamp, author). Resolution order: `protocolPath` →
+  `protocolName` (exact match; multiple hits list candidates) → `pinId`.
+  Reads execute the OAC core registry client in-process against the metaso-p2p
+  `/api/metaweb/protocols*` family (`so.metaid.io`,
+  `METABOT_METAWEB_API_BASE_URL` override); when MetaSo is unreachable the
+  tool degrades to a read-only MANAPI scan (`manapi.metaid.io
+  /pin/path/list`, payloads parsed client-side) and marks the output's first
+  line `(degraded: registry fallback)`. Deep reads record on the chain-read
+  ledger through a fire-and-forget `chainhistory read record` CLI call.
+- **`post_metaprotocol`** (write): `publish` registers a NEW protocol under
+  `/protocols/<protocolName-lowercase>`; `update` publishes a new version of
+  an existing one (only the original registrant — identity cascade
+  globalMetaId → metaId → address; version auto-increments `1.0.9 → 1.1.0`
+  when omitted). Writes run through `metabot protocol
+  publish|update --request-file` → daemon `/api/protocol/*`, which owns the
+  §5.4 gate order: draft-07 payload schema validation BEFORE anything reaches
+  the wallet, MetaSo precheck (path occupancy for publish — unconfirmed
+  mempool registrations count as occupied; record resolution for update) with
+  the MANAPI degraded scan, a hard refusal when both indexes are down, and
+  conflict/unauthorized updates that NEVER write. Pins are isomorphic with
+  the human protocol square (same 7-tuple — create on `/protocols/
+  metaprotocol`, modify on `@<source pinId>` with the outer version of the
+  replaced body — same body fields, same `{value, description}` → annotated
+  JSON5 serialization), so human and Agent registrations are mutually visible.
+
+CLI-first for humans and other hosts: `metabot protocol
+list|read|versions|check` (reads, in-process) and `metabot protocol
+publish|update --request-file --from` (daemon writes); the surf session's
+own R6 `metaprotocol_registry` radar tool is unchanged.
+
 ## MetaWeb Surf (AI 冲浪): autonomous AI-internet browsing
 
 IDBots feat/metaweb-surf port (v0.9.0-0.9.2). One unattended, persona-driven

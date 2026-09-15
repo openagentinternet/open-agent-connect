@@ -1223,6 +1223,56 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG],
   },
   {
+    commandPath: ['protocol'],
+    summary: 'MetaID protocol registry (/protocols/metaprotocol, docs/metaid_protocols/metaprotocol-registry-agent-tools.md): browse registered protocols, read full definitions, version history, and publish/update registrations.',
+    usage: 'metabot protocol <list|read|versions|check|publish|update> …',
+    subcommands: [
+      {
+        name: 'list',
+        summary: 'Enumerate registered protocols (newest first): [--query <q>] [--publisher <id>] [--size N] [--cursor C].',
+      },
+      {
+        name: 'read',
+        summary: 'One protocol\'s full authoritative latest-version body incl. protocolContent JSON5: --path /protocols/<name> | --name <displayName> | --pin <pinId>.',
+      },
+      {
+        name: 'versions',
+        summary: 'Full version history (pinId, version, timestamp, author): --path | --name | --pin (any pinId in the chain).',
+      },
+      {
+        name: 'check',
+        summary: 'Publish precheck — is a registry path free: --path /protocols/<name>.',
+      },
+      {
+        name: 'publish',
+        summary: 'Register a NEW protocol from a JSON request file: { title, protocol_name, body | protocol_content, intro?, version?, protocol_content_type?, metadata?, attachments? }. Path /protocols/<protocol_name> must be free.',
+      },
+      {
+        name: 'update',
+        summary: 'Publish a new version of an existing protocol from a JSON request file: { title, protocol_name, target, body | protocol_content, version?, … }. Only the original registrant may update; version auto-increments when omitted.',
+      },
+    ],
+    optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG],
+  },
+  {
+    commandPath: ['protocol', 'publish'],
+    summary: 'Register a NEW protocol in the on-chain protocol registry.',
+    usage: 'metabot protocol publish --request-file <path> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>]',
+    requiredFlags: [
+      { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG, CHAIN_WRITE_FLAG],
+  },
+  {
+    commandPath: ['protocol', 'update'],
+    summary: 'Publish a new version of a protocol you registered (identity-checked).',
+    usage: 'metabot protocol update --request-file <path> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>]',
+    requiredFlags: [
+      { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG, CHAIN_WRITE_FLAG],
+  },
+  {
     commandPath: ['buzz'],
     summary: 'Buzz commands for posting simplebuzz content on MetaWeb.',
     usage: 'metabot buzz <subcommand>',

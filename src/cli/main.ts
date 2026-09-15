@@ -38,6 +38,7 @@ import { runMetaIdCommand } from './commands/metaid';
 import { runMetawebCommand } from './commands/metaweb';
 import { runSimpleNoteCommand } from './commands/simplenote';
 import { runQandaCommand } from './commands/qanda';
+import { runProtocolCommand } from './commands/protocol';
 import { runMediaCommand } from './commands/media';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
@@ -197,6 +198,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'qanda':
           result = await runQandaCommand(rest, context);
+          break;
+        case 'protocol':
+          result = await runProtocolCommand(rest, context);
           break;
         case undefined:
           result = commandFailed('missing_command', 'No command provided.');
