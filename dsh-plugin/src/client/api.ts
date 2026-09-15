@@ -1750,3 +1750,95 @@ export async function studyList(from: string): Promise<StudyJob[]> {
   const rows = Array.isArray(data.jobs) ? data.jobs : []
   return rows.map(studyJobOf)
 }
+
+// ---------------- Surf (MetaWeb AI-internet browsing) ----------------
+
+export type SurfRunStatus = 'running' | 'done' | 'failed'
+
+export interface SurfRun {
+  id: string
+  trigger: string
+  status: SurfRunStatus
+  stats: {
+    fetched: number
+    deepRead: number
+    savedToKb: number
+    liked: number
+    commented: number
+    answered: number
+    posted: number
+    challenged: number
+    inboxHandled: number
+    discoveredProtocols: number
+    tasksScheduled: number
+  }
+  reportMarkdown: string | null
+  error: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+export interface SurfStatus {
+  runs: SurfRun[]
+  running: boolean
+  surfBeforeDreamEnabled: boolean
+  interactionBudget: number
+  preDreamDue?: boolean
+}
+
+function surfRunOf(row: Record<string, unknown>): SurfRun {
+  const stats = (row.stats && typeof row.stats === 'object' ? row.stats : {}) as Record<string, unknown>
+  const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 0)
+  return {
+    id: String(row.id ?? ''),
+    trigger: String(row.trigger ?? 'manual-ui'),
+    status: row.status === 'running' || row.status === 'failed' ? row.status : 'done',
+    stats: {
+      fetched: num(stats.fetched),
+      deepRead: num(stats.deepRead),
+      savedToKb: num(stats.savedToKb),
+      liked: num(stats.liked),
+      commented: num(stats.commented),
+      answered: num(stats.answered),
+      posted: num(stats.posted),
+      challenged: num(stats.challenged),
+      inboxHandled: num(stats.inboxHandled),
+      discoveredProtocols: num(stats.discoveredProtocols),
+      tasksScheduled: num(stats.tasksScheduled),
+    },
+    reportMarkdown: typeof row.reportMarkdown === 'string' ? row.reportMarkdown : null,
+    error: typeof row.error === 'string' ? row.error : null,
+    startedAt: String(row.startedAt ?? ''),
+    finishedAt: typeof row.finishedAt === 'string' ? row.finishedAt : null,
+  }
+}
+
+export async function surfStatus(from: string, limit = 5): Promise<SurfStatus> {
+  const data = recordOf(await post<unknown>('surf/status', { from, limit }))
+  const rows = Array.isArray(data.runs) ? data.runs.map((row) => surfRunOf(recordOf(row))) : []
+  return {
+    runs: rows,
+    running: data.running === true,
+    surfBeforeDreamEnabled: data.surfBeforeDreamEnabled === true,
+    interactionBudget: typeof data.interactionBudget === 'number' ? data.interactionBudget : 20,
+    preDreamDue: data.preDreamDue === true,
+  }
+}
+
+export async function surfRunStart(from: string): Promise<{ runId: string }> {
+  const data = recordOf(await post<unknown>('surf/run', { from, trigger: 'manual-ui' }))
+  return { runId: String(data.runId ?? '') }
+}
+
+export async function surfEnable(from: string): Promise<{ qaSurfRetired: boolean }> {
+  const data = recordOf(await post<unknown>('surf/enable', { from }))
+  return { qaSurfRetired: data.qaSurfRetired === true }
+}
+
+export async function surfDisable(from: string): Promise<void> {
+  await post<unknown>('surf/disable', { from })
+}
+
+export async function surfBudgetSet(from: string, budget: number): Promise<void> {
+  await post<unknown>('surf/budget', { from, budget })
+}

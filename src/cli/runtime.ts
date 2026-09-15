@@ -5422,15 +5422,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (!('homeDir' in actor)) return actor;
         const paths = resolveMetabotPaths(actor.homeDir);
         const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 5)));
-        const [runs, settings] = await Promise.all([
+        const [runs, settings, latest, memoryEnabled] = await Promise.all([
           createMetawebSurfStore(paths).listRuns(limit),
           createSurfSettingsStore(paths).read(),
+          createMetawebSurfStore(paths).getLatestFinishedRun(),
+          createMemoryPolicyStore(paths).effectivePolicy().then((policy) => policy.memoryEnabled).catch(() => true),
         ]);
+        const running = runs.some((run) => run.status === 'running');
+        const finishedMs = latest?.finishedAt ? Date.parse(latest.finishedAt) : NaN;
+        const preDreamDue = settings.surfBeforeDreamEnabled
+          && !running
+          && memoryEnabled
+          && (!Number.isFinite(finishedMs) || Date.now() - finishedMs >= 20 * 60 * 60 * 1000);
         return commandSuccess({
           runs,
-          running: runs.some((run) => run.status === 'running'),
+          running,
           surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
           interactionBudget: settings.interactionBudget,
+          preDreamDue,
           formatted: formatSurfRunList(runs),
         });
       },

@@ -13,6 +13,8 @@ import { runDreamWithLlm } from './memory-routes.js'
 
 const DEFAULT_TICK_MINUTES = 10
 const LIST_TIMEOUT_MS = 30_000
+/** Pre-dream surf: the daemon-side watchdog is 35 min; margin for CLI boot. */
+const PRE_DREAM_SURF_TIMEOUT_MS = 40 * 60_000
 /** Hygiene runs in-process on the CLI; the deep-consolidation LLM attempt alone may take 3 minutes. */
 const HYGIENE_RUN_TIMEOUT_MS = 600_000
 
@@ -27,6 +29,10 @@ export interface DreamBotOutcome {
   hygieneRan?: boolean
   hygieneError?: string
   hygieneSkipped?: string
+  /** Set when the pre-dream surf ran (or why it was skipped). */
+  surfRan?: boolean
+  surfError?: string
+  surfSkipped?: string
 }
 
 export interface DreamSchedulerOptions {
@@ -37,6 +43,12 @@ export interface DreamSchedulerOptions {
   dreamEnabled?: boolean
   /** Memory-hygiene tail after the dream pass (default enabled; CLI `memory hygiene due/run`). */
   hygieneEnabled?: boolean
+  /**
+   * Pre-dream MetaWeb surf pass (default enabled; per-Bot opt-in lives in the
+   * Bot's surf settings — `surf status` reports `preDreamDue`). A surf
+   * failure never fails the dream.
+   */
+  surfBeforeDream?: boolean
   /** Test hook: called after each tick with per-bot outcomes. */
   onTick?: (outcomes: DreamBotOutcome[]) => void
 }
@@ -104,6 +116,40 @@ export async function runDreamSchedulerTick(
         outcome.skipped = 'no due dates'
         continue
       }
+      // Pre-dream MetaWeb surf (IDBots feat/metaweb-surf port): the per-Bot
+      // opt-in + 20h recency + memory gates live daemon-side (`surf status`
+      // reports `preDreamDue`); when due, one unattended surf runs BEFORE the
+      // dream so its report feeds tonight's dream prompt (gatherActivity
+      // picks up the same-night run automatically). A surf failure or skip
+      // never fails the dream.
+      if (options.surfBeforeDream !== false) {
+        try {
+          const surfStatus = await options.run(['surf', 'status', '--from', slug], { timeoutMs: LIST_TIMEOUT_MS })
+          const preDreamDue = surfStatus.ok
+            ? (surfStatus.data as { preDreamDue?: boolean } | null)?.preDreamDue === true
+            : false
+          if (preDreamDue) {
+            const surfRun = await options.run(
+              ['surf', 'run', '--from', slug, '--trigger', 'pre-dream', '--wait'],
+              { timeoutMs: PRE_DREAM_SURF_TIMEOUT_MS },
+            )
+            if (surfRun.ok) {
+              const surfData = (surfRun.data ?? {}) as { status?: string; error?: string }
+              outcome.surfRan = true
+              if (surfData.status === 'failed') {
+                // The run settled failed but the dream proceeds — recorded, not raised.
+                outcome.surfError = surfData.error ?? 'pre-dream surf run failed'
+              }
+            } else {
+              outcome.surfError = surfRun.message ?? surfRun.code ?? 'pre-dream surf failed'
+            }
+          } else {
+            outcome.surfSkipped = 'not due (off / recent / memory off / running)'
+          }
+        } catch (error) {
+          outcome.surfError = error instanceof Error ? error.message : String(error)
+        }
+      }
       for (const date of dueDates) {
         const result = await runDreamWithLlm({ from: slug, date, ...llmConfig }, options.run, llm)
         if (result.ok) outcome.dreamed.push(date)
@@ -145,6 +191,11 @@ export function reportDreamSchedulerOutcomes(ctx: HostContext, outcomes: DreamBo
       ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} skipped: ${outcome.skipped}`)
     } else if (outcome.dreamed.length > 0) {
       ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} dreamed ${outcome.dreamed.join(', ')}`)
+    }
+    if (outcome.surfRan) {
+      ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} pre-dream surf ran`)
+    } else if (outcome.surfError) {
+      ctx.logger?.warn?.(`[oac-dsh] dream scheduler: ${outcome.slug} pre-dream surf: ${outcome.surfError} (dream proceeds)`)
     }
     if (outcome.hygieneRan) {
       ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} hygiene ran`)

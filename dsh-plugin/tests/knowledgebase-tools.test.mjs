@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -75,35 +75,64 @@ test('kb/study tools survive a cordis ctx that throws on gated reads (kernel reg
   const byName = new Map(host.tools.map((tool) => [tool.name, tool]))
   const exec = { agent: kernelAgent, callId: 'call-1' }
 
-  const enabled = await byName.get('metaweb_qa_surf_enqueue').execute({}, exec)
-  assert.match(String(enabled), /Nightly Q&A surfing enabled/)
+  const cliCalls = []
+  const run = async (args) => {
+    cliCalls.push(args.join(' '))
+    return { ok: true, state: 'success', data: { runId: 'r1' } }
+  }
+  const defs = plugin.buildStudyToolDefinitions({
+    host: host.ctx,
+    fallbackSlug: 'test-bot',
+    resolveHomeDir: resolve,
+    run,
+  })
+  const aliasByName = new Map(defs.map((tool) => [tool.name, tool]))
+  const enabled = await aliasByName.get('metaweb_qa_surf_enqueue').execute({}, exec)
+  assert.match(String(enabled), /Nightly MetaWeb surfing enabled/)
+  assert.match(String(enabled), /metaweb_qa_surf_disable|metaweb_surf_status/)
+  // The immediate surf start went through the CLI bridge (enable+retire are in-process).
+  assert.ok(cliCalls.some((entry) => entry.startsWith('surf run --from test-bot --trigger manual-chat')))
+  // No legacy study job was created — Q&A browsing lives in the surf run now.
   const status = await byName.get('metaweb_study_status').execute({}, exec)
-  assert.match(String(status), /recurring Q&A surfing/)
+  assert.doesNotMatch(String(status), /recurring Q&A surfing/)
 })
 
-test('qa-surf enqueue/dedup/disable roundtrip with the recurring status label', async () => {
-  const { exec, resolve } = profileSetup('kb-qa-surf-')
+test('qa-surf alias roundtrip: enqueue enables surf + retires the study job; disable turns it off', async () => {
+  const { exec, resolve, homeDir } = profileSetup('kb-qa-surf-')
   const host = fakeHost()
-  plugin.bindKnowledgeBaseToolInstall(host.ctx, 'test-bot', resolve)
-  const byName = new Map(host.tools.map((tool) => [tool.name, tool]))
+  const cliCalls = []
+  const run = async (args) => {
+    cliCalls.push(args.join(' '))
+    return { ok: true, state: 'success', data: {} }
+  }
+  const defs = plugin.buildStudyToolDefinitions({
+    host: host.ctx,
+    fallbackSlug: 'test-bot',
+    resolveHomeDir: resolve,
+    run,
+  })
+  const byName = new Map(defs.map((tool) => [tool.name, tool]))
+
+  // Seed a legacy active qa-surf job, then enroll through the alias.
+  const studyStore = localRead.core('core/knowledgebase/studyJobs.js')
+    .createStudyJobStore(localRead.core('core/state/paths.js').resolveMetabotPaths(homeDir))
+  await studyStore.enqueueQaSurfJob({ metabotSlug: 'test-bot', budgetPins: 5 })
 
   const enabled = await byName.get('metaweb_qa_surf_enqueue').execute({ nightly_budget: 5 }, exec)
-  assert.match(String(enabled), /Nightly Q&A surfing enabled \(nightly budget: 5 pins\/run\)\./)
-  assert.match(String(enabled), /metaweb_qa_surf_disable/)
-
-  const dup = await byName.get('metaweb_qa_surf_enqueue').execute({}, exec)
-  assert.match(String(dup), /already pending for this bot/)
-  assert.match(String(dup), /no duplicate was created/)
-
-  const status = await byName.get('metaweb_study_status').execute({}, exec)
-  assert.match(String(status), /"On-chain Q&A surfing" \[recurring Q&A surfing\] \[pending\]/)
-  assert.match(String(status), /pins handled: 0\/5 per night/)
+  assert.match(String(enabled), /Nightly MetaWeb surfing enabled/)
+  assert.match(String(enabled), /retired/)
+  // The settings file flipped ON in-process; the legacy job retired in-process.
+  const settingsRaw = JSON.parse(readFileSync(path.join(homeDir, '.runtime/surf/settings.json'), 'utf8'))
+  assert.equal(settingsRaw.surfBeforeDreamEnabled, true)
+  assert.ok(cliCalls.some((entry) => entry.startsWith('surf run --from test-bot --trigger manual-chat')))
+  const job = (await studyStore.listStudyJobs('test-bot')).find((entry) => entry.kind === 'qa-surf')
+  assert.equal(job.status, 'done')
+  assert.match(job.summary ?? '', /Superseded by MetaWeb surf/)
 
   const disabled = await byName.get('metaweb_qa_surf_disable').execute({}, exec)
-  assert.match(String(disabled), /Nightly Q&A surfing disabled\./)
-
-  const again = await byName.get('metaweb_qa_surf_disable').execute({}, exec)
-  assert.match(String(again), /not active for this bot/)
+  assert.match(String(disabled), /Nightly MetaWeb surfing disabled\./)
+  const settingsAfter = JSON.parse(readFileSync(path.join(homeDir, '.runtime/surf/settings.json'), 'utf8'))
+  assert.equal(settingsAfter.surfBeforeDreamEnabled, false)
 })
 
 // DSH-DEFECT-KB-001 acceptance smoke: add -> query -> learn -> list on a

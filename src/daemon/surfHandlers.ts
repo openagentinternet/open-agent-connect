@@ -166,12 +166,17 @@ export function createSurfDaemonHandlers(input: CreateSurfDaemonHandlersInput) {
         createMetawebSurfStore(paths).listRuns(limit),
         createSurfSettingsStore(paths).read(),
       ]);
+      // Pre-dream gate (opt-in + 20h recency + memory + not running) — the
+      // dream scheduler reads this to decide whether tonight's dream gets a
+      // fresh surf first.
+      const preDreamDue = await serviceFor(bot).shouldPreDreamSurf().catch(() => false);
       return commandSuccess({
         botSlug: bot.slug,
         runs,
         running: servicesByHome.get(bot.homeDir)?.isRunning() ?? false,
         surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
         interactionBudget: settings.interactionBudget,
+        preDreamDue,
         formatted: formatSurfRunList(runs),
       });
     },
