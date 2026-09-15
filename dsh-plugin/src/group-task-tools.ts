@@ -36,7 +36,7 @@ Do NOT open one for single-step jobs (do them yourself or use local_worker_deleg
 3. For each seat call \`{action:"search_candidates", seat}\` once (match-first; local Workers are a tie-break, not a gate), then \`{action:"propose", title, goal, plan, acceptanceCriteria}\`. The plan is {stages:[{id,title,seatRole,dependsOn[]}], seats:[{role, candidateName, candidateSlug?, candidateGlobalMetaId?, source:"local"|"remote", reason, domainLabel?, backupName?}]}. A local seat must name an AVAILABLE local Bot (Settings → Bots toggle on AND a DSH LLM pair configured) — propose refuses slugs that are unknown or unavailable, so only pick candidates search_candidates returned; never seat a Bot you merely remember.
 4. The propose result carries \`slateText\` — show it to the owner in the owner's language (pass \`language\`), then WAIT. The owner confirms in chat → \`{action:"decide", proposalId, decision:"confirm"}\`; asks for changes → "revise", then propose again; wants staffing skipped → "skip".
 5. After a confirm decision call \`{action:"create_from_proposal", proposalId}\`. Auto-start waiver: when the triggering wish itself said to just start (直接开始 / 直接开 / "just start" / "no need to confirm"), you may create immediately — pass the original wish text as \`wish\` on propose so the gate records it.
-6. create_from_proposal returns the task (taskId, groupId) and \`pendingRemoteSeats\`. Invite each remote seat one at a time: \`{action:"invite", taskId, globalMetaId, name?, skills?}\` (invites expire in 10 minutes; the daemon must be alive when it arrives). Then report the group's title, roster, and stage plan to the owner and let the engine run. When the result lists \`skippedWorkers\`, those local seats were dropped as unavailable — name them to the owner and note the group runs short those seats.
+6. create_from_proposal returns the task (taskId, groupId) and \`pendingRemoteSeats\`. One Bot can hold several seats — invite each remote BOT exactly ONCE, by its GlobalMetaId; a single invite covers all its seats (duplicate invites are refused: invite_pending / already_member). Invites expire in 10 minutes and the daemon must be alive when one arrives. Then report the group's title, roster, and stage plan to the owner and let the engine run. When the result lists \`skippedWorkers\`, those local seats were dropped as unavailable — name them to the owner and note the group runs short those seats.
 
 ### After creation
 The daemon engine drives the task: it posts the kickoff, runs the planning turn, wakes @-mentioned workers, verifies deliverables, and moves planning → executing → review. SINGLE COMMANDER: the chair is the only coordinator and the host itself NEVER speaks in the group — every group message is written by a participant (chair, workers, or the owner); host observations reach the chair as private environment notes in its turn context. Do not speak as the chair inside the group while it runs (the engine speaks with the chair's voice); if you must post, post as the owner (\`asOwner\`) or as a member Bot (\`asSlug\`).
@@ -149,11 +149,21 @@ function formatCreated(data: Record<string, unknown>): string {
   ]
   const remoteSeats = (data.pendingRemoteSeats ?? []) as Array<Record<string, unknown>>
   if (remoteSeats.length > 0) {
-    lines.push(`Pending remote seats (${remoteSeats.length}) — invite each one next, invites expire in 10 minutes:`)
+    // OT-02: one Bot can hold several seats — group by Bot so the guidance
+    // never induces a duplicate invite (extra chain fee, pending litter).
+    const byBot = new Map<string, { name: string; gmid: string | null; roles: string[] }>()
     for (const seat of remoteSeats) {
-      lines.push(`  - ${String(seat.role)}: ${String(seat.candidateName)}${seat.candidateGlobalMetaId ? ` (globalMetaId ${String(seat.candidateGlobalMetaId)})` : ''}`)
+      const gmid = seat.candidateGlobalMetaId ? String(seat.candidateGlobalMetaId) : null
+      const key = (gmid ?? `name:${String(seat.candidateName)}`).toLowerCase()
+      const entry = byBot.get(key) ?? { name: String(seat.candidateName), gmid, roles: [] }
+      entry.roles.push(String(seat.role))
+      byBot.set(key, entry)
     }
-    lines.push(`Invite with {action:"invite", taskId:${String(task.id)}, globalMetaId:"..."} (chair defaults to ${String(data.chairSlug)}).`)
+    lines.push(`Pending remote Bots (${byBot.size}, holding ${remoteSeats.length} seat${remoteSeats.length === 1 ? '' : 's'}) — invite each BOT once; a single invite by its GlobalMetaId covers all its seats. Invites expire in 10 minutes:`)
+    for (const bot of byBot.values()) {
+      lines.push(`  - ${bot.name}${bot.gmid ? ` (globalMetaId ${bot.gmid})` : ''} — seats: ${bot.roles.join(', ')}`)
+    }
+    lines.push(`Invite with {action:"invite", taskId:${String(task.id)}, globalMetaId:"..."} (chair defaults to ${String(data.chairSlug)}). Duplicate invites are refused while one is pending or the Bot already joined.`)
   }
   const skipped = (data.skippedWorkers ?? []) as Array<Record<string, unknown>>
   if (skipped.length > 0) {

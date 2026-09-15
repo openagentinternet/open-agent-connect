@@ -243,9 +243,31 @@ test('decide validates the decision and create_from_proposal surfaces remote sea
   assert.equal(flagValue(createCall, '--proposal'), '7')
   assert.equal(flagValue(createCall, '--chair'), 'alice')
   assert.match(output, /task 6, group group-pin-2/)
-  assert.match(output, /Pending remote seats \(1\)/)
-  assert.match(output, /design: Remote Designer \(globalMetaId gm-1\)/)
-  assert.match(output, /invites expire in 10 minutes/)
+  assert.match(output, /Pending remote Bots \(1, holding 1 seat\)/)
+  assert.match(output, /Remote Designer \(globalMetaId gm-1\) — seats: design/)
+  assert.match(output, /[Ii]nvites expire in 10 minutes/)
+})
+
+test('create_from_proposal groups seats by Bot so one bot with two seats gets ONE invite (OT-02)', async () => {
+  const { run } = fakeRun((args) => ({
+    ok: true,
+    state: 'success',
+    data: {
+      chairSlug: 'alice',
+      task: { id: 9, groupId: 'group-pin-3', title: 'T', status: 'planning' },
+      taskId: 9,
+      pendingRemoteSeats: [
+        { role: 'design', candidateName: 'Eleven', candidateGlobalMetaId: 'gm-11' },
+        { role: 'engineering', candidateName: 'Eleven', candidateGlobalMetaId: 'gm-11' },
+      ],
+      decision: 'owner_confirmed',
+    },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const output = await controller.run('create_from_proposal', { proposalId: 8 })
+  assert.match(output, /Pending remote Bots \(1, holding 2 seats\)/, 'bots deduped, seats counted')
+  assert.match(output, /Eleven \(globalMetaId gm-11\) — seats: design, engineering/)
+  assert.match(output, /invite each BOT once/)
 })
 
 test('search_candidates requires a seat or a query', async () => {
