@@ -22,6 +22,7 @@ import { bindQaToolInstall } from './qa-tools.js'
 import { bindMetaprotocolToolInstall } from './metaprotocol-tools.js'
 import { bindSurfToolInstall } from './surf-tools.js'
 import { dispatchSurfRoutes } from './surf-routes.js'
+import { dispatchScheduleRoutes } from './schedule-routes.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
 import { bindMediaDescriptionTools } from './vision-tools.js'
 import { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
@@ -283,6 +284,8 @@ async function dispatchPost(
   if (kb !== undefined) return kb
   const surf = await dispatchSurfRoutes(method, payload)
   if (surf !== undefined) return surf
+  const scheduleRoutes = await dispatchScheduleRoutes(method, payload)
+  if (scheduleRoutes !== undefined) return scheduleRoutes
   const section = await dispatchSection(method, payload)
   if (section !== undefined) return section
   return { ok: false, state: 'failed', code: 'not-found', message: `unknown oac API method "${method}"` }
@@ -795,6 +798,7 @@ export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 export { dispatchSurfRoutes } from './surf-routes.js'
+export { dispatchScheduleRoutes } from './schedule-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick, runHygieneTail } from './dream-scheduler.js'
 export {

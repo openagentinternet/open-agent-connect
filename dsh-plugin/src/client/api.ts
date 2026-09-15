@@ -1751,6 +1751,138 @@ export async function studyList(from: string): Promise<StudyJob[]> {
   return rows.map(studyJobOf)
 }
 
+// ---------------- Scheduled tasks (A2A panel "Scheduled" tab) ----------------
+
+export type ScheduleSpecKind = 'at' | 'interval' | 'cron'
+
+export interface ScheduledTaskRow {
+  botSlug: string
+  id: string
+  name: string
+  description: string
+  enabled: boolean
+  scheduleKind: ScheduleSpecKind
+  /** Human summary of the spec (datetime / interval / cron text). */
+  scheduleText: string
+  channel: 'auto' | 'host' | 'daemon'
+  prompt: string
+  expiresAt: string | null
+  nextRunAtMs: number | null
+  lastRunAtMs: number | null
+  lastStatus: 'success' | 'error' | 'running' | null
+  lastError: string | null
+  consecutiveErrors: number
+  runningAtMs: number | null
+  createdAt: string
+  /** Surf handoff provenance (create_scheduled_task writes the marker text). */
+  fromSurf: boolean
+}
+
+export interface ScheduledRunRow {
+  id: string
+  taskId: string
+  status: 'success' | 'error' | 'running'
+  trigger: 'scheduled' | 'manual'
+  executor: string | null
+  startedAt: string
+  finishedAt: string | null
+  durationMs: number | null
+  error: string | null
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function toMillis(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function scheduleTextOf(schedule: Record<string, unknown>): { kind: ScheduleSpecKind; text: string } {
+  if (schedule.type === 'at') {
+    return { kind: 'at', text: String(schedule.datetime ?? '') }
+  }
+  if (schedule.type === 'interval') {
+    const ms = toMillis(schedule.intervalMs) ?? 0
+    const minutes = Math.round(ms / 60_000)
+    if (minutes >= 1440 && minutes % 1440 === 0) return { kind: 'interval', text: `every ${minutes / 1440}d` }
+    if (minutes >= 60 && minutes % 60 === 0) return { kind: 'interval', text: `every ${minutes / 60}h` }
+    return { kind: 'interval', text: `every ${minutes}m` }
+  }
+  return { kind: 'cron', text: String(schedule.expression ?? '') }
+}
+
+function scheduledTaskOf(row: unknown, botSlug: string): ScheduledTaskRow {
+  const record_ = record(row)
+  const state = record(record_.state)
+  const schedule = record(record_.schedule)
+  const { kind, text } = scheduleTextOf(schedule)
+  const lastStatus = state.lastStatus
+  const description = String(record_.description ?? '')
+  return {
+    botSlug,
+    id: String(record_.id ?? ''),
+    name: String(record_.name ?? ''),
+    description,
+    enabled: record_.enabled === true,
+    scheduleKind: kind,
+    scheduleText: text,
+    channel: record_.channel === 'host' || record_.channel === 'daemon' ? record_.channel : 'auto',
+    prompt: String(record_.prompt ?? ''),
+    expiresAt: typeof record_.expiresAt === 'string' ? record_.expiresAt : null,
+    nextRunAtMs: toMillis(state.nextRunAtMs),
+    lastRunAtMs: toMillis(state.lastRunAtMs),
+    lastStatus: lastStatus === 'success' || lastStatus === 'error' || lastStatus === 'running'
+      ? lastStatus
+      : null,
+    lastError: typeof state.lastError === 'string' ? state.lastError : null,
+    consecutiveErrors: Number.isFinite(Number(state.consecutiveErrors)) ? Math.max(0, Math.floor(Number(state.consecutiveErrors))) : 0,
+    runningAtMs: toMillis(state.runningAtMs),
+    createdAt: String(record_.createdAt ?? ''),
+    fromSurf: description.includes('Surf→work handoff'),
+  }
+}
+
+function scheduledRunOf(row: unknown): ScheduledRunRow {
+  const record_ = record(row)
+  const status = record_.status
+  return {
+    id: String(record_.id ?? ''),
+    taskId: String(record_.taskId ?? ''),
+    status: status === 'error' || status === 'running' ? status : 'success',
+    trigger: record_.trigger === 'manual' ? 'manual' : 'scheduled',
+    executor: typeof record_.executor === 'string' ? record_.executor : null,
+    startedAt: String(record_.startedAt ?? ''),
+    finishedAt: typeof record_.finishedAt === 'string' ? record_.finishedAt : null,
+    durationMs: toMillis(record_.durationMs),
+    error: typeof record_.error === 'string' ? record_.error : null,
+  }
+}
+
+export async function scheduleList(from: string): Promise<ScheduledTaskRow[]> {
+  const data = recordOf(await post<unknown>('schedule/list', { from }))
+  const rows = Array.isArray(data.tasks) ? data.tasks : []
+  return rows.map((row) => scheduledTaskOf(row, from))
+}
+
+export async function scheduleRuns(from: string, id: string, limit = 10): Promise<ScheduledRunRow[]> {
+  const data = recordOf(await post<unknown>('schedule/runs', { from, id, limit }))
+  const rows = Array.isArray(data.runs) ? data.runs : []
+  return rows.map(scheduledRunOf)
+}
+
+export async function scheduleSetEnabled(from: string, id: string, enabled: boolean): Promise<ScheduledTaskRow | null> {
+  const data = recordOf(await post<unknown>(enabled ? 'schedule/enable' : 'schedule/disable', { from, id }))
+  return data.task ? scheduledTaskOf(data.task, from) : null
+}
+
+export async function scheduleRunNow(from: string, id: string): Promise<void> {
+  await post<unknown>('schedule/run', { from, id })
+}
+
 // ---------------- Surf (MetaWeb AI-internet browsing) ----------------
 
 export type SurfRunStatus = 'running' | 'done' | 'failed'

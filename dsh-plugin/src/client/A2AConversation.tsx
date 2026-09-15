@@ -26,6 +26,7 @@ import { relativeTimeLabel } from '../relative-time.ts'
 import type { UnreadState } from '../unread-logic.ts'
 import type { A2AUnreadView } from './a2a-unread-store.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
+import { ScheduledTasksView, type ScheduledTaskInjectedApi } from './ScheduledTasksView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
 
@@ -44,6 +45,8 @@ export interface A2AConversationInjected {
     displayName?: string | null
   }) => Promise<unknown>
   grouptask: GroupTaskInjectedApi
+  /** The Scheduled tab's `/oac/api/schedule/*` face (metabot schedule verbs). */
+  schedule: ScheduledTaskInjectedApi
   /** Open a resource URI (e.g. `metaid://<globalMetaId>`) in the right-Sidebar Bot Browser tab. */
   browserOpen: (uri?: string) => Promise<void>
   hooks: {
@@ -162,6 +165,7 @@ export function A2AConversation({
   guidance,
   meta,
   grouptask,
+  schedule,
   browserOpen,
   useUnread,
   clearPrivateUnread,
@@ -169,7 +173,7 @@ export function A2AConversation({
   setView,
   t,
 }: InjectFace<A2AConversationInjected> & { t: Translate }): ReactNode {
-  const [mode, setMode] = useState<'private' | 'grouptask'>('private')
+  const [mode, setMode] = useState<'private' | 'grouptask' | 'scheduled'>('private')
   const [gtCreateSignal, setGtCreateSignal] = useState(0)
   const [profiles, setProfiles] = useState<BotRow[]>([])
   const [from, setFrom] = useState('')
@@ -492,7 +496,7 @@ export function A2AConversation({
         <div className="oac-gt-header-left">
           <h2>{t('title')}</h2>
           <div className="oac-tablist oac-gt-mode-tabs" role="tablist">
-            {(['private', 'grouptask'] as const).map((key) => (
+            {(['private', 'grouptask', 'scheduled'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
@@ -501,7 +505,7 @@ export function A2AConversation({
                 data-active={mode === key}
                 onClick={() => setMode(key)}
               >
-                {t(key === 'private' ? 'tabPrivate' : 'tabGroup')}
+                {t(key === 'private' ? 'tabPrivate' : key === 'grouptask' ? 'tabGroup' : 'tabScheduled')}
               </button>
             ))}
           </div>
