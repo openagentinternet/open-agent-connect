@@ -18,8 +18,9 @@
  */
 import { dispatchGroupTaskRoutes, type GroupTaskRouteDeps } from './grouptask.js'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { approvalOf, sessionApprovalPolicy } from './browser-tools.js'
 import type { RunFn } from './cli-payload.js'
-import type { HostAgentLike, HostToolDefinition } from './context-types.js'
+import type { HostAgentLike, HostApproval, HostApprovalOutcome, HostContext, HostToolDefinition } from './context-types.js'
 
 /** Group-task SOP for the Twin, ported from the IDBots metabot-group-task SKILL.md. */
 export const GROUP_TASK_SOP_TEXT = `## Group Tasks (multi-bot on-chain group tasks)
@@ -40,7 +41,7 @@ Do NOT open one for single-step jobs (do them yourself or use local_worker_deleg
 ### After creation
 The daemon engine drives the task: it posts the kickoff, runs the planning turn, wakes @-mentioned workers, verifies deliverables, and moves planning → executing → review. SINGLE COMMANDER: the chair is the only coordinator and the host itself NEVER speaks in the group — every group message is written by a participant (chair, workers, or the owner); host observations reach the chair as private environment notes in its turn context. Do not speak as the chair inside the group while it runs (the engine speaks with the chair's voice); if you must post, post as the owner (\`asOwner\`) or as a member Bot (\`asSlug\`).
 - Follow progress: \`{action:"detail", taskId}\` / \`{action:"messages", taskId}\`.
-- When the task reaches review, walk the owner through the acceptance summary in this chat, then close it: \`{action:"close", taskId, outcome:"done", rating:1-5, comment?}\` — or back to work: \`{action:"reopen", taskId, reason}\`. Cancel with outcome:"cancelled".
+- When the task reaches review, walk the owner through the acceptance summary in this chat, then close it: \`{action:"close", taskId, outcome:"done", rating:1-5, comment?}\` — or back to work: \`{action:"reopen", taskId, reason}\`. Cancel with outcome:"cancelled". CLOSING IS THE OWNER'S DECISION, never yours: every close raises the native confirmation dialog for the owner (when approval prompts are disabled in this session, ask the owner in chat first and pass \`ownerConfirmed:true\` — only after an explicit yes). Never close or rate a task on your own authority because the deliverables "look done" — present the evidence and wait.
 - Roster control: \`{action:"member_status", taskId, status, member|globalMetaId}\`, \`{action:"kick", taskId, member|globalMetaId, reason?}\`, \`{action:"invite", ...}\` to add a remote Bot by GlobalMetaId.
 - Statuses: planning, executing, review, done, cancelled. Deliverables arrive as [DELIVERABLE] messages and are verified on-chain; app work must show up as a clickable \`metaapp://\` link — if a worker hands the owner a raw file instead, send it back before review. Every MetaWeb URI (metaid://, pin://, metafile://, metaapp://, map://) is always shown in FULL — never abbreviated or truncated with an ellipsis; the pinId part is 64 lowercase hex chars + \`i0\`, copied verbatim.
 - Owner supervision via \`{action:"supervise", taskId, superviseAction}\`: "nudge" wakes a quiet member through the chair's turn context (optionally target one with member/globalMetaId), "pause" suspends dispatch and "resume" continues (the chair re-engages the roster), "flag" records an observation into the acceptance record. Supervision never posts into the group. Use \`{action:"deliverable_delete", taskId, deliverableId}\` to drop a mis-reported ledger row.
@@ -342,6 +343,9 @@ export function createGroupTaskController(
             chair,
             taskId,
             outcome,
+            // Attribution (OT-08 R26): the Twin executes, the owner decides —
+            // the audit trail must show the proxy, not a bare "owner".
+            actorKind: 'owner_via_twin',
             ...(rating !== undefined ? { rating } : {}),
             ...(comment ? { ratingComment: comment } : {}),
             ...(reason ? { reason } : {}),
@@ -444,7 +448,50 @@ export function createGroupTaskController(
 }
 
 /** The single twin-only group-task tool definition (action-union shape). */
-export function buildGroupTaskToolDefinition(controller: GroupTaskController): HostToolDefinition {
+/** Owner gate for `close` (task-213 defect #8): an acceptance close — with
+ *  its rating — is the owner's decision, never the chair's. With native
+ *  approval prompts enabled, the dialog asks; with prompts disabled (or no
+ *  approval surface), the model must bring an explicit chat confirmation as
+ *  `ownerConfirmed: true`. Returns the refusal text, or null to proceed. */
+async function confirmCloseWithOwner(
+  args: Record<string, unknown>,
+  approval: HostApproval | undefined,
+  exec: { agent?: HostAgentLike; callId?: string; signal?: AbortSignal },
+): Promise<string | null> {
+  const taskId = readNumber(args, 'taskId')
+  const outcome = readString(args, 'outcome') ?? 'done'
+  const rating = readNumber(args, 'rating')
+  const refusal = [
+    'Close refused: an acceptance close (with its rating) is the owner\'s decision, not the chair\'s.',
+    'Present the deliverables and acceptance evidence to the owner in chat, ask for an explicit yes on the outcome'
+    + (outcome === 'done' ? ' and the 1-5 rating' : '') + ', then retry the close with ownerConfirmed:true.',
+  ].join('\n')
+  const policy = approval?.overrideOf?.(exec.agent?.session) ?? sessionApprovalPolicy(exec.agent)
+  if (!approval || policy === 'never') {
+    if (readBoolean(args, 'ownerConfirmed') === true) return null
+    return refusal
+  }
+  const decision: HostApprovalOutcome = await approval.request({
+    agent: exec.agent,
+    toolName: 'group_task',
+    ...(exec.callId ? { callId: exec.callId } : {}),
+    reason: `Close group task #${taskId ?? '?'} as ${outcome}`
+      + (outcome === 'done' && rating !== undefined ? ` with rating ${rating}/5` : '')
+      + (readString(args, 'comment') ? ` — “${readString(args, 'comment')}”` : '')
+      + '. The group freezes after this.',
+    signal: exec.signal,
+  })
+  if (decision !== 'allowed-once') {
+    return `Close cancelled: the owner declined in the confirmation dialog (${decision}). `
+      + 'Do not retry unless the owner explicitly asks again.'
+  }
+  return null
+}
+
+export function buildGroupTaskToolDefinition(
+  controller: GroupTaskController,
+  options: { approval?: HostApproval } = {},
+): HostToolDefinition {
   return {
     name: 'group_task',
     description:
@@ -484,6 +531,7 @@ export function buildGroupTaskToolDefinition(controller: GroupTaskController): H
         outcome: { type: 'string', enum: ['done', 'cancelled'] },
         rating: { type: 'integer', description: '1-5 acceptance rating on close done.' },
         comment: { type: 'string', description: 'Rating comment on close.' },
+        ownerConfirmed: { type: 'boolean', description: 'Close only: true after the owner explicitly confirmed the outcome and rating in chat (required when approval prompts are disabled).' },
         reason: { type: 'string' },
         member: { type: 'string', description: 'Member Bot slug (kick/member_status).' },
         globalMetaId: { type: 'string', description: 'Remote member GlobalMetaId (kick/member_status/invite).' },
@@ -507,7 +555,16 @@ export function buildGroupTaskToolDefinition(controller: GroupTaskController): H
     },
     timeoutMs: TOOL_TIMEOUT_MS,
     async execute(args, exec) {
-      return controller.run(String(args.action ?? ''), args, {
+      const action = String(args.action ?? '')
+      if (action === 'close') {
+        const refusal = await confirmCloseWithOwner(args, options.approval, {
+          agent: exec?.agent,
+          ...(exec?.callId ? { callId: exec.callId } : {}),
+          ...(exec?.signal ? { signal: exec.signal } : {}),
+        })
+        if (refusal) return refusal
+      }
+      return controller.run(action, args, {
         sessionId: exec?.agent?.session?.id ?? null,
       })
     },
@@ -525,7 +582,11 @@ export function installGroupTaskOnAgent(
     order: 100,
     text: GROUP_TASK_SOP_TEXT,
   })
+  // The close confirmation dialog rides the same approval surface the publish
+  // tools use; resolving per-agent keeps the gate honest if only some
+  // compositions mount user-approval.
+  const approval = approvalOf(agent.ctx as unknown as HostContext)
   agent.ctx.tools?.register(
-    buildGroupTaskToolDefinition(createGroupTaskController(twinSlug, options)),
+    buildGroupTaskToolDefinition(createGroupTaskController(twinSlug, options), { approval }),
   )
 }

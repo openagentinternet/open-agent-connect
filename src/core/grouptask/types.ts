@@ -20,7 +20,7 @@ export type GroupTaskMemberStatus = 'assigned' | 'working' | 'standby' | 'done' 
 export type GroupTaskDeliverableStatus = 'pending' | 'delivered' | 'accepted' | 'rejected';
 
 /** Who moved a task between statuses (chair bot, human owner, or the host). */
-export type GroupTaskStatusEventActorKind = 'chair' | 'owner' | 'system';
+export type GroupTaskStatusEventActorKind = 'chair' | 'owner' | 'owner_via_twin' | 'system';
 
 export interface GroupTaskStatusEventActor {
   kind: GroupTaskStatusEventActorKind;

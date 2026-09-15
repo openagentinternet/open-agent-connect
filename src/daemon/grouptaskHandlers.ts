@@ -453,7 +453,10 @@ export function createGroupTaskDaemonHandlers(
         reason: normalizeText(body.reason) || undefined,
         rating: readInt(body.rating),
         ratingComment: normalizeText(body.ratingComment) || undefined,
-        actor: { kind: 'owner' },
+        // Attribution (OT-08 R26): panel/CLI closes are the human owner
+        // acting; the Twin's chat tool stamps 'owner_via_twin' so the audit
+        // trail distinguishes the human decision from the proxy execution.
+        actor: { kind: normalizeText(body.actorKind) === 'owner_via_twin' ? 'owner_via_twin' : 'owner' },
       }));
     },
 

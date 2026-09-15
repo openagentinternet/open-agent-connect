@@ -364,6 +364,23 @@ test('closeGroupTask accepts with rating; terminal tasks refuse new messages', a
   );
 });
 
+test('closeGroupTask stamps owner_via_twin attribution for Twin-executed closes (OT-08 R26)', async () => {
+  const { ctx, profiles } = createFakeContext('metabot-gts-close-actor-');
+  const { task } = await createGroupTask(ctx, { title: 'T', goal: 'G' });
+  await closeGroupTask(ctx, 'twin-bot', task.id, {
+    status: 'done',
+    rating: 4,
+    actor: { kind: 'owner_via_twin' },
+  });
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const store = createGroupTaskStore(resolveMetabotPaths(profiles[0].homeDir));
+  const events = await store.listStatusEvents(task.id);
+  const close = events.at(-1);
+  assert.equal(close.toStatus, 'done');
+  assert.equal(close.actorKind, 'owner_via_twin', 'the proxy execution must not read as a bare owner');
+});
+
 test('reopenGroupTask only works from review and rejects pending deliverables', async () => {
   const { ctx, profiles } = createFakeContext('metabot-gts-reopen-');
   const { task } = await createGroupTask(ctx, { title: 'T', goal: 'G' });

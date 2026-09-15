@@ -344,3 +344,90 @@ test('deliverable_delete maps the ledger row id', async () => {
   const call = calls.find((args) => args[1] === 'deliverable-delete')
   assert.equal(flagValue(call, '--deliverable'), '9')
 })
+
+// ---------------------------------------------------------------------------
+// Owner acceptance gate (task-213 defect #8 / OT-08 R26)
+// ---------------------------------------------------------------------------
+
+function fakeApproval(result) {
+  const requests = []
+  return {
+    requests,
+    request: async (req) => {
+      requests.push(req)
+      return typeof result === 'function' ? result(req) : result
+    },
+  }
+}
+
+test('close gate: the SOP declares closing is the owner decision and the schema carries ownerConfirmed', () => {
+  assert.match(plugin.GROUP_TASK_SOP_TEXT, /CLOSING IS THE OWNER'S DECISION/)
+  const controller = plugin.createGroupTaskController('alice', { run: async () => ({ ok: true, data: {} }) })
+  const tool = plugin.buildGroupTaskToolDefinition(controller)
+  assert.ok(tool.parameters.properties.ownerConfirmed, 'ownerConfirmed param documented')
+})
+
+test('close gate: a declined approval dialog refuses the close without any CLI write', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const approval = fakeApproval('rejected')
+  const tool = plugin.buildGroupTaskToolDefinition(controller, { approval })
+  const output = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 5 },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.match(String(output), /Close cancelled: the owner declined/)
+  assert.equal(approval.requests.length, 1)
+  assert.match(String(approval.requests[0].reason), /rating 5\/5/)
+  assert.equal(calls.filter((args) => args[1] === 'close').length, 0, 'no close dispatched')
+})
+
+test('close gate: an approved dialog closes and stamps owner_via_twin attribution', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const approval = fakeApproval('allowed-once')
+  const tool = plugin.buildGroupTaskToolDefinition(controller, { approval })
+  await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 4, comment: 'ok' },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  const closeCall = calls.find((args) => args[1] === 'close')
+  assert.ok(closeCall, 'close dispatched after approval')
+  assert.equal(flagValue(closeCall, '--actor-kind'), 'owner_via_twin')
+})
+
+test('close gate: without an approval surface, an explicit ownerConfirmed is required', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const tool = plugin.buildGroupTaskToolDefinition(controller)
+  const refused = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 5 },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.match(String(refused), /Close refused.*owner's decision/)
+  assert.equal(calls.filter((args) => args[1] === 'close').length, 0)
+
+  const allowed = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 5, ownerConfirmed: true },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.ok(allowed)
+  const closeCall = calls.find((args) => args[1] === 'close')
+  assert.equal(flagValue(closeCall, '--actor-kind'), 'owner_via_twin')
+})
+
+test('close gate: prompts-disabled sessions still demand ownerConfirmed', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const approval = {
+    overrideOf: () => 'never',
+    request: async () => { throw new Error('must not be called when policy is never') },
+  }
+  const tool = plugin.buildGroupTaskToolDefinition(controller, { approval })
+  const refused = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'cancelled' },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.match(String(refused), /Close refused/)
+  assert.equal(calls.filter((args) => args[1] === 'close').length, 0)
+})
