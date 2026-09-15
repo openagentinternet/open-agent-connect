@@ -109,6 +109,12 @@ const WORK_REQUEST_CLAIMED_TTL_MS = 30 * 60_000; // build+publish turns legitima
  * for OpenTeam invites to resolve before planning with whatever roster exists.
  */
 const ROSTER_SETTLE_MAX_WAIT_MS = 10 * 60_000;
+/**
+ * OT-05: grace for an accepted OpenTeam invite whose member row has not
+ * landed yet — planning defers through this window before running with
+ * explicit roster facts (the task-213 race was exactly this gap, in seconds).
+ */
+const JOIN_INGEST_GRACE_MS = 60_000;
 /** Deliverable re-verification cadence (indexer lag absorption). */
 export const GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = 'group_task_deliverable_verify:';
 const DELIVERABLE_REVERIFY_INTERVAL_MS = 10 * 60_000;
@@ -1699,6 +1705,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     promptSeats: GroupTaskPromptSeat[];
     ownerGmid: string | null;
     recentMessages: GroupTaskMessage[];
+    /** OT-05 R15: forced-planning roster facts (pending/unjoined invites). */
+    rosterFacts?: string | null;
   }): Promise<void> {
     const { store, task } = input;
     const plannedKey = `${GROUP_TASK_PLANNED_KV_PREFIX}${task.id}`;
@@ -1744,12 +1752,13 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (attempts >= PLAN_ATTEMPTS_MAX) return;
     await store.kvSet(attemptsKey, String(attempts + 1));
 
-    const directive = buildPlanningDirective({
+    const directiveBase = buildPlanningDirective({
       task,
       seats: input.promptSeats,
       recentMessages: input.recentMessages,
       nowMs: now(),
     });
+    const directive = input.rosterFacts ? `${directiveBase}\n\n${input.rosterFacts}` : directiveBase;
     const reply = (await runSeatTurn({
       seat: input.chair,
       task,
@@ -1777,17 +1786,56 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
    * plan landing seconds after create, before any remote accept, and the
    * chair committing to self-execute). Bounded by ROSTER_SETTLE_MAX_WAIT_MS
    * so a never-answering invitee cannot wedge the task in planning.
+   *
+   * OT-05 (task-213): an ACCEPTED invite whose member row has not landed yet
+   * is the same race one step later — planning ingested the accept and raced
+   * the join ingestion by seconds, and the chair publicly concluded "no one
+   * to dispatch" over a roster that held two workers milliseconds later.
+   * Accepted-but-unjoined invitees defer planning briefly (JOIN_INGEST_GRACE_MS
+   * from respondedAt); past the grace window planning runs with explicit
+   * roster facts so the chair can never draw the wrong conclusion.
    */
   async function rosterSettledForPlanning(
     profile: GroupTaskProfileRef,
     task: GroupTaskRecord,
-  ): Promise<{ settled: true } | { settled: false; reason: string }> {
+    members: GroupTaskMember[],
+  ): Promise<{ settled: true; facts?: string } | { settled: false; reason: string }> {
     const openteam = openteamStoreFor(ctx, profile);
     const invites = await openteam.listInvites(task.id).catch(() => []);
+    const joined = new Set(
+      members
+        .map((member) => normalizeGmid(member.globalMetaId ?? ''))
+        .filter((gmid) => gmid !== ''));
     const pending = invites.filter((invite) => invite.status === 'pending');
-    if (pending.length === 0) return { settled: true };
-    if (now() - task.createdAt >= ROSTER_SETTLE_MAX_WAIT_MS) return { settled: true };
-    return { settled: false, reason: `${pending.length} OpenTeam invite(s) pending` };
+    const acceptedUnjoined = invites.filter((invite) => invite.status === 'accepted'
+      && !joined.has(normalizeGmid(invite.inviteeGlobalMetaId)));
+    if (pending.length === 0 && acceptedUnjoined.length === 0) return { settled: true };
+    if (now() - task.createdAt >= ROSTER_SETTLE_MAX_WAIT_MS) {
+      return { settled: true, facts: buildRosterFactLine(pending, acceptedUnjoined) };
+    }
+    if (pending.length === 0) {
+      const fresh = acceptedUnjoined.some(
+        (invite) => now() - (invite.respondedAt ?? 0) < JOIN_INGEST_GRACE_MS);
+      if (!fresh) return { settled: true, facts: buildRosterFactLine(pending, acceptedUnjoined) };
+    }
+    const parts: string[] = [];
+    if (pending.length > 0) parts.push(`${pending.length} OpenTeam invite(s) pending`);
+    if (acceptedUnjoined.length > 0) {
+      parts.push(`${acceptedUnjoined.length} accepted invitee(s) not yet in the roster`);
+    }
+    return { settled: false, reason: parts.join(', ') };
+  }
+
+  /** R15: the explicit anti-"无人可派" fact line for a forced planning turn. */
+  function buildRosterFactLine(
+    pending: Array<{ inviteeName: string | null }>,
+    acceptedUnjoined: Array<{ inviteeName: string | null }>,
+  ): string {
+    const names = [...pending, ...acceptedUnjoined]
+      .map((invite) => invite.inviteeName?.trim() || 'an invited worker');
+    return `ROSTER FACT (host): ${names.length} invited OpenTeam worker(s) — ${names.join(', ')} `
+      + '— are seated on this task but not yet fully joined/resolved. Do NOT conclude that the seats are '
+      + 'unstaffable and do NOT ask the owner to recruit: plan around these workers, they are joining.';
   }
 
   // Note: remote-member joins wake the chair through a `join` HOST NOTE
@@ -1971,7 +2019,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     let current = task;
 
     if (current.status === 'planning' && chair && current.dispatchPausedAt == null) {
-      const settle = await rosterSettledForPlanning(profile, current);
+      const settle = await rosterSettledForPlanning(profile, current, members);
       if (!settle.settled) {
         // Log the deferral once per task, not once per tick.
         const deferredKey = `${GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX}${current.id}`;
@@ -1986,18 +2034,19 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           (await store.kvGet(`${GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${current.id}`)) ?? '0') || 0;
         if (now() < retryAfter) {
           // Chair LLM unavailable: planning waits for the next window.
-        } else {
-          try {
-            await runPlanningTurn({
-              store,
-              task: current,
-              chair,
-              seats,
-              promptSeats,
-              ownerGmid,
-              recentMessages: page.messages,
-            });
-          } catch (error) {
+      } else {
+        try {
+          await runPlanningTurn({
+            store,
+            task: current,
+            chair,
+            seats,
+            promptSeats,
+            ownerGmid,
+            recentMessages: page.messages,
+            rosterFacts: settle.facts ?? null,
+          });
+        } catch (error) {
             if (isChairLlmUnavailable(error)) {
               const sinceKey = `${GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${current.id}`;
               const firstFailure = Number((await store.kvGet(sinceKey)) ?? '0') || now();

@@ -531,6 +531,9 @@ test('engine: planning defers while an OpenTeam invite is pending and runs once 
     'deferral logged once');
 
   await openteam.updateInvite('inv-settle-1', { status: 'accepted', respondedAt: Date.now() });
+  await h.chairStore.addMember({
+    taskId: task.id, slug: null, globalMetaId: 'IDREMOTE1', role: 'worker', displayName: 'Remote Designer',
+  });
   h.llmTurns.push('@worker 1 ship it\n[STATUS:EXECUTING]');
   await h.engine.tick();
   assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1,
@@ -1066,4 +1069,72 @@ test('engine: a remote member [WORKING] ack updates the member status by globalM
   const members = await h.chairStore.listMembers(task.id);
   const remote = members.find((member) => member.globalMetaId === 'IDREMOTE');
   assert.equal(remote.status, 'working', 'remote ack recorded by globalMetaId');
+});
+
+test('engine: planning defers while an accepted invitee has not joined the roster yet (OT-05 race)', async () => {
+  const h = createHarness('metabot-gt-engine-joinrace-');
+  const task = await h.seedTask('planning');
+  h.pushHistory('IDTWIN', '[GROUP TASK] Engine test task');
+
+  const openteam = openteamStoreFor(h.ctx, h.profiles[0]);
+  await openteam.createInvite({
+    taskId: task.id,
+    groupId: task.groupId,
+    inviteId: 'inv-race-1',
+    inviteeGlobalMetaId: 'IDREMOTE9',
+    inviteeName: 'Late Joiner',
+    requiredSkills: [],
+    sentPinId: 'pin-invite-race',
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+  });
+  // The task-213 race: the accept is ingested; the member row lags seconds.
+  await openteam.updateInvite('inv-race-1', { status: 'accepted', respondedAt: Date.now() });
+
+  h.llmTurns.push('plan with nobody [STATUS:EXECUTING]');
+  await h.engine.tick();
+  assert.equal(h.pins.length, 0, 'planning deferred during the join-ingest grace');
+  assert.equal(h.llmCalls.length, 0);
+
+  // The member row lands → planning runs normally (no facts needed).
+  await h.chairStore.addMember({
+    taskId: task.id, slug: null, globalMetaId: 'IDREMOTE9', role: 'worker', displayName: 'Late Joiner',
+  });
+  h.llmTurns.length = 0; // drop the script queued for the deferred tick
+  h.llmTurns.push('@worker 1 ship it\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+  assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1,
+    'planning ran once the joiner landed in the roster');
+});
+
+test('engine: past the join grace the plan runs with an explicit ROSTER FACT (OT-05 R15)', async () => {
+  const h = createHarness('metabot-gt-engine-joinrace-cap-', {
+    engineNow: () => Date.now() + 2 * 60_000, // 2 min ahead: grace expired, cap not
+  });
+  const task = await h.seedTask('planning');
+  h.pushHistory('IDTWIN', '[GROUP TASK] Engine test task');
+
+  const openteam = openteamStoreFor(h.ctx, h.profiles[0]);
+  await openteam.createInvite({
+    taskId: task.id,
+    groupId: task.groupId,
+    inviteId: 'inv-race-2',
+    inviteeGlobalMetaId: 'IDREMOTE7',
+    inviteeName: 'Slow Joiner',
+    requiredSkills: [],
+    sentPinId: null,
+    expiresAt: Math.floor((Date.now() + 2 * 60_000) / 1000) + 3600,
+  });
+  await openteam.updateInvite('inv-race-2', { status: 'accepted', respondedAt: Date.now() });
+
+  const prompts = [];
+  h.llmTurns.push((turn) => {
+    prompts.push(JSON.stringify(turn));
+    return 'plan around the joiner [STATUS:EXECUTING]';
+  });
+  await h.engine.tick();
+  assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1,
+    'grace expired: planning ran');
+  assert.ok(prompts.some((text) => text.includes('ROSTER FACT (host)')),
+    'the directive carries the anti-"no one to dispatch" fact');
+  assert.ok(prompts.some((text) => text.includes('Slow Joiner')));
 });
