@@ -27,6 +27,14 @@ export interface CliDependencies {
     detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     answers?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  protocol?: {
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    read?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    versions?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    check?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   browser?: {
     open?: (input: { uri?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     /** Ask every currently-open Browser page to open a URI in a new tab. */

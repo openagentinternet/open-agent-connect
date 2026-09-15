@@ -19,6 +19,7 @@ import { bindMetawebToolInstall } from './metaweb-tools.js'
 import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { bindQaToolInstall } from './qa-tools.js'
+import { bindMetaprotocolToolInstall } from './metaprotocol-tools.js'
 import { bindSurfToolInstall } from './surf-tools.js'
 import { dispatchSurfRoutes } from './surf-routes.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
@@ -652,6 +653,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindSkillToolInstall(ctx)
   bindSimpleNoteToolInstall(ctx)
   bindQaToolInstall(ctx)
+  bindMetaprotocolToolInstall(ctx)
   bindSurfToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
   bindGlobalKnowledgeToolInstall(ctx)

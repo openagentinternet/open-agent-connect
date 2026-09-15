@@ -258,6 +258,19 @@ import {
 import { collectPriorAnswers, createQaAnswerLedger } from '../core/qanda/ledger';
 import { qaQuestionAnswers, QA_RECALL_BASE_URL_ENV } from '../core/qanda/recall';
 import { formatAlreadyAnsweredNotice } from '../core/qanda/format';
+import {
+  buildMetaprotocolPayload,
+  checkMetaprotocolContentInput,
+  findMetaprotocolPublishConflict,
+  formatMetaprotocolResult,
+  isSameRegistrant,
+  resolveMetaprotocolUpdateTarget,
+  validateMetaprotocolPayload,
+  writeMetaprotocolPin,
+  type MetaprotocolActingIdentity,
+  type MetaprotocolNetwork,
+} from '../core/metaprotocol/publish';
+import { MetaprotocolResolveError } from '../core/metaprotocol/registry';
 import { createProfileScopedUpload } from '../core/files/profileUploadGate';
 import { ChainBroadcastUnknownError } from '../core/signing/localMnemonicSigner';
 import {
@@ -14269,6 +14282,182 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return qandaFailedOrBroadcastUnknown(error, 'qanda_like', [
             normalizeText(rawInput.pinId ?? rawInput.pin_id),
             String(rawInput.isLike ?? rawInput.is_like ?? ''),
+            await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+          ]);
+        }
+      },
+    },
+    // Metaprotocol registry writers (metaprotocol_registry /
+    // post_metaprotocol): publish registers a NEW protocol under
+    // /protocols/<name>, update publishes a new version of an existing one.
+    // Both run the §5.4 gate order — acting identity, draft-07 payload
+    // schema, MetaSo precheck (path occupancy / registrant identity cascade)
+    // with the read-only MANAPI degraded scan, both-down refusal — BEFORE
+    // anything reaches the wallet.
+    protocol: {
+      publish: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing a protocol.');
+        }
+        const title = normalizeText(rawInput.title);
+        const protocolName = normalizeText(rawInput.protocolName ?? rawInput.protocol_name);
+        if (!title) {
+          return commandFailed('missing_field', 'post_metaprotocol requires a non-empty `title`.');
+        }
+        if (!protocolName) {
+          return commandFailed('missing_field', 'post_metaprotocol requires a non-empty `protocol_name`.');
+        }
+        const xorFailure = checkMetaprotocolContentInput({
+          body: rawInput.body,
+          protocolContent: rawInput.protocolContent ?? rawInput.protocol_content,
+        });
+        if (xorFailure) {
+          return commandFailed('invalid_request', xorFailure);
+        }
+        const identity: MetaprotocolActingIdentity = {
+          name: normalizeText(state.identity.name),
+          globalMetaId: normalizeText(state.identity.globalMetaId),
+          metaId: normalizeText(state.identity.metaId),
+          address: normalizeText(state.identity.addresses?.mvc) || normalizeText(state.identity.mvcAddress),
+        };
+        const { payload, replacedVersion } = buildMetaprotocolPayload({
+          action: 'publish',
+          request: {
+            title,
+            protocolName,
+            intro: typeof rawInput.intro === 'string' ? rawInput.intro : undefined,
+            version: normalizeText(rawInput.version) || undefined,
+            protocolContentType: normalizeText(rawInput.protocolContentType ?? rawInput.protocol_content_type) || undefined,
+            ...(rawInput.body != null && typeof rawInput.body === 'object' ? { body: rawInput.body as Record<string, unknown> } : {}),
+            ...(normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) ? { protocolContent: normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) } : {}),
+            metadata: rawInput.metadata,
+            attachments: readStringArray(rawInput.attachments),
+          },
+          identity,
+          record: null,
+        });
+        const schemaFailure = validateMetaprotocolPayload(payload);
+        if (schemaFailure) {
+          return commandFailed('invalid_payload', schemaFailure);
+        }
+        // Same env override family as the Q&A recall client.
+        const conflict = await findMetaprotocolPublishConflict(String(payload.path), qaRecallOptionsForDaemon());
+        if (conflict) {
+          return commandFailed('protocol_path_taken', conflict);
+        }
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await writeMetaprotocolPin(actor.signer, {
+            action: 'publish',
+            payload,
+            record: null,
+            replacedVersion,
+            network: network as MetaprotocolNetwork,
+          });
+          return commandSuccess({ ...result, formatted: formatMetaprotocolResult(result) });
+        } catch (error) {
+          return qandaFailedOrBroadcastUnknown(error, 'protocol_publish', [
+            title,
+            String(payload.path),
+            await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+          ]);
+        }
+      },
+      update: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before updating a protocol.');
+        }
+        const title = normalizeText(rawInput.title);
+        const protocolName = normalizeText(rawInput.protocolName ?? rawInput.protocol_name);
+        if (!title) {
+          return commandFailed('missing_field', 'post_metaprotocol requires a non-empty `title`.');
+        }
+        if (!protocolName) {
+          return commandFailed('missing_field', 'post_metaprotocol requires a non-empty `protocol_name`.');
+        }
+        const target = normalizeText(rawInput.target);
+        if (!target) {
+          return commandFailed('missing_field', 'post_metaprotocol update requires a target (protocolPath, protocolName or pinId).');
+        }
+        const xorFailure = checkMetaprotocolContentInput({
+          body: rawInput.body,
+          protocolContent: rawInput.protocolContent ?? rawInput.protocol_content,
+        });
+        if (xorFailure) {
+          return commandFailed('invalid_request', xorFailure);
+        }
+        // Resolve the target record FIRST (read-only): the auto-increment
+        // needs the current on-chain body version, and the identity gate
+        // needs the registrant. The schema gate below still runs before
+        // anything wallet-bound.
+        let record;
+        try {
+          record = await resolveMetaprotocolUpdateTarget(target, qaRecallOptionsForDaemon());
+        } catch (error) {
+          const message = error instanceof MetaprotocolResolveError
+            ? error.message
+            : `Protocol registry lookup failed for "${target}": ${error instanceof Error ? error.message : String(error)}`;
+          return commandFailed('protocol_not_found', message);
+        }
+        const identity: MetaprotocolActingIdentity = {
+          name: normalizeText(state.identity.name),
+          globalMetaId: normalizeText(state.identity.globalMetaId),
+          metaId: normalizeText(state.identity.metaId),
+          address: normalizeText(state.identity.addresses?.mvc) || normalizeText(state.identity.mvcAddress),
+        };
+        const { payload, replacedVersion } = buildMetaprotocolPayload({
+          action: 'update',
+          request: {
+            title,
+            protocolName,
+            intro: typeof rawInput.intro === 'string' ? rawInput.intro : undefined,
+            version: normalizeText(rawInput.version) || undefined,
+            protocolContentType: normalizeText(rawInput.protocolContentType ?? rawInput.protocol_content_type) || undefined,
+            ...(rawInput.body != null && typeof rawInput.body === 'object' ? { body: rawInput.body as Record<string, unknown> } : {}),
+            ...(normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) ? { protocolContent: normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) } : {}),
+            metadata: rawInput.metadata,
+            attachments: readStringArray(rawInput.attachments),
+          },
+          identity,
+          record,
+        });
+        const schemaFailure = validateMetaprotocolPayload(payload);
+        if (schemaFailure) {
+          return commandFailed('invalid_payload', schemaFailure);
+        }
+        // §5.4 update step 4 — only the original registrant may update.
+        const botName = identity.name || 'the current acting MetaBot';
+        const registrantName = record.author.name || record.author.globalMetaId || record.author.metaid || record.author.address || 'unknown';
+        if (!isSameRegistrant(record.author, identity)) {
+          return commandFailed(
+            'not_registrant',
+            `Only the original registrant can update ${record.protocolPath} (registered by ${registrantName}). The current acting MetaBot (${botName}) is not the registrant.`,
+          );
+        }
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await writeMetaprotocolPin(actor.signer, {
+            action: 'update',
+            payload,
+            record,
+            replacedVersion,
+            network: network as MetaprotocolNetwork,
+          });
+          return commandSuccess({ ...result, formatted: formatMetaprotocolResult(result) });
+        } catch (error) {
+          return qandaFailedOrBroadcastUnknown(error, 'protocol_update', [
+            title,
+            String(payload.path),
             await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
           ]);
         }

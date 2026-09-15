@@ -151,6 +151,18 @@ import {
 } from '../core/qanda/recall';
 import { formatQaAnswerBullets, formatQaQuestionBullets, formatQaQuestionDetail } from '../core/qanda/format';
 import {
+  checkMetaProtocolPath,
+  getMetaProtocolPinVersions,
+  listMetaProtocols,
+  MetaprotocolResolveError,
+  resolveMetaProtocolRecord,
+} from '../core/metaprotocol/registry';
+import {
+  renderMetaprotocolList,
+  renderMetaprotocolPinVersions,
+  renderMetaprotocolRead,
+} from '../core/metaprotocol/format';
+import {
   extractSkillPinDescriptor,
   installSkillFromReference,
   listInstalledSkills,
@@ -3032,6 +3044,82 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     return path.join(normalizeSystemHomeDir(context.env, context.cwd), '.metabot', 'skills');
   }
 
+  // `metabot protocol list|read|versions|check` — read-only registry verbs
+  // over the metaso-p2p /api/metaweb/protocols* family, in-process like the
+  // qanda read verbs. The data envelope carries the raw rows plus a
+  // model-ready `formatted` block (the same renderer the DSH tool uses).
+  async function runProtocolList(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const query = normalizeEnvText(typeof input.query === 'string' ? input.query : undefined);
+      const page = await listMetaProtocols({
+        ...(query ? { query } : {}),
+        ...(normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) ? { publisher: normalizeEnvText(input.publisher as string) } : {}),
+        ...(readPositiveField(input.size) ? { size: readPositiveField(input.size) } : {}),
+        ...(normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) ? { cursor: normalizeEnvText(input.cursor as string) } : {}),
+      }, metawebServiceOptions());
+      return commandSuccess({ ...page, formatted: renderMetaprotocolList(page) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('protocol_list_failed', message);
+    }
+  }
+
+  async function runProtocolRead(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const record = await resolveMetaProtocolRecord({
+        ...(normalizeEnvText(typeof input.protocolPath === 'string' ? input.protocolPath : undefined) ? { protocolPath: normalizeEnvText(input.protocolPath as string) } : {}),
+        ...(normalizeEnvText(typeof input.protocolName === 'string' ? input.protocolName : undefined) ? { protocolName: normalizeEnvText(input.protocolName as string) } : {}),
+        ...(normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined) ? { pinId: normalizeEnvText(input.pinId as string) } : {}),
+      }, metawebServiceOptions());
+      return commandSuccess({ record, formatted: renderMetaprotocolRead(record) });
+    } catch (error) {
+      if (error instanceof MetaprotocolResolveError) {
+        return commandFailed('protocol_not_found', error.message);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('protocol_read_failed', message);
+    }
+  }
+
+  async function runProtocolVersions(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const protocolPath = normalizeEnvText(typeof input.protocolPath === 'string' ? input.protocolPath : undefined);
+      const protocolName = normalizeEnvText(typeof input.protocolName === 'string' ? input.protocolName : undefined);
+      const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+      let sourcePinId = pinId;
+      let label = pinId;
+      if (!sourcePinId) {
+        const record = await resolveMetaProtocolRecord({ ...(protocolPath ? { protocolPath } : {}), ...(protocolName ? { protocolName } : {}) }, metawebServiceOptions());
+        sourcePinId = record.pinId;
+        label = record.protocolPath;
+      }
+      const versions = await getMetaProtocolPinVersions(sourcePinId, metawebServiceOptions());
+      return commandSuccess({ ...versions, label, formatted: renderMetaprotocolPinVersions(versions, label) });
+    } catch (error) {
+      if (error instanceof MetaprotocolResolveError) {
+        return commandFailed('protocol_not_found', error.message);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('protocol_versions_failed', message);
+    }
+  }
+
+  async function runProtocolCheck(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const protocolPath = normalizeEnvText(typeof input.protocolPath === 'string' ? input.protocolPath : undefined);
+      if (!protocolPath) return commandFailed('missing_path', '--path is required.');
+      const check = await checkMetaProtocolPath(protocolPath, metawebServiceOptions());
+      const existing = check.existing;
+      const formatted = check.available
+        ? `Path ${check.path} is FREE — a new protocol can be registered there (metabot protocol publish).`
+        : `Path ${check.path} is TAKEN by ${existing?.author.name || existing?.author.globalMetaId || existing?.author.address || 'unknown'} (first registered ${existing && existing.createdAt > 0 ? new Date(existing.createdAt * 1000).toISOString().slice(0, 10) : 'unknown'}, current version ${existing?.version || '?'}, pin://${existing?.pinId || '?'}).`;
+      return commandSuccess({ ...check, formatted });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('protocol_check_failed', message);
+    }
+  }
+
   function mapSkillInstallError(error: unknown): MetabotCommandResult<never> {
     if (error instanceof SkillInstallError) {
       return commandFailed(error.code === 'name_conflict' ? 'skill_name_conflict' : 'skill_install_failed', error.message);
@@ -3520,6 +3608,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       latest: async (input) => runQandaLatest(input),
       detail: async (input) => runQandaDetail(input),
       answers: async (input) => runQandaAnswers(input),
+    },
+    protocol: {
+      list: async (input) => runProtocolList(input),
+      read: async (input) => runProtocolRead(input),
+      versions: async (input) => runProtocolVersions(input),
+      check: async (input) => runProtocolCheck(input),
+      publish: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/protocol/publish',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      update: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/protocol/update',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
     },
     browser: {
       open: async (input) => openLocalBrowserPage(input),
@@ -5669,6 +5775,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     metaweb: { ...defaults.metaweb, ...provided.metaweb },
     simplenote: { ...defaults.simplenote, ...provided.simplenote },
     qanda: { ...defaults.qanda, ...provided.qanda },
+    protocol: { ...defaults.protocol, ...provided.protocol },
     chain: { ...defaults.chain, ...provided.chain },
     traffic: { ...defaults.traffic, ...provided.traffic },
     daemon: { ...defaults.daemon, ...provided.daemon },

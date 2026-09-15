@@ -79,6 +79,10 @@ export interface MetabotDaemonHttpHandlers {
     answer?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     like?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  protocol?: {
+    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   skills?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
