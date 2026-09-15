@@ -262,3 +262,19 @@ test('decide: skips self, suspects, terminal tasks, empty bodies, and host notic
   assert.deepEqual(decide({ message: { content: '   ' } }), []);
   assert.deepEqual(decide({ message: { content: '[GROUP_TASK_NOTICE:welcome] hi' } }), []);
 });
+
+test('parseDeliverableCandidates: metafile URIs with a file extension parse (task-213 video defect)', () => {
+  const PIN_V = `${'c'.repeat(64)}i0`;
+  const rows = parseDeliverableCandidates(
+    `[DELIVERABLE] metafile: metafile://${PIN_V}.mp4\n`
+    + `[DELIVERABLE] metafile://metafile://${PIN_V}.png bogus scheme\n`
+    + `[DELIVERABLE] metafile://${PIN_V}.jpeg`,
+  );
+  // A malformed URI-shaped token drops its line (fabrication guard), so the
+  // bogus double-scheme line yields nothing.
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].kind, 'metafile');
+  assert.equal(rows[0].uri, `metafile://${PIN_V}.mp4`, 'extension kept so the URI still serves');
+  assert.equal(rows[1].kind, 'metafile');
+  assert.equal(rows[1].uri, `metafile://${PIN_V}.jpeg`);
+});
