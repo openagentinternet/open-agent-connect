@@ -419,6 +419,7 @@ export type GroupTaskDetailPayload = {
   archivedAt: number | null
   openTeam: boolean
   stall: boolean
+  chairDegradedAt: number | null
   rating: number | null
   ratingComment: string | null
   createdAt: number
@@ -431,6 +432,16 @@ export type GroupTaskDetailPayload = {
   integrityEvents: GroupTaskIntegrityEventRow[]
   messages: GroupTaskMessageRow[]
   openCheckpointSummary: string | null
+}
+
+/** Chair-side sent invite (`metabot grouptask invites`) for the drawer. */
+export type GroupTaskSentInviteRow = {
+  id: number
+  inviteeName: string | null
+  inviteeGlobalMetaId: string
+  status: 'pending' | 'accepted' | 'declined' | 'expired'
+  requiredSkills: string[]
+  expiresAt: number | null
 }
 
 /** Read-only `metabot grouptask health` snapshot shown as the panel banner. */
@@ -798,6 +809,26 @@ export const api = {
   },
   grouptaskDetail: async (chair: string, taskId: number): Promise<GroupTaskDetailPayload> =>
     normalizeGroupTaskDetail(await post('grouptask/detail', { chair, taskId })),
+  grouptaskInvites: async (chair: string, taskId: number): Promise<GroupTaskSentInviteRow[]> => {
+    const data = await post<{ invites?: unknown }>('grouptask/invites', { chair, taskId })
+    const rows = Array.isArray(data.invites) ? data.invites : []
+    return rows.map((row) => {
+      const entry = recordOf(row)
+      const status = textOf(entry.status)
+      return {
+        id: Math.trunc(toNumber(entry.id)),
+        inviteeName: textOf(entry.inviteeName) || null,
+        inviteeGlobalMetaId: textOf(entry.inviteeGlobalMetaId),
+        status: (status === 'pending' || status === 'accepted' || status === 'declined' || status === 'expired'
+          ? status
+          : 'pending') as GroupTaskSentInviteRow['status'],
+        requiredSkills: Array.isArray(entry.requiredSkills)
+          ? entry.requiredSkills.map((skill) => textOf(skill)).filter(Boolean)
+          : [],
+        expiresAt: nullableNumber(entry.expiresAt),
+      }
+    })
+  },
   grouptaskCreate: async (input: {
     title: string
     goal: string
@@ -1360,6 +1391,7 @@ function normalizeGroupTaskDetail(value: unknown): GroupTaskDetailPayload {
     archivedAt: nullableNumber(record.archivedAt),
     openTeam: record.openTeam === true,
     stall: record.stall === true,
+    chairDegradedAt: nullableNumber(record.chairDegradedAt),
     rating: nullableNumber(record.rating),
     ratingComment: textOf(record.ratingComment) || null,
     createdAt: toNumber(record.createdAt),
