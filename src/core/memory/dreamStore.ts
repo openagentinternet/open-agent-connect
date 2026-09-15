@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import { createChainHistoryStore } from '../chainhistory/store';
 import { createScheduleStore } from '../schedule/store';
+import { createMetawebSurfStore } from '../surf/store';
 import {
   GROUP_TASK_TERMINAL_STATUSES,
   type GroupTaskMember,
@@ -169,6 +170,12 @@ export interface DreamDayActivity {
   chainWrites?: DreamChainWriteActivity[];
   /** Chain pins this bot fully read that day (chain content history). */
   chainReads?: DreamChainReadActivity[];
+  /**
+   * Markdown report of the bot's latest finished MetaWeb surf run inside the
+   * day window (pre-dream surf or a manual evening surf) — the freshest
+   * experience of the night; a surf report alone counts as day activity.
+   */
+  surfReport?: string | null;
 }
 
 interface DreamRunsFile {
@@ -999,6 +1006,21 @@ export function createDreamStore(paths: MetabotPaths, deps: {
         taskRuns = [];
       }
 
+      // Latest finished MetaWeb surf report in the day window (IDBots parity:
+      // the pre-dream surf report feeds the same night's dream as its own
+      // section). Best effort: a missing store degrades to no report.
+      let surfReport: string | null = null;
+      try {
+        const surfRuns = await createMetawebSurfStore(paths).listRuns(50);
+        surfReport = surfRuns.find((run) => run.status === 'done'
+          && run.reportMarkdown
+          && Number.isFinite(Date.parse(run.finishedAt ?? ''))
+          && Date.parse(run.finishedAt!) >= startMs
+          && Date.parse(run.finishedAt!) < endMs)?.reportMarkdown ?? null;
+      } catch {
+        surfReport = null;
+      }
+
       return {
         sessions,
         taskRuns,
@@ -1007,6 +1029,7 @@ export function createDreamStore(paths: MetabotPaths, deps: {
         groupChats,
         chainWrites,
         chainReads,
+        surfReport,
       };
     },
 

@@ -66,6 +66,13 @@ export interface MetabotPaths {
   // Per-bot scheduled-task store (storage layout v2 amendment 2026-09-05).
   schedulePath: string;
 
+  // Per-bot MetaWeb surf store root (storage layout v2 amendment 2026-09-15).
+  surfRoot: string;
+  surfRunsPath: string;
+  surfProtocolStatePath: string;
+  surfSeenPinsPath: string;
+  surfSettingsPath: string;
+
   // LLM runtime / binding paths.
   llmRoot: string;
   llmRuntimesPath: string;
@@ -246,6 +253,13 @@ function buildMetabotPaths(input: {
 
     // Per-bot scheduled-task store (`.runtime/schedule/schedule.json`).
     schedulePath: path.join(input.runtimeRoot, 'schedule', 'schedule.json'),
+
+    // Per-bot MetaWeb surf store (`.runtime/surf/`).
+    surfRoot: path.join(input.runtimeRoot, 'surf'),
+    surfRunsPath: path.join(input.runtimeRoot, 'surf', 'runs.json'),
+    surfProtocolStatePath: path.join(input.runtimeRoot, 'surf', 'protocol-state.json'),
+    surfSeenPinsPath: path.join(input.runtimeRoot, 'surf', 'seen-pins.json'),
+    surfSettingsPath: path.join(input.runtimeRoot, 'surf', 'settings.json'),
 
     // LLM paths.
     llmRoot: input.llmRoot,

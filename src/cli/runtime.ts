@@ -189,6 +189,10 @@ import {
 import { createMetasoPinVerifier } from '../core/grouptask/deliverableVerification';
 import { createProfileScopedUpload } from '../core/files/profileUploadGate';
 import { getMetabotProfile, listMetabotProfiles } from '../core/bot/metabotProfileManager';
+import { createMetawebSurfStore } from '../core/surf/store';
+import { createSurfSettingsStore } from '../core/surf/settings';
+import { formatSurfRunList } from '../core/surf/format';
+import { retireQaSurfJobsForSurf } from '../core/knowledgebase/studyJobs';
 import {
   createKnowledgeBaseService,
 } from '../core/knowledgebase/service';
@@ -5412,6 +5416,110 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return commandSuccess({ knowledgeBase });
       },
     },
+    surf: {
+      status: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 5)));
+        const [runs, settings, latest, memoryEnabled] = await Promise.all([
+          createMetawebSurfStore(paths).listRuns(limit),
+          createSurfSettingsStore(paths).read(),
+          createMetawebSurfStore(paths).getLatestFinishedRun(),
+          createMemoryPolicyStore(paths).effectivePolicy().then((policy) => policy.memoryEnabled).catch(() => true),
+        ]);
+        const running = runs.some((run) => run.status === 'running');
+        const finishedMs = latest?.finishedAt ? Date.parse(latest.finishedAt) : NaN;
+        const preDreamDue = settings.surfBeforeDreamEnabled
+          && !running
+          && memoryEnabled
+          && (!Number.isFinite(finishedMs) || Date.now() - finishedMs >= 20 * 60 * 60 * 1000);
+        return commandSuccess({
+          runs,
+          running,
+          surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
+          interactionBudget: settings.interactionBudget,
+          preDreamDue,
+          formatted: formatSurfRunList(runs),
+        });
+      },
+      run: async (input) => {
+        // The run itself lives in the daemon process; the CLI only starts it.
+        const start = await requestJsonForSelectedActor(
+          'POST',
+          '/api/surf/run',
+          typeof input.from === 'string' ? input.from : undefined,
+          {
+            trigger: input.trigger ?? 'manual-ui',
+          },
+        );
+        if (start.ok !== true) {
+          return start as MetabotCommandResult<never>;
+        }
+        const startData = (start.data ?? {}) as { runId?: string };
+        const runId = typeof startData.runId === 'string' ? startData.runId : null;
+        if (!input.wait || !runId) {
+          return commandSuccess({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running' });
+        }
+        // --wait: poll the shared run store file until the run settles.
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMetawebSurfStore(resolveMetabotPaths(actor.homeDir));
+        const deadline = Date.now() + 65 * 60_000;
+        for (;;) {
+          await new Promise((resolve) => setTimeout(resolve, 10_000));
+          const run = await store.getRun(runId);
+          if (run && run.status !== 'running') {
+            return commandSuccess({
+              runId,
+              trigger: run.trigger,
+              status: run.status,
+              stats: run.stats,
+              error: run.error,
+              reportMarkdown: run.reportMarkdown,
+            });
+          }
+          if (Date.now() > deadline) {
+            return commandSuccess({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running', note: 'wait timeout — the run continues in the daemon' });
+          }
+        }
+      },
+      enable: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const next = await createSurfSettingsStore(paths).update({ surfBeforeDreamEnabled: true });
+        let qaSurfRetired = false;
+        try {
+          qaSurfRetired = await retireQaSurfJobsForSurf(createStudyJobStore(paths), input.from?.trim() || 'default');
+        } catch {
+          // A sick study store never blocks enabling surf.
+        }
+        return commandSuccess({
+          surfBeforeDreamEnabled: next.surfBeforeDreamEnabled,
+          interactionBudget: next.interactionBudget,
+          qaSurfRetired,
+        });
+      },
+      disable: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const next = await createSurfSettingsStore(resolveMetabotPaths(actor.homeDir)).update({ surfBeforeDreamEnabled: false });
+        return commandSuccess({ surfBeforeDreamEnabled: next.surfBeforeDreamEnabled });
+      },
+      budget: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        try {
+          const next = await createSurfSettingsStore(resolveMetabotPaths(actor.homeDir)).update({
+            interactionBudget: input.budget,
+          });
+          return commandSuccess({ interactionBudget: next.interactionBudget });
+        } catch (error) {
+          return commandFailed('invalid_budget', error instanceof Error ? error.message : String(error));
+        }
+      },
+    },
     twin: {
       current: async () => {
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
@@ -5577,6 +5685,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     dream: { ...defaults.dream, ...provided.dream },
     knowledgeBase: { ...defaults.knowledgeBase, ...provided.knowledgeBase },
     schedule: { ...defaults.schedule, ...provided.schedule },
+    surf: { ...defaults.surf, ...provided.surf },
     twin: { ...defaults.twin, ...provided.twin },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
@@ -5718,6 +5827,356 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   // runners consult it (per Bot DSH pair) before falling back to templates.
   const hostLlmExecutorBridge = createHostLlmExecutorBridge();
   setActiveHostLlmExecutorBridge(hostLlmExecutorBridge);
+  // MetaWeb surf session executor (IDBots feat/metaweb-surf port): one
+  // unattended persona-driven tool-loop turn per surf run. Injected into the
+  // daemon handlers (surf group) as `runSurfSession`; executes on the unified
+  // passive-LLM chain (DSH pair via the host-executor lease first, then the
+  // bot's local CLI runtime chain) with a wall-clock watchdog (35 min
+  // pre-dream / 60 min manual), the interaction budget guard over every
+  // chain write, the KB add budget, and host ground-truth receipts.
+  type SurfSessionWriteState = import('../core/surf/guard.js').SurfSessionWriteState;
+  let surfChainWriteRef: ((input: Record<string, unknown>) => Promise<{ ok: boolean; message?: string; data?: unknown }>) | null = null;
+  const runSurfSessionExecutor = async (surfContext: import('../core/surf/service.js').SurfSessionContext): Promise<import('../core/surf/service.js').SurfSessionResult> => {
+    const {
+      buildSurfSessionPrompt, parseSurfRunReport,
+    } = await import('../core/surf/prompt.js');
+    const {
+      runSurfTurnWithTools, withSurfToolLoopContract,
+    } = await import('../core/surf/turn.js');
+    const {
+      createSurfChainWriteGuard, foldSurfReceiptsIntoSeenActions,
+      recordSurfDeepRead, surfSessionPartialStats, surfReceiptSeenActions,
+    } = await import('../core/surf/guard.js');
+    const { createMetawebSurfStore } = await import('../core/surf/store.js');
+    const { SURF_KB_ADD_BUDGET } = await import('../core/surf/prompt.js');
+    const {
+      metawebPinsBatch, metawebPinVersions, metawebProtocols,
+    } = await import('../core/surf/surfReads.js');
+    const {
+      getSocialFeed, getSocialPost, getSocialPostComments,
+    } = await import('../core/surf/socialRecall.js');
+    const { runOmniReadAction } = await import('../core/surf/omniRead.js');
+    const { surfSignerWrite, formatSurfWriteReceipt } = await import('../core/surf/writes.js');
+    const {
+      formatSurfBatchPins, formatSurfPinVersions, formatSurfProtocolRegistry,
+      formatSurfSocialPosts, formatSurfSocialPostDetail, formatSurfSocialComments,
+    } = await import('../core/surf/format.js');
+    const { createChainHistoryStore } = await import('../core/chainhistory/store.js');
+
+    const profile = await getMetabotProfile(systemHomeDir, surfContext.botSlug);
+    const homeDir = profile?.homeDir ?? '';
+    if (!homeDir) throw new Error(`Surf session could not resolve the profile home for ${surfContext.botSlug}.`);
+    const profilePaths = resolveMetabotPaths(homeDir);
+    const paths2 = profilePaths;
+    const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+    const readsOptions = baseUrl ? { baseUrl } : undefined;
+    const memoryEnabled = await createMemoryPolicyStore(profilePaths).effectivePolicy()
+      .then((policy) => policy.memoryEnabled)
+      .catch(() => true);
+
+    const writeState: SurfSessionWriteState = {
+      interactionBudget: surfContext.briefing.interactionBudget,
+      kbBudget: SURF_KB_ADD_BUDGET,
+    };
+    const surfStore = createMetawebSurfStore(profilePaths);
+    const chainHistory = createChainHistoryStore(profilePaths);
+    const guardedWrite = createSurfChainWriteGuard({
+      write: async ({ path, payload, network }) => {
+        const write = surfChainWriteRef;
+        if (!write) throw new Error('chain write handler is not configured.');
+        const result = await write({
+          from: surfContext.botSlug,
+          operation: 'create',
+          path,
+          encryption: '0',
+          version: '1.0.0',
+          contentType: 'application/json',
+          payload: typeof payload === 'string' ? payload : JSON.stringify(payload),
+          ...(network ? { network } : {}),
+        }) as { ok: boolean; message?: string; data?: unknown };
+        if (!result.ok) {
+          throw new Error(result.message || 'chain write failed');
+        }
+        const data = (result.data ?? {}) as { pinId?: string; txids?: string[]; totalCost?: number; network?: string };
+        if (!data.pinId) throw new Error('chain write returned no pinId.');
+        return { pinId: data.pinId, txids: data.txids ?? [], totalCost: data.totalCost ?? 0, network: data.network ?? 'mvc' };
+      },
+      state: writeState,
+      getSeenAction: (pinId) => surfStore.getSeenAction(pinId),
+      isOwnPin: async (pinId) => (await chainHistory.getWrite(pinId)) !== null,
+    });
+
+    // LLM: unified passive-LLM priority with a wall-clock watchdog.
+    const runtimeResolver = createLlmRuntimeResolver({
+      runtimeStore: createLlmRuntimeStore(profilePaths),
+      bindingStore: createLlmBindingStore(profilePaths),
+      getPreferredRuntimeId: async () => {
+        try {
+          const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+          const data = JSON.parse(raw) as { runtimeId?: string | null };
+          return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+        } catch {
+          return null;
+        }
+      },
+    });
+    const deadlineMs = Date.now() + (surfContext.trigger === 'pre-dream' ? 35 : 60) * 60_000;
+    const llm = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
+      if (Date.now() > deadlineMs) {
+        throw new Error('Surf watchdog: wall-clock budget exhausted — write the final report now.');
+      }
+      const historyText = history
+        .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
+        .join('\n\n---\n\n');
+      const surfSystemPrompt = 'You are a MetaBot running an unattended MetaWeb surf session. Reply with exactly one ```json fence per turn.';
+      const hostText = await createHostFirstCompletion({
+        dshLlmPath: profilePaths.dshLlmPath,
+      })({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
+      if (hostText !== null) return hostText;
+      const result = await runLlmPromptWithRuntimeFallback({
+        runtimeResolver,
+        llmExecutor,
+        metaBotSlug: surfContext.botSlug,
+        prompt: historyText,
+        systemPrompt: surfSystemPrompt,
+        timeoutMs: 10 * 60_000,
+        pollIntervalMs: 5_000,
+      });
+      if (result.status !== 'completed') {
+        throw new Error(result.error || `Surf turn ended with status ${result.status}`);
+      }
+      return result.output;
+    };
+
+    // Real tools (same seams the study drain uses).
+    const kbService = createKnowledgeBaseService(profilePaths);
+    const procedures = createProcedureStore(profilePaths);
+    const knowledge = createKnowledgeStore(profilePaths);
+    const { formatMetawebSearchBullets, formatMetawebPinDetail } = await import('../core/metaweb/format.js');
+
+    const tools = {
+      searchMetaweb: async ({ query }: { query: string }) => {
+        const page = await searchMetaweb({ q: query }, readsOptions);
+        return formatMetawebSearchBullets(page.items) || 'No results. Retry with other keywords (bilingual).';
+      },
+      readMetawebPin: async ({ pinId }: { pinId: string }) => {
+        const pin = await readMetawebPin(pinId, readsOptions);
+        void recordMetawebPinRead(profilePaths, pin, 'metaweb_surf').catch(() => undefined);
+        if (pin.text != null) recordSurfDeepRead(writeState, pin.pinId);
+        return formatMetawebPinDetail(pin);
+      },
+      readMetawebPinsBatch: async ({ pinIds }: { pinIds: string[] }) => {
+        const entries = await metawebPinsBatch(pinIds, readsOptions);
+        for (const entry of Object.values(entries)) {
+          if (!('error' in entry) && entry.text != null) recordSurfDeepRead(writeState, entry.pinId);
+        }
+        return formatSurfBatchPins(entries);
+      },
+      metawebPinVersions: async ({ pinId }: { pinId: string }) =>
+        formatSurfPinVersions(await metawebPinVersions(pinId, readsOptions)),
+      metaprotocolRegistry: async ({ size, cursor }: { size?: number; cursor?: string }) =>
+        formatSurfProtocolRegistry(await metawebProtocols({ ...(size ? { size } : {}), ...(cursor ? { cursor } : {}) }, readsOptions)),
+      searchQa: async ({ query, answered, sort, size, cursor }: { query: string; answered?: boolean; sort?: string; size?: number; cursor?: string }) => {
+        const page = await qaSearch({
+          q: query,
+          ...(answered === true || answered === false ? { answered } : {}),
+          ...(sort === 'newest' ? { sort: 'newest' as const } : {}),
+          ...(size ? { size } : {}),
+          ...(cursor ? { cursor } : {}),
+        }, readsOptions);
+        return formatQaQuestionBullets(page.items) || `No on-chain Q&A matched "${query}". Do NOT invent questions or answers.`;
+      },
+      listLatestQuestions: async ({ maxAnswers, sort, size, cursor }: { maxAnswers?: number; sort?: string; size?: number; cursor?: string }) => {
+        const page = await qaLatestQuestions({
+          ...(maxAnswers !== undefined ? { maxAnswers } : {}),
+          ...(sort === 'hot' ? { sort: 'hot' as const } : {}),
+          ...(size ? { size } : {}),
+          ...(cursor ? { cursor } : {}),
+        }, readsOptions);
+        return formatQaQuestionBullets(page.items) || 'No on-chain questions matched this filter.';
+      },
+      getQuestionAnswers: async ({ questionPinId }: { questionPinId: string }) => {
+        const detail = await qaQuestionDetail(questionPinId, readsOptions);
+        return formatQaQuestionDetail({ question: detail.question, answers: detail.answers });
+      },
+      searchSocialPosts: async ({ query, size, cursor }: { query: string; size?: number; cursor?: string }) => {
+        const page = await getSocialFeed({ keyword: query, ...(size ? { size } : {}), ...(cursor ? { cursor } : {}) }, readsOptions);
+        return formatSurfSocialPosts(page.items, page.hasMore ? page.nextCursor : null);
+      },
+      socialPostDetail: async ({ pinId }: { pinId: string }) =>
+        formatSurfSocialPostDetail(await getSocialPost(pinId, readsOptions)),
+      socialPostComments: async ({ pinId, size, cursor }: { pinId: string; size?: number; cursor?: string }) => {
+        const page = await getSocialPostComments({ pinId, ...(size ? { size } : {}), ...(cursor ? { cursor } : {}) }, readsOptions);
+        return formatSurfSocialComments(page);
+      },
+      omniRead: async (args: Record<string, unknown>) => {
+        const result = await runOmniReadAction(args);
+        return result.text;
+      },
+      chainWrite: async ({ path, payload, network }: { path: string; payload: unknown; network?: string }) => {
+        const payloadText = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        const result = await guardedWrite({ path, payload: payloadText, ...(network ? { network: network as 'mvc' | 'doge' | 'btc' } : {}) });
+        return formatSurfWriteReceipt({
+          label: 'Surf interaction',
+          result,
+          targetPinId: typeof (payload as { likeTo?: string; commentTo?: string; answerTo?: string })?.likeTo === 'string'
+            || typeof (payload as { commentTo?: string })?.commentTo === 'string'
+            || typeof (payload as { answerTo?: string })?.answerTo === 'string'
+              ? ((payload as { likeTo?: string; commentTo?: string; answerTo?: string }).likeTo
+                ?? (payload as { commentTo?: string }).commentTo
+                ?? (payload as { answerTo?: string }).answerTo)
+              : undefined,
+        });
+      },
+      listKnowledgeBases: async () => {
+        const rows = (await kbService.store.listKnowledgeBases())
+          .filter((row) => row.metabotSlug === surfContext.botSlug);
+        if (!rows.length) return 'No knowledge bases yet.';
+        return rows.map((row) => `- "${row.name}"${row.isDefault ? ' (default)' : ''} `
+          + `docs=${row.docCount} chunks=${row.chunkCount}`
+          + `${row.description ? ` — ${row.description}` : ''}`).join('\n');
+      },
+      queryKnowledgeBases: async ({ query, knowledgeBaseId }: { query: string; knowledgeBaseId?: string }) => {
+        const results = await kbService.queryKnowledgeBase(surfContext.botSlug, query, {
+          ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
+        });
+        if (!results.length) return 'No hits.';
+        return results.map((result) => result.hits.map((hit) =>
+          `- [${result.knowledgeBaseName}] ${hit.title}#${hit.ord} (score ${hit.score})\n  ${hit.snippet}`
+        ).join('\n')).join('\n');
+      },
+      addDocument: async ({ title, content, pinId }: { title: string; content: string; pinId?: string }) => {
+        const saved = await kbService.addDocument(surfContext.botSlug, {
+          title,
+          content,
+          sourceType: 'metaweb',
+          ...(pinId ? { pinId } : {}),
+        });
+        return `Saved as ${saved.relPath} (indexed: ${saved.indexed ? 'yes' : 'pending'}).`;
+      },
+      learnKnowledgeBase: async () => {
+        const learned = await kbService.learnKnowledgeBase(surfContext.botSlug);
+        return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
+      },
+      saveProcedure: async (input: { title: string; steps: string[]; pitfalls?: string[]; triggerText?: string; sourcePinIds?: string[] }) => {
+        const { procedure, created } = await procedures.upsertProcedure({
+          title: input.title,
+          steps: input.steps,
+          ...(input.pitfalls?.length ? { pitfalls: input.pitfalls } : {}),
+          ...(input.triggerText ? { triggerText: input.triggerText } : {}),
+          ...(input.sourcePinIds?.length ? { sourcePinIds: input.sourcePinIds } : {}),
+          origin: 'agent',
+        });
+        return `${created ? 'Saved' : 'Updated'} procedure "${procedure.title}" v${procedure.version} (${procedure.steps.length} steps).`;
+      },
+      recallProcedures: async ({ query }: { query: string }) => {
+        const rows = await procedures.listProcedures({ status: 'active' });
+        const scored = scoreProceduresForQuery(rows, query).slice(0, 5);
+        if (!scored.length) return 'No matching procedures.';
+        return scored.map(({ procedure, score }) =>
+          `- ${procedure.title} (${score})\n  ${procedure.steps.join(' → ')}`
+          + (procedure.pitfalls.length ? `\n  Pitfalls: ${procedure.pitfalls.join('; ')}` : '')
+        ).join('\n');
+      },
+      upsertKnowledge: async ({ topic, summary, kind }: { topic: string; summary: string; kind?: string }) => {
+        const validKind: KnowledgeKind | undefined = kind && (KNOWLEDGE_KINDS as readonly string[]).includes(kind)
+          ? kind as KnowledgeKind
+          : undefined;
+        const result = await knowledge.upsertKnowledge({
+          topic,
+          summary,
+          ...(validKind ? { kind: validKind } : {}),
+          origin: 'agent',
+        });
+        return formatKnowledgeUpsertResult({
+          topic: result.entry.topic,
+          created: result.created,
+          revised: result.revised,
+          version: result.entry.version,
+          kind: result.entry.kind,
+        });
+      },
+      recallKnowledge: async (input: { query?: string; kind?: string }) => {
+        const rows = await knowledge.searchKnowledge({
+          ...(input.query ? { query: input.query } : {}),
+          ...(input.kind && (KNOWLEDGE_KINDS as readonly string[]).includes(input.kind)
+            ? { kind: input.kind as KnowledgeKind }
+            : {}),
+          limit: 5,
+          touchLastUsed: true,
+        });
+        if (!rows.length) return 'No matching knowledge.';
+        return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
+      },
+      createScheduledTask: async (spec: import('../core/surf/turn.js').SurfScheduledTaskSpec) => {
+        const schedule = spec.scheduleType === 'at'
+          ? { type: 'at' as const, datetime: spec.at! }
+          : spec.scheduleType === 'interval'
+            ? { type: 'interval' as const, intervalMs: Math.max(60_000, (spec.intervalValue ?? 1) * (spec.intervalUnit === 'minute' ? 60_000 : spec.intervalUnit === 'day' ? 86_400_000 : 3_600_000)) }
+            : { type: 'cron' as const, expression: spec.cron! };
+        const store = scheduleStoreFor(homeDir);
+        const task = await store.createTask({
+          name: spec.name,
+          description: 'Surf→work handoff (created inside a MetaWeb surf run).',
+          prompt: spec.prompt,
+          schedule,
+          workingDirectory: paths2.workspaceRoot,
+          channel: 'auto',
+        });
+        if (task.state.nextRunAtMs == null) {
+          await store.deleteTask(task.id);
+          throw new Error('The schedule never fires (past date or invalid spec) — task rolled back.');
+        }
+        (writeState.scheduledTaskIds ??= []).push(task.id);
+        return [
+          `Scheduled task created — it runs later as a full work session (coding, skills, publishing available).`,
+          `- task id: ${task.id}`,
+          `- name: ${spec.name}`,
+          `- schedule: ${spec.scheduleType}${spec.scheduleType === 'at' ? ` ${spec.at}` : spec.scheduleType === 'cron' ? ` ${spec.cron}` : ''}`,
+          `- next fire: ${task.state.nextRunAtMs ? new Date(task.state.nextRunAtMs).toISOString() : 'unknown'}`,
+        ].join('\n');
+      },
+    };
+
+    try {
+      const prompt = withSurfToolLoopContract(
+        buildSurfSessionPrompt({ ...surfContext, memoryEnabled }),
+        { memoryEnabled },
+      );
+      const finalText = await runSurfTurnWithTools(prompt, {
+        runLlm: llm,
+        tools,
+        writeState,
+        memoryEnabled,
+      });
+      const report = parseSurfRunReport(finalText);
+      // Receipts over self-report: chain-write classes and scheduled tasks
+      // come only from what the host actually published.
+      const receipts = surfReceiptSeenActions(writeState);
+      const countOf = (action: string) => receipts.filter((entry) => entry.action === action).length;
+      const reported = report.stats ?? {};
+      const stats = {
+        ...reported,
+        liked: countOf('liked') || reported.liked || 0,
+        commented: countOf('commented') || reported.commented || 0,
+        answered: countOf('answered') || reported.answered || 0,
+        posted: countOf('posted') || reported.posted || 0,
+        challenged: countOf('challenged') || reported.challenged || 0,
+        tasksScheduled: writeState.tasksScheduled ?? 0,
+      };
+      return {
+        stats,
+        reportMarkdown: report.reportMarkdown,
+        reportJson: report.reportJson,
+        seenActions: foldSurfReceiptsIntoSeenActions(report.seenActions, writeState),
+      };
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      (err as Error & { surfPartialStats?: unknown }).surfPartialStats = surfSessionPartialStats(writeState);
+      throw err;
+    }
+  };
+
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
@@ -5776,11 +6235,14 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     onProviderPresenceChanged: (enabled) => onProviderPresenceChanged(enabled),
     onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
     onBrowserInfrastructureChanged: () => refreshA2ASimplemsgListenerAfterInfrastructureChange(),
+    runSurfSession: runSurfSessionExecutor,
+    metawebApiBaseUrl: normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined,
     schedule: {
       createScheduleStore: scheduleStoreFor,
       hostLeases: scheduleHostLeases,
     },
   });
+  surfChainWriteRef = (handlers.chain?.write ?? null) as typeof surfChainWriteRef;
 
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,

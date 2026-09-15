@@ -34,6 +34,8 @@ export const DREAM_WINDOW_END_MINUTES = 6 * 60;
 export const DREAM_ACTIVITY_DEFAULT_TOKEN_BUDGET = 48_000;
 export const SELF_IDENTITY_MIN_CHARS = 200;
 export const MAX_WORK_REVIEWS = 5;
+/** Longest surf-report excerpt carried into the dream prompt (IDBots parity). */
+export const SURF_REPORT_PROMPT_MAX_CHARS = 2000;
 export const MAX_IMPORTANT_MEMORIES = 5;
 export const MAX_VALUE_LESSONS = 3;
 export const MAX_IMPRESSION_UPDATES = 20;
@@ -488,6 +490,13 @@ export function buildDreamPrompt(input: {
   if (sourceMode !== 'fragment' && (input.activity.chainReads ?? []).length > 0) {
     const readLines = (input.activity.chainReads ?? []).map(formatChainReadActivity).join('\n');
     sections.push(`## 当日阅读的链上内容(完整读过的文章/帖子,读过即有印象)\n${readLines}`);
+  }
+  if (sourceMode !== 'fragment' && input.activity.surfReport) {
+    // IDBots parity: the pre-dream surf report rides in as its own section —
+    // the freshest stretch of that night's experience, for the dream to digest.
+    sections.push(
+      `## 今夜做梦前的 AI 互联网冲浪报告(你今晚自主冲浪 AI 互联网的经历与收获,把它当作今晚 freshest 的一段经历来消化)\n${truncateText(input.activity.surfReport, SURF_REPORT_PROMPT_MAX_CHARS)}`,
+    );
   }
   if (input.activity.taskRuns.length > 0) {
     const taskLines = input.activity.taskRuns

@@ -290,6 +290,13 @@ export interface CliDependencies {
     selfIdentity?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     capabilities?: (input: { from?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  surf?: {
+    status?: (input: { from?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    run?: (input: { from?: string; trigger?: 'manual-chat' | 'manual-ui' | 'pre-dream'; wait?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    enable?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    disable?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    budget?: (input: { from?: string; budget: number }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   knowledgeBase?: {
     list?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     create?: (input: { from?: string; name: string; description?: string; rawDir?: string; autoLearn?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;

@@ -28,6 +28,7 @@ import { BotAvatar } from './BotAvatar.tsx'
 import { LlmPicker } from './LlmPicker.tsx'
 import type { BotsLocaleKey } from './locale.ts'
 import { KnowledgeTab } from './KnowledgeTab.tsx'
+import { SurfSection } from './SurfSection.tsx'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 type TabKey = 'basic' | 'behavior' | 'chat' | 'knowledge' | 'advanced'
@@ -787,6 +788,7 @@ export function BotEditor({
               onSave={runSave}
               onRequestDelete={() => setConfirmDelete(true)}
             />
+            <SurfSection bot={bot} t={t} />
           </div>
         </div>
       ) : null}

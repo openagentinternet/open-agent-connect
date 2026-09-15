@@ -10,6 +10,7 @@ import { handleBuzzRoutes } from './routes/buzz';
 import { handleSimpleNoteRoutes } from './routes/simplenote';
 import { handleQandaRoutes } from './routes/qanda';
 import { handleChainRoutes } from './routes/chain';
+import { handleSurfRoutes } from './routes/surf';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
 import { handleGroupTaskRoutes } from './routes/grouptask';
@@ -39,6 +40,7 @@ const ROUTES: RouteHandler[] = [
   handleSimpleNoteRoutes,
   handleQandaRoutes,
   handleChainRoutes,
+  handleSurfRoutes,
   handleDaemonRoutes,
   handleChatRoutes,
   handleGroupTaskRoutes,

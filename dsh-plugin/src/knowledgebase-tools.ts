@@ -6,12 +6,15 @@
  * against the session Bot's profile paths.
  */
 import { core, twinFallbackSlug } from './local-read.js'
+import { qaSurfAliasDisable, qaSurfAliasEnqueue } from './surf-tools.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 import { actorHomeDir, oacSlugOf } from './browser-tools.js'
 
 export interface KnowledgebaseToolDeps {
   /** Resolve the acting bot slug for one tool exec; fallback when unknown. */
   fallbackSlug?: string
+  /** CLI bridge for the surf alias tools; defaults to the real metabot CLI. */
+  run?: import('./cli-payload.js').RunFn
   /** Resolve a Bot slug to its profile homeDir; defaults to the CLI-mirroring resolution. */
   resolveHomeDir?: (slug: string) => Promise<string>
   /**
@@ -464,7 +467,7 @@ function studyStoreFor(homeDir: string) {
   return store as ReturnType<StudyModule['createStudyJobStore']>
 }
 
-function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostContext }): HostToolDefinition[] {
+export function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostContext }): HostToolDefinition[] {
   const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
     { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
   ]
@@ -519,64 +522,39 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
     {
       name: 'metaweb_qa_surf_enqueue',
       description:
-        'Enable RECURRING nightly on-chain Q&A surfing for yourself — use when the user asks you to spend your '
-        + 'nights on the MetaWeb Q&A (e.g. "晚上去链上问答看看，会的就答", "surf the on-chain Q&A at night and learn from it"). '
-        + 'Every night (00:00-06:00) a background session then: browses the unanswered question queue, answers the ones '
-        + 'squarely in your role (a few per night — answers are on-chain writes that cost sats), likes genuinely good '
-        + 'answers, and saves Q&A valuable to your role into your knowledge bases. It recurs until the user disables it '
-        + '(metaweb_qa_surf_disable); it never completes on its own. Re-enabling while active is a no-op returning the '
-        + 'existing job. nightly_budget caps the NEW pins handled per run (questions answered + pins saved), default 10, max 50.',
+        'Enable RECURRING nightly MetaWeb surfing for yourself — use when the user asks you to spend your nights '
+        + 'on the AI internet (e.g. "晚上去链上问答看看，会的就答", "surf the on-chain Q&A at night and learn from it", '
+        + '"每晚去冲浪"). Each night before your dream, an unattended session then: catches up on new chain content '
+        + '(buzz, articles, Q&A, encyclopedia), searches & learns what fits your role, engages as your persona '
+        + '(like/comment/answer — on-chain writes capped by your interaction budget), handles replies addressed to '
+        + 'you, and hands off real work to scheduled tasks. The surf report feeds the same night\'s dream. It recurs '
+        + 'until the user disables it (metaweb_qa_surf_disable / the Advanced-tab toggle); the legacy Q&A-only surf '
+        + 'job is retired by this call — Q&A browsing now happens inside the full surf. This legacy alias is kept for '
+        + 'muscle memory; prefer metaweb_surf_start for a one-off surf right now.',
       parameters: {
         type: 'object',
         properties: {
-          nightly_budget: { type: 'number', description: 'New pins handled per night (answered + saved). Default 10, max 50.' },
+          nightly_budget: { type: 'number', description: 'Ignored (legacy parameter) — the surf interaction budget lives in the bot\'s Advanced tab (default 20).' },
         },
       },
       output: { schema: { type: 'string' }, render },
-      timeoutMs: 15_000,
-      execute: async (args, exec) => {
-        const session = await sessionOf(input, exec)
-        if (!session) return toolError('metaweb_qa_surf_enqueue', NO_SESSION)
-        try {
-          const result = await studyStoreFor(session.homeDir).enqueueQaSurfJob({
-            metabotSlug: session.slug,
-            ...(numberArg(args, 'nightly_budget') ? { budgetPins: numberArg(args, 'nightly_budget') } : {}),
-          })
-          if (!result.created) {
-            return `Nightly Q&A surfing is already ${result.job.status} for this bot (${result.job.runCount} run(s) so far). `
-              + 'It continues every night — no duplicate was created.'
-          }
-          return [
-            `Nightly Q&A surfing enabled (nightly budget: ${result.job.budgetPins} pins/run).`,
-            'Each night (00:00-06:00) a background session browses the unanswered on-chain questions, answers the ones squarely in your role, reacts honestly, and saves valuable Q&A into your knowledge bases.',
-            'Tell the user it recurs until disabled (metaweb_qa_surf_disable) and that progress shows in metaweb_study_status.',
-          ].join('\n')
-        } catch (error) {
-          return toolError('metaweb_qa_surf_enqueue', error)
-        }
+      timeoutMs: 90_000,
+      execute: async (_args, exec) => {
+        return qaSurfAliasEnqueue(input, exec)
       },
     },
     {
       name: 'metaweb_qa_surf_disable',
       description:
-        'Stop YOUR recurring nightly on-chain Q&A surfing — use when the user asks to stop/disable the nightly '
-        + 'surfing ("别晚上去问答了", "stop the nightly Q&A surfing"). Answers and knowledge already saved stay; only '
-        + 'future nightly runs stop. Re-enable anytime with metaweb_qa_surf_enqueue. Bare call, no arguments.',
+        'Stop YOUR recurring nightly MetaWeb surfing — use when the user asks to stop/disable the nightly '
+        + 'surfing ("别晚上去冲浪了", "stop the nightly surfing"). Everything already answered and saved stays; only '
+        + 'future nightly runs stop. Re-enable anytime with metaweb_qa_surf_enqueue or the Advanced-tab toggle. '
+        + 'Bare call, no arguments.',
       parameters: { type: 'object', properties: {} },
       output: { schema: { type: 'string' }, render },
-      timeoutMs: 15_000,
+      timeoutMs: 30_000,
       execute: async (_args, exec) => {
-        const session = await sessionOf(input, exec)
-        if (!session) return toolError('metaweb_qa_surf_disable', NO_SESSION)
-        try {
-          const disabled = await studyStoreFor(session.homeDir).disableQaSurfJob(session.slug)
-          if (!disabled) {
-            return 'Nightly Q&A surfing is not active for this bot — nothing to disable.'
-          }
-          return 'Nightly Q&A surfing disabled. Everything already answered and saved stays with you; future nightly runs are stopped. Re-enable anytime with metaweb_qa_surf_enqueue.'
-        } catch (error) {
-          return toolError('metaweb_qa_surf_disable', error)
-        }
+        return qaSurfAliasDisable(input, exec)
       },
     },
     {

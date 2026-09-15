@@ -78,6 +78,7 @@ import type {
 import { normalizeOptionalDshLlmId, normalizeOptionalDshLlmReasoningEffort, readDshLlmBinding } from '../core/bot/dshLlm';
 import { normalizeBotType, normalizeOptionalGlobalMetaId } from '../core/bot/botRole';
 import { applyTwinInvariant, resolveCurrentTwinSlug, resolveTwinHomeDir } from '../core/bot/twinRole';
+import { createSurfDaemonHandlers } from './surfHandlers';
 import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
 import {
   buildPublishedService,
@@ -5088,6 +5089,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     options: RequestMvcGasSubsidyOptions
   ) => Promise<RequestMvcGasSubsidyResult>;
   createSignerForHome?: (homeDir: string) => Signer;
+  /**
+   * Unattended MetaWeb surf session executor (LLM tool loop), injected by the
+   * daemon runtime which owns the passive-LLM chain; absent → digest-only runs.
+   */
+  runSurfSession?: import('../core/surf/service.js').SurfServiceDeps['runSurfSession'];
+  /** so.metaid.io override for the surf reads (METABOT_METAWEB_API_BASE_URL). */
+  metawebApiBaseUrl?: string;
   autoReplyConfig?: PrivateChatAutoReplyConfig;
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
   /** Host LLM executor bridge (DSH host delegation); shared with the private-chat reply runners. */
@@ -13368,6 +13376,41 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
     },
+    surf: (() => {
+      // Per-daemon surf group: bot resolution mirrors resolveActorWriteContext
+      // (explicit selector, else the machine Twin) but also returns slug/name.
+      const group = createSurfDaemonHandlers({
+        resolveBot: async (from) => {
+          const requestedSlug = normalizeText(from);
+          let profileHomeDir = await resolveTwinHomeDir(normalizedSystemHomeDir) ?? input.homeDir;
+          let slug: string | null = null;
+          if (requestedSlug) {
+            const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+            if (!selectedProfile) {
+              return { failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`) };
+            }
+            profileHomeDir = selectedProfile.homeDir;
+            slug = selectedProfile.slug;
+          } else {
+            slug = await resolveCurrentTwinSlug(normalizedSystemHomeDir);
+          }
+          const name = (await getMetabotProfile(normalizedSystemHomeDir, slug ?? ''))?.name ?? slug ?? 'Bot';
+          const effectiveSlug = slug ?? 'default';
+          return { slug: effectiveSlug, name, homeDir: profileHomeDir };
+        },
+        runSurfSession: input.runSurfSession,
+        metawebBaseUrl: normalizeText(input.metawebApiBaseUrl) || undefined,
+        log: (message) => console.warn(message),
+      });
+      return {
+        status: (rawInput: { from?: string; limit?: number }) => group.status(rawInput),
+        run: (rawInput: { from?: string; trigger?: 'manual-chat' | 'manual-ui' | 'pre-dream'; wait?: boolean }) =>
+          group.run(rawInput),
+        enable: (rawInput: { from?: string }) => group.enable(rawInput),
+        disable: (rawInput: { from?: string }) => group.disable(rawInput),
+        budget: (rawInput: { from?: string; budget?: number }) => group.budget(rawInput),
+      };
+    })(),
     skills: {
       publish: async (rawInput) => {
         const actor = await resolveActorWriteContext(rawInput.from);

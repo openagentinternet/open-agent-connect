@@ -331,6 +331,23 @@ button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); 
 .oac-setup-badge { background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 16%, transparent); color: var(--dsw-alias-state-warn-label); }
 .oac-spin { animation: oac-spin 1s linear infinite; }
 @keyframes oac-spin { to { transform: rotate(360deg); } }
+
+.oac-surf-section .oac-subsection-title { margin: 0 0 4px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
+.oac-surf-section .oac-info-row { align-items: flex-start; padding: 6px 0; }
+.oac-surf-section .oac-info-label-wrap { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.oac-surf-section .oac-info-label { color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.oac-surf-now-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.oac-surf-reports { display: grid; gap: 6px; }
+.oac-surf-run { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 8px 10px; display: grid; gap: 6px; }
+.oac-surf-run-head { display: flex; align-items: center; gap: 8px; padding: 0; border: none; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; flex-wrap: wrap; }
+.oac-surf-run-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.oac-surf-run-dot.running { background: var(--dsw-alias-brand-primary); animation: oac-surf-pulse 1.4s ease-in-out infinite; }
+.oac-surf-run-dot.done { background: var(--dsw-alias-state-success-primary); }
+.oac-surf-run-dot.failed { background: var(--dsw-alias-state-error-primary); }
+.oac-surf-run-meta { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.oac-surf-run-stats { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.oac-surf-report { margin: 0; max-height: 320px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); font-size: 12px; line-height: 18px; white-space: pre-wrap; word-break: break-word; }
+@keyframes oac-surf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 `
 
 export const APPS_CSS = `
