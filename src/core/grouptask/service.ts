@@ -1029,6 +1029,9 @@ export interface SuperviseGroupTaskResult {
   notice: string | null;
   /** Set for nudge: the engine consumes this kv and runs the chair wake turn. */
   nudgeQueued: boolean;
+  /** OT-08 R25: the chair's LLM channel is degraded — nudge/resume signals
+   *  are queued and fire on recovery, but the chair cannot speak right now. */
+  chairUnavailable?: boolean;
 }
 
 /**
@@ -1079,7 +1082,10 @@ export async function superviseGroupTask(
       attempts: 0,
     }));
     await emitGroupTaskRelay(ctx, chair, updated, 'resumed', 'The owner resumed this task; work continues.');
-    return { task: updated, action, notice: null, nudgeQueued: true };
+    return {
+      task: updated, action, notice: null, nudgeQueued: true,
+      chairUnavailable: updated.chairDegradedAt != null,
+    };
   }
 
   // nudge + flag address a member (nudge) or the whole room (flag).
@@ -1131,7 +1137,10 @@ export async function superviseGroupTask(
     attempts: 0,
   };
   await store.kvSet(`${GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`, JSON.stringify(nudge));
-  return { task, action, notice: null, nudgeQueued: true };
+  return {
+    task, action, notice: null, nudgeQueued: true,
+    chairUnavailable: task.chairDegradedAt != null,
+  };
 }
 
 // ---------------------------------------------------------------------------

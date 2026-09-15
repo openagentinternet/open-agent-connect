@@ -418,14 +418,27 @@ export function createGroupTaskController(
           const globalMetaId = readString(args, 'globalMetaId')
           if (member && globalMetaId) fail('conflicting_member', 'member and globalMetaId are mutually exclusive.')
           const note = readString(args, 'note')
-          return json(dataOf(await dispatch('grouptask/supervise', {
+          const result = await dispatch('grouptask/supervise', {
             chair,
             taskId,
             superviseAction,
             ...(member ? { member } : {}),
             ...(!member && globalMetaId ? { globalMetaId } : {}),
             ...(note ? { note } : {}),
-          })))
+          })
+          const data = dataOf(result)
+          // OT-08 R25: never a silent no-op — say the channel is down and the
+          // signal is queued, and name the takeover paths that still work.
+          if (data.chairUnavailable === true) {
+            return [
+              'NOTICE: the chair\'s LLM runtime is currently unavailable, so the chair cannot speak right now.',
+              'The signal is QUEUED and will fire automatically once the runtime recovers.',
+              'Meanwhile the owner can act directly from the Group Tasks panel (post as the owner, pause, or close),'
+                + ' and `metabot grouptask health` lists degraded tasks.',
+              json(data),
+            ].join('\n')
+          }
+          return json(data)
         }
         case 'deliverable_delete': {
           if (!taskId) fail('missing_task_id', 'taskId is required.')

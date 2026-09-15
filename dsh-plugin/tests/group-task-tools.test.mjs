@@ -336,6 +336,23 @@ test('supervise action validates and maps to the CLI verb', async () => {
   assert.equal(flagValue(pauseCall, '--member'), undefined)
 })
 
+test('supervise prints a takeover NOTICE when the chair channel is unavailable', async () => {
+  const { run } = fakeRun((args) => ({
+    ok: true,
+    state: 'success',
+    data: flagValue(args, '--action') === 'nudge'
+      ? { task: {}, action: 'nudge', nudgeQueued: true, chairUnavailable: true }
+      : { task: {}, action: flagValue(args, '--action'), nudgeQueued: false },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const output = await controller.run('supervise', { taskId: 3, superviseAction: 'nudge', member: 'bob' })
+  assert.match(output, /NOTICE: the chair's LLM runtime is currently unavailable/)
+  assert.match(output, /QUEUED/)
+  assert.match(output, /metabot grouptask health/)
+  const healthy = await controller.run('supervise', { taskId: 3, superviseAction: 'flag', note: 'x' })
+  assert.doesNotMatch(healthy, /NOTICE/)
+})
+
 test('deliverable_delete maps the ledger row id', async () => {
   const { calls, run } = fakeRun()
   const controller = plugin.createGroupTaskController('alice', { run })

@@ -19,6 +19,15 @@ export type GroupTaskHealthReport = {
     | { present: false };
   simplemsgListenerEnabled: boolean;
   tasks: { active: number; total: number };
+  /** OT-08 R27: active tasks whose chair LLM channel is degraded (cheap
+   *  takeover-relevant probe — no per-task detail payloads needed). */
+  degradedTasks: Array<{
+    id: number;
+    title: string;
+    status: string;
+    chairDegradedAt: number;
+    lastProcessedIndex: number;
+  }>;
   engine: { logFile: string | null; recentLines: string[] };
 };
 
@@ -54,12 +63,22 @@ export async function getGroupTaskHealth(
   const simplemsgListenerEnabled = await input.readSimplemsgListenerEnabled?.().catch(() => true) ?? true;
 
   let tasks = { active: 0, total: 0 };
+  let degradedTasks: GroupTaskHealthReport['degradedTasks'] = [];
   try {
     const summaries = await listGroupTaskSummaries(ctx, { tab: 'all', includeArchived: false });
     tasks = {
       total: summaries.length,
       active: summaries.filter((task) => task.status !== 'done' && task.status !== 'cancelled').length,
     };
+    degradedTasks = summaries
+      .filter((task) => task.chairDegradedAt != null && task.status !== 'done' && task.status !== 'cancelled')
+      .map((task) => ({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        chairDegradedAt: task.chairDegradedAt as number,
+        lastProcessedIndex: task.lastProcessedIndex,
+      }));
   } catch {
     // Profile listing failures must not take down the rest of the report.
   }
@@ -71,5 +90,5 @@ export async function getGroupTaskHealth(
     recentLines = tail.split('\n').filter((line) => line.trim() !== '').slice(-RECENT_ENGINE_LOG_LINES);
   }
 
-  return { chair, ownerIdentity, simplemsgListenerEnabled, tasks, engine: { logFile, recentLines } };
+  return { chair, ownerIdentity, simplemsgListenerEnabled, tasks, degradedTasks, engine: { logFile, recentLines } };
 }

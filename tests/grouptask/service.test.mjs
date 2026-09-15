@@ -575,6 +575,63 @@ test('supervise records signals and queues wakes but NEVER posts into the group 
   assert.equal(await store.kvGet(`group_task_nudge_attempts:${task.id}`), undefined);
 });
 
+test('supervise reports chairUnavailable for nudge/resume on a degraded chair channel (OT-08 R25)', async () => {
+  const { ctx } = createFakeContext('metabot-gt-supervise-degraded-');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { task, chairSlug } = await createGroupTask(ctx, {
+    title: 'Degraded channel task',
+    goal: 'Survive the outage',
+    workerSlugs: ['worker-1'],
+  });
+  const chairProfile = await ctx.getProfile(chairSlug);
+  const store = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
+  await store.setTaskChairDegraded(task.id, Date.now());
+
+  const nudge = await service.superviseGroupTask(ctx, chairSlug, task.id, {
+    action: 'nudge',
+    memberSlug: 'worker-1',
+  });
+  assert.equal(nudge.nudgeQueued, true, 'the signal is still queued');
+  assert.equal(nudge.chairUnavailable, true, 'the degraded channel is surfaced explicitly');
+
+  await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'pause' });
+  const resumed = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'resume' });
+  assert.equal(resumed.nudgeQueued, true);
+  assert.equal(resumed.chairUnavailable, true);
+
+  // A healthy task keeps the field falsy.
+  const { task: healthy } = await createGroupTask(ctx, {
+    title: 'Healthy task',
+    goal: 'No outage here',
+    workerSlugs: ['worker-1'],
+  });
+  const okNudge = await service.superviseGroupTask(ctx, chairSlug, healthy.id, {
+    action: 'nudge',
+    memberSlug: 'worker-1',
+  });
+  assert.notEqual(okNudge.chairUnavailable, true);
+});
+
+test('getGroupTaskHealth lists degraded active tasks (OT-08 R27)', async () => {
+  const { ctx } = createFakeContext('metabot-gt-health-degraded-');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { task, chairSlug } = await createGroupTask(ctx, {
+    title: 'Stuck without a chair',
+    goal: 'Report me',
+  });
+  const chairProfile = await ctx.getProfile(chairSlug);
+  const store = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
+  await store.setTaskChairDegraded(task.id, 1_700_000_000_000);
+
+  const report = await require('../../dist/core/grouptask/health.js').getGroupTaskHealth(ctx);
+  assert.equal(report.degradedTasks.length, 1);
+  assert.equal(report.degradedTasks[0].id, task.id);
+  assert.equal(report.degradedTasks[0].title, 'Stuck without a chair');
+  assert.equal(report.degradedTasks[0].chairDegradedAt, 1_700_000_000_000);
+});
+
 test('submitGroupTaskWork: a [NO_REPLY] handoff completes WITHOUT an on-chain post; empty handoff fails', async () => {
   const { ctx, pins } = createFakeContext('metabot-gt-submit-noreply-');
   const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
