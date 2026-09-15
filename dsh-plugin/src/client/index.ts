@@ -208,6 +208,7 @@ export function apply(ctx: ClientContext): void {
       grouptask: {
         list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
         detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
+        invites: (chair, taskId) => api.grouptaskInvites(chair, taskId),
         create: (input) => api.grouptaskCreate(input),
         post: (chair, taskId, input) => api.grouptaskPost(chair, taskId, input),
         close: (chair, taskId, input) => api.grouptaskClose(chair, taskId, input),

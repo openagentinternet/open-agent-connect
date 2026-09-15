@@ -18,8 +18,9 @@
  */
 import { dispatchGroupTaskRoutes, type GroupTaskRouteDeps } from './grouptask.js'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { approvalOf, sessionApprovalPolicy } from './browser-tools.js'
 import type { RunFn } from './cli-payload.js'
-import type { HostAgentLike, HostToolDefinition } from './context-types.js'
+import type { HostAgentLike, HostApproval, HostApprovalOutcome, HostContext, HostToolDefinition } from './context-types.js'
 
 /** Group-task SOP for the Twin, ported from the IDBots metabot-group-task SKILL.md. */
 export const GROUP_TASK_SOP_TEXT = `## Group Tasks (multi-bot on-chain group tasks)
@@ -35,12 +36,12 @@ Do NOT open one for single-step jobs (do them yourself or use local_worker_deleg
 3. For each seat call \`{action:"search_candidates", seat}\` once (match-first; local Workers are a tie-break, not a gate), then \`{action:"propose", title, goal, plan, acceptanceCriteria}\`. The plan is {stages:[{id,title,seatRole,dependsOn[]}], seats:[{role, candidateName, candidateSlug?, candidateGlobalMetaId?, source:"local"|"remote", reason, domainLabel?, backupName?}]}. A local seat must name an AVAILABLE local Bot (Settings → Bots toggle on AND a DSH LLM pair configured) — propose refuses slugs that are unknown or unavailable, so only pick candidates search_candidates returned; never seat a Bot you merely remember.
 4. The propose result carries \`slateText\` — show it to the owner in the owner's language (pass \`language\`), then WAIT. The owner confirms in chat → \`{action:"decide", proposalId, decision:"confirm"}\`; asks for changes → "revise", then propose again; wants staffing skipped → "skip".
 5. After a confirm decision call \`{action:"create_from_proposal", proposalId}\`. Auto-start waiver: when the triggering wish itself said to just start (直接开始 / 直接开 / "just start" / "no need to confirm"), you may create immediately — pass the original wish text as \`wish\` on propose so the gate records it.
-6. create_from_proposal returns the task (taskId, groupId) and \`pendingRemoteSeats\`. Invite each remote seat one at a time: \`{action:"invite", taskId, globalMetaId, name?, skills?}\` (invites expire in 10 minutes; the daemon must be alive when it arrives). Then report the group's title, roster, and stage plan to the owner and let the engine run. When the result lists \`skippedWorkers\`, those local seats were dropped as unavailable — name them to the owner and note the group runs short those seats.
+6. create_from_proposal returns the task (taskId, groupId) and \`pendingRemoteSeats\`. One Bot can hold several seats — invite each remote BOT exactly ONCE, by its GlobalMetaId; a single invite covers all its seats (duplicate invites are refused: invite_pending / already_member). Invites expire in 10 minutes and the daemon must be alive when one arrives. Then report the group's title, roster, and stage plan to the owner and let the engine run. When the result lists \`skippedWorkers\`, those local seats were dropped as unavailable — name them to the owner and note the group runs short those seats.
 
 ### After creation
 The daemon engine drives the task: it posts the kickoff, runs the planning turn, wakes @-mentioned workers, verifies deliverables, and moves planning → executing → review. SINGLE COMMANDER: the chair is the only coordinator and the host itself NEVER speaks in the group — every group message is written by a participant (chair, workers, or the owner); host observations reach the chair as private environment notes in its turn context. Do not speak as the chair inside the group while it runs (the engine speaks with the chair's voice); if you must post, post as the owner (\`asOwner\`) or as a member Bot (\`asSlug\`).
 - Follow progress: \`{action:"detail", taskId}\` / \`{action:"messages", taskId}\`.
-- When the task reaches review, walk the owner through the acceptance summary in this chat, then close it: \`{action:"close", taskId, outcome:"done", rating:1-5, comment?}\` — or back to work: \`{action:"reopen", taskId, reason}\`. Cancel with outcome:"cancelled".
+- When the task reaches review, walk the owner through the acceptance summary in this chat, then close it: \`{action:"close", taskId, outcome:"done", rating:1-5, comment?}\` — or back to work: \`{action:"reopen", taskId, reason}\`. Cancel with outcome:"cancelled". CLOSING IS THE OWNER'S DECISION, never yours: every close raises the native confirmation dialog for the owner (when approval prompts are disabled in this session, ask the owner in chat first and pass \`ownerConfirmed:true\` — only after an explicit yes). Never close or rate a task on your own authority because the deliverables "look done" — present the evidence and wait.
 - Roster control: \`{action:"member_status", taskId, status, member|globalMetaId}\`, \`{action:"kick", taskId, member|globalMetaId, reason?}\`, \`{action:"invite", ...}\` to add a remote Bot by GlobalMetaId.
 - Statuses: planning, executing, review, done, cancelled. Deliverables arrive as [DELIVERABLE] messages and are verified on-chain; app work must show up as a clickable \`metaapp://\` link — if a worker hands the owner a raw file instead, send it back before review. Every MetaWeb URI (metaid://, pin://, metafile://, metaapp://, map://) is always shown in FULL — never abbreviated or truncated with an ellipsis; the pinId part is 64 lowercase hex chars + \`i0\`, copied verbatim.
 - Owner supervision via \`{action:"supervise", taskId, superviseAction}\`: "nudge" wakes a quiet member through the chair's turn context (optionally target one with member/globalMetaId), "pause" suspends dispatch and "resume" continues (the chair re-engages the roster), "flag" records an observation into the acceptance record. Supervision never posts into the group. Use \`{action:"deliverable_delete", taskId, deliverableId}\` to drop a mis-reported ledger row.
@@ -148,11 +149,21 @@ function formatCreated(data: Record<string, unknown>): string {
   ]
   const remoteSeats = (data.pendingRemoteSeats ?? []) as Array<Record<string, unknown>>
   if (remoteSeats.length > 0) {
-    lines.push(`Pending remote seats (${remoteSeats.length}) — invite each one next, invites expire in 10 minutes:`)
+    // OT-02: one Bot can hold several seats — group by Bot so the guidance
+    // never induces a duplicate invite (extra chain fee, pending litter).
+    const byBot = new Map<string, { name: string; gmid: string | null; roles: string[] }>()
     for (const seat of remoteSeats) {
-      lines.push(`  - ${String(seat.role)}: ${String(seat.candidateName)}${seat.candidateGlobalMetaId ? ` (globalMetaId ${String(seat.candidateGlobalMetaId)})` : ''}`)
+      const gmid = seat.candidateGlobalMetaId ? String(seat.candidateGlobalMetaId) : null
+      const key = (gmid ?? `name:${String(seat.candidateName)}`).toLowerCase()
+      const entry = byBot.get(key) ?? { name: String(seat.candidateName), gmid, roles: [] }
+      entry.roles.push(String(seat.role))
+      byBot.set(key, entry)
     }
-    lines.push(`Invite with {action:"invite", taskId:${String(task.id)}, globalMetaId:"..."} (chair defaults to ${String(data.chairSlug)}).`)
+    lines.push(`Pending remote Bots (${byBot.size}, holding ${remoteSeats.length} seat${remoteSeats.length === 1 ? '' : 's'}) — invite each BOT once; a single invite by its GlobalMetaId covers all its seats. Invites expire in 10 minutes:`)
+    for (const bot of byBot.values()) {
+      lines.push(`  - ${bot.name}${bot.gmid ? ` (globalMetaId ${bot.gmid})` : ''} — seats: ${bot.roles.join(', ')}`)
+    }
+    lines.push(`Invite with {action:"invite", taskId:${String(task.id)}, globalMetaId:"..."} (chair defaults to ${String(data.chairSlug)}). Duplicate invites are refused while one is pending or the Bot already joined.`)
   }
   const skipped = (data.skippedWorkers ?? []) as Array<Record<string, unknown>>
   if (skipped.length > 0) {
@@ -342,6 +353,9 @@ export function createGroupTaskController(
             chair,
             taskId,
             outcome,
+            // Attribution (OT-08 R26): the Twin executes, the owner decides —
+            // the audit trail must show the proxy, not a bare "owner".
+            actorKind: 'owner_via_twin',
             ...(rating !== undefined ? { rating } : {}),
             ...(comment ? { ratingComment: comment } : {}),
             ...(reason ? { reason } : {}),
@@ -414,14 +428,27 @@ export function createGroupTaskController(
           const globalMetaId = readString(args, 'globalMetaId')
           if (member && globalMetaId) fail('conflicting_member', 'member and globalMetaId are mutually exclusive.')
           const note = readString(args, 'note')
-          return json(dataOf(await dispatch('grouptask/supervise', {
+          const result = await dispatch('grouptask/supervise', {
             chair,
             taskId,
             superviseAction,
             ...(member ? { member } : {}),
             ...(!member && globalMetaId ? { globalMetaId } : {}),
             ...(note ? { note } : {}),
-          })))
+          })
+          const data = dataOf(result)
+          // OT-08 R25: never a silent no-op — say the channel is down and the
+          // signal is queued, and name the takeover paths that still work.
+          if (data.chairUnavailable === true) {
+            return [
+              'NOTICE: the chair\'s LLM runtime is currently unavailable, so the chair cannot speak right now.',
+              'The signal is QUEUED and will fire automatically once the runtime recovers.',
+              'Meanwhile the owner can act directly from the Group Tasks panel (post as the owner, pause, or close),'
+                + ' and `metabot grouptask health` lists degraded tasks.',
+              json(data),
+            ].join('\n')
+          }
+          return json(data)
         }
         case 'deliverable_delete': {
           if (!taskId) fail('missing_task_id', 'taskId is required.')
@@ -444,7 +471,50 @@ export function createGroupTaskController(
 }
 
 /** The single twin-only group-task tool definition (action-union shape). */
-export function buildGroupTaskToolDefinition(controller: GroupTaskController): HostToolDefinition {
+/** Owner gate for `close` (task-213 defect #8): an acceptance close — with
+ *  its rating — is the owner's decision, never the chair's. With native
+ *  approval prompts enabled, the dialog asks; with prompts disabled (or no
+ *  approval surface), the model must bring an explicit chat confirmation as
+ *  `ownerConfirmed: true`. Returns the refusal text, or null to proceed. */
+async function confirmCloseWithOwner(
+  args: Record<string, unknown>,
+  approval: HostApproval | undefined,
+  exec: { agent?: HostAgentLike; callId?: string; signal?: AbortSignal },
+): Promise<string | null> {
+  const taskId = readNumber(args, 'taskId')
+  const outcome = readString(args, 'outcome') ?? 'done'
+  const rating = readNumber(args, 'rating')
+  const refusal = [
+    'Close refused: an acceptance close (with its rating) is the owner\'s decision, not the chair\'s.',
+    'Present the deliverables and acceptance evidence to the owner in chat, ask for an explicit yes on the outcome'
+    + (outcome === 'done' ? ' and the 1-5 rating' : '') + ', then retry the close with ownerConfirmed:true.',
+  ].join('\n')
+  const policy = approval?.overrideOf?.(exec.agent?.session) ?? sessionApprovalPolicy(exec.agent)
+  if (!approval || policy === 'never') {
+    if (readBoolean(args, 'ownerConfirmed') === true) return null
+    return refusal
+  }
+  const decision: HostApprovalOutcome = await approval.request({
+    agent: exec.agent,
+    toolName: 'group_task',
+    ...(exec.callId ? { callId: exec.callId } : {}),
+    reason: `Close group task #${taskId ?? '?'} as ${outcome}`
+      + (outcome === 'done' && rating !== undefined ? ` with rating ${rating}/5` : '')
+      + (readString(args, 'comment') ? ` — “${readString(args, 'comment')}”` : '')
+      + '. The group freezes after this.',
+    signal: exec.signal,
+  })
+  if (decision !== 'allowed-once') {
+    return `Close cancelled: the owner declined in the confirmation dialog (${decision}). `
+      + 'Do not retry unless the owner explicitly asks again.'
+  }
+  return null
+}
+
+export function buildGroupTaskToolDefinition(
+  controller: GroupTaskController,
+  options: { approval?: HostApproval } = {},
+): HostToolDefinition {
   return {
     name: 'group_task',
     description:
@@ -484,6 +554,7 @@ export function buildGroupTaskToolDefinition(controller: GroupTaskController): H
         outcome: { type: 'string', enum: ['done', 'cancelled'] },
         rating: { type: 'integer', description: '1-5 acceptance rating on close done.' },
         comment: { type: 'string', description: 'Rating comment on close.' },
+        ownerConfirmed: { type: 'boolean', description: 'Close only: true after the owner explicitly confirmed the outcome and rating in chat (required when approval prompts are disabled).' },
         reason: { type: 'string' },
         member: { type: 'string', description: 'Member Bot slug (kick/member_status).' },
         globalMetaId: { type: 'string', description: 'Remote member GlobalMetaId (kick/member_status/invite).' },
@@ -507,7 +578,16 @@ export function buildGroupTaskToolDefinition(controller: GroupTaskController): H
     },
     timeoutMs: TOOL_TIMEOUT_MS,
     async execute(args, exec) {
-      return controller.run(String(args.action ?? ''), args, {
+      const action = String(args.action ?? '')
+      if (action === 'close') {
+        const refusal = await confirmCloseWithOwner(args, options.approval, {
+          agent: exec?.agent,
+          ...(exec?.callId ? { callId: exec.callId } : {}),
+          ...(exec?.signal ? { signal: exec.signal } : {}),
+        })
+        if (refusal) return refusal
+      }
+      return controller.run(action, args, {
         sessionId: exec?.agent?.session?.id ?? null,
       })
     },
@@ -525,7 +605,11 @@ export function installGroupTaskOnAgent(
     order: 100,
     text: GROUP_TASK_SOP_TEXT,
   })
+  // The close confirmation dialog rides the same approval surface the publish
+  // tools use; resolving per-agent keeps the gate honest if only some
+  // compositions mount user-approval.
+  const approval = approvalOf(agent.ctx as unknown as HostContext)
   agent.ctx.tools?.register(
-    buildGroupTaskToolDefinition(createGroupTaskController(twinSlug, options)),
+    buildGroupTaskToolDefinition(createGroupTaskController(twinSlug, options), { approval }),
   )
 }

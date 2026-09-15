@@ -243,9 +243,31 @@ test('decide validates the decision and create_from_proposal surfaces remote sea
   assert.equal(flagValue(createCall, '--proposal'), '7')
   assert.equal(flagValue(createCall, '--chair'), 'alice')
   assert.match(output, /task 6, group group-pin-2/)
-  assert.match(output, /Pending remote seats \(1\)/)
-  assert.match(output, /design: Remote Designer \(globalMetaId gm-1\)/)
-  assert.match(output, /invites expire in 10 minutes/)
+  assert.match(output, /Pending remote Bots \(1, holding 1 seat\)/)
+  assert.match(output, /Remote Designer \(globalMetaId gm-1\) — seats: design/)
+  assert.match(output, /[Ii]nvites expire in 10 minutes/)
+})
+
+test('create_from_proposal groups seats by Bot so one bot with two seats gets ONE invite (OT-02)', async () => {
+  const { run } = fakeRun((args) => ({
+    ok: true,
+    state: 'success',
+    data: {
+      chairSlug: 'alice',
+      task: { id: 9, groupId: 'group-pin-3', title: 'T', status: 'planning' },
+      taskId: 9,
+      pendingRemoteSeats: [
+        { role: 'design', candidateName: 'Eleven', candidateGlobalMetaId: 'gm-11' },
+        { role: 'engineering', candidateName: 'Eleven', candidateGlobalMetaId: 'gm-11' },
+      ],
+      decision: 'owner_confirmed',
+    },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const output = await controller.run('create_from_proposal', { proposalId: 8 })
+  assert.match(output, /Pending remote Bots \(1, holding 2 seats\)/, 'bots deduped, seats counted')
+  assert.match(output, /Eleven \(globalMetaId gm-11\) — seats: design, engineering/)
+  assert.match(output, /invite each BOT once/)
 })
 
 test('search_candidates requires a seat or a query', async () => {
@@ -336,6 +358,23 @@ test('supervise action validates and maps to the CLI verb', async () => {
   assert.equal(flagValue(pauseCall, '--member'), undefined)
 })
 
+test('supervise prints a takeover NOTICE when the chair channel is unavailable', async () => {
+  const { run } = fakeRun((args) => ({
+    ok: true,
+    state: 'success',
+    data: flagValue(args, '--action') === 'nudge'
+      ? { task: {}, action: 'nudge', nudgeQueued: true, chairUnavailable: true }
+      : { task: {}, action: flagValue(args, '--action'), nudgeQueued: false },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const output = await controller.run('supervise', { taskId: 3, superviseAction: 'nudge', member: 'bob' })
+  assert.match(output, /NOTICE: the chair's LLM runtime is currently unavailable/)
+  assert.match(output, /QUEUED/)
+  assert.match(output, /metabot grouptask health/)
+  const healthy = await controller.run('supervise', { taskId: 3, superviseAction: 'flag', note: 'x' })
+  assert.doesNotMatch(healthy, /NOTICE/)
+})
+
 test('deliverable_delete maps the ledger row id', async () => {
   const { calls, run } = fakeRun()
   const controller = plugin.createGroupTaskController('alice', { run })
@@ -343,4 +382,91 @@ test('deliverable_delete maps the ledger row id', async () => {
   await controller.run('deliverable_delete', { taskId: 3, deliverableId: 9 })
   const call = calls.find((args) => args[1] === 'deliverable-delete')
   assert.equal(flagValue(call, '--deliverable'), '9')
+})
+
+// ---------------------------------------------------------------------------
+// Owner acceptance gate (task-213 defect #8 / OT-08 R26)
+// ---------------------------------------------------------------------------
+
+function fakeApproval(result) {
+  const requests = []
+  return {
+    requests,
+    request: async (req) => {
+      requests.push(req)
+      return typeof result === 'function' ? result(req) : result
+    },
+  }
+}
+
+test('close gate: the SOP declares closing is the owner decision and the schema carries ownerConfirmed', () => {
+  assert.match(plugin.GROUP_TASK_SOP_TEXT, /CLOSING IS THE OWNER'S DECISION/)
+  const controller = plugin.createGroupTaskController('alice', { run: async () => ({ ok: true, data: {} }) })
+  const tool = plugin.buildGroupTaskToolDefinition(controller)
+  assert.ok(tool.parameters.properties.ownerConfirmed, 'ownerConfirmed param documented')
+})
+
+test('close gate: a declined approval dialog refuses the close without any CLI write', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const approval = fakeApproval('rejected')
+  const tool = plugin.buildGroupTaskToolDefinition(controller, { approval })
+  const output = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 5 },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.match(String(output), /Close cancelled: the owner declined/)
+  assert.equal(approval.requests.length, 1)
+  assert.match(String(approval.requests[0].reason), /rating 5\/5/)
+  assert.equal(calls.filter((args) => args[1] === 'close').length, 0, 'no close dispatched')
+})
+
+test('close gate: an approved dialog closes and stamps owner_via_twin attribution', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const approval = fakeApproval('allowed-once')
+  const tool = plugin.buildGroupTaskToolDefinition(controller, { approval })
+  await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 4, comment: 'ok' },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  const closeCall = calls.find((args) => args[1] === 'close')
+  assert.ok(closeCall, 'close dispatched after approval')
+  assert.equal(flagValue(closeCall, '--actor-kind'), 'owner_via_twin')
+})
+
+test('close gate: without an approval surface, an explicit ownerConfirmed is required', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const tool = plugin.buildGroupTaskToolDefinition(controller)
+  const refused = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 5 },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.match(String(refused), /Close refused.*owner's decision/)
+  assert.equal(calls.filter((args) => args[1] === 'close').length, 0)
+
+  const allowed = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'done', rating: 5, ownerConfirmed: true },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.ok(allowed)
+  const closeCall = calls.find((args) => args[1] === 'close')
+  assert.equal(flagValue(closeCall, '--actor-kind'), 'owner_via_twin')
+})
+
+test('close gate: prompts-disabled sessions still demand ownerConfirmed', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const approval = {
+    overrideOf: () => 'never',
+    request: async () => { throw new Error('must not be called when policy is never') },
+  }
+  const tool = plugin.buildGroupTaskToolDefinition(controller, { approval })
+  const refused = await tool.execute(
+    { action: 'close', taskId: 3, outcome: 'cancelled' },
+    { agent: { session: { id: 'sess-1' } } },
+  )
+  assert.match(String(refused), /Close refused/)
+  assert.equal(calls.filter((args) => args[1] === 'close').length, 0)
 })

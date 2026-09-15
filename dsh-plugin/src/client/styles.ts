@@ -606,6 +606,11 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
    absolutely positioned over the thread's right edge, never taking layout
    space. Toggled from the thread head; closed by its own header button. */
 .oac-gt-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; width: min(300px, 88%); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-2); border-left: 1px solid var(--dsw-alias-border-l2); box-shadow: var(--dsw-shadow-lv3); animation: oac-gt-drawer-in .18s cubic-bezier(.4, 0, .2, 1); }
+.oac-gt-drawer-degraded { display: flex; flex-direction: column; gap: 4px; margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: rgba(245, 158, 11, .12); border: 1px solid rgba(245, 158, 11, .35); }
+.oac-gt-badge.oac-gt-degraded { background: #f59e0b; color: #fff; }
+.oac-gt-drawer-degraded-note { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); }
+.oac-gt-badge.oac-gt-invite-pending { background: rgba(59, 130, 246, .15); color: #1d4ed8; }
+.oac-gt-badge.oac-gt-invite-expired { background: rgba(239, 68, 68, .12); color: #b91c1c; }
 @keyframes oac-gt-drawer-in { from { transform: translateX(100%); } to { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .oac-gt-drawer { animation: none; } }
 .oac-gt-drawer-head { flex: none; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 8px 0 14px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }

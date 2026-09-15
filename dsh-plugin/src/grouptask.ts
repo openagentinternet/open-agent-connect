@@ -168,6 +168,9 @@ export async function dispatchGroupTaskRoutes(
     if (comment) args.push('--comment', comment)
     const reason = readTrimmed(body, 'reason')
     if (reason) args.push('--reason', reason)
+    // Attribution (OT-08 R26): the Twin chat tool stamps the proxy execution
+    // so the audit trail distinguishes it from a direct owner close.
+    if (readTrimmed(body, 'actorKind') === 'owner_via_twin') args.push('--actor-kind', 'owner_via_twin')
     return run(args, { timeoutMs: WRITE_TIMEOUT_MS })
   }
 

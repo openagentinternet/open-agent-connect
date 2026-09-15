@@ -2796,6 +2796,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--rating', value: '<1-5>', description: 'Owner acceptance rating (done only).' },
       { flag: '--comment', value: '<text>', description: 'Rating comment.' },
       { flag: '--reason', value: '<text>', description: 'Close reason recorded in the audit trail.' },
+      { flag: '--actor-kind', value: '<owner|owner_via_twin>', description: 'Attribution for the audit trail: owner (default) for direct human closes, owner_via_twin when the Twin Bot closes on the owner\'s confirmed behalf.' },
       HELP_JSON_FLAG,
     ],
     examples: [

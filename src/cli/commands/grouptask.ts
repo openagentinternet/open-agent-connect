@@ -235,12 +235,18 @@ export async function runGroupTaskCommand(
     }
     const rating = readIntFlag(args, '--rating');
     if (rating === 'invalid') return commandFailed('invalid_flag', '--rating must be an integer between 1 and 5.');
+    const actorKind = normalizeText(readFlagValue(args, '--actor-kind'));
+    if (actorKind != null && actorKind !== ''
+      && actorKind !== 'owner' && actorKind !== 'owner_via_twin') {
+      return commandFailed('invalid_flag', "--actor-kind must be 'owner' or 'owner_via_twin'.");
+    }
     return handler({
       ...ref,
       outcome,
       rating,
       ratingComment: normalizeText(readFlagValue(args, '--comment')) || undefined,
       reason: normalizeText(readFlagValue(args, '--reason')) || undefined,
+      ...(actorKind === 'owner_via_twin' ? { actorKind } : {}),
     });
   }
 

@@ -22,6 +22,7 @@ import {
   type GroupTaskListTab,
   type GroupTaskMemberRow,
   type GroupTaskMessageRow,
+  type GroupTaskSentInviteRow,
   type GroupTaskSkippedWorkerRow,
   type GroupTaskStaffingProposalRow,
   type GroupTaskSummaryRow,
@@ -42,6 +43,7 @@ type Translate = (key: ConversationsLocaleKey | CommonKeyOf, vars?: Record<strin
 export interface GroupTaskInjectedApi {
   list: (tab: GroupTaskListTab, includeArchived: boolean) => Promise<GroupTaskSummaryRow[]>
   detail: (chair: string, taskId: number) => Promise<GroupTaskDetailPayload>
+  invites: (chair: string, taskId: number) => Promise<GroupTaskSentInviteRow[]>
   create: (input: {
     title: string
     goal: string
@@ -329,6 +331,7 @@ function Stars({ value, onChange }: { value: number; onChange?: (value: number) 
  */
 function GroupTaskDrawer({
   detail,
+  invites,
   bots,
   t,
   onClose,
@@ -336,6 +339,7 @@ function GroupTaskDrawer({
   onOpenUri,
 }: {
   detail: GroupTaskDetailPayload
+  invites: GroupTaskSentInviteRow[]
   bots: BotRow[]
   t: Translate
   onClose: () => void
@@ -380,6 +384,14 @@ function GroupTaskDrawer({
         </button>
       </div>
       <div className="oac-gt-drawer-body">
+        {detail.chairDegradedAt != null ? (
+          <div className="oac-gt-drawer-degraded" role="status">
+            <span className="oac-gt-badge oac-gt-degraded">{t('gtChairDegraded')}</span>
+            <span className="oac-gt-drawer-degraded-note">
+              {t('gtChairDegradedHint', { time: relativeTimeLabel(detail.chairDegradedAt) })}
+            </span>
+          </div>
+        ) : null}
         <section className="oac-gt-drawer-section">
           <h3 className="oac-gt-drawer-heading">{t('gtMembers')}</h3>
           <ul className="oac-gt-drawer-members">
@@ -425,6 +437,41 @@ function GroupTaskDrawer({
             })}
           </ul>
         </section>
+        {invites.length > 0 ? (
+          <section className="oac-gt-drawer-section">
+            <h3 className="oac-gt-drawer-heading">{t('gtInvites')}</h3>
+            <ul className="oac-gt-drawer-members">
+              {invites.map((invite) => {
+                const pending = invite.status === 'pending'
+                const expired = invite.status === 'expired' || invite.status === 'declined'
+                if (!pending && !expired) return null
+                return (
+                  <li key={invite.id} className="oac-gt-drawer-member">
+                    <BotAvatar
+                      name={invite.inviteeName ?? invite.inviteeGlobalMetaId}
+                      className="oac-gt-member-avatar"
+                    />
+                    <span className="oac-gt-drawer-member-main">
+                      <span className="oac-gt-member-name">{invite.inviteeName ?? invite.inviteeGlobalMetaId}</span>
+                      <span className="oac-gt-drawer-member-badges">
+                        {pending ? (
+                          <span className="oac-gt-badge oac-gt-invite-pending">{t('gtInvitePending')}</span>
+                        ) : (
+                          <span className="oac-gt-badge oac-gt-invite-expired">{t('gtInviteExpired')}</span>
+                        )}
+                      </span>
+                      {pending && invite.expiresAt != null ? (
+                        <span className="oac-gt-drawer-member-meta">
+                          {t('gtInviteExpires', { time: relativeTimeLabel(invite.expiresAt * 1000) })}
+                        </span>
+                      ) : null}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        ) : null}
         <section className="oac-gt-drawer-section">
           <details>
             <summary className="oac-gt-drawer-heading">{t('gtStatusHistory')}</summary>
@@ -512,6 +559,11 @@ function GroupTaskDrawer({
                       <span className={`oac-gt-badge oac-gt-dkind-${deliverableKindClass(deliverable.kind)}`}>
                         {t(deliverableKindKey(deliverable.kind))}
                       </span>
+                      {!deliverable.uri ? (
+                        <span className="oac-gt-badge oac-gt-invite-expired" title={t('gtDeliverableLocalPathHint')}>
+                          {t('gtDeliverableLocalPath')}
+                        </span>
+                      ) : null}
                       <span className="oac-gt-dstatus" title={t(deliverableStatusHintKey(deliverable.status))}>
                         {t(deliverableStatusKey(deliverable.status))}
                       </span>
@@ -618,6 +670,7 @@ export function GroupTaskView({
   const [listError, setListError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ chair: string; taskId: number } | null>(null)
   const [detail, setDetail] = useState<GroupTaskDetailPayload | null>(null)
+  const [sentInvites, setSentInvites] = useState<GroupTaskSentInviteRow[]>([])
   const [detailStatus, setDetailStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [detailError, setDetailError] = useState<string | null>(null)
   const [actionNote, setActionNote] = useState<string | null>(null)
@@ -789,6 +842,14 @@ export function GroupTaskView({
       const data = await gt.detail(target.chair, target.taskId)
       setDetail(data)
       setDetailStatus('ready')
+      // Chair-side sent invites (OpenTeam): pending/expired rows are invisible
+      // in the members list, which left the owner staring at a static panel
+      // for minutes (task-213 defect #4). Best-effort — old hosts may 404.
+      try {
+        setSentInvites(await gt.invites(target.chair, target.taskId))
+      } catch {
+        setSentInvites([])
+      }
     } catch (cause) {
       if (!silent) {
         setDetailError(errorText(cause))
@@ -1551,6 +1612,7 @@ export function GroupTaskView({
             {drawerOpen ? (
               <GroupTaskDrawer
                 detail={detail}
+                invites={sentInvites}
                 bots={bots}
                 t={t}
                 onClose={() => setDrawerOpen(false)}
