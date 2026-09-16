@@ -46,6 +46,61 @@ test('schedule routes reject missing ids before any CLI call; run never spawns w
   assert.equal(calls.length, 0)
 })
 
+test('schedule create/update/delete forward with validated shapes', async () => {
+  const calls = []
+  const payloads = []
+  const run = async (args) => {
+    calls.push(args)
+    // The payload helper deletes its temp file after run() returns, so the
+    // content must be captured here.
+    const flagIndex = args.indexOf('--payload-file')
+    if (flagIndex >= 0) {
+      const raw = await (await import('node:fs/promises')).readFile(args[flagIndex + 1], 'utf8')
+      payloads.push(JSON.parse(raw))
+    }
+    return resultOf(true, { task: { id: 't1' } })
+  }
+
+  // create: flags form; interval carries everyMs; unknown channel refused.
+  await dispatchScheduleRoutes('schedule/create', {
+    from: 'alice', name: 'n', prompt: 'p', everyMs: 3_600_000, channel: 'auto',
+  }, { run })
+  assert.deepEqual(calls[0], ['schedule', 'create', '--from', 'alice', '--name', 'n', '--prompt', 'p', '--every', '3600000', '--channel', 'auto'])
+  await dispatchScheduleRoutes('schedule/create', { from: 'alice', name: 'n', prompt: 'p', at: '2026-09-16T09:00', enabled: false }, { run })
+  assert.deepEqual(calls[1], ['schedule', 'create', '--from', 'alice', '--name', 'n', '--prompt', 'p', '--at', '2026-09-16T09:00', '--disabled'])
+  const twoSelectors = await dispatchScheduleRoutes('schedule/create', {
+    from: 'alice', name: 'n', prompt: 'p', at: 'x', cron: 'y',
+  }, { run })
+  assert.equal(twoSelectors.ok, false)
+  const badChannel = await dispatchScheduleRoutes('schedule/create', {
+    from: 'alice', name: 'n', prompt: 'p', cron: '* * * * *', channel: 'evil',
+  }, { run })
+  assert.equal(badChannel.ok, false)
+  const missingName = await dispatchScheduleRoutes('schedule/create', { from: 'alice', prompt: 'p', cron: '* * * * *' }, { run })
+  assert.equal(missingName.ok, false)
+
+  // update: partial payload file carries ONLY the changed fields.
+  const updated = await dispatchScheduleRoutes('schedule/update', {
+    from: 'alice', id: 't1', name: 'renamed', at: '2026-09-17T08:00',
+  }, { run })
+  assert.equal(updated.ok, true)
+  const updateArgs = calls[calls.length - 1]
+  assert.equal(updateArgs[0], 'schedule')
+  assert.equal(updateArgs[1], 'update')
+  assert.equal(updateArgs[2], '--from')
+  assert.equal(updateArgs[3], 'alice')
+  assert.equal(updateArgs[4], '--id')
+  assert.equal(updateArgs[5], 't1')
+  assert.equal(updateArgs[6], '--payload-file')
+  assert.deepEqual(payloads[payloads.length - 1], { name: 'renamed', schedule: { type: 'at', datetime: '2026-09-17T08:00' } })
+  const emptyPatch = await dispatchScheduleRoutes('schedule/update', { from: 'alice', id: 't1' }, { run })
+  assert.equal(emptyPatch.ok, false)
+
+  // delete: carries --confirm.
+  await dispatchScheduleRoutes('schedule/delete', { from: 'alice', id: 't1' }, { run })
+  assert.deepEqual(calls[calls.length - 1], ['schedule', 'delete', '--from', 'alice', '--id', 't1', '--confirm'])
+})
+
 test('unknown methods keep dispatching', async () => {
   const run = async () => resultOf(true)
   assert.equal(await dispatchScheduleRoutes('schedule/nope', {}, { run }), undefined)

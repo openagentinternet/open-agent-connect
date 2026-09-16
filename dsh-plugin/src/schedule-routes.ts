@@ -9,6 +9,7 @@
  */
 import { spawn } from 'node:child_process'
 import { runMetabot, resolveCli, type MetabotCommandResult, type RunMetabotOptions } from './cli-bridge.js'
+import { runMetabotWithPayloadFile } from './cli-payload.js'
 
 const CLI_TIMEOUT_MS = 60_000
 
@@ -85,6 +86,81 @@ export async function dispatchScheduleRoutes(
       if (!id) return failure('missing_id', 'id is required.')
       const verb = method === 'schedule/enable' ? 'enable' : 'disable'
       return run(['schedule', verb, ...withFrom(from), '--id', id], { timeoutMs: CLI_TIMEOUT_MS })
+    }
+    case 'schedule/create': {
+      const from = textArg(body, 'from')
+      const name = textArg(body, 'name')
+      const prompt = textArg(body, 'prompt')
+      if (!name) return failure('invalid_argument', 'name is required.')
+      if (!prompt) return failure('invalid_argument', 'prompt is required.')
+      // Schedule selector: exactly one of at (local datetime, no timezone
+      // suffix) / everyMs (positive integer) / cron (5-field expression).
+      const at = textArg(body, 'at')
+      const everyMs = typeof body.everyMs === 'number' && Number.isFinite(body.everyMs)
+        ? Math.floor(body.everyMs)
+        : null
+      const cron = textArg(body, 'cron')
+      const selectors = [at !== '', everyMs !== null, cron !== ''].filter(Boolean).length
+      if (selectors !== 1) {
+        return failure('invalid_argument', 'Exactly one of at, everyMs, or cron is required.')
+      }
+      const channel = textArg(body, 'channel')
+      if (channel !== '' && !['auto', 'host', 'daemon'].includes(channel)) {
+        return failure('invalid_argument', 'channel must be auto, host, or daemon.')
+      }
+      return run([
+        'schedule', 'create',
+        ...withFrom(from),
+        '--name', name,
+        '--prompt', prompt,
+        ...(at !== '' ? ['--at', at] : []),
+        ...(everyMs !== null ? ['--every', String(everyMs)] : []),
+        ...(cron !== '' ? ['--cron', cron] : []),
+        ...(channel !== '' ? ['--channel', channel] : []),
+        ...(body.enabled === false ? ['--disabled'] : []),
+      ], { timeoutMs: CLI_TIMEOUT_MS })
+    }
+    case 'schedule/update': {
+      const from = textArg(body, 'from')
+      const id = textArg(body, 'id')
+      if (!id) return failure('missing_id', 'id is required.')
+      // The update verb takes a partial CreateScheduleTaskInput via
+      // --payload-file; keep the payload strictly the editable fields.
+      const patch: Record<string, unknown> = {}
+      if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim()
+      if (typeof body.prompt === 'string' && body.prompt.trim()) patch.prompt = body.prompt.trim()
+      if (typeof body.channel === 'string' && ['auto', 'host', 'daemon'].includes(body.channel)) {
+        patch.channel = body.channel
+      }
+      const at = textArg(body, 'at')
+      const everyMs = typeof body.everyMs === 'number' && Number.isFinite(body.everyMs)
+        ? Math.floor(body.everyMs)
+        : null
+      const cron = textArg(body, 'cron')
+      const selectors = [at !== '', everyMs !== null, cron !== ''].filter(Boolean).length
+      if (selectors > 1) {
+        return failure('invalid_argument', 'At most one of at, everyMs, or cron may be given.')
+      }
+      if (at !== '') patch.schedule = { type: 'at', datetime: at }
+      if (everyMs !== null) patch.schedule = { type: 'interval', intervalMs: everyMs }
+      if (cron !== '') patch.schedule = { type: 'cron', expression: cron }
+      if (Object.keys(patch).length === 0) {
+        return failure('invalid_argument', 'Nothing to update.')
+      }
+      return runMetabotWithPayloadFile(
+        ['schedule', 'update', ...withFrom(from), '--id', id],
+        patch,
+        '--payload-file',
+        [],
+        run,
+        { timeoutMs: CLI_TIMEOUT_MS },
+      )
+    }
+    case 'schedule/delete': {
+      const from = textArg(body, 'from')
+      const id = textArg(body, 'id')
+      if (!id) return failure('missing_id', 'id is required.')
+      return run(['schedule', 'delete', ...withFrom(from), '--id', id, '--confirm'], { timeoutMs: CLI_TIMEOUT_MS })
     }
     case 'schedule/run': {
       const from = textArg(body, 'from')
