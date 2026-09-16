@@ -37,6 +37,11 @@ export function enhanceConversationLinks(): void {
 
 function isSkippable(el: Element): boolean {
   if (SKIP_WRAP.has(el.tagName)) return true
+  // Editable surfaces (the DSH composer is a Lexical contenteditable): the
+  // editor owns its DOM, so a foreign <a>/text-node rewrite desyncs its
+  // reconciliation and the destroyed nodes take the surrounding text with
+  // them — a pasted bare pinId lost everything from the hash onward.
+  if (el.closest('[contenteditable]') !== null) return true
   // .oac-a2a-list is the A2A Chat / Group Tasks left column: navigation rows
   // whose name/summary text must stay plain — never linkify pinIDs/URIs there.
   if (el.closest('a, code, pre, textarea, .oac-browser-tab, .oac-a2a-list')) return true
