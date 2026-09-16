@@ -156,6 +156,12 @@ export class SurfService {
     return this.runningRunId !== null;
   }
 
+  /** The run this process is executing right now; null when idle. Orphan
+   *  sweeps exclude it when failing `running` rows a dead process left. */
+  currentRunId(): string | null {
+    return this.runningRunId;
+  }
+
   /**
    * The notes the bot wrote to itself in its last DONE run: read back out of
    * reportJson so the next surf inherits its hard-won lessons. Best-effort —

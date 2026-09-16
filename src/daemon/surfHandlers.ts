@@ -160,6 +160,18 @@ export function createSurfDaemonHandlers(input: CreateSurfDaemonHandlersInput) {
     status: async (rawInput: { from?: string; limit?: number }) => {
       const bot = await input.resolveBot(rawInput.from);
       if ('failure' in bot) return bot.failure;
+      // Self-healing orphan sweep (IDBots parity): `running` rows a dead
+      // daemon left behind become failed before anything reads them — the
+      // in-memory run of THIS process is excluded.
+      const service = serviceFor(bot);
+      const store = createMetawebSurfStore(resolveMetabotPaths(bot.homeDir));
+      if (await store.hasRunningRun()) {
+        await store.failStaleRunningRuns({
+          error: 'Daemon restarted during surf run',
+          nowIso: new Date().toISOString(),
+          ...(service.currentRunId() != null ? { excludeId: service.currentRunId()! } : {}),
+        }).catch(() => 0);
+      }
       const paths = resolveMetabotPaths(bot.homeDir);
       const limit = Math.max(1, Math.min(50, Math.floor(rawInput.limit ?? 5)));
       const [runs, settings] = await Promise.all([

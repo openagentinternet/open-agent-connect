@@ -1,14 +1,17 @@
 /**
  * Bot editor Advanced-tab surf section — DSH port of IDBots' SurfSection +
- * SurfReportsPanel (same controls, same copy adapted to the host routes):
- * the surf-before-dream toggle (opt-in per Bot, immediate effect), the
- * per-run on-chain interaction budget, a "Surf now" trigger, and the
- * readable surf reports list. The host routes back the `metabot surf` CLI
- * verbs; the running state is seeded from the run store and polled while a
- * run is in flight.
+ * SurfReportsPanel (same controls and copy). The section sits ABOVE the
+ * chain & wallet block: rows for the surf-before-dream toggle (opt-in per
+ * Bot, immediate effect) and the per-surf on-chain interaction budget, a
+ * "Surf now" trigger, and the readable surf report list (IDBots-style run
+ * cards: chevron + trigger + start time + status badge, one-line non-zero
+ * stats, expandable). Reports render as MARKDOWN so the global
+ * browser-links pass turns every pin id / `pin://` URI into a clickable
+ * Agent Internet link that opens the right-sidebar Bot Browser (the same
+ * mechanism DSH chat uses; a <pre> block would be skipped by it).
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Button, Input, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   surfBudgetSet,
@@ -18,6 +21,7 @@ import {
   surfStatus,
   type SurfRun,
 } from './api.js'
+import { markdownLabels } from './markdown-labels.ts'
 import type { BotsLocaleKey } from './locale.js'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
@@ -37,82 +41,92 @@ function formatStartedAt(startedAt: string): string {
   return Number.isFinite(ms) ? new Date(ms).toLocaleString() : startedAt
 }
 
-function firstReportLine(reportMarkdown: string | null): string | null {
-  if (!reportMarkdown) return null
-  const line = reportMarkdown.split('\n').find((entry) => entry.trim() && !entry.startsWith('#'))
-  return line ? line.trim().slice(0, 160) : null
+/** IDBots parity: only the non-zero parts, joined by '·'. */
+function formatRunStats(t: Translate, run: SurfRun): string {
+  const parts: string[] = []
+  const acted = run.stats.liked + run.stats.commented + run.stats.answered + run.stats.posted + run.stats.challenged
+  if (run.stats.fetched > 0) parts.push(t('surfRunStatsFetched', { count: run.stats.fetched }))
+  if (run.stats.deepRead > 0) parts.push(t('surfRunStatsRead', { count: run.stats.deepRead }))
+  if (run.stats.savedToKb > 0) parts.push(t('surfRunStatsSaved', { count: run.stats.savedToKb }))
+  if (acted > 0) parts.push(t('surfRunStatsActed', { count: acted }))
+  return parts.join(' · ')
+}
+
+function triggerLabel(t: Translate, run: SurfRun): string {
+  if (run.trigger === 'manual-chat') return t('surfRunTriggerManualChat')
+  if (run.trigger === 'pre-dream') return t('surfRunTriggerPreDream')
+  return t('surfRunTriggerManualUi')
 }
 
 export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate }): ReactNode {
   const [enabled, setEnabled] = useState(false)
   const [budget, setBudget] = useState(String(DEFAULT_SURF_INTERACTION_BUDGET))
-  const [loaded, setLoaded] = useState(false)
+  // Loading gate for the switch: closed after the FIRST status read settles
+  // (success OR failure) — a failed read (e.g. host routes not loaded yet)
+  // must not wedge the toggle disabled forever; the write path is
+  // optimistic and reverts on error.
+  const [switchLocked, setSwitchLocked] = useState(true)
   const [running, setRunning] = useState(false)
   const [runs, setRuns] = useState<SurfRun[]>([])
   const [settingsError, setSettingsError] = useState('')
+  const [settingsNotice, setSettingsNotice] = useState('')
   const [nowError, setNowError] = useState('')
   const [nowBusy, setNowBusy] = useState(false)
   const [expandedRun, setExpandedRun] = useState<string | null>(null)
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const mdLabels = markdownLabels(t)
 
-  const loadStatus = useCallback(async (limit: number) => {
+  const loadStatus = useCallback(async (withLimit: number): Promise<boolean> => {
     try {
-      const status = await surfStatus(bot.slug, limit)
+      const status = await surfStatus(bot.slug, withLimit)
       setEnabled(status.surfBeforeDreamEnabled)
       setRunning(status.running)
       setRuns(status.runs)
-      if (!loaded) setBudget(String(status.interactionBudget))
-      setLoaded(true)
+      setBudget(String(status.interactionBudget))
       return status.running
     } catch {
-      setLoaded(true)
       return false
+    } finally {
+      setSwitchLocked(false)
     }
-  }, [bot.slug, loaded])
+  }, [bot.slug])
 
-  // Seed on mount / bot change; poll while a run is in flight so the panel
-  // settles live (the daemon owns the run; there is no push channel here).
+  // Seed on mount / bot change; poll so the panel settles live (the daemon
+  // owns the run; there is no push channel here).
   useEffect(() => {
-    let cancelled = false
-    setLoaded(false)
+    setSwitchLocked(true)
     setSettingsError('')
+    setSettingsNotice('')
     setNowError('')
     setExpandedRun(null)
     void loadStatus(20)
-    const timer = setInterval(() => {
-      if (cancelled) return
-      void loadStatus(20)
-    }, RUN_POLL_MS)
-    pollTimerRef.current = timer
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-      pollTimerRef.current = null
-    }
+    const timer = setInterval(() => { void loadStatus(20) }, RUN_POLL_MS)
+    return () => { clearInterval(timer) }
   }, [bot.slug, loadStatus])
 
-  const handleToggle = () => {
-    if (!loaded) return
+  const handleToggle = (): void => {
+    if (switchLocked) return
     const next = !enabled
     setEnabled(next)
     setSettingsError('')
-    const revert = (message: string) => {
+    setSettingsNotice('')
+    const revert = (message: string): void => {
       setEnabled(!next)
       setSettingsError(message)
     }
     const request = next ? surfEnable(bot.slug) : surfDisable(bot.slug)
     request
-      .then((result) => {
+      .then(async (result) => {
         if (next && 'qaSurfRetired' in result && result.qaSurfRetired) {
-          setSettingsError(t('surfQaSurfRetired'))
+          setSettingsNotice(t('surfQaSurfRetired'))
         }
+        await loadStatus(20)
       })
       .catch((error: unknown) => {
         revert(t('surfSettingsError', { message: error instanceof Error ? error.message : String(error) }))
       })
   }
 
-  const handleBudgetCommit = () => {
+  const handleBudgetCommit = (): void => {
     const clamped = clampBudget(budget)
     if (clamped === null) {
       setBudget(String(DEFAULT_SURF_INTERACTION_BUDGET))
@@ -120,19 +134,20 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
       return
     }
     setBudget(String(clamped))
+    setSettingsError('')
+    setSettingsNotice('')
     surfBudgetSet(bot.slug, clamped).catch((error: unknown) => {
       setSettingsError(t('surfSettingsError', { message: error instanceof Error ? error.message : String(error) }))
     })
   }
 
-  const handleSurfNow = () => {
+  const handleSurfNow = (): void => {
     if (running || nowBusy) return
     setNowBusy(true)
     setNowError('')
     surfRunStart(bot.slug)
-      .then(() => {
-        setRunning(true)
-        void loadStatus(20)
+      .then(async () => {
+        await loadStatus(20)
       })
       .catch((error: unknown) => {
         setNowError(t('surfNowFailed', { message: error instanceof Error ? error.message : String(error) }))
@@ -140,41 +155,36 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
       .finally(() => setNowBusy(false))
   }
 
-  const acted = (run: SurfRun): number =>
-    run.stats.liked + run.stats.commented + run.stats.answered + run.stats.posted + run.stats.challenged
-
-  const triggerLabel = (run: SurfRun): string => {
-    if (run.trigger === 'manual-chat') return t('surfRunTriggerManualChat')
-    if (run.trigger === 'pre-dream') return t('surfRunTriggerPreDream')
-    return t('surfRunTriggerManualUi')
-  }
-
   return (
-    <div className="oac-form-section" data-slot="oac-surf-section">
-      <div className="oac-subsection-title">{t('surfSectionTitle')}</div>
+    <div className="oac-surf-section" data-slot="oac-surf-section">
+      <div className="oac-surf-title">{t('surfSectionTitle')}</div>
       <p className="oac-hint">{t('surfSectionHint')}</p>
       {settingsError ? <p className="oac-note error">{settingsError}</p> : null}
+      {settingsNotice ? <p className="oac-note success">{settingsNotice}</p> : null}
 
-      <div className="oac-info-row" data-slot="oac-surf-before-dream-row">
-        <div className="oac-info-label-wrap">
-          <span className="oac-info-label">{t('surfBeforeDreamToggle')}</span>
+      {/* Surf before dream: immediate-effect toggle (IDBots parity). */}
+      <div className="oac-surf-row" data-slot="oac-surf-before-dream-row">
+        <div className="oac-surf-row-label">
+          <span>{t('surfBeforeDreamToggle')}</span>
           <p className="oac-hint">{t('surfBeforeDreamHint')}</p>
         </div>
         <button
           type="button"
           role="switch"
           aria-checked={enabled}
+          aria-label={t('surfBeforeDreamToggle')}
           className={`oac-switch${enabled ? ' on' : ''}`}
-          disabled={!loaded}
+          disabled={switchLocked}
           onClick={handleToggle}
         >
           <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
         </button>
       </div>
 
-      <div className="oac-info-row" data-slot="oac-surf-budget-row">
-        <div className="oac-info-label-wrap">
-          <span className="oac-info-label">{t('surfInteractionBudgetLabel')}</span>
+      {/* Interaction budget per surf. */}
+      <div className="oac-surf-row" data-slot="oac-surf-budget-row">
+        <div className="oac-surf-row-label">
+          <span>{t('surfInteractionBudgetLabel')}</span>
           <p className="oac-hint">{t('surfInteractionBudgetHint')}</p>
         </div>
         <Input
@@ -192,17 +202,18 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
         />
       </div>
 
-      <div className="oac-info-row" data-slot="oac-surf-now-row">
-        <div className="oac-info-label-wrap" />
+      {/* Surf now trigger. */}
+      <div className="oac-surf-row" data-slot="oac-surf-now-row">
+        <div className="oac-surf-row-label" />
         <div className="oac-surf-now-wrap">
-          <Button size="sm" onClick={handleSurfNow} disabled={running || nowBusy}>
+          <Button variant="primary" size="sm" onClick={handleSurfNow} disabled={running || nowBusy}>
             {running || nowBusy ? t('surfNowRunning') : t('surfNowButton')}
           </Button>
           {nowError ? <span className="oac-note error">{nowError}</span> : null}
         </div>
       </div>
 
-      <div className="oac-subsection-title" style={{ marginTop: 12 }}>{t('surfReportsTitle')}</div>
+      <div className="oac-surf-reports-title">{t('surfReportsTitle')}</div>
       <div className="oac-surf-reports">
         {runs.length === 0 ? (
           <p className="oac-hint">{t('surfReportsEmpty')}</p>
@@ -211,30 +222,27 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
             <button
               type="button"
               className="oac-surf-run-head"
+              aria-expanded={expandedRun === run.id}
               onClick={() => setExpandedRun(expandedRun === run.id ? null : run.id)}
             >
-              <span className={`oac-surf-run-dot ${run.status}`} aria-hidden />
-              <span className="oac-surf-run-meta">
-                {formatStartedAt(run.startedAt)} · {triggerLabel(run)}
-              </span>
-              <span className="oac-surf-run-stats">
-                {t('surfStatsLine', {
-                  fetched: run.stats.fetched,
-                  deepRead: run.stats.deepRead,
-                  saved: run.stats.savedToKb,
-                  acted: acted(run),
-                })}
-                {run.stats.tasksScheduled > 0
-                  ? ` ${t('surfTasksScheduled', { count: run.stats.tasksScheduled })}`
-                  : ''}
+              <span className={`oac-surf-chevron${expandedRun === run.id ? ' open' : ''}`} aria-hidden>▸</span>
+              <span className="oac-surf-run-trigger">{triggerLabel(t, run)}</span>
+              <span className="oac-surf-run-time">{formatStartedAt(run.startedAt)}</span>
+              <span className={`oac-surf-run-badge ${run.status}`}>
+                {run.status === 'running' ? <span className="oac-surf-run-dot" aria-hidden /> : null}
+                {t(run.status === 'running' ? 'surfStatusRunning' : run.status === 'done' ? 'surfStatusDone' : 'surfStatusFailed')}
               </span>
             </button>
-            {run.error ? <p className="oac-note error">{run.error}</p> : null}
-            {expandedRun === run.id && run.reportMarkdown ? (
-              <pre className="oac-surf-report">{run.reportMarkdown}</pre>
+            <p className="oac-surf-run-stats">{formatRunStats(t, run) || '—'}</p>
+            {expandedRun === run.id && run.error ? (
+              <p className="oac-note error">{run.error}</p>
             ) : null}
-            {expandedRun === run.id && !run.reportMarkdown && !run.error ? (
-              <p className="oac-hint">{firstReportLine(run.reportMarkdown) ?? '—'}</p>
+            {expandedRun === run.id && run.reportMarkdown ? (
+              // Markdown (not <pre>): the global browser-links pass wraps
+              // bare pin ids and pin:// URIs into Bot Browser links.
+              <div className="oac-surf-report-md">
+                <MarkdownText text={run.reportMarkdown} labels={mdLabels} />
+              </div>
             ) : null}
           </div>
         ))}
