@@ -292,6 +292,15 @@ Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 
 ## Scheduled tasks (定时任务)
 
+The Bot editor (Settings → Bots → edit) gains a **Scheduled tab** — every
+scheduled task of THIS Bot, fully manageable: create (name, self-contained
+prompt, one-shot `at` / `interval` / 5-field `cron` schedule, execution
+channel), inline edit, enable/disable, delete, Run now, and an expandable
+prompt + run-history view. Tasks the Bot handed off during a MetaWeb surf
+(`create_scheduled_task`, cap 2 per surf) carry a "surf handoff" pill. The
+tab reads and writes through `/oac/api/schedule/*` → the `metabot schedule`
+CLI verbs, so the CLI stays the single management surface.
+
 CLI-first like everything else here: `metabot schedule *` owns the data model,
 due math, and run ledger (`create --name --prompt --at|--every|--cron`,
 `list`/`show`, `update --payload-file`, `delete`, `enable`/`disable`, `run`
@@ -550,6 +559,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/surf/status` | `metabot surf status` — runs (newest first), running flag, pre-dream toggle, interaction budget, `preDreamDue` gate |
 | POST | `/oac/api/surf/run` | `metabot surf run` — start one unattended surf run (fire-and-forget; the daemon owns execution) |
 | POST | `/oac/api/surf/enable` / `disable` / `budget` | pre-dream toggle + interaction budget (enable also retires legacy qa-surf study jobs) |
+| POST | `/oac/api/schedule/list` / `runs` / `create` / `update` / `enable` / `disable` / `delete` / `run` | `metabot schedule *` verbs backing the Bot editor's Scheduled tab (`run` spawns the CLI detached — a manual run is a whole LLM turn) |
 | POST | `/oac/api/dream/*` | `metabot dream` verbs; `dream/run` orchestrates plan → `ctx.llm` → commit in-process |
 | POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |
 | POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner` |

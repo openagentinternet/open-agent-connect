@@ -479,12 +479,18 @@ export const GROUPTASK_CSS = `
 .oac-gt-mode-tabs { border-bottom: none; margin-top: 0; align-self: stretch; align-items: center; }
 .oac-gt-mode-tabs .oac-tab { font-size: 14px; }
 
-/** A2A panel "Scheduled" tab (scheduled tasks) — same card chrome as Group Tasks. */
-.oac-sch-view { display: flex; flex-direction: column; gap: 10px; width: 100%; height: 100%; overflow: auto; padding: 14px 18px; }
-.oac-sch-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.oac-sch-filters { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
-.oac-sch-filters .oac-tab { font-size: 13px; }
-.oac-sch-hint { margin: 0; }
+/** Bot editor "Scheduled" tab (per-Bot scheduled tasks). */
+.oac-sch-tab { display: flex; flex-direction: column; gap: 10px; }
+.oac-sch-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.oac-sch-form { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.oac-sch-form-title { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
+.oac-sch-field { display: grid; gap: 4px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.oac-sch-textarea { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-2); color: inherit; font: inherit; font-size: 13px; line-height: 19px; resize: vertical; }
+.oac-sch-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-2); color: inherit; font: inherit; font-size: 13px; }
+.oac-sch-kind-row { display: flex; align-items: center; gap: 2px; }
+.oac-sch-kind-row .oac-tab { font-size: 12px; }
+.oac-sch-interval-row { display: flex; align-items: center; gap: 8px; }
+.oac-sch-form-actions { display: flex; align-items: center; gap: 8px; }
 .oac-sch-list { display: grid; gap: 10px; align-content: start; }
 .oac-sch-card { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
 .oac-sch-card.off { opacity: 0.72; }

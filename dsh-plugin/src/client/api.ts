@@ -1915,6 +1915,48 @@ export async function scheduleRunNow(from: string, id: string): Promise<void> {
   await post<unknown>('schedule/run', { from, id })
 }
 
+export interface ScheduleSpecInput {
+  at?: string
+  everyMs?: number
+  cron?: string
+}
+
+export async function scheduleCreate(input: {
+  from: string
+  name: string
+  prompt: string
+  channel?: 'auto' | 'host' | 'daemon'
+  enabled?: boolean
+} & ScheduleSpecInput): Promise<{ task: ScheduledTaskRow | null; warnings: string[] }> {
+  const data = recordOf(await post<unknown>('schedule/create', input))
+  return {
+    task: data.task ? scheduledTaskOf(data.task, input.from) : null,
+    warnings: Array.isArray(data.warnings)
+      ? data.warnings.map((row) => String(row))
+      : [],
+  }
+}
+
+export async function scheduleUpdate(input: {
+  from: string
+  id: string
+  name?: string
+  prompt?: string
+  channel?: 'auto' | 'host' | 'daemon'
+} & Partial<ScheduleSpecInput>): Promise<{ task: ScheduledTaskRow | null; warnings: string[] }> {
+  const data = recordOf(await post<unknown>('schedule/update', input))
+  return {
+    task: data.task ? scheduledTaskOf(data.task, input.from) : null,
+    warnings: Array.isArray(data.warnings)
+      ? data.warnings.map((row) => String(row))
+      : [],
+  }
+}
+
+export async function scheduleDelete(from: string, id: string): Promise<void> {
+  await post<unknown>('schedule/delete', { from, id })
+}
+
 // ---------------- Surf (MetaWeb AI-internet browsing) ----------------
 
 export type SurfRunStatus = 'running' | 'done' | 'failed'
