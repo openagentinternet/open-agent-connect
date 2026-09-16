@@ -17206,6 +17206,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       daemonHomeDir: input.homeDir,
       createSignerForProfileHome,
       adapters,
+      resolveSponsorWritePin,
       resolvePeerChatPublicKey,
       log: (message) => console.warn(message),
     }),

@@ -31,6 +31,7 @@ import {
   isTrafficNetworkError,
   normalizeTrafficApiBase,
   shortTrafficAddress,
+  sortTrafficUsageRowsByDateDesc,
   splitTrafficAmount,
   trafficErrorCodeOf,
   trafficErrorLocaleKey,
@@ -230,7 +231,7 @@ export function TrafficPanel(injected: TrafficPanelInjected & { t: Translate }):
     try {
       const res = await injected.usage()
       setSummary(res.summary)
-      setDailyRows(res.daily)
+      setDailyRows(sortTrafficUsageRowsByDateDesc(res.daily))
       setUsageError(res.source === 'service' ? '' : t('trafficUsageUnavailable'))
     } catch (cause) {
       setUsageError(describeTrafficError(errorMessageOf(cause), 'trafficUsageUnavailable', trafficErrorCodeOf(cause)))
