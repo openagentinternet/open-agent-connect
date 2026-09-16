@@ -6284,6 +6284,20 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     }
   };
 
+  // Per-profile-home signer factory with the traffic (代付) sponsor hook,
+  // shared by the daemon handlers and the non-Twin auto-reply dispatcher so
+  // every local Bot's chain writes route through the account quota.
+  const createSignerForHome = (profileHomeDir: string): Signer => {
+    const profileBaseSigner = createLocalMnemonicSigner({
+      secretStore: createFileSecretStore(profileHomeDir),
+      adapters,
+      resolveSponsorWritePin,
+    });
+    return context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+      ? createTestChainWriteSigner(profileBaseSigner)
+      : profileBaseSigner;
+  };
+
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
@@ -6326,16 +6340,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       })
       : undefined,
     requestMvcGasSubsidy,
-    createSignerForHome: (profileHomeDir) => {
-      const profileBaseSigner = createLocalMnemonicSigner({
-        secretStore: createFileSecretStore(profileHomeDir),
-        adapters,
-        resolveSponsorWritePin,
-      });
-      return context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
-        ? createTestChainWriteSigner(profileBaseSigner)
-        : profileBaseSigner;
-    },
+    createSignerForHome,
     autoReplyConfig: sharedAutoReplyConfig,
     llmExecutor,
     providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
@@ -6532,6 +6537,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     autoReplyConfig: sharedAutoReplyConfig,
     resolvePeerChatPublicKey,
     llmExecutor,
+    createSignerForHome,
     // Wire the live per-home config resolver so each profile orchestrator reads
     // the same object that handlers.chat.setAutoReply mutates. Without this,
     // toggling Auto-Reply off in /ui/bot (or via the CLI) for a non-Twin Bot

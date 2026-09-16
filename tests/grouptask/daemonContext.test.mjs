@@ -84,3 +84,74 @@ test('grouptask health surfaces the owner identity through the daemon handler', 
     name: 'Alice',
   });
 });
+
+test('owner signer routes MVC writes through the sponsor hook when provided', async () => {
+  const systemHomeDir = await mkdtempTempRoot('metabot-grouptask-ctx-');
+  const owner = await createOwnerIdentity(systemHomeDir, { name: 'Alice' });
+  const sponsoredResult = {
+    txids: ['f'.repeat(64)],
+    pinId: `${'f'.repeat(64)}i0`,
+    totalCost: 0,
+    network: 'mvc',
+    operation: 'create',
+    path: '/protocols/simplebuzz',
+    contentType: 'text/plain',
+    encoding: 'utf-8',
+    globalMetaId: owner.globalMetaId,
+    mvcAddress: 'owner-mvc-address',
+  };
+  const hookCalls = [];
+  const ctx = createGroupTaskServiceContext({
+    systemHomeDir,
+    createSignerForProfileHome: unusedSignerFactory,
+    adapters: new Map([['mvc', { network: 'mvc', deriveAddress: async () => 'owner-mvc-address' }]]),
+    resolveSponsorWritePin: async (hookInput) => {
+      hookCalls.push(hookInput);
+      return sponsoredResult;
+    },
+  });
+
+  const ref = await ctx.ownerIdentity();
+  const result = await ref.signer.writePin({
+    operation: 'create',
+    path: '/protocols/simplebuzz',
+    encryption: '0',
+    version: '1.0',
+    contentType: 'text/plain',
+    payload: '{"content":"hi"}',
+    encoding: 'utf-8',
+    network: 'mvc',
+  });
+  assert.equal(result, sponsoredResult);
+  assert.equal(hookCalls.length, 1);
+  assert.equal(typeof hookCalls[0].runSelfPaid, 'function');
+});
+
+test('owner signer keeps the self-paid path when no sponsor hook is provided', async () => {
+  const systemHomeDir = await mkdtempTempRoot('metabot-grouptask-ctx-');
+  await createOwnerIdentity(systemHomeDir, { name: 'Alice' });
+  const ctx = createGroupTaskServiceContext({
+    systemHomeDir,
+    createSignerForProfileHome: unusedSignerFactory,
+    adapters: new Map([['mvc', {
+      network: 'mvc',
+      deriveAddress: async () => 'owner-mvc-address',
+      buildInscription: async () => { throw new Error('self-paid buildInscription reached'); },
+    }]]),
+  });
+
+  const ref = await ctx.ownerIdentity();
+  await assert.rejects(
+    ref.signer.writePin({
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0',
+      contentType: 'text/plain',
+      payload: '{"content":"hi"}',
+      encoding: 'utf-8',
+      network: 'mvc',
+    }),
+    /self-paid buildInscription reached/,
+  );
+});

@@ -242,6 +242,16 @@ export type TrafficUsagePayload = {
   source: 'service' | 'local' | 'unavailable'
 }
 
+/**
+ * Usage-table order: newest day first. Both sources bucket rows by ISO
+ * YYYY-MM-DD day strings (the service's UTC day; the local journal's
+ * `toISOString().slice(0, 10)`), so plain string comparison orders them; the
+ * sort is stable and keeps each source's own row order within one day.
+ */
+export function sortTrafficUsageRowsByDateDesc(rows: TrafficUsageRow[]): TrafficUsageRow[] {
+  return [...rows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+}
+
 /** `metabot traffic claim`. */
 export type TrafficClaimPayload = {
   grantId: string
