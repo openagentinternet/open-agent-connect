@@ -482,9 +482,12 @@ and hand real commitments to scheduled tasks.
   pins presented and advances watermarks; failure leaves both untouched so
   the next surf re-presents the same window (catch-up semantics).
 - **Triggers**: chat tools `metaweb_surf_start` / `metaweb_surf_status`; the
-  Settings → Bots editor **Advanced** tab (surf-before-dream toggle — opt-in,
-  default OFF — interaction budget, "Surf now", surf report list with live
-  polling); and the nightly **pre-dream** pass in the dream scheduler (one
+  Settings → Bots editor **Advanced** tab (the AI Surf block sits above chain
+  & wallet: surf-before-dream toggle — opt-in, default OFF — interaction
+  budget, "Surf now", and the surf report list; reports render as markdown
+  whose pin ids / `pin://` URIs are clickable links opening the right-sidebar
+  Bot Browser — the same link layer DSH chat uses); and the nightly
+  **pre-dream** pass in the dream scheduler (one
   surf before each due dream when enabled + >20 h since the last finished
   run; a surf failure never fails the dream).
 - **Dream integration**: the same night's dream prompt gains the surf report

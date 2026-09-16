@@ -333,21 +333,27 @@ button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); 
 .oac-spin { animation: oac-spin 1s linear infinite; }
 @keyframes oac-spin { to { transform: rotate(360deg); } }
 
-.oac-surf-section .oac-subsection-title { margin: 0 0 4px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
-.oac-surf-section .oac-info-row { align-items: flex-start; padding: 6px 0; }
-.oac-surf-section .oac-info-label-wrap { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
-.oac-surf-section .oac-info-label { color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.oac-surf-section { display: grid; gap: 8px; padding: 14px 0 4px; border-top: 1px solid var(--dsw-alias-border-l2); margin-top: 10px; }
+.oac-surf-title { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
+.oac-surf-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.oac-surf-row-label { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+.oac-surf-row-label .oac-hint { margin: 0; }
 .oac-surf-now-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.oac-surf-reports-title { margin-top: 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
 .oac-surf-reports { display: grid; gap: 6px; }
-.oac-surf-run { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 8px 10px; display: grid; gap: 6px; }
-.oac-surf-run-head { display: flex; align-items: center; gap: 8px; padding: 0; border: none; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; flex-wrap: wrap; }
-.oac-surf-run-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.oac-surf-run-dot.running { background: var(--dsw-alias-brand-primary); animation: oac-surf-pulse 1.4s ease-in-out infinite; }
-.oac-surf-run-dot.done { background: var(--dsw-alias-state-success-primary); }
-.oac-surf-run-dot.failed { background: var(--dsw-alias-state-error-primary); }
-.oac-surf-run-meta { color: var(--dsw-alias-label-secondary); font-size: 12px; }
-.oac-surf-run-stats { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
-.oac-surf-report { margin: 0; max-height: 320px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); font-size: 12px; line-height: 18px; white-space: pre-wrap; word-break: break-word; }
+.oac-surf-run { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 8px 10px; display: grid; gap: 4px; }
+.oac-surf-run-head { display: flex; align-items: center; gap: 8px; padding: 0; border: none; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
+.oac-surf-chevron { flex: none; width: 12px; font-size: 11px; color: var(--dsw-alias-label-tertiary); transition: transform .12s; }
+.oac-surf-chevron.open { transform: rotate(90deg); }
+.oac-surf-run-trigger { font-size: 13px; font-weight: 500; }
+.oac-surf-run-time { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.oac-surf-run-badge { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l2); font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.oac-surf-run-badge.done { color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); }
+.oac-surf-run-badge.failed { color: var(--dsw-alias-state-error-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent); }
+.oac-surf-run-badge.running { color: var(--dsw-alias-brand-primary); border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 40%, transparent); }
+.oac-surf-run-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--dsw-alias-brand-primary); animation: oac-surf-pulse 1.4s ease-in-out infinite; }
+.oac-surf-run-stats { margin: 0; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.oac-surf-report-md { max-height: 340px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); font-size: 12px; line-height: 18px; }
 @keyframes oac-surf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 `
 

@@ -783,6 +783,7 @@ export function BotEditor({
                 <code className="oac-info-value">{bot.mvcAddress ?? ''}</code>
               </div>
             </div>
+            <SurfSection bot={bot} t={t} />
             <BotAdvancedSection
               bot={bot}
               t={t}
@@ -795,7 +796,6 @@ export function BotEditor({
               onSave={runSave}
               onRequestDelete={() => setConfirmDelete(true)}
             />
-            <SurfSection bot={bot} t={t} />
           </div>
         </div>
       ) : null}
