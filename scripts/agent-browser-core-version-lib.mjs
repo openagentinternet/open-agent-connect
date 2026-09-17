@@ -32,18 +32,76 @@ export function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
 }
 
+function stripYamlQuotes(value) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    || (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+// Minimal reader for the root importer of pnpm-lock.yaml (lockfileVersion 9).
+// Returns section -> Map(package name -> { specifier, version }). Resolved
+// versions may carry a peer-dependency suffix like `1.2.3(foo@4.5.6)`; the
+// suffix is stripped because OAC pins exact versions for these packages.
+export function readPnpmLockImporters(rootDir) {
+  const lockPath = path.join(rootDir, 'pnpm-lock.yaml');
+  const lines = readFileSync(lockPath, 'utf8').split('\n');
+  const importersStart = lines.findIndex((line) => line === 'importers:');
+  if (importersStart === -1) {
+    throw new Error(`Missing importers section in ${lockPath}.`);
+  }
+  const sections = {
+    dependencies: new Map(),
+    devDependencies: new Map(),
+    optionalDependencies: new Map(),
+  };
+  let currentSection = null;
+  let currentPackage = null;
+  for (let index = importersStart + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line && !line.startsWith(' ')) {
+      break; // The next top-level key ends the importers block.
+    }
+    const sectionMatch = line.match(/^ {4}(dependencies|devDependencies|optionalDependencies):$/);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1];
+      currentPackage = null;
+      continue;
+    }
+    const packageMatch = line.match(/^ {6}'?([^':]+)'?:$/);
+    if (packageMatch && currentSection) {
+      currentPackage = stripYamlQuotes(packageMatch[1]);
+      continue;
+    }
+    const fieldMatch = line.match(/^ {8}(specifier|version): (.+)$/);
+    if (fieldMatch && currentPackage && currentSection) {
+      const entry = sections[currentSection].get(currentPackage) ?? {};
+      entry[fieldMatch[1]] = stripYamlQuotes(fieldMatch[2]).split('(')[0];
+      sections[currentSection].set(currentPackage, entry);
+    }
+  }
+  return sections;
+}
+
 export function readAgentBrowserPackageState(rootDir) {
   const packageJsonPath = path.join(rootDir, 'package.json');
-  const packageLockPath = path.join(rootDir, 'package-lock.json');
   const packageJson = readJsonFile(packageJsonPath);
-  const packageLock = readJsonFile(packageLockPath);
-  const lockRoot = packageLock.packages?.[''] ?? {};
+  const lockImporters = readPnpmLockImporters(rootDir);
 
   const pins = AGENT_BROWSER_PACKAGES.map(({ name, section }) => {
     const packageVersion = packageJson[section]?.[name] ?? null;
-    const lockRootVersion = lockRoot[section]?.[name] ?? null;
-    const lockPackageVersion = packageLock.packages?.[`node_modules/${name}`]?.version ?? null;
-    return { name, section, packageVersion, lockRootVersion, lockPackageVersion };
+    const lockEntry = lockImporters[section]?.get(name) ?? null;
+    return {
+      name,
+      section,
+      packageVersion,
+      lockSpecifier: lockEntry?.specifier ?? null,
+      lockVersion: lockEntry?.version ?? null,
+    };
   });
 
   const disallowed = DISALLOWED_OAC_BROWSER_PACKAGES.flatMap((name) => {
@@ -57,7 +115,7 @@ export function readAgentBrowserPackageState(rootDir) {
     return hits;
   });
 
-  return { packageJson, packageLock, pins, disallowed };
+  return { packageJson, pins, disallowed };
 }
 
 export function validateAgentBrowserPackageState(state) {
@@ -75,14 +133,14 @@ export function validateAgentBrowserPackageState(state) {
     }
     exactVersions.push(pin.packageVersion);
 
-    if (pin.lockRootVersion !== pin.packageVersion) {
+    if (pin.lockSpecifier !== pin.packageVersion) {
       errors.push(
-        `${pin.name} package-lock root ${pin.section} is ${pin.lockRootVersion ?? 'missing'}, expected ${pin.packageVersion}.`,
+        `${pin.name} pnpm-lock importer specifier is ${pin.lockSpecifier ?? 'missing'}, expected ${pin.packageVersion}.`,
       );
     }
-    if (pin.lockPackageVersion !== pin.packageVersion) {
+    if (pin.lockVersion !== pin.packageVersion) {
       errors.push(
-        `${pin.name} package-lock node_modules entry is ${pin.lockPackageVersion ?? 'missing'}, expected ${pin.packageVersion}.`,
+        `${pin.name} pnpm-lock resolved version is ${pin.lockVersion ?? 'missing'}, expected ${pin.packageVersion}.`,
       );
     }
   }

@@ -90,6 +90,7 @@ export interface GroupTaskStore {
     updateTaskRating(taskId: number, rating: number, ratingComment?: string | null): Promise<GroupTaskRecord>;
     updateTaskCursor(taskId: number, lastProcessedIndex: number): Promise<void>;
     touchTaskDriven(taskId: number, atMs?: number): Promise<void>;
+    setTaskChairDegraded(taskId: number, atMs: number | null): Promise<void>;
     renameTask(taskId: number, displayName: string): Promise<GroupTaskRecord>;
     setTaskPinned(taskId: number, pinned: boolean): Promise<GroupTaskRecord>;
     archiveTask(taskId: number): Promise<GroupTaskRecord>;

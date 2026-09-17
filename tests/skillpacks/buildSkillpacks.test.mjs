@@ -158,7 +158,7 @@ let builtSkillpacksPromise;
 async function getBuiltSkillpacks() {
   if (!builtSkillpacksPromise) {
     builtSkillpacksPromise = (async () => {
-      await execFile('npm', ['run', 'build'], {
+      await execFile('pnpm', ['run', 'build'], {
         cwd: REPO_ROOT,
         maxBuffer: 100 * 1024 * 1024,
       });
@@ -1147,7 +1147,7 @@ test('codex install runbook documents install verification and first-run handoff
   );
 
   assert.match(installRunbook, /docs\/install\/open-agent-connect\.md/);
-  assert.match(installRunbook, /npm run build:skillpacks/);
+  assert.match(installRunbook, /pnpm run build:skillpacks/);
   assert.match(installRunbook, /cd skillpacks\/shared/);
   assert.match(installRunbook, /metabot host bind-skills --host codex/);
   assert.match(installRunbook, /\$HOME\/\.metabot\/skills\/metabot-network-manage\/SKILL\.md/);

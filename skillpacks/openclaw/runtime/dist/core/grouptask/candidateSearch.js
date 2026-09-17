@@ -509,8 +509,23 @@ function toRemoteCandidate(remote, tokens, roleHint, snapshot) {
         role: remote.role ?? '',
         goal: remote.goal ?? '',
     }, tokens);
-    const rawScore = Number.isFinite(remote.score) ? Number(remote.score) : resume.score;
-    const matchReasons = remote.matchReasons?.length ? remote.matchReasons : resume.reasons;
+    // OT-04 R11: the remote index's own score is a coarse single-token role
+    // match (every remote candidate scored a flat 0.5 in the task-213 run,
+    // degrading the ranking to name order). Score remote candidates from their
+    // VISIBLE signals locally — the same resume scoring locals get — plus a
+    // light on-chain experience bonus (prior group tasks, capped). The remote
+    // score no longer replaces anything.
+    const experience = Math.min(4, Math.max(0, remote.groupTaskCount ?? 0)) * 0.25;
+    const matchReasons = resume.reasons.length > 0
+        ? resume.reasons
+        : (remote.matchReasons ?? []);
+    if (experience > 0) {
+        matchReasons.push({
+            field: 'groupTaskTitle',
+            token: `${remote.groupTaskCount} prior group tasks`,
+            weight: Number(experience.toFixed(2)),
+        });
+    }
     const impression = evaluateImpressionForSeat(snapshot, roleHint);
     return {
         name: remote.name,
@@ -525,8 +540,8 @@ function toRemoteCandidate(remote, tokens, roleHint, snapshot) {
         lastSeenAgoSeconds: remote.lastSeenAgoSeconds,
         groupTaskCount: remote.groupTaskCount,
         recentGroupTasks: remote.recentGroupTasks,
-        rawScore,
-        score: rawScore + impressionDelta(impression.verdict),
+        rawScore: resume.score + experience,
+        score: resume.score + experience + impressionDelta(impression.verdict),
         matchReasons,
         impression,
     };
@@ -593,6 +608,11 @@ async function searchGroupTaskSeatCandidates(deps, input = {}) {
         .slice(0, limit);
     if (hireable.length === 0 && blocked.length === 0) {
         warnings.push('no resume match for this seat');
+    }
+    // OT-04 R12: never dress up a signal-free ranking — when nothing
+    // distinguished the candidates, say so instead of implying relevance.
+    if (hireable.length > 1 && hireable.every((candidate) => candidate.score <= 0)) {
+        warnings.push('no distinguishing match signals — the order does NOT reflect fit');
     }
     return {
         query,

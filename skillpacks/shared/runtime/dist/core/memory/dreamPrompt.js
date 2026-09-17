@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DREAM_VERSION = exports.MAX_CAPABILITY_LEARNINGS = exports.MAX_KNOWLEDGE_UPDATES = exports.MAX_IMPRESSION_UPDATES = exports.MAX_VALUE_LESSONS = exports.MAX_IMPORTANT_MEMORIES = exports.MAX_WORK_REVIEWS = exports.SELF_IDENTITY_MIN_CHARS = exports.DREAM_ACTIVITY_DEFAULT_TOKEN_BUDGET = exports.DREAM_WINDOW_END_MINUTES = exports.DREAM_RETRY_MAX_DELAY_MS = exports.DREAM_RETRY_BASE_DELAY_MS = exports.DREAM_LOOKBACK_DAYS = void 0;
+exports.DREAM_VERSION = exports.MAX_CAPABILITY_LEARNINGS = exports.MAX_KNOWLEDGE_UPDATES = exports.MAX_IMPRESSION_UPDATES = exports.MAX_VALUE_LESSONS = exports.MAX_IMPORTANT_MEMORIES = exports.SURF_REPORT_PROMPT_MAX_CHARS = exports.MAX_WORK_REVIEWS = exports.SELF_IDENTITY_MIN_CHARS = exports.DREAM_ACTIVITY_DEFAULT_TOKEN_BUDGET = exports.DREAM_WINDOW_END_MINUTES = exports.DREAM_RETRY_MAX_DELAY_MS = exports.DREAM_RETRY_BASE_DELAY_MS = exports.DREAM_LOOKBACK_DAYS = void 0;
 exports.computeDreamStaggerMinute = computeDreamStaggerMinute;
 exports.dreamStaggerSeedForSlug = dreamStaggerSeedForSlug;
 exports.countNonWhitespaceChars = countNonWhitespaceChars;
@@ -39,6 +39,8 @@ exports.DREAM_WINDOW_END_MINUTES = 6 * 60;
 exports.DREAM_ACTIVITY_DEFAULT_TOKEN_BUDGET = 48_000;
 exports.SELF_IDENTITY_MIN_CHARS = 200;
 exports.MAX_WORK_REVIEWS = 5;
+/** Longest surf-report excerpt carried into the dream prompt (IDBots parity). */
+exports.SURF_REPORT_PROMPT_MAX_CHARS = 2000;
 exports.MAX_IMPORTANT_MEMORIES = 5;
 exports.MAX_VALUE_LESSONS = 3;
 exports.MAX_IMPRESSION_UPDATES = 20;
@@ -324,6 +326,11 @@ function buildDreamPrompt(input) {
     if (sourceMode !== 'fragment' && (input.activity.chainReads ?? []).length > 0) {
         const readLines = (input.activity.chainReads ?? []).map(formatChainReadActivity).join('\n');
         sections.push(`## 当日阅读的链上内容(完整读过的文章/帖子,读过即有印象)\n${readLines}`);
+    }
+    if (sourceMode !== 'fragment' && input.activity.surfReport) {
+        // IDBots parity: the pre-dream surf report rides in as its own section —
+        // the freshest stretch of that night's experience, for the dream to digest.
+        sections.push(`## 今夜做梦前的 AI 互联网冲浪报告(你今晚自主冲浪 AI 互联网的经历与收获,把它当作今晚 freshest 的一段经历来消化)\n${truncateText(input.activity.surfReport, exports.SURF_REPORT_PROMPT_MAX_CHARS)}`);
     }
     if (input.activity.taskRuns.length > 0) {
         const taskLines = input.activity.taskRuns

@@ -15,7 +15,9 @@ const traffic_1 = require("./routes/traffic");
 const buzz_1 = require("./routes/buzz");
 const simplenote_1 = require("./routes/simplenote");
 const qanda_1 = require("./routes/qanda");
+const protocol_1 = require("./routes/protocol");
 const chain_1 = require("./routes/chain");
+const surf_1 = require("./routes/surf");
 const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
 const grouptask_1 = require("./routes/grouptask");
@@ -41,7 +43,9 @@ const ROUTES = [
     buzz_1.handleBuzzRoutes,
     simplenote_1.handleSimpleNoteRoutes,
     qanda_1.handleQandaRoutes,
+    protocol_1.handleProtocolRoutes,
     chain_1.handleChainRoutes,
+    surf_1.handleSurfRoutes,
     daemon_1.handleDaemonRoutes,
     chat_1.handleChatRoutes,
     grouptask_1.handleGroupTaskRoutes,

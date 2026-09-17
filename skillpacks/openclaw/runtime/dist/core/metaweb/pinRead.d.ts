@@ -65,6 +65,8 @@ export type MetawebPin = {
 export declare class MetawebPinNotFoundError extends Error {
     constructor(message: string);
 }
+/** Normalize a raw pin payload; exported for the surf-reads batch client. */
+export declare function normalizePin(raw: unknown): MetawebPin;
 export type MetawebPinServiceOptions = {
     baseUrl?: string;
     fetchImpl?: typeof fetch;

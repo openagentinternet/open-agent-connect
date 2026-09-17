@@ -31,12 +31,22 @@ async function getGroupTaskHealth(ctx, input = {}) {
         : { present: false };
     const simplemsgListenerEnabled = await input.readSimplemsgListenerEnabled?.().catch(() => true) ?? true;
     let tasks = { active: 0, total: 0 };
+    let degradedTasks = [];
     try {
         const summaries = await (0, service_1.listGroupTaskSummaries)(ctx, { tab: 'all', includeArchived: false });
         tasks = {
             total: summaries.length,
             active: summaries.filter((task) => task.status !== 'done' && task.status !== 'cancelled').length,
         };
+        degradedTasks = summaries
+            .filter((task) => task.chairDegradedAt != null && task.status !== 'done' && task.status !== 'cancelled')
+            .map((task) => ({
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            chairDegradedAt: task.chairDegradedAt,
+            lastProcessedIndex: task.lastProcessedIndex,
+        }));
     }
     catch {
         // Profile listing failures must not take down the rest of the report.
@@ -47,5 +57,5 @@ async function getGroupTaskHealth(ctx, input = {}) {
         const tail = await (input.readEngineLogTail ?? engineLog_1.readGroupTaskEngineLogTail)(logFile);
         recentLines = tail.split('\n').filter((line) => line.trim() !== '').slice(-RECENT_ENGINE_LOG_LINES);
     }
-    return { chair, ownerIdentity, simplemsgListenerEnabled, tasks, engine: { logFile, recentLines } };
+    return { chair, ownerIdentity, simplemsgListenerEnabled, tasks, degradedTasks, engine: { logFile, recentLines } };
 }

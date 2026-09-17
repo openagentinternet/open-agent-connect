@@ -233,6 +233,9 @@ export interface SuperviseGroupTaskResult {
     notice: string | null;
     /** Set for nudge: the engine consumes this kv and runs the chair wake turn. */
     nudgeQueued: boolean;
+    /** OT-08 R25: the chair's LLM channel is degraded — nudge/resume signals
+     *  are queued and fire on recovery, but the chair cannot speak right now. */
+    chairUnavailable?: boolean;
 }
 /**
  * Owner-side supervision (single-commander). Signals are recorded on the

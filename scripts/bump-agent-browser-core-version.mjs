@@ -19,7 +19,7 @@ Explicitly bumps OAC's pinned Agent Browser Core package set.
 
 Options:
   --root <path>  Repository root to mutate. Defaults to the current working directory.
-  --dry-run      Print the npm commands without mutating package.json or package-lock.json.
+  --dry-run      Print the pnpm commands without mutating package.json or pnpm-lock.yaml.
   --verify       Run the fast verification chain after the bump: version check, build,
                  Playwright preflight, high-risk Browser/daemon tests, build:skillpacks,
                  and test:fast with a captured log under .codex_tmp/.
@@ -81,8 +81,8 @@ function packageSpecs(packageNames, version) {
   return packageNames.map((packageName) => `${packageName}@${version}`);
 }
 
-function runNpmInstall(rootDir, args) {
-  const result = spawnSync('npm', args, {
+function runPnpmAdd(rootDir, args) {
+  const result = spawnSync('pnpm', args, {
     cwd: rootDir,
     stdio: 'inherit',
   });
@@ -90,7 +90,7 @@ function runNpmInstall(rootDir, args) {
     throw result.error;
   }
   if (result.status !== 0) {
-    throw new Error(`npm ${args.join(' ')} failed with exit code ${result.status}.`);
+    throw new Error(`pnpm ${args.join(' ')} failed with exit code ${result.status}.`);
   }
 }
 
@@ -111,13 +111,13 @@ function runCommand(rootDir, args, options = {}) {
 function runVerifyFlow(rootDir, version) {
   const steps = [
     ['version check', ['node', 'scripts/check-agent-browser-core-version.mjs', '--latest', version]],
-    ['npm run build', ['npm', 'run', 'build']],
-    ['playwright preflight', ['npm', 'run', 'test:setup']],
+    ['pnpm run build', ['pnpm', 'run', 'build']],
+    ['playwright preflight', ['pnpm', 'run', 'test:setup']],
     [
       'high-risk Browser/daemon tests',
       ['node', '--test', '--test-concurrency=1', ...ABC_HIGH_RISK_TEST_FILES],
     ],
-    ['npm run build:skillpacks', ['npm', 'run', 'build:skillpacks']],
+    ['pnpm run build:skillpacks', ['pnpm', 'run', 'build:skillpacks']],
   ];
 
   for (const [label, args] of steps) {
@@ -129,10 +129,10 @@ function runVerifyFlow(rootDir, version) {
   mkdirSync(logDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const logPath = path.join(logDir, `abc-bump-verify-${version}-${timestamp}.log`);
-  console.log(`[abc-verify] npm run test:fast (log: ${logPath})`);
+  console.log(`[abc-verify] pnpm run test:fast (log: ${logPath})`);
   const result = spawnSync(
     'bash',
-    ['-lc', `set -o pipefail; npm run test:fast 2>&1 | tee "${logPath}"`],
+    ['-lc', `set -o pipefail; pnpm run test:fast 2>&1 | tee "${logPath}"`],
     {
       cwd: rootDir,
       stdio: 'inherit',
@@ -143,7 +143,7 @@ function runVerifyFlow(rootDir, version) {
     throw result.error;
   }
   if (result.status !== 0) {
-    throw new Error(`npm run test:fast failed with exit code ${result.status}; see ${logPath}`);
+    throw new Error(`pnpm run test:fast failed with exit code ${result.status}; see ${logPath}`);
   }
 
   const logText = readFileSync(logPath, 'utf8');
@@ -175,25 +175,25 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   const runtimeArgs = [
-    'install',
+    'add',
     '--save-exact',
     ...packageSpecs(AGENT_BROWSER_RUNTIME_PACKAGES, options.version),
   ];
   const devArgs = [
-    'install',
+    'add',
     '--save-dev',
     '--save-exact',
     ...packageSpecs(AGENT_BROWSER_DEV_PACKAGES, options.version),
   ];
 
   if (options.dryRun) {
-    console.log(formatShellCommand('npm', runtimeArgs));
-    console.log(formatShellCommand('npm', devArgs));
+    console.log(formatShellCommand('pnpm', runtimeArgs));
+    console.log(formatShellCommand('pnpm', devArgs));
     return 0;
   }
 
-  runNpmInstall(options.rootDir, runtimeArgs);
-  runNpmInstall(options.rootDir, devArgs);
+  runPnpmAdd(options.rootDir, runtimeArgs);
+  runPnpmAdd(options.rootDir, devArgs);
 
   const state = readAgentBrowserPackageState(options.rootDir);
   const validation = validateAgentBrowserPackageState(state);
@@ -215,8 +215,8 @@ export function main(argv = process.argv.slice(2)) {
   console.log('Next release checks:');
   console.log(`- node scripts/check-agent-browser-core-version.mjs --latest ${options.version}`);
   console.log(`- node scripts/bump-agent-browser-core-version.mjs ${options.version} --verify`);
-  console.log('- npm run build');
-  console.log('- npm test');
+  console.log('- pnpm run build');
+  console.log('- pnpm test');
   return 0;
 }
 

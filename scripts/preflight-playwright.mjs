@@ -38,8 +38,8 @@ function isInstalled(installDir) {
 }
 
 function dryRunBrowsers() {
-  const output = execFileSync('npx', ['playwright', 'install', '--dry-run'], {
-    encoding: 'utf8',
+  const output = execFileSync('pnpm', ['exec', 'playwright', 'install', '--dry-run'], {
+    encoding: 'utf-8',
   });
   return parseDryRunOutput(output);
 }
@@ -60,7 +60,7 @@ function main() {
   for (const name of missing) {
     const mirror = process.env.PLAYWRIGHT_DOWNLOAD_HOST || DEFAULT_MIRROR_HOST;
     console.log(`[test:setup] installing ${name} (mirror: ${mirror})`);
-    execFileSync('npx', ['playwright', 'install', name], {
+    execFileSync('pnpm', ['exec', 'playwright', 'install', name], {
       stdio: 'inherit',
       env: {
         ...process.env,

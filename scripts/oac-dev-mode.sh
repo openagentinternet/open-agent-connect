@@ -17,7 +17,7 @@ acceptance testing from another host session.
 Options:
   --host <host>       Host skill root to bind. Defaults to codex.
   --restart-daemon   Stop and start the local daemon after relinking.
-  --skip-build       Reinstall/bind without running npm run build.
+  --skip-build       Reinstall/bind without running pnpm run build.
   --help, -h         Show this help.
 USAGE
 }
@@ -70,7 +70,7 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   echo "[oac-dev-mode] Building core runtime and UI modules"
   (
     cd "$ROOT_DIR"
-    npm run build
+    pnpm run build
   )
 else
   echo "[oac-dev-mode] Build skipped"

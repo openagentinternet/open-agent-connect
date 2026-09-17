@@ -101,6 +101,13 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     onBrowserInfrastructureChanged?: () => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
     createSignerForHome?: (homeDir: string) => Signer;
+    /**
+     * Unattended MetaWeb surf session executor (LLM tool loop), injected by the
+     * daemon runtime which owns the passive-LLM chain; absent → digest-only runs.
+     */
+    runSurfSession?: import('../core/surf/service.js').SurfServiceDeps['runSurfSession'];
+    /** so.metaid.io override for the surf reads (METABOT_METAWEB_API_BASE_URL). */
+    metawebApiBaseUrl?: string;
     autoReplyConfig?: PrivateChatAutoReplyConfig;
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
     /** Host LLM executor bridge (DSH host delegation); shared with the private-chat reply runners. */

@@ -25,7 +25,7 @@
  * loader, clock) are injected so tests run fully offline.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_DEADLINE_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_WORK_REQ_KV_PREFIX = exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
+exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_CHAIR_DEGRADED_NOTIFIED_KV_PREFIX = exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX = exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_DEADLINE_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_WORK_REQ_KV_PREFIX = exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
 exports.createGroupTaskEngine = createGroupTaskEngine;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
@@ -63,6 +63,12 @@ const WORK_REQUEST_CLAIMED_TTL_MS = 30 * 60_000; // build+publish turns legitima
  * for OpenTeam invites to resolve before planning with whatever roster exists.
  */
 const ROSTER_SETTLE_MAX_WAIT_MS = 10 * 60_000;
+/**
+ * OT-05: grace for an accepted OpenTeam invite whose member row has not
+ * landed yet — planning defers through this window before running with
+ * explicit roster facts (the task-213 race was exactly this gap, in seconds).
+ */
+const JOIN_INGEST_GRACE_MS = 60_000;
 /** Deliverable re-verification cadence (indexer lag absorption). */
 exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = 'group_task_deliverable_verify:';
 const DELIVERABLE_REVERIFY_INTERVAL_MS = 10 * 60_000;
@@ -96,6 +102,24 @@ const DEFAULT_WORKER_COOLDOWN_MS = 20_000;
 const DEFAULT_CHAIR_COOLDOWN_MS = 10_000;
 const DEFAULT_REPLY_BUDGET = 40;
 const MSG_RETRY_MAX_FAILURES = 5;
+/**
+ * OT-01: errors of this class mean the chair's LLM CHAIN is unavailable —
+ * transient infrastructure, not a poison message. The turn defers (cursor
+ * stays put) and retries with backoff instead of burning the poison counter,
+ * and a sustained streak degrades the task with a one-time owner alert.
+ */
+const CHAIR_LLM_UNAVAILABLE_RE = /no healthy llm runtime|llm runtime timed out|timed out while running prompt|host.?executor/i;
+/** Chair-channel degrade window: an uninterrupted LLM-unavailable streak this
+ *  long trips the one-time owner alert (task.chairDegradedAt). */
+const CHAIR_DEGRADE_AFTER_MS = 10 * 60_000;
+/** Per-task backoff before the next chair turn after an LLM-unavailable
+ *  failure: a hanging provider must not eat the single-threaded tick every
+ *  5 s. Doubles per elapsed base window, capped. */
+const CHAIR_RETRY_BACKOFF_BASE_MS = 30_000;
+const CHAIR_RETRY_BACKOFF_MAX_MS = 5 * 60_000;
+exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX = 'group_task_chair_failure_since:';
+exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX = 'group_task_chair_retry_after:';
+exports.GROUP_TASK_CHAIR_DEGRADED_NOTIFIED_KV_PREFIX = 'group_task_chair_degraded_notified:';
 /** IDBots guest daemon bound: 3 consecutive failures per guest message. */
 const GUEST_MSG_RETRY_MAX_FAILURES = 3;
 // Guest membership self-check (IDBots cadence): 5-min probe, 15-min
@@ -161,6 +185,23 @@ async function defaultInboundPrivateMessages(profile) {
 // ---------------------------------------------------------------------------
 // Engine
 // ---------------------------------------------------------------------------
+/**
+ * OT-01 sweep: an outage streak that ended while nobody watched (host
+ * restart, lease recovery) must not linger — the failure clock, backoff
+ * gate, and notified flag clear together once the recorded degradation is
+ * far in the past. (task.chairDegradedAt itself clears only on the next
+ * successful chair turn via reviveChairChannel — degraded until proven
+ * recovered.)
+ */
+async function clearStaleChairOutage(store, task, nowMs) {
+    if (task.chairDegradedAt == null)
+        return;
+    if (nowMs - task.chairDegradedAt < CHAIR_DEGRADE_AFTER_MS)
+        return;
+    await store.kvDelete(`${exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${task.id}`);
+    await store.kvDelete(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${task.id}`);
+    await store.kvDelete(`${exports.GROUP_TASK_CHAIR_DEGRADED_NOTIFIED_KV_PREFIX}${task.id}`);
+}
 function createGroupTaskEngine(options) {
     const ctx = options.ctx;
     const log = logOf(ctx);
@@ -350,6 +391,66 @@ function createGroupTaskEngine(options) {
      * Single-commander host→chair one-way channel: record one environment fact
      * (NEVER a group post). The store dedupes unconsumed notes by dedupeKey.
      */
+    /** OT-01: true when the error means the chair's LLM chain is temporarily
+     *  unavailable (no healthy runtime / provider timeout) — a defer-and-retry
+     *  condition, never a reason to poison the message or wedge the task. */
+    function isChairLlmUnavailable(error) {
+        const text = error instanceof Error ? error.message : String(error);
+        return CHAIR_LLM_UNAVAILABLE_RE.test(text);
+    }
+    /** One-time owner-facing degradation for a chair whose LLM chain has been
+     *  down continuously for CHAIR_DEGRADE_AFTER_MS: set task.chairDegradedAt,
+     *  emit an alert relay to the origin session, and post a plain-system group
+     *  note so members learn WHY the chair went silent (the single-commander
+     *  host never speaks, but an owner-actionable outage is exactly the case
+     *  the rule exists for). Idempotent per outage via the notified kv. */
+    async function degradeChairChannel(store, task, chairProfile, firstFailureMs) {
+        if (task.chairDegradedAt != null)
+            return;
+        // A short blip (one failed turn, recovered on retry) must not alert the
+        // owner — the marker fires only once the streak outlives the window.
+        if (now() - firstFailureMs < CHAIR_DEGRADE_AFTER_MS)
+            return;
+        const notifiedKey = `${exports.GROUP_TASK_CHAIR_DEGRADED_NOTIFIED_KV_PREFIX}${task.id}`;
+        if (await store.kvGet(notifiedKey))
+            return;
+        await store.setTaskChairDegraded(task.id, firstFailureMs);
+        await store.kvSet(notifiedKey, String(now()));
+        await (0, service_1.emitGroupTaskRelay)(ctx, chairProfile, task, 'alert', `The chair's LLM runtime has been unavailable since ${new Date(firstFailureMs).toLocaleString()}`
+            + ' — chair replies are paused and the task is waiting for the channel to recover.'
+            + ' Check the host LLM config or run `metabot llm host-executor`; the engine will resume'
+            + ' the chair automatically once a runtime is healthy again.');
+        // Group-facing system note (single-commander exception for owner-actionable
+        // outages, per the task-213 defect report): rides the inert
+        // [GROUP_TASK_NOTICE:*] host-notice channel so it is visible to remote
+        // members, is clearly not the chair's voice, and triggers no replies.
+        // Best-effort — the LLM being down never blocks a chain write, but the
+        // degrade path must not crash the tick if the chain also fails.
+        await enginePost(store, task, {
+            content: '[GROUP_TASK_NOTICE:chair_degraded] The chair\'s LLM runtime is temporarily '
+                + 'unavailable — the task is paused at the host level and will resume automatically.'
+                + ' The owner has been notified.',
+        }).catch(() => undefined);
+        log(`[GroupTaskEngine] Task ${task.id}: chair channel DEGRADED (LLM unavailable since `
+            + `${new Date(firstFailureMs).toISOString()})`);
+    }
+    /** Clear the degraded marker + notified flag after a successful chair turn. */
+    async function reviveChairChannel(store, task, chairProfile) {
+        const fresh = await store.getTaskById(task.id);
+        if (fresh?.chairDegradedAt == null)
+            return;
+        await store.setTaskChairDegraded(task.id, null);
+        await store.kvDelete(`${exports.GROUP_TASK_CHAIR_DEGRADED_NOTIFIED_KV_PREFIX}${task.id}`);
+        await (0, service_1.emitGroupTaskRelay)(ctx, chairProfile, fresh, 'alert', 'The chair\'s LLM runtime has recovered — the task resumes automatically.');
+        log(`[GroupTaskEngine] Task ${task.id}: chair channel RECOVERED`);
+    }
+    /** Bookkeeping after ANY successful chair turn: clear the outage clock and
+     *  the retry backoff, and revive the degraded marker when one is set. */
+    async function noteChairTurnSuccess(store, task, chairProfile) {
+        await store.kvDelete(`${exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${task.id}`);
+        await store.kvDelete(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${task.id}`);
+        await reviveChairChannel(store, task, chairProfile);
+    }
     async function recordHostNote(store, taskId, input) {
         const note = await store.recordHostNote({ taskId, ...input });
         log(`[GroupTaskEngine] Task ${taskId}: host note [${note.kind}${note.target ? ` → ${note.target}` : ''}] recorded`);
@@ -924,7 +1025,7 @@ function createGroupTaskEngine(options) {
             }).catch(() => undefined);
         }
     }
-    async function applyTagSideEffects(store, task, chairSlug, message, tags, seats, ownerGmid, chairProfile, promptSeats, deferredReview) {
+    async function applyTagSideEffects(store, task, chairSlug, message, tags, seats, members, ownerGmid, chairProfile, promptSeats, deferredReview) {
         if (message.senderSuspect)
             return task;
         const senderGmid = normalizeGmid(message.senderGlobalMetaId);
@@ -990,11 +1091,22 @@ function createGroupTaskEngine(options) {
                 current = await applyChairStatusTag(store, current, chairSlug, tags.status, message, ownerGmid, chairProfile, promptSeats, deferredReview);
             }
         }
-        // Member tags (non-chair local members)
-        if (senderSeat && !fromChair) {
+        // Member tags (local seats AND remote OpenTeam members): remote workers
+        // have no staffing seat, so the old senderSeat-only guard silently
+        // dropped every remote [DELIVERABLE]/[WORKING] line (task-213 defect #2
+        // — the deliverables ledger stayed empty while the panel showed nothing
+        // to accept). Keying on the members table records remote artifacts;
+        // local-seat behavior (deadline clocks, local-file upload) is unchanged.
+        const senderMember = !fromChair
+            ? members.find((entry) => entry.removedAt == null
+                && normalizeGmid(entry.globalMetaId ?? '') === senderGmid) ?? null
+            : null;
+        if ((senderSeat || senderMember) && !fromChair) {
             if (tags.deliverables.length > 0 && message.pinId) {
                 // A delivery settles the chair-stated deadline clock for this member.
-                await store.kvDelete(`${exports.GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${senderSeat.slug}`);
+                if (senderSeat) {
+                    await store.kvDelete(`${exports.GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${senderSeat.slug}`);
+                }
                 let recordedAny = false;
                 for (const candidate of tags.deliverables) {
                     // Per-(msgPin, uri, kind) dedupe (IDBots parity): the same line
@@ -1037,7 +1149,10 @@ function createGroupTaskEngine(options) {
                         : '';
                     const localPath = (looksLikeLocalFilePath(candidate.uri) ? candidate.uri : null)
                         ?? (looksLikeLocalFilePath(payloadPath) ? payloadPath : null);
-                    if (localPath) {
+                    if (localPath && senderSeat) {
+                        // Local-seat only: the upload seam reads the SENDER's workspace.
+                        // A remote member's path rows stay raw until the cross-host
+                        // transfer channel exists (remote paths are same-machine-only).
                         try {
                             const uploaded = await uploadDeliverableFile({
                                 slug: senderSeat.slug,
@@ -1087,11 +1202,13 @@ function createGroupTaskEngine(options) {
                     await (0, deliverableVerification_1.verifyTaskDeliverables)(store, task.id, options.verifyPin, { now, log }).catch(() => undefined);
                 }
             }
-            if (tags.working) {
-                await store.setMemberStatus(task.id, senderSeat.slug, 'working', senderSeat.globalMetaId);
-            }
-            else if (tags.standby) {
-                await store.setMemberStatus(task.id, senderSeat.slug, 'standby', senderSeat.globalMetaId);
+            if (tags.working || tags.standby) {
+                if (senderSeat) {
+                    await store.setMemberStatus(task.id, senderSeat.slug, tags.working ? 'working' : 'standby', senderSeat.globalMetaId);
+                }
+                else if (senderMember) {
+                    await store.setMemberStatus(task.id, null, tags.working ? 'working' : 'standby', senderMember.globalMetaId);
+                }
             }
         }
         return current;
@@ -1190,18 +1307,38 @@ function createGroupTaskEngine(options) {
             // Single-commander: [DEPENDS_ON] is a DECLARATIVE marker — the host
             // never holds or re-orders dispatches; sequencing is the chair's
             // judgment (the marker only keeps timeout flags off a waiting member).
-            const reply = (await runSeatTurn({
-                seat,
-                task: input.task,
-                promptSeats: input.promptSeats,
-                chairName: input.chairName,
-                ownerGmid: input.ownerGmid,
-                recentMessages: input.recentMessages,
-                target: input.message,
-                stateLine: decision.role === 'chair'
-                    ? await chairStateLine(input.store, input.task)
-                    : null,
-            })).trim();
+            // OT-01: an LLM-unavailable failure is infrastructure, not a poison
+            // message — record the outage, start the degrade clock, and return
+            // 'defer' so the cursor stays on this message for a later tick. The
+            // poison counter below never sees errors of this class.
+            let reply;
+            try {
+                reply = (await runSeatTurn({
+                    seat,
+                    task: input.task,
+                    promptSeats: input.promptSeats,
+                    chairName: input.chairName,
+                    ownerGmid: input.ownerGmid,
+                    recentMessages: input.recentMessages,
+                    target: input.message,
+                    stateLine: decision.role === 'chair'
+                        ? await chairStateLine(input.store, input.task)
+                        : null,
+                })).trim();
+            }
+            catch (error) {
+                if (decision.role === 'chair' && isChairLlmUnavailable(error)) {
+                    const sinceKey = `${exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${input.task.id}`;
+                    const firstFailure = Number((await input.store.kvGet(sinceKey)) ?? '0')
+                        || now();
+                    await input.store.kvSet(sinceKey, String(firstFailure));
+                    await degradeChairChannel(input.store, input.task, input.chairProfile, firstFailure);
+                    return 'defer';
+                }
+                throw error;
+            }
+            if (decision.role === 'chair')
+                await noteChairTurnSuccess(input.store, input.task, input.chairProfile);
             replyCounts.set(key, spent + 1);
             lastReplyAt.set(key, now());
             if (decision.role === 'worker')
@@ -1311,12 +1448,13 @@ function createGroupTaskEngine(options) {
         if (attempts >= PLAN_ATTEMPTS_MAX)
             return;
         await store.kvSet(attemptsKey, String(attempts + 1));
-        const directive = (0, prompts_1.buildPlanningDirective)({
+        const directiveBase = (0, prompts_1.buildPlanningDirective)({
             task,
             seats: input.promptSeats,
             recentMessages: input.recentMessages,
             nowMs: now(),
         });
+        const directive = input.rosterFacts ? `${directiveBase}\n\n${input.rosterFacts}` : directiveBase;
         const reply = (await runSeatTurn({
             seat: input.chair,
             task,
@@ -1343,16 +1481,49 @@ function createGroupTaskEngine(options) {
      * plan landing seconds after create, before any remote accept, and the
      * chair committing to self-execute). Bounded by ROSTER_SETTLE_MAX_WAIT_MS
      * so a never-answering invitee cannot wedge the task in planning.
+     *
+     * OT-05 (task-213): an ACCEPTED invite whose member row has not landed yet
+     * is the same race one step later — planning ingested the accept and raced
+     * the join ingestion by seconds, and the chair publicly concluded "no one
+     * to dispatch" over a roster that held two workers milliseconds later.
+     * Accepted-but-unjoined invitees defer planning briefly (JOIN_INGEST_GRACE_MS
+     * from respondedAt); past the grace window planning runs with explicit
+     * roster facts so the chair can never draw the wrong conclusion.
      */
-    async function rosterSettledForPlanning(profile, task) {
+    async function rosterSettledForPlanning(profile, task, members) {
         const openteam = (0, service_1.openteamStoreFor)(ctx, profile);
         const invites = await openteam.listInvites(task.id).catch(() => []);
+        const joined = new Set(members
+            .map((member) => normalizeGmid(member.globalMetaId ?? ''))
+            .filter((gmid) => gmid !== ''));
         const pending = invites.filter((invite) => invite.status === 'pending');
-        if (pending.length === 0)
+        const acceptedUnjoined = invites.filter((invite) => invite.status === 'accepted'
+            && !joined.has(normalizeGmid(invite.inviteeGlobalMetaId)));
+        if (pending.length === 0 && acceptedUnjoined.length === 0)
             return { settled: true };
-        if (now() - task.createdAt >= ROSTER_SETTLE_MAX_WAIT_MS)
-            return { settled: true };
-        return { settled: false, reason: `${pending.length} OpenTeam invite(s) pending` };
+        if (now() - task.createdAt >= ROSTER_SETTLE_MAX_WAIT_MS) {
+            return { settled: true, facts: buildRosterFactLine(pending, acceptedUnjoined) };
+        }
+        if (pending.length === 0) {
+            const fresh = acceptedUnjoined.some((invite) => now() - (invite.respondedAt ?? 0) < JOIN_INGEST_GRACE_MS);
+            if (!fresh)
+                return { settled: true, facts: buildRosterFactLine(pending, acceptedUnjoined) };
+        }
+        const parts = [];
+        if (pending.length > 0)
+            parts.push(`${pending.length} OpenTeam invite(s) pending`);
+        if (acceptedUnjoined.length > 0) {
+            parts.push(`${acceptedUnjoined.length} accepted invitee(s) not yet in the roster`);
+        }
+        return { settled: false, reason: parts.join(', ') };
+    }
+    /** R15: the explicit anti-"无人可派" fact line for a forced planning turn. */
+    function buildRosterFactLine(pending, acceptedUnjoined) {
+        const names = [...pending, ...acceptedUnjoined]
+            .map((invite) => invite.inviteeName?.trim() || 'an invited worker');
+        return `ROSTER FACT (host): ${names.length} invited OpenTeam worker(s) — ${names.join(', ')} `
+            + '— are seated on this task but not yet fully joined/resolved. Do NOT conclude that the seats are '
+            + 'unstaffable and do NOT ask the owner to recruit: plan around these workers, they are joining.';
     }
     // Note: remote-member joins wake the chair through a `join` HOST NOTE
     // (recorded by maintainInviterInvites) — the host-notes turn delivers it and
@@ -1407,6 +1578,11 @@ function createGroupTaskEngine(options) {
         const pending = await store.listPendingHostNotes(task.id);
         if (pending.length === 0)
             return;
+        // OT-01: an open LLM-unavailable backoff window defers the notes turn —
+        // the delivery-attempt budget is reserved for real failures.
+        const notesRetryAfter = Number((await store.kvGet(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${task.id}`)) ?? '0') || 0;
+        if (now() < notesRetryAfter)
+            return;
         const attemptsKey = `${exports.GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX}${task.id}`;
         const attempts = Number((await store.kvGet(attemptsKey)) ?? '0') || 0;
         if (attempts >= HOST_NOTE_TURN_MAX_ATTEMPTS) {
@@ -1456,9 +1632,21 @@ function createGroupTaskEngine(options) {
             log(`[GroupTaskEngine] Task ${task.id}: delivered ${pending.length} host note(s) to the chair`);
         }
         catch (error) {
-            await store.kvSet(attemptsKey, String(attempts + 1));
-            log(`[GroupTaskEngine] Host-notes turn failed for task ${task.id} (${attempts + 1}/${HOST_NOTE_TURN_MAX_ATTEMPTS}): `
-                + `${error instanceof Error ? error.message : String(error)}`);
+            if (isChairLlmUnavailable(error)) {
+                // OT-01: an outage must not burn the delivery budget — the notes stay
+                // pending, the backoff window opens, and the owner learns via degrade.
+                const sinceKey = `${exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${task.id}`;
+                const firstFailure = Number((await store.kvGet(sinceKey)) ?? '0') || now();
+                await store.kvSet(sinceKey, String(firstFailure));
+                await degradeChairChannel(store, task, input.profile, firstFailure);
+                await store.kvSet(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${task.id}`, String(now() + CHAIR_RETRY_BACKOFF_BASE_MS));
+                log(`[GroupTaskEngine] Host-notes turn deferred for task ${task.id} (chair LLM unavailable)`);
+            }
+            else {
+                await store.kvSet(attemptsKey, String(attempts + 1));
+                log(`[GroupTaskEngine] Host-notes turn failed for task ${task.id} (${attempts + 1}/${HOST_NOTE_TURN_MAX_ATTEMPTS}): `
+                    + `${error instanceof Error ? error.message : String(error)}`);
+            }
         }
     }
     // -------------------------------------------------------------------------
@@ -1487,7 +1675,7 @@ function createGroupTaskEngine(options) {
         const page = await store.listMessages(task.groupId, { limit: MESSAGE_FETCH_LIMIT });
         let current = task;
         if (current.status === 'planning' && chair && current.dispatchPausedAt == null) {
-            const settle = await rosterSettledForPlanning(profile, current);
+            const settle = await rosterSettledForPlanning(profile, current, members);
             if (!settle.settled) {
                 // Log the deferral once per task, not once per tick.
                 const deferredKey = `${exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX}${current.id}`;
@@ -1497,20 +1685,46 @@ function createGroupTaskEngine(options) {
                 }
             }
             else {
-                try {
-                    await runPlanningTurn({
-                        store,
-                        task: current,
-                        chair,
-                        seats,
-                        promptSeats,
-                        ownerGmid,
-                        recentMessages: page.messages,
-                    });
+                // OT-01: never burn a planning attempt on an LLM outage — wait out
+                // the backoff window and retry with the attempts kv untouched.
+                const retryAfter = Number((await store.kvGet(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${current.id}`)) ?? '0') || 0;
+                if (now() < retryAfter) {
+                    // Chair LLM unavailable: planning waits for the next window.
                 }
-                catch (error) {
-                    log(`[GroupTaskEngine] Planning turn failed for task ${current.id}: `
-                        + `${error instanceof Error ? error.message : String(error)}`);
+                else {
+                    try {
+                        await runPlanningTurn({
+                            store,
+                            task: current,
+                            chair,
+                            seats,
+                            promptSeats,
+                            ownerGmid,
+                            recentMessages: page.messages,
+                            rosterFacts: settle.facts ?? null,
+                        });
+                    }
+                    catch (error) {
+                        if (isChairLlmUnavailable(error)) {
+                            const sinceKey = `${exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${current.id}`;
+                            const firstFailure = Number((await store.kvGet(sinceKey)) ?? '0') || now();
+                            await store.kvSet(sinceKey, String(firstFailure));
+                            await degradeChairChannel(store, current, profile, firstFailure);
+                            await store.kvSet(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${current.id}`, String(now() + CHAIR_RETRY_BACKOFF_BASE_MS));
+                            // The attempt counter burned above belongs to the outage, not
+                            // to a failing plan — give it back so a long outage cannot
+                            // exhaust the three planning attempts.
+                            const burned = Number((await store.kvGet(`${exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX}${current.id}`)) ?? '0') || 0;
+                            if (burned > 0) {
+                                await store.kvSet(`${exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX}${current.id}`, String(burned - 1));
+                            }
+                            log(`[GroupTaskEngine] Planning turn deferred for task ${current.id} (chair LLM unavailable)`);
+                        }
+                        else {
+                            log(`[GroupTaskEngine] Planning turn failed for task ${current.id}: `
+                                + `${error instanceof Error ? error.message : String(error)}`);
+                        }
+                    }
                 }
             }
         }
@@ -1552,8 +1766,21 @@ function createGroupTaskEngine(options) {
                     }
                 }
                 catch (error) {
-                    log(`[GroupTaskEngine] Supervisor wake failed for task ${current.id}: `
-                        + `${error instanceof Error ? error.message : String(error)}`);
+                    if (isChairLlmUnavailable(error)) {
+                        // OT-01: outage, not a dropped signal — degrade, arm the backoff,
+                        // and re-queue the wake so it fires after the window.
+                        const sinceKey = `${exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${current.id}`;
+                        const firstFailure = Number((await store.kvGet(sinceKey)) ?? '0') || now();
+                        await store.kvSet(sinceKey, String(firstFailure));
+                        await degradeChairChannel(store, current, profile, firstFailure);
+                        await store.kvSet(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${current.id}`, String(now() + CHAIR_RETRY_BACKOFF_BASE_MS));
+                        await store.kvSet(`${service_1.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${current.id}`, nudgeRaw);
+                        log(`[GroupTaskEngine] Supervisor wake deferred for task ${current.id} (chair LLM unavailable)`);
+                    }
+                    else {
+                        log(`[GroupTaskEngine] Supervisor wake failed for task ${current.id}: `
+                            + `${error instanceof Error ? error.message : String(error)}`);
+                    }
                 }
             }
         }
@@ -1570,7 +1797,7 @@ function createGroupTaskEngine(options) {
             const retryKey = `${exports.GROUP_TASK_MSG_RETRY_KV_PREFIX}${current.id}:${message.index}`;
             try {
                 const tags = (0, tags_1.parseGroupTaskTags)(message.content);
-                current = await applyTagSideEffects(store, current, profile.slug, message, tags, seats, ownerGmid, profile, promptSeats, deferredReview);
+                current = await applyTagSideEffects(store, current, profile.slug, message, tags, seats, members, ownerGmid, profile, promptSeats, deferredReview);
                 await trackAssignmentAcks(store, current, message, members, tags).catch(() => undefined);
                 for (const member of undrivableWorkers) {
                     if (!(0, tags_1.isMentioned)(message, {
@@ -1607,11 +1834,22 @@ function createGroupTaskEngine(options) {
                     seats,
                     ownerGlobalMetaId: ownerGmid,
                 });
+                // OT-01 backoff gate: while the chair LLM-unavailable window is open,
+                // chair replies wait (the cursor is already stuck on this message).
+                // Tag side effects above still ran — they are idempotent and their
+                // dedupe keys make the next attempt a no-op. Worker-only decisions
+                // (no chair role in `decisions`) are never gated.
+                if (decisions.some((decision) => decision.role === 'chair')) {
+                    const retryAfter = Number((await store.kvGet(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${current.id}`)) ?? '0') || 0;
+                    if (now() < retryAfter)
+                        break;
+                }
                 const recentMessages = page.messages.filter((entry) => entry.index <= message.index);
                 const outcome = await runReplies({
                     store,
                     task: current,
                     chairSlug: profile.slug,
+                    chairProfile: profile,
                     message,
                     decisions,
                     seats,
@@ -1627,6 +1865,24 @@ function createGroupTaskEngine(options) {
                 await store.kvDelete(retryKey);
             }
             catch (error) {
+                if (isChairLlmUnavailable(error)) {
+                    // OT-01: the chair's LLM CHAIN is down — transient infrastructure,
+                    // not a poison message. The cursor stays put (auto-resume); a
+                    // backoff gate suppresses retries until the next window; the
+                    // degrade clock records the outage and alerts the owner once the
+                    // window passes. The poison counter below is never touched.
+                    const sinceKey = `${exports.GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX}${current.id}`;
+                    const firstFailure = Number((await store.kvGet(sinceKey)) ?? '0') || now();
+                    await store.kvSet(sinceKey, String(firstFailure));
+                    await degradeChairChannel(store, current, profile, firstFailure);
+                    const window = Math.min(CHAIR_RETRY_BACKOFF_MAX_MS, CHAIR_RETRY_BACKOFF_BASE_MS
+                        * 2 ** Math.min(8, Math.floor((now() - firstFailure) / CHAIR_RETRY_BACKOFF_BASE_MS)));
+                    await store.kvSet(`${exports.GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX}${current.id}`, String(now() + window));
+                    log(`[GroupTaskEngine] Message ${message.index} of task ${current.id}: chair LLM `
+                        + `unavailable — deferred (retry after ~${Math.round(window / 1000)}s): `
+                        + `${error instanceof Error ? error.message : String(error)}`);
+                    break;
+                }
                 const failures = (Number((await store.kvGet(retryKey)) ?? '0') || 0) + 1;
                 await store.kvSet(retryKey, String(failures));
                 log(`[GroupTaskEngine] Message ${message.index} of task ${current.id} failed `
@@ -1636,7 +1892,7 @@ function createGroupTaskEngine(options) {
                     // run the idempotent tag side effects once so a dying [STATUS:*] or
                     // [DELIVERABLE] line is not lost (IDBots GT#26 parity).
                     try {
-                        current = await applyTagSideEffects(store, current, profile.slug, message, (0, tags_1.parseGroupTaskTags)(message.content), seats, ownerGmid, profile, promptSeats, deferredReview);
+                        current = await applyTagSideEffects(store, current, profile.slug, message, (0, tags_1.parseGroupTaskTags)(message.content), seats, members, ownerGmid, profile, promptSeats, deferredReview);
                     }
                     catch {
                         // Tag reprocess is best-effort; the cursor advances regardless.
@@ -2155,6 +2411,7 @@ function createGroupTaskEngine(options) {
                 const runnable = tasks.filter((task) => task.chairSlug === profile.slug && RUNNABLE_STATUSES.has(task.status));
                 for (const task of runnable) {
                     try {
+                        await clearStaleChairOutage(store, task, now());
                         await driveTask(profile, store, task, profileBySlug, ownerGmid);
                     }
                     catch (error) {

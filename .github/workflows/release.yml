@@ -18,19 +18,35 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-          cache: npm
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'dsh-plugin/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
+      # npm publish / npm view stay on the npm CLI on purpose: the npm
+      # Trusted Publisher (OIDC) flow for this repo is configured for the
+      # npm CLI and pnpm publish does not support it.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=moderate
+        run: pnpm audit --prod --audit-level=moderate
 
       - name: Build runtime
-        run: npm run build
+        run: pnpm run build
 
       - name: Build skillpacks
-        run: npm run build:skillpacks
+        run: pnpm run build:skillpacks
 
       - name: Verify release version
         run: node scripts/verify-release-version.mjs "${{ github.ref_name }}"
@@ -68,8 +84,8 @@ jobs:
 
       - name: Build DSH plugin
         run: |
-          npm ci --prefix dsh-plugin
-          npm run build --prefix dsh-plugin
+          pnpm --dir dsh-plugin install --frozen-lockfile
+          pnpm --dir dsh-plugin run build
 
       # The DSH plugin rides an independent version line (dsh-plugin/package.json,
       # currently 0.4.x tied to the DSH kernel surface, not the core version).

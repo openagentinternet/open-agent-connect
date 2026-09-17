@@ -82,8 +82,14 @@ function classifyUriToken(raw) {
         return PIN_ID_RE.test(id) ? { kind: 'metaapp', uri: `metaapp://${id}` } : null;
     }
     if (lower.startsWith('metafile://')) {
-        const id = lower.slice('metafile://'.length);
-        return PIN_ID_RE.test(id) ? { kind: 'metafile', uri: `metafile://${id}` } : null;
+        let id = lower.slice('metafile://'.length);
+        // Remote workers commonly suffix the content type ("metafile://<pin>.mp4"
+        // — task-213 defect #3). The extension is metadata, not part of the pin:
+        // validate the bare pin and keep the extension so the URI still serves.
+        const ext = /\.[a-z0-9]{1,8}$/u.exec(id)?.[0] ?? null;
+        if (ext)
+            id = id.slice(0, -ext.length);
+        return PIN_ID_RE.test(id) ? { kind: 'metafile', uri: `metafile://${id}${ext ?? ''}` } : null;
     }
     if (lower.startsWith('http://') || lower.startsWith('https://')) {
         try {

@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -590,65 +590,78 @@ async function sanitizeGeneratedTree(rootPath) {
 
 async function collectBundledRuntimeDependencies(repoRoot) {
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
-  const packageLock = JSON.parse(await fs.readFile(path.join(repoRoot, 'package-lock.json'), 'utf8'));
-  const packages = packageLock?.packages ?? {};
-  const dependencyNames = new Set();
+  const rootModulesDir = path.join(repoRoot, 'node_modules');
+  const dependencyDirs = new Set();
   const queue = Object.keys(packageJson.dependencies || {}).map((dependencyName) => ({
     dependencyName,
-    packagePath: `node_modules/${dependencyName}`,
+    parentDir: null,
   }));
-  const seenPackagePaths = new Set();
 
-  function resolveDependencyPath(parentPackagePath, dependencyName) {
-    if (parentPackagePath) {
-      const nestedPath = `${parentPackagePath}/node_modules/${dependencyName}`;
-      if (packages[nestedPath]) {
-        return nestedPath;
+  // Walk the installed dependency graph instead of a lockfile: pnpm installs
+  // with nodeLinker=hoisted, so every runtime dependency is a real directory
+  // under node_modules, with nested fallbacks wherever two consumers need
+  // different versions of the same package. Collecting the resolved
+  // directories (not just package names) preserves that resolution layout in
+  // the vendored runtime node_modules below.
+  function resolveDependencyDir(parentDir, dependencyName) {
+    if (parentDir) {
+      const nestedDir = path.join(parentDir, 'node_modules', dependencyName);
+      if (existsSync(path.join(nestedDir, 'package.json'))) {
+        return nestedDir;
       }
     }
-    return `node_modules/${dependencyName}`;
+    return path.join(rootModulesDir, dependencyName);
   }
 
   while (queue.length > 0) {
     const item = queue.shift();
-    if (!item?.dependencyName || !item.packagePath || seenPackagePaths.has(item.packagePath)) {
+    if (!item?.dependencyName) {
       continue;
     }
 
-    const packageLockEntry = packages[item.packagePath];
-    if (!packageLockEntry) {
-      throw new Error(`Missing package-lock entry for runtime dependency: ${item.dependencyName}`);
+    const dependencyDir = resolveDependencyDir(item.parentDir, item.dependencyName);
+    const relativeDir = path.relative(rootModulesDir, dependencyDir);
+    if (dependencyDirs.has(relativeDir)) {
+      continue;
+    }
+    let manifest;
+    try {
+      manifest = JSON.parse(await fs.readFile(path.join(dependencyDir, 'package.json'), 'utf8'));
+    } catch {
+      throw new Error(
+        `Missing installed runtime dependency: ${item.dependencyName} (looked in ${dependencyDir}). Run \`pnpm install\` before building skillpacks.`,
+      );
     }
 
-    seenPackagePaths.add(item.packagePath);
-    dependencyNames.add(item.dependencyName);
-    for (const nestedDependencyName of Object.keys(packageLockEntry.dependencies || {})) {
+    dependencyDirs.add(relativeDir);
+    for (const nestedDependencyName of Object.keys(manifest.dependencies || {})) {
       queue.push({
         dependencyName: nestedDependencyName,
-        packagePath: resolveDependencyPath(item.packagePath, nestedDependencyName),
+        parentDir: dependencyDir,
       });
     }
   }
 
-  return [...dependencyNames].sort();
+  return [...dependencyDirs].sort();
 }
 
-async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyNames) {
+async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyDirs) {
   const bundledNodeModulesRoot = path.join(runtimeRoot, 'node_modules');
   await fs.rm(bundledNodeModulesRoot, { recursive: true, force: true });
   await fs.mkdir(bundledNodeModulesRoot, { recursive: true });
 
-  for (const dependencyName of dependencyNames) {
-    const dependencyPathSegments = dependencyName.split('/');
-    const sourceDependencyRoot = path.join(repoRoot, 'node_modules', ...dependencyPathSegments);
+  for (const relativeDir of dependencyDirs) {
+    const sourceDependencyRoot = path.join(repoRoot, 'node_modules', relativeDir);
     try {
       await fs.access(sourceDependencyRoot);
     } catch {
-      throw new Error(`Installed runtime dependency missing from node_modules: ${dependencyName}`);
+      throw new Error(`Installed runtime dependency missing from node_modules: ${relativeDir}`);
     }
+    const destinationRoot = path.join(bundledNodeModulesRoot, relativeDir);
+    await fs.mkdir(path.dirname(destinationRoot), { recursive: true });
     await fs.cp(
       sourceDependencyRoot,
-      path.join(bundledNodeModulesRoot, ...dependencyPathSegments),
+      destinationRoot,
       {
         recursive: true,
         verbatimSymlinks: true,
@@ -693,13 +706,13 @@ async function copyRuntimeStaticAssets(repoRoot, runtimeRoot) {
   );
 }
 
-async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyNames) {
+async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyDirs) {
   const builtCliEntry = path.join(repoRoot, 'dist', 'cli', 'main.js');
   try {
     await fs.access(builtCliEntry);
   } catch {
     throw new Error(
-      `Expected bundled CLI entry at ${builtCliEntry}. Run \`npm run build\` before building skillpacks.`
+      `Expected bundled CLI entry at ${builtCliEntry}. Run \`pnpm run build\` before building skillpacks.`
     );
   }
 
@@ -709,7 +722,7 @@ async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest
   await copyRuntimeStaticAssets(repoRoot, runtimeRoot);
   await writeFile(path.join(runtimeRoot, 'compatibility.json'), compatibilityManifest);
   await fs.cp(path.join(repoRoot, 'package.json'), path.join(runtimeRoot, 'package.json'));
-  await copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyNames);
+  await copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyDirs);
 }
 
 export async function buildAgentConnectSkillpacks(options = {}) {

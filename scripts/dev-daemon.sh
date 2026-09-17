@@ -17,7 +17,7 @@ fi
 echo "[dev-daemon] building current worktree"
 (
   cd "$ROOT_DIR"
-  npm run build
+  pnpm run build
 )
 
 echo "[dev-daemon] starting daemon from current worktree dist entry"

@@ -25,6 +25,7 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@11.24.0",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -55,7 +56,7 @@
   "scripts": {
     "build": "rm -rf lib && tsc -p tsconfig.json && tsdown",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "pnpm run build && node --test tests/*.test.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
@@ -100,6 +101,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
+    "open-agent-connect": "link:..",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",

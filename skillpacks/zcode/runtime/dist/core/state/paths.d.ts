@@ -57,6 +57,11 @@ export interface MetabotPaths {
     memoryCapabilityDraftsPath: string;
     chainHistoryRoot: string;
     schedulePath: string;
+    surfRoot: string;
+    surfRunsPath: string;
+    surfProtocolStatePath: string;
+    surfSeenPinsPath: string;
+    surfSettingsPath: string;
     llmRoot: string;
     llmRuntimesPath: string;
     llmBindingsPath: string;

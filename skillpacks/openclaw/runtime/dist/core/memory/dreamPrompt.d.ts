@@ -11,6 +11,8 @@ export declare const DREAM_WINDOW_END_MINUTES: number;
 export declare const DREAM_ACTIVITY_DEFAULT_TOKEN_BUDGET = 48000;
 export declare const SELF_IDENTITY_MIN_CHARS = 200;
 export declare const MAX_WORK_REVIEWS = 5;
+/** Longest surf-report excerpt carried into the dream prompt (IDBots parity). */
+export declare const SURF_REPORT_PROMPT_MAX_CHARS = 2000;
 export declare const MAX_IMPORTANT_MEMORIES = 5;
 export declare const MAX_VALUE_LESSONS = 3;
 export declare const MAX_IMPRESSION_UPDATES = 20;

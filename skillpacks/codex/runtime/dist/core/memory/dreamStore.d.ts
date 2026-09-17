@@ -133,6 +133,12 @@ export interface DreamDayActivity {
     chainWrites?: DreamChainWriteActivity[];
     /** Chain pins this bot fully read that day (chain content history). */
     chainReads?: DreamChainReadActivity[];
+    /**
+     * Markdown report of the bot's latest finished MetaWeb surf run inside the
+     * day window (pre-dream surf or a manual evening surf) — the freshest
+     * experience of the night; a surf report alone counts as day activity.
+     */
+    surfReport?: string | null;
 }
 /** Render the human-readable diary mirror at `memory/YYYY-MM-DD.md`. */
 export declare function renderDreamDiaryMarkdown(summary: DailySummary): string;

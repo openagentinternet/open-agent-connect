@@ -6,15 +6,23 @@ host skill packs, and MetaID network protocol integrations.
 
 ## Requirements
 
-- Node.js `>=20 <25`
-- npm
+- Node.js `>=20 <25` (pnpm 11 itself needs Node ≥ 22.5 — prefer Node 22–24)
+- pnpm, enabled once via `corepack enable` (the version is pinned by the
+  `packageManager` field in `package.json`)
 - macOS, Linux, or Windows
 
-Install dependencies with:
+Install dependencies with (the repository root and `dsh-plugin/` are separate
+packages with separate lockfiles):
 
 ```bash
-npm ci
+pnpm install
+pnpm --dir dsh-plugin install
 ```
+
+`pnpm-lock.yaml` is committed; do not reintroduce `package-lock.json`. pnpm
+settings live in `pnpm-workspace.yaml` (hoisted node_modules layout, version
+overrides, approved dependency build scripts) — pnpm 11 ignores `.npmrc` for
+these.
 
 ## Development Loop
 
@@ -22,32 +30,32 @@ Build before running tests because source is TypeScript and tests import the
 compiled CommonJS output:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Run all tests:
 
 ```bash
-npm test
+pnpm test
 ```
 
 Regenerate host skill packs when runtime files, skills, templates, or generated
 artifacts change:
 
 ```bash
-npm run build:skillpacks
+pnpm run build:skillpacks
 ```
 
 Run the release-level local verification set:
 
 ```bash
-npm run verify
+pnpm run verify
 ```
 
 Run a focused test file:
 
 ```bash
-npm run build && node --test tests/<dir>/<name>.test.mjs
+pnpm run build && node --test tests/<dir>/<name>.test.mjs
 ```
 
 ## Architecture Pointers
@@ -92,8 +100,8 @@ requests, generated buzz posts, or test fixtures.
 Before submitting security-sensitive changes, run:
 
 ```bash
-npm run build
-npm audit --omit=dev --audit-level=moderate
+pnpm run build
+pnpm audit --prod --audit-level=moderate
 ```
 
 Use the smallest test set that covers the change. Run the full suite for shared
