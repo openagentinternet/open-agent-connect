@@ -13,6 +13,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MetawebPinNotFoundError = exports.DEFAULT_METAWEB_PIN_BASE_URL = void 0;
+exports.normalizePin = normalizePin;
 exports.readMetawebPin = readMetawebPin;
 exports.DEFAULT_METAWEB_PIN_BASE_URL = 'https://so.metaid.io';
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -58,6 +59,7 @@ function normalizeMeta(raw) {
         tags: textList(record.tags).slice(0, 10).map((tag) => tag.slice(0, 40)),
     };
 }
+/** Normalize a raw pin payload; exported for the surf-reads batch client. */
 function normalizePin(raw) {
     const record = (raw && typeof raw === 'object' ? raw : {});
     const textValue = typeof record.text === 'string' ? record.text : null;

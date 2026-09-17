@@ -2,7 +2,7 @@
 // Test-run leak guard.
 //
 // Snapshots metabot-*/oac-*/loom-* temp roots under os.tmpdir(), runs the test
-// command (default: npm run --silent test:raw), then verifies the run left no
+// command (default: pnpm run --silent test:raw), then verifies the run left no
 // new temp roots behind — including when tests fail. Leftovers are reported
 // and removed best-effort (any recorded test daemon is stopped first), and
 // the guard exits non-zero so a lifecycle regression fails the run.
@@ -105,7 +105,7 @@ async function main() {
   const separatorIndex = process.argv.indexOf('--');
   const command = separatorIndex >= 0
     ? process.argv.slice(separatorIndex + 1).join(' ').trim()
-    : 'npm run --silent test:raw';
+    : 'pnpm run --silent test:raw';
   if (!command) {
     console.error('[leak-guard] empty test command after --');
     process.exit(2);

@@ -1,0 +1,5 @@
+# pnpm 11 reads pnpm-specific settings only from this file. This package is
+# intentionally its own workspace root (no `packages` key): dsh-plugin keeps
+# a separate lockfile from the repository root, mirroring the npm-era
+# dual-package layout.
+nodeLinker: hoisted

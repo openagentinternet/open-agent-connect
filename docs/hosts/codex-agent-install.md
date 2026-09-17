@@ -40,9 +40,10 @@ If any precondition fails, stop and return a concise failure report with the exa
 Run these commands from the repository root:
 
 ```bash
-npm install
-npm run build
-npm run build:skillpacks
+corepack enable
+pnpm install
+pnpm run build
+pnpm run build:skillpacks
 cd skillpacks/shared
 ./install.sh
 export PATH="$HOME/.metabot/bin:$PATH"
@@ -277,7 +278,7 @@ Use the same language as the user.
 Prompt wording can vary as long as intent is equivalent and triggers the right skill.
 
 For successful installs, do not mention internal install constraints such as not
-cloning the source repository, not running `npm install`, or not running build
+cloning the source repository, not running `pnpm install`, or not running build
 commands.
 
 Do not single out one installed skill in the user-facing success message. For

@@ -92,6 +92,12 @@ function buildMetabotPaths(input) {
         chainHistoryRoot: node_path_1.default.join(input.runtimeRoot, 'chain-history'),
         // Per-bot scheduled-task store (`.runtime/schedule/schedule.json`).
         schedulePath: node_path_1.default.join(input.runtimeRoot, 'schedule', 'schedule.json'),
+        // Per-bot MetaWeb surf store (`.runtime/surf/`).
+        surfRoot: node_path_1.default.join(input.runtimeRoot, 'surf'),
+        surfRunsPath: node_path_1.default.join(input.runtimeRoot, 'surf', 'runs.json'),
+        surfProtocolStatePath: node_path_1.default.join(input.runtimeRoot, 'surf', 'protocol-state.json'),
+        surfSeenPinsPath: node_path_1.default.join(input.runtimeRoot, 'surf', 'seen-pins.json'),
+        surfSettingsPath: node_path_1.default.join(input.runtimeRoot, 'surf', 'settings.json'),
         // LLM paths.
         llmRoot: input.llmRoot,
         llmRuntimesPath: input.llmRuntimesPath,

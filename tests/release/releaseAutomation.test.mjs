@@ -51,9 +51,10 @@ test('release workflow publishes GitHub release assets and npm package from the 
   assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN/);
   assert.doesNotMatch(workflow, /NPM_TOKEN/);
   assert.match(workflow, /node-version:\s+'24'/);
-  assert.match(workflow, /npm ci/);
-  assert.match(workflow, /npm run build/);
-  assert.match(workflow, /npm run build:skillpacks/);
+  assert.match(workflow, /corepack enable/);
+  assert.match(workflow, /pnpm install --frozen-lockfile/);
+  assert.match(workflow, /pnpm run build/);
+  assert.match(workflow, /pnpm run build:skillpacks/);
   assert.match(workflow, /node scripts\/verify-release-version\.mjs "\$\{\{\s*github\.ref_name\s*\}\}"/);
   assert.match(workflow, /node scripts\/build-release-packs\.mjs/);
   assert.match(workflow, /gh release upload "\$RELEASE_TAG"/);

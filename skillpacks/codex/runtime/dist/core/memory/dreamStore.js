@@ -24,6 +24,7 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const store_1 = require("../chainhistory/store");
 const store_2 = require("../schedule/store");
+const store_3 = require("../surf/store");
 const types_1 = require("../grouptask/types");
 const transcriptStore_1 = require("./transcriptStore");
 let atomicWriteSequence = 0;
@@ -712,6 +713,21 @@ function createDreamStore(paths, deps = {}) {
             catch {
                 taskRuns = [];
             }
+            // Latest finished MetaWeb surf report in the day window (IDBots parity:
+            // the pre-dream surf report feeds the same night's dream as its own
+            // section). Best effort: a missing store degrades to no report.
+            let surfReport = null;
+            try {
+                const surfRuns = await (0, store_3.createMetawebSurfStore)(paths).listRuns(50);
+                surfReport = surfRuns.find((run) => run.status === 'done'
+                    && run.reportMarkdown
+                    && Number.isFinite(Date.parse(run.finishedAt ?? ''))
+                    && Date.parse(run.finishedAt) >= startMs
+                    && Date.parse(run.finishedAt) < endMs)?.reportMarkdown ?? null;
+            }
+            catch {
+                surfReport = null;
+            }
             return {
                 sessions,
                 taskRuns,
@@ -720,6 +736,7 @@ function createDreamStore(paths, deps = {}) {
                 groupChats,
                 chainWrites,
                 chainReads,
+                surfReport,
             };
         },
         async purgeOldRunsAndFragments(input) {

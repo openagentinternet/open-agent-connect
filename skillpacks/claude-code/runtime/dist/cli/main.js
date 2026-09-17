@@ -22,6 +22,7 @@ const conversations_1 = require("./commands/conversations");
 const memory_1 = require("./commands/memory");
 const chainhistory_1 = require("./commands/chainhistory");
 const dream_1 = require("./commands/dream");
+const surf_1 = require("./commands/surf");
 const knowledge_base_1 = require("./commands/knowledge-base");
 const schedule_1 = require("./commands/schedule");
 const twin_1 = require("./commands/twin");
@@ -39,6 +40,7 @@ const metaid_1 = require("./commands/metaid");
 const metaweb_1 = require("./commands/metaweb");
 const simplenote_1 = require("./commands/simplenote");
 const qanda_1 = require("./commands/qanda");
+const protocol_1 = require("./commands/protocol");
 const media_1 = require("./commands/media");
 const helpers_1 = require("./commands/helpers");
 const commandHelp_1 = require("./commandHelp");
@@ -137,6 +139,9 @@ async function runCli(argv, cliContext = {}) {
                 case 'dream':
                     result = await (0, dream_1.runDreamCommand)(rest, context);
                     break;
+                case 'surf':
+                    result = await (0, surf_1.runSurfCommand)(rest, context);
+                    break;
                 case 'knowledge-base':
                     result = await (0, knowledge_base_1.runKnowledgeBaseCommand)(rest, context);
                     break;
@@ -187,6 +192,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'qanda':
                     result = await (0, qanda_1.runQandaCommand)(rest, context);
+                    break;
+                case 'protocol':
+                    result = await (0, protocol_1.runProtocolCommand)(rest, context);
                     break;
                 case undefined:
                     result = (0, commandResult_1.commandFailed)('missing_command', 'No command provided.');

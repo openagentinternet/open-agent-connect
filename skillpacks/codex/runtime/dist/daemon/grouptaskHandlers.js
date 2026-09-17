@@ -76,7 +76,11 @@ function toProfileRef(profile, metaId) {
         globalMetaId: normalizeText(profile.globalMetaId) || null,
         metaId,
         botType: profile.botType === 'twin' ? 'twin' : profile.botType === 'worker' ? 'worker' : null,
-        avatar: normalizeText(profile.avatarDataUrl) || null,
+        // OT-03 R9: never inline the base64 avatar here — this ref feeds the
+        // detail/list payloads that agents consume, and an 8KB data URL per
+        // member per call was a silent context tax. The panel resolves local Bot
+        // avatars client-side from the bots API (a UI-specific surface).
+        avatar: null,
         available: (0, metabotProfileManager_1.isMetabotProfileAvailable)(profile),
     };
 }
@@ -174,6 +178,7 @@ function createGroupTaskServiceContext(input) {
             ownerSigner ??= (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
                 secretStore: createOwnerSecretStore(input.systemHomeDir, owner),
                 adapters: input.adapters,
+                ...(input.resolveSponsorWritePin ? { resolveSponsorWritePin: input.resolveSponsorWritePin } : {}),
             });
             return {
                 globalMetaId: owner.globalMetaId,
@@ -334,7 +339,10 @@ function createGroupTaskDaemonHandlers(input) {
                 reason: normalizeText(body.reason) || undefined,
                 rating: readInt(body.rating),
                 ratingComment: normalizeText(body.ratingComment) || undefined,
-                actor: { kind: 'owner' },
+                // Attribution (OT-08 R26): panel/CLI closes are the human owner
+                // acting; the Twin's chat tool stamps 'owner_via_twin' so the audit
+                // trail distinguishes the human decision from the proxy execution.
+                actor: { kind: normalizeText(body.actorKind) === 'owner_via_twin' ? 'owner_via_twin' : 'owner' },
             }));
         },
         reopen: async (body) => {

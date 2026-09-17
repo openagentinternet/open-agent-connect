@@ -8,20 +8,20 @@ Open Agent Connect is an open-source connector for local AI agents (Codex, Claud
 
 ## Build & Test Commands
 
-Requires Node.js `>=20 <25`.
+Requires Node.js `>=20 <25` and pnpm (run `corepack enable` once; pnpm 11 needs Node ≥ 22.5, so prefer Node 22–24 for pnpm commands).
 
 ```bash
-npm run build            # Clean build: rimraf dist && tsc
-npm run test             # Build + run all tests (concurrency=1, runtime.test.mjs runs last)
-npm run verify           # Build + regenerate skillpacks + full test suite
-npm run build:skillpacks # Regenerate host-specific skillpacks only
-npm run test:contracts   # Build + run only contract tests
+pnpm run build            # Clean build: rimraf dist && tsc
+pnpm run test             # Build + run all tests (concurrency=1, runtime.test.mjs runs last)
+pnpm run verify           # Build + regenerate skillpacks + full test suite
+pnpm run build:skillpacks # Regenerate host-specific skillpacks only
+pnpm run test:contracts   # Build + run only contract tests
 ```
 
 Run a single test file:
 
 ```bash
-npm run build && node --test tests/<dir>/<name>.test.mjs
+pnpm run build && node --test tests/<dir>/<name>.test.mjs
 ```
 
 There is no separate lint command — the project relies on TypeScript strict mode (`strict: true`, target ES2022, CommonJS output).
@@ -35,11 +35,11 @@ Releases are published automatically by GitHub Actions when a version tag is pus
 1. Bump `"version"` in `package.json` and all fields in `release/compatibility.json` to the new version (e.g. `0.3.0`).
 2. Rebuild and regenerate all artifacts:
    ```bash
-   npm run build && npm run build:skillpacks
+   pnpm run build && pnpm run build:skillpacks
    ```
 3. Run the full test suite and confirm it passes:
    ```bash
-   npm test
+   pnpm test
    ```
 4. Commit the version bump and regenerated artifacts, then push to `main`.
 5. Push the version tag — this triggers CI to build release tarballs and publish the GitHub Release automatically:
@@ -47,7 +47,7 @@ Releases are published automatically by GitHub Actions when a version tag is pus
    git tag v0.3.0 && git push origin v0.3.0
    ```
 
-**Do not** run `npm run build:packs` or `gh release create` manually. CI handles that. Release tarballs (`release/packs/`) are gitignored and only exist as GitHub Release assets.
+**Do not** run `pnpm run build:packs` or `gh release create` manually. CI handles that. Release tarballs (`release/packs/`) are gitignored and only exist as GitHub Release assets.
 
 ## Architecture
 
@@ -96,7 +96,7 @@ Releases are published automatically by GitHub Actions when a version tag is pus
 - Framework: Node.js native test runner (`node --test`)
 - Location: `tests/` with subdirs per module (bootstrap, identity, chat, a2a, discovery, cli, contracts, e2e, etc.)
 - Test files are `*.test.mjs` (CommonJS-compiled source, ESM test harness)
-- `tests/cli/runtime.test.mjs` must run last (the npm scripts handle this)
+- `tests/cli/runtime.test.mjs` must run last (the pnpm scripts handle this)
 - `tests/helpers/` contains shared test utilities
 
 ## Agent Contribution Rules (from AGENTS.md)

@@ -165,6 +165,7 @@ async function planDream(paths, input, deps = {}) {
         && (activity.groupChats?.length ?? 0) === 0
         && (activity.chainWrites?.length ?? 0) === 0
         && (activity.chainReads?.length ?? 0) === 0
+        && !activity.surfReport
         && impressionSubjects.length === 0) {
         // Nothing happened that day — no LLM call, no summary, still recorded.
         await dreamStore.beginRun(date, llm, dreamPrompt_1.DREAM_VERSION);

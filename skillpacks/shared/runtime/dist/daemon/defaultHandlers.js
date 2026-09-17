@@ -30,6 +30,7 @@ const metabotHomepage_1 = require("../core/bot/metabotHomepage");
 const dshLlm_1 = require("../core/bot/dshLlm");
 const botRole_1 = require("../core/bot/botRole");
 const twinRole_1 = require("../core/bot/twinRole");
+const surfHandlers_1 = require("./surfHandlers");
 const publishService_1 = require("../core/services/publishService");
 const servicePublishChain_1 = require("../core/services/servicePublishChain");
 const myServices_1 = require("../core/services/myServices");
@@ -84,6 +85,8 @@ const publish_2 = require("../core/qanda/publish");
 const ledger_1 = require("../core/qanda/ledger");
 const recall_1 = require("../core/qanda/recall");
 const format_1 = require("../core/qanda/format");
+const publish_3 = require("../core/metaprotocol/publish");
+const registry_1 = require("../core/metaprotocol/registry");
 const profileUploadGate_1 = require("../core/files/profileUploadGate");
 const localMnemonicSigner_2 = require("../core/signing/localMnemonicSigner");
 const writeAttempts_1 = require("../core/chain/writeAttempts");
@@ -95,7 +98,7 @@ const ownerService_1 = require("../core/metaapp/ownerService");
 const manOwnerList_1 = require("../core/metaapp/manOwnerList");
 const metaAppSource_1 = require("../core/metaapp/metaAppSource");
 const pinId_1 = require("../core/metaapp/pinId");
-const publish_3 = require("../core/metaapp/publish");
+const publish_4 = require("../core/metaapp/publish");
 const skillPublish_1 = require("../core/skills/skillPublish");
 const share_1 = require("../core/metaapp/share");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
@@ -123,7 +126,7 @@ const delegationOrderMessage_1 = require("../core/orders/delegationOrderMessage"
 const orderMessage_1 = require("../core/orders/orderMessage");
 const servicePayment_1 = require("../core/payments/servicePayment");
 const servicePaymentVerification_1 = require("../core/payments/servicePaymentVerification");
-const registry_1 = require("../core/chain/adapters/registry");
+const registry_2 = require("../core/chain/adapters/registry");
 const utxoBroadcastErrors_1 = require("../core/chain/utxoBroadcastErrors");
 const mvc_1 = require("../core/chain/adapters/mvc");
 const btc_1 = require("../core/chain/adapters/btc");
@@ -3940,7 +3943,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     }
     const secretStore = input.secretStore ?? (0, fileSecretStore_1.createFileSecretStore)(input.homeDir);
     // Create default adapter registry if none provided (backward compat)
-    const adapters = input.adapters ?? (0, registry_1.createChainAdapterRegistry)([
+    const adapters = input.adapters ?? (0, registry_2.createChainAdapterRegistry)([
         mvc_1.mvcChainAdapter,
         btc_1.btcChainAdapter,
         doge_1.dogeChainAdapter,
@@ -11190,6 +11193,41 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
             },
         },
+        surf: (() => {
+            // Per-daemon surf group: bot resolution mirrors resolveActorWriteContext
+            // (explicit selector, else the machine Twin) but also returns slug/name.
+            const group = (0, surfHandlers_1.createSurfDaemonHandlers)({
+                resolveBot: async (from) => {
+                    const requestedSlug = normalizeText(from);
+                    let profileHomeDir = await (0, twinRole_1.resolveTwinHomeDir)(normalizedSystemHomeDir) ?? input.homeDir;
+                    let slug = null;
+                    if (requestedSlug) {
+                        const selectedProfile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, requestedSlug);
+                        if (!selectedProfile) {
+                            return { failure: (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${requestedSlug}`) };
+                        }
+                        profileHomeDir = selectedProfile.homeDir;
+                        slug = selectedProfile.slug;
+                    }
+                    else {
+                        slug = await (0, twinRole_1.resolveCurrentTwinSlug)(normalizedSystemHomeDir);
+                    }
+                    const name = (await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug ?? ''))?.name ?? slug ?? 'Bot';
+                    const effectiveSlug = slug ?? 'default';
+                    return { slug: effectiveSlug, name, homeDir: profileHomeDir };
+                },
+                runSurfSession: input.runSurfSession,
+                metawebBaseUrl: normalizeText(input.metawebApiBaseUrl) || undefined,
+                log: (message) => console.warn(message),
+            });
+            return {
+                status: (rawInput) => group.status(rawInput),
+                run: (rawInput) => group.run(rawInput),
+                enable: (rawInput) => group.enable(rawInput),
+                disable: (rawInput) => group.disable(rawInput),
+                budget: (rawInput) => group.budget(rawInput),
+            };
+        })(),
         skills: {
             publish: async (rawInput) => {
                 const actor = await resolveActorWriteContext(rawInput.from);
@@ -11247,7 +11285,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             stageEvents: ({ op, listener }) => metaAppStageHub.subscribe(op, listener),
             preview: async (rawInput) => {
                 try {
-                    const result = await (0, publish_3.previewMetaAppProject)({
+                    const result = await (0, publish_4.previewMetaAppProject)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         open: rawInput.open === true,
@@ -11303,7 +11341,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return result;
                 };
                 try {
-                    const result = await (0, publish_3.publishMetaApp)({
+                    const result = await (0, publish_4.publishMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         confirm: rawInput.confirm === true,
@@ -11388,7 +11426,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return result;
                 };
                 try {
-                    const result = await (0, publish_3.updateMetaApp)({
+                    const result = await (0, publish_4.updateMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         confirm: rawInput.confirm === true,
@@ -11526,7 +11564,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
             share: async (rawInput) => {
                 try {
-                    const share = await (0, publish_3.shareMetaApp)({
+                    const share = await (0, publish_4.shareMetaApp)({
                         pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
                     });
                     if (rawInput.announce !== true) {
@@ -11573,7 +11611,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before writing comments.');
                 }
                 try {
-                    const result = await (0, publish_3.commentMetaApp)({
+                    const result = await (0, publish_4.commentMetaApp)({
                         pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
                         comment: typeof rawInput.comment === 'string' ? rawInput.comment : '',
                         network: await resolveWriteNetworkForHome(rawInput.network, actor.homeDir),
@@ -11924,6 +11962,182 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return qandaFailedOrBroadcastUnknown(error, 'qanda_like', [
                         normalizeText(rawInput.pinId ?? rawInput.pin_id),
                         String(rawInput.isLike ?? rawInput.is_like ?? ''),
+                        await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+                    ]);
+                }
+            },
+        },
+        // Metaprotocol registry writers (metaprotocol_registry /
+        // post_metaprotocol): publish registers a NEW protocol under
+        // /protocols/<name>, update publishes a new version of an existing one.
+        // Both run the §5.4 gate order — acting identity, draft-07 payload
+        // schema, MetaSo precheck (path occupancy / registrant identity cascade)
+        // with the read-only MANAPI degraded scan, both-down refusal — BEFORE
+        // anything reaches the wallet.
+        protocol: {
+            publish: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before publishing a protocol.');
+                }
+                const title = normalizeText(rawInput.title);
+                const protocolName = normalizeText(rawInput.protocolName ?? rawInput.protocol_name);
+                if (!title) {
+                    return (0, commandResult_1.commandFailed)('missing_field', 'post_metaprotocol requires a non-empty `title`.');
+                }
+                if (!protocolName) {
+                    return (0, commandResult_1.commandFailed)('missing_field', 'post_metaprotocol requires a non-empty `protocol_name`.');
+                }
+                const xorFailure = (0, publish_3.checkMetaprotocolContentInput)({
+                    body: rawInput.body,
+                    protocolContent: rawInput.protocolContent ?? rawInput.protocol_content,
+                });
+                if (xorFailure) {
+                    return (0, commandResult_1.commandFailed)('invalid_request', xorFailure);
+                }
+                const identity = {
+                    name: normalizeText(state.identity.name),
+                    globalMetaId: normalizeText(state.identity.globalMetaId),
+                    metaId: normalizeText(state.identity.metaId),
+                    address: normalizeText(state.identity.addresses?.mvc) || normalizeText(state.identity.mvcAddress),
+                };
+                const { payload, replacedVersion } = (0, publish_3.buildMetaprotocolPayload)({
+                    action: 'publish',
+                    request: {
+                        title,
+                        protocolName,
+                        intro: typeof rawInput.intro === 'string' ? rawInput.intro : undefined,
+                        version: normalizeText(rawInput.version) || undefined,
+                        protocolContentType: normalizeText(rawInput.protocolContentType ?? rawInput.protocol_content_type) || undefined,
+                        ...(rawInput.body != null && typeof rawInput.body === 'object' ? { body: rawInput.body } : {}),
+                        ...(normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) ? { protocolContent: normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) } : {}),
+                        metadata: rawInput.metadata,
+                        attachments: readStringArray(rawInput.attachments),
+                    },
+                    identity,
+                    record: null,
+                });
+                const schemaFailure = (0, publish_3.validateMetaprotocolPayload)(payload);
+                if (schemaFailure) {
+                    return (0, commandResult_1.commandFailed)('invalid_payload', schemaFailure);
+                }
+                // Same env override family as the Q&A recall client.
+                const conflict = await (0, publish_3.findMetaprotocolPublishConflict)(String(payload.path), qaRecallOptionsForDaemon());
+                if (conflict) {
+                    return (0, commandResult_1.commandFailed)('protocol_path_taken', conflict);
+                }
+                try {
+                    const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+                    const result = await (0, publish_3.writeMetaprotocolPin)(actor.signer, {
+                        action: 'publish',
+                        payload,
+                        record: null,
+                        replacedVersion,
+                        network: network,
+                    });
+                    return (0, commandResult_1.commandSuccess)({ ...result, formatted: (0, publish_3.formatMetaprotocolResult)(result) });
+                }
+                catch (error) {
+                    return qandaFailedOrBroadcastUnknown(error, 'protocol_publish', [
+                        title,
+                        String(payload.path),
+                        await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+                    ]);
+                }
+            },
+            update: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before updating a protocol.');
+                }
+                const title = normalizeText(rawInput.title);
+                const protocolName = normalizeText(rawInput.protocolName ?? rawInput.protocol_name);
+                if (!title) {
+                    return (0, commandResult_1.commandFailed)('missing_field', 'post_metaprotocol requires a non-empty `title`.');
+                }
+                if (!protocolName) {
+                    return (0, commandResult_1.commandFailed)('missing_field', 'post_metaprotocol requires a non-empty `protocol_name`.');
+                }
+                const target = normalizeText(rawInput.target);
+                if (!target) {
+                    return (0, commandResult_1.commandFailed)('missing_field', 'post_metaprotocol update requires a target (protocolPath, protocolName or pinId).');
+                }
+                const xorFailure = (0, publish_3.checkMetaprotocolContentInput)({
+                    body: rawInput.body,
+                    protocolContent: rawInput.protocolContent ?? rawInput.protocol_content,
+                });
+                if (xorFailure) {
+                    return (0, commandResult_1.commandFailed)('invalid_request', xorFailure);
+                }
+                // Resolve the target record FIRST (read-only): the auto-increment
+                // needs the current on-chain body version, and the identity gate
+                // needs the registrant. The schema gate below still runs before
+                // anything wallet-bound.
+                let record;
+                try {
+                    record = await (0, publish_3.resolveMetaprotocolUpdateTarget)(target, qaRecallOptionsForDaemon());
+                }
+                catch (error) {
+                    const message = error instanceof registry_1.MetaprotocolResolveError
+                        ? error.message
+                        : `Protocol registry lookup failed for "${target}": ${error instanceof Error ? error.message : String(error)}`;
+                    return (0, commandResult_1.commandFailed)('protocol_not_found', message);
+                }
+                const identity = {
+                    name: normalizeText(state.identity.name),
+                    globalMetaId: normalizeText(state.identity.globalMetaId),
+                    metaId: normalizeText(state.identity.metaId),
+                    address: normalizeText(state.identity.addresses?.mvc) || normalizeText(state.identity.mvcAddress),
+                };
+                const { payload, replacedVersion } = (0, publish_3.buildMetaprotocolPayload)({
+                    action: 'update',
+                    request: {
+                        title,
+                        protocolName,
+                        intro: typeof rawInput.intro === 'string' ? rawInput.intro : undefined,
+                        version: normalizeText(rawInput.version) || undefined,
+                        protocolContentType: normalizeText(rawInput.protocolContentType ?? rawInput.protocol_content_type) || undefined,
+                        ...(rawInput.body != null && typeof rawInput.body === 'object' ? { body: rawInput.body } : {}),
+                        ...(normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) ? { protocolContent: normalizeText(rawInput.protocolContent ?? rawInput.protocol_content) } : {}),
+                        metadata: rawInput.metadata,
+                        attachments: readStringArray(rawInput.attachments),
+                    },
+                    identity,
+                    record,
+                });
+                const schemaFailure = (0, publish_3.validateMetaprotocolPayload)(payload);
+                if (schemaFailure) {
+                    return (0, commandResult_1.commandFailed)('invalid_payload', schemaFailure);
+                }
+                // §5.4 update step 4 — only the original registrant may update.
+                const botName = identity.name || 'the current acting MetaBot';
+                const registrantName = record.author.name || record.author.globalMetaId || record.author.metaid || record.author.address || 'unknown';
+                if (!(0, publish_3.isSameRegistrant)(record.author, identity)) {
+                    return (0, commandResult_1.commandFailed)('not_registrant', `Only the original registrant can update ${record.protocolPath} (registered by ${registrantName}). The current acting MetaBot (${botName}) is not the registrant.`);
+                }
+                try {
+                    const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+                    const result = await (0, publish_3.writeMetaprotocolPin)(actor.signer, {
+                        action: 'update',
+                        payload,
+                        record,
+                        replacedVersion,
+                        network: network,
+                    });
+                    return (0, commandResult_1.commandSuccess)({ ...result, formatted: (0, publish_3.formatMetaprotocolResult)(result) });
+                }
+                catch (error) {
+                    return qandaFailedOrBroadcastUnknown(error, 'protocol_update', [
+                        title,
+                        String(payload.path),
                         await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
                     ]);
                 }
@@ -14488,6 +14702,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             daemonHomeDir: input.homeDir,
             createSignerForProfileHome,
             adapters,
+            resolveSponsorWritePin,
             resolvePeerChatPublicKey,
             log: (message) => console.warn(message),
         }),

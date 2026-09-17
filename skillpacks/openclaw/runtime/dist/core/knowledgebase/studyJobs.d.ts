@@ -63,7 +63,7 @@ export interface StudyJobStore {
         job: StudyJobRecord;
         created: boolean;
     }>;
-    disableQaSurfJob(metabotSlug: string): Promise<boolean>;
+    disableQaSurfJob(metabotSlug: string, summary?: string): Promise<boolean>;
     listStudyJobs(metabotSlug?: string): Promise<StudyJobRecord[]>;
     listPending(): Promise<StudyJobRecord[]>;
     getStudyJob(id: string): Promise<StudyJobRecord | null>;
@@ -89,6 +89,13 @@ export interface StudyJobStore {
 export declare function createStudyJobStore(paths: MetabotPaths): StudyJobStore;
 /** True inside the nightly drain window (local hours 0-6). */
 export declare function inStudyWindow(now: Date): boolean;
+/**
+ * Retire a bot's active qa-surf jobs when MetaWeb surf is enabled for it
+ * (IDBots 0.9.1 migration semantics): Q&A browsing now happens inside the
+ * nightly surf run, so the legacy recurring job is marked done instead of
+ * double-spending the night. Idempotent — done/failed jobs stay untouched.
+ */
+export declare function retireQaSurfJobsForSurf(store: StudyJobStore, metabotSlug: string): Promise<boolean>;
 /** The unattended study prompt (IDBots parity, tool-allowlist note included). */
 export declare function buildStudySessionPrompt(input: {
     topic: string;

@@ -31,6 +31,14 @@ export interface CliDependencies {
         detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         answers?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    protocol?: {
+        list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        read?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        versions?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        check?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     browser?: {
         open?: (input: {
             uri?: string;
@@ -456,6 +464,27 @@ export interface CliDependencies {
         capabilities?: (input: {
             from?: string;
             limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    surf?: {
+        status?: (input: {
+            from?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        run?: (input: {
+            from?: string;
+            trigger?: 'manual-chat' | 'manual-ui' | 'pre-dream';
+            wait?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        enable?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        disable?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        budget?: (input: {
+            from?: string;
+            budget: number;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     knowledgeBase?: {

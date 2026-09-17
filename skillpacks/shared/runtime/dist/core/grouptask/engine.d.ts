@@ -46,6 +46,9 @@ export declare const GROUP_TASK_DEADLINE_KV_PREFIX = "group_task_deadline:";
 /** Consecutive-failure budget for the host-notes delivery chair turn. */
 export declare const GROUP_TASK_HOST_NOTE_ATTEMPTS_KV_PREFIX = "group_task_host_note_attempts:";
 export declare const GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = "group_task_review_summary:";
+export declare const GROUP_TASK_CHAIR_FAILURE_SINCE_KV_PREFIX = "group_task_chair_failure_since:";
+export declare const GROUP_TASK_CHAIR_RETRY_AFTER_KV_PREFIX = "group_task_chair_retry_after:";
+export declare const GROUP_TASK_CHAIR_DEGRADED_NOTIFIED_KV_PREFIX = "group_task_chair_degraded_notified:";
 export declare const GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = "openteam_self_check:";
 export interface GroupTaskLlmTurn {
     profile: GroupTaskProfileRef;

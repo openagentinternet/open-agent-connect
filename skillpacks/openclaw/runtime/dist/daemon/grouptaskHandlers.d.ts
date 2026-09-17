@@ -8,6 +8,7 @@
 import { type MetabotCommandResult } from '../core/contracts/commandResult';
 import { type GroupTaskServiceContext } from '../core/grouptask/service';
 import type { GroupTaskTransportOptions } from '../core/grouptask/transport';
+import { type ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
 export interface GroupTaskDaemonHandlers {
@@ -45,6 +46,12 @@ export interface CreateGroupTaskDaemonHandlersInput {
     daemonHomeDir?: string;
     createSignerForProfileHome: (homeDir: string) => Signer;
     adapters: ChainAdapterRegistry;
+    /**
+     * MVC sponsor (traffic/代付) hook applied to the owner-identity signer, so
+     * owner group-join and asOwner posts bill the traffic account like Bot
+     * writes. Absent = owner writes self-pay (tests/legacy callers).
+     */
+    resolveSponsorWritePin?: ResolveSponsorWritePin;
     /** Peer chat pubkey resolver; enables OpenTeam private-message envelopes. */
     resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
     transport?: GroupTaskTransportOptions;

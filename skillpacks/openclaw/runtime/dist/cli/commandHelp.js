@@ -180,6 +180,7 @@ exports.ROOT_COMMAND_HELP = {
         { name: 'dream', summary: 'Nightly dream consolidation: due dates, plan/commit runs, diaries, and self-identity.' },
         { name: 'knowledge-base', summary: 'Manage a MetaBot\'s document knowledge bases: create, import, query, and learn.' },
         { name: 'schedule', summary: 'Scheduled tasks: create/list/update/delete, due/claim/complete, and run history.' },
+        { name: 'surf', summary: 'MetaWeb surf (AI internet browsing): run reports, pre-dream toggle, and interaction budget.' },
         { name: 'twin', summary: 'Twin/Worker orchestration: current twin, worker roster, and delegation tasks.' },
         { name: 'host', summary: 'Project shared MetaBot skills into one host-native skills root.' },
         { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
@@ -1165,6 +1166,56 @@ const COMMAND_HELP_SPECS = [
             },
         ],
         optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG],
+    },
+    {
+        commandPath: ['protocol'],
+        summary: 'MetaID protocol registry (/protocols/metaprotocol, docs/metaid_protocols/metaprotocol-registry-agent-tools.md): browse registered protocols, read full definitions, version history, and publish/update registrations.',
+        usage: 'metabot protocol <list|read|versions|check|publish|update> …',
+        subcommands: [
+            {
+                name: 'list',
+                summary: 'Enumerate registered protocols (newest first): [--query <q>] [--publisher <id>] [--size N] [--cursor C].',
+            },
+            {
+                name: 'read',
+                summary: 'One protocol\'s full authoritative latest-version body incl. protocolContent JSON5: --path /protocols/<name> | --name <displayName> | --pin <pinId>.',
+            },
+            {
+                name: 'versions',
+                summary: 'Full version history (pinId, version, timestamp, author): --path | --name | --pin (any pinId in the chain).',
+            },
+            {
+                name: 'check',
+                summary: 'Publish precheck — is a registry path free: --path /protocols/<name>.',
+            },
+            {
+                name: 'publish',
+                summary: 'Register a NEW protocol from a JSON request file: { title, protocol_name, body | protocol_content, intro?, version?, protocol_content_type?, metadata?, attachments? }. Path /protocols/<protocol_name> must be free.',
+            },
+            {
+                name: 'update',
+                summary: 'Publish a new version of an existing protocol from a JSON request file: { title, protocol_name, target, body | protocol_content, version?, … }. Only the original registrant may update; version auto-increments when omitted.',
+            },
+        ],
+        optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG],
+    },
+    {
+        commandPath: ['protocol', 'publish'],
+        summary: 'Register a NEW protocol in the on-chain protocol registry.',
+        usage: 'metabot protocol publish --request-file <path> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>]',
+        requiredFlags: [
+            { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG, CHAIN_WRITE_FLAG],
+    },
+    {
+        commandPath: ['protocol', 'update'],
+        summary: 'Publish a new version of a protocol you registered (identity-checked).',
+        usage: 'metabot protocol update --request-file <path> [--from <bot-slug>] [--chain <mvc|btc|doge|opcat>]',
+        requiredFlags: [
+            { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG, FROM_BOT_FLAG, CHAIN_WRITE_FLAG],
     },
     {
         commandPath: ['buzz'],
@@ -2690,6 +2741,7 @@ const COMMAND_HELP_SPECS = [
             { flag: '--rating', value: '<1-5>', description: 'Owner acceptance rating (done only).' },
             { flag: '--comment', value: '<text>', description: 'Rating comment.' },
             { flag: '--reason', value: '<text>', description: 'Close reason recorded in the audit trail.' },
+            { flag: '--actor-kind', value: '<owner|owner_via_twin>', description: 'Attribution for the audit trail: owner (default) for direct human closes, owner_via_twin when the Twin Bot closes on the owner\'s confirmed behalf.' },
             HELP_JSON_FLAG,
         ],
         examples: [
@@ -3120,6 +3172,51 @@ const COMMAND_HELP_SPECS = [
             { name: 'self-identity', summary: 'Show the Bot\'s current dream-written self-identity.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['surf', 'status'],
+        summary: 'Show surf runs (newest first), the pre-dream surf toggle, and the interaction budget.',
+        usage: 'metabot surf status [--from <bot-slug>] [--limit <n>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG, { flag: '--limit', description: 'Max run rows (default 5, max 50).' }],
+        successFields: ['runs', 'running', 'surfBeforeDreamEnabled', 'interactionBudget'],
+        examples: ['metabot surf status --from alice'],
+    },
+    {
+        commandPath: ['surf', 'run'],
+        summary: 'Start a MetaWeb surf run now (fire-and-forget; --wait blocks until it settles).',
+        usage: 'metabot surf run [--from <bot-slug>] [--trigger manual-chat|manual-ui|pre-dream] [--wait]',
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            HELP_JSON_FLAG,
+            { flag: '--trigger', description: 'Run trigger label (default manual-ui).' },
+            { flag: '--wait', description: 'Wait for the run to finish and print its report.' },
+        ],
+        successFields: ['runId', 'status', 'trigger'],
+        examples: ['metabot surf run --from alice --wait'],
+    },
+    {
+        commandPath: ['surf', 'enable'],
+        summary: 'Enable pre-dream surfing for the Bot (opt-in; retires any legacy nightly qa-surf job).',
+        usage: 'metabot surf enable [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['surfBeforeDreamEnabled', 'qaSurfRetired'],
+        examples: ['metabot surf enable --from alice'],
+    },
+    {
+        commandPath: ['surf', 'disable'],
+        summary: 'Disable pre-dream surfing for the Bot.',
+        usage: 'metabot surf disable [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['surfBeforeDreamEnabled'],
+        examples: ['metabot surf disable --from alice'],
+    },
+    {
+        commandPath: ['surf', 'budget'],
+        summary: 'Set the per-run chain-write interaction budget (0-100, default 20).',
+        usage: 'metabot surf budget [--from <bot-slug>] <0-100>',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['interactionBudget'],
+        examples: ['metabot surf budget --from alice 30'],
     },
     {
         commandPath: ['dream', 'due'],

@@ -29,6 +29,15 @@ export type GroupTaskHealthReport = {
         active: number;
         total: number;
     };
+    /** OT-08 R27: active tasks whose chair LLM channel is degraded (cheap
+     *  takeover-relevant probe — no per-task detail payloads needed). */
+    degradedTasks: Array<{
+        id: number;
+        title: string;
+        status: string;
+        chairDegradedAt: number;
+        lastProcessedIndex: number;
+    }>;
     engine: {
         logFile: string | null;
         recentLines: string[];

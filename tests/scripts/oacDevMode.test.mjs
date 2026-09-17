@@ -31,10 +31,10 @@ async function createFakeToolchain(t) {
   await fs.writeFile(path.join(repoRoot, 'dist', 'oac', 'main.js'), '', 'utf8');
   await fs.writeFile(logPath, '', 'utf8');
 
-  await writeExecutable(path.join(binDir, 'npm'), [
+  await writeExecutable(path.join(binDir, 'pnpm'), [
     '#!/usr/bin/env bash',
     'set -euo pipefail',
-    'printf "npm %s\\n" "$*" >> "$OAC_DEV_MODE_TEST_LOG"',
+    'printf "pnpm %s\\n" "$*" >> "$OAC_DEV_MODE_TEST_LOG"',
     '',
   ].join('\n'));
 
@@ -80,7 +80,7 @@ async function runDevMode(t, args = []) {
 test('oac-dev-mode builds the current repo, installs the codex dev runtime, and prints an acceptance handoff', async (t) => {
   const result = await runDevMode(t);
 
-  assert.match(result.commands, /^npm run build$/m);
+  assert.match(result.commands, /^pnpm run build$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host codex$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host codex$/m);
   assert.match(result.commands, /^metabot --help$/m);
@@ -93,7 +93,7 @@ test('oac-dev-mode builds the current repo, installs the codex dev runtime, and 
 test('oac-dev-mode supports host selection and daemon restart for UI/runtime acceptance', async (t) => {
   const result = await runDevMode(t, ['--host', 'claude-code', '--restart-daemon']);
 
-  assert.match(result.commands, /^npm run build$/m);
+  assert.match(result.commands, /^pnpm run build$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host claude-code$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host claude-code$/m);
   assert.match(result.commands, /^metabot daemon stop$/m);
@@ -105,7 +105,7 @@ test('oac-dev-mode supports host selection and daemon restart for UI/runtime acc
 test('oac-dev-mode supports Cursor host binding for cross-platform acceptance', async (t) => {
   const result = await runDevMode(t, ['--host', 'cursor', '--skip-build']);
 
-  assert.doesNotMatch(result.commands, /^npm run build$/m);
+  assert.doesNotMatch(result.commands, /^pnpm run build$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host cursor$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host cursor$/m);
   assert.match(result.stdout, /Host: cursor/);
@@ -114,7 +114,7 @@ test('oac-dev-mode supports Cursor host binding for cross-platform acceptance', 
 test('oac-dev-mode supports WorkBuddy host binding for app-backed acceptance', async (t) => {
   const result = await runDevMode(t, ['--host', 'workbuddy', '--skip-build']);
 
-  assert.doesNotMatch(result.commands, /^npm run build$/m);
+  assert.doesNotMatch(result.commands, /^pnpm run build$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host workbuddy$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host workbuddy$/m);
   assert.match(result.stdout, /Host: workbuddy/);
@@ -123,7 +123,7 @@ test('oac-dev-mode supports WorkBuddy host binding for app-backed acceptance', a
 test('oac-dev-mode supports ZCode host binding for app-backed acceptance', async (t) => {
   const result = await runDevMode(t, ['--host', 'zcode', '--skip-build']);
 
-  assert.doesNotMatch(result.commands, /^npm run build$/m);
+  assert.doesNotMatch(result.commands, /^pnpm run build$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host zcode$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host zcode$/m);
   assert.match(result.stdout, /Host: zcode/);
@@ -132,7 +132,7 @@ test('oac-dev-mode supports ZCode host binding for app-backed acceptance', async
 test('oac-dev-mode can skip the build for skill-only or static UI checks', async (t) => {
   const result = await runDevMode(t, ['--skip-build']);
 
-  assert.doesNotMatch(result.commands, /^npm run build$/m);
+  assert.doesNotMatch(result.commands, /^pnpm run build$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host codex$/m);
   assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host codex$/m);
   assert.match(result.stdout, /Build skipped/);

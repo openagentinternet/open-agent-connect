@@ -17,10 +17,6 @@ const AGENT_BROWSER_RUNTIME_PACKAGES = [
   '@openagentinternet/agent-browser-ui',
 ];
 const AGENT_BROWSER_DEV_PACKAGES = ['@openagentinternet/agent-browser-test-harness'];
-const ALL_AGENT_BROWSER_PACKAGES = [
-  ...AGENT_BROWSER_RUNTIME_PACKAGES,
-  ...AGENT_BROWSER_DEV_PACKAGES,
-];
 
 function createRootPackage(version = '0.3.0') {
   return {
@@ -35,27 +31,24 @@ function createRootPackage(version = '0.3.0') {
   };
 }
 
-function createLockfile(packageJson, version = '0.3.0') {
-  return {
-    name: packageJson.name,
-    version: packageJson.version,
-    lockfileVersion: 3,
-    requires: true,
-    packages: {
-      '': {
-        name: packageJson.name,
-        version: packageJson.version,
-        dependencies: packageJson.dependencies,
-        devDependencies: packageJson.devDependencies,
-      },
-      ...Object.fromEntries(
-        ALL_AGENT_BROWSER_PACKAGES.map((packageName) => [
-          `node_modules/${packageName}`,
-          { version },
-        ]),
-      ),
-    },
-  };
+function createLockfileYaml(version = '0.3.0') {
+  const entry = (packageName) => `      '${packageName}':
+        specifier: ${version}
+        version: ${version}`;
+  return `lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+${AGENT_BROWSER_RUNTIME_PACKAGES.map(entry).join('\n')}
+    devDependencies:
+${AGENT_BROWSER_DEV_PACKAGES.map(entry).join('\n')}
+`;
 }
 
 async function writeJson(filePath, value) {
@@ -70,13 +63,13 @@ async function createFixtureRepo(t, options = {}) {
   if (options.mutatePackage) {
     options.mutatePackage(rootPackage);
   }
-  const lockfile = createLockfile(rootPackage, options.lockVersion ?? '0.3.0');
-  if (options.mutateLockfile) {
-    options.mutateLockfile(lockfile);
-  }
 
   await writeJson(path.join(tempRoot, 'package.json'), rootPackage);
-  await writeJson(path.join(tempRoot, 'package-lock.json'), lockfile);
+  await fs.writeFile(
+    path.join(tempRoot, 'pnpm-lock.yaml'),
+    createLockfileYaml(options.lockVersion ?? '0.3.0'),
+    'utf8',
+  );
   return tempRoot;
 }
 
@@ -149,11 +142,11 @@ test('ABC bump script dry-run prints the exact npm install commands without muta
 
   assert.equal(result.code, 0, result.stderr);
   assert.equal(after, before);
-  assert.match(result.stdout, /npm install --save-exact/);
+  assert.match(result.stdout, /pnpm add --save-exact/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-host-contract@0\.4\.0/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-core@0\.4\.0/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-name-resolvers@0\.4\.0/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-ui@0\.4\.0/);
-  assert.match(result.stdout, /npm install --save-dev --save-exact/);
+  assert.match(result.stdout, /pnpm add --save-dev --save-exact/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-test-harness@0\.4\.0/);
 });

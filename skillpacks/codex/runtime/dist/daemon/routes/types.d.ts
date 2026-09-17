@@ -71,6 +71,10 @@ export interface MetabotDaemonHttpHandlers {
         answer?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         like?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    protocol?: {
+        publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     skills?: {
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -100,6 +104,27 @@ export interface MetabotDaemonHttpHandlers {
     };
     chain?: {
         write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    surf?: {
+        status?: (input: {
+            from?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        run?: (input: {
+            from?: string;
+            trigger?: 'manual-chat' | 'manual-ui' | 'pre-dream';
+            wait?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        enable?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        disable?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        budget?: (input: {
+            from?: string;
+            budget?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     daemon?: {
         getStatus?: () => Awaitable<MetabotCommandResult<unknown>>;

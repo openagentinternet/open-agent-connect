@@ -231,12 +231,18 @@ async function runGroupTaskCommand(args, context) {
         const rating = readIntFlag(args, '--rating');
         if (rating === 'invalid')
             return (0, commandResult_1.commandFailed)('invalid_flag', '--rating must be an integer between 1 and 5.');
+        const actorKind = normalizeText((0, helpers_1.readFlagValue)(args, '--actor-kind'));
+        if (actorKind != null && actorKind !== ''
+            && actorKind !== 'owner' && actorKind !== 'owner_via_twin') {
+            return (0, commandResult_1.commandFailed)('invalid_flag', "--actor-kind must be 'owner' or 'owner_via_twin'.");
+        }
         return handler({
             ...ref,
             outcome,
             rating,
             ratingComment: normalizeText((0, helpers_1.readFlagValue)(args, '--comment')) || undefined,
             reason: normalizeText((0, helpers_1.readFlagValue)(args, '--reason')) || undefined,
+            ...(actorKind === 'owner_via_twin' ? { actorKind } : {}),
         });
     }
     if (action === 'reopen') {

@@ -357,7 +357,14 @@ async function createGroupTask(ctx, input) {
         log(`[GroupTask] Kickoff message failed for task ${task.id}: `
             + `${error instanceof Error ? error.message : String(error)}`);
     }
-    await emitGroupTaskRelay(ctx, chair, task, 'created', `Task created and the on-chain group is open. The engine posts the kickoff and runs planning next.`);
+    // OT-07 R21/R22: the origin-session receipt carries the taskId and describes
+    // COMPLETED state in past tense — a future-tense receipt ("planning runs
+    // next") arriving after everything already happened invited duplicate
+    // create/dispatch calls from literal-minded agents.
+    const memberCount = (await store.listMembers(task.id)).length;
+    await emitGroupTaskRelay(ctx, chair, task, 'created', `Group task ${task.id} created; the on-chain group is open (task status: ${task.status}). `
+        + `Kickoff posted, roster ${memberCount} member(s). Track it in the Group Tasks panel or with `
+        + `{action:"detail", taskId:${task.id}}.`);
     return {
         chairSlug: chair.slug,
         task: await getGroupTaskDetail(ctx, chair.slug, task.id),
@@ -634,7 +641,32 @@ async function closeGroupTask(ctx, chairSlug, taskId, opts) {
     }
     const chair = await requireProfile(ctx, chairSlug);
     const store = storeFor(ctx, chair);
-    await requireTask(store, taskId);
+    const task = await requireTask(store, taskId);
+    if (task.status === 'done' || task.status === 'cancelled') {
+        throw new GroupTaskServiceError('task_terminal', `Group task ${taskId} is already ${task.status}`);
+    }
+    // OT-06 R18: the acceptance verdict is broadcast as the group's FINAL
+    // message — members learn the outcome without polling a frozen group (the
+    // task-213 workers never heard anything after close). Authored by the
+    // chair (a participant — single-commander-compatible), riding the inert
+    // [GROUP_TASK_NOTICE:*] channel so the engine never replies to it.
+    // Best-effort: a chain failure here never blocks the owner's close.
+    if (task.groupId) {
+        const verdict = opts.status === 'done'
+            ? `outcome=done${opts.rating != null ? `, rating=${opts.rating}/5` : ''}`
+            : 'outcome=cancelled';
+        const comment = opts.ratingComment?.trim();
+        const content = `[GROUP_TASK_NOTICE:closed] The owner has closed this task (${verdict}).`
+            + (comment ? `\n${comment}` : '')
+            + '\nThank you all for the work — the group is read-only from this point on.';
+        await postGroupTaskMessage(ctx, chairSlug, taskId, {
+            asSlug: chairSlug,
+            content,
+        }).catch((error) => {
+            logOf(ctx)(`[GroupTask] Closing broadcast failed for task ${taskId}: `
+                + `${error instanceof Error ? error.message : String(error)}`);
+        });
+    }
     const closed = await store.updateTaskStatus(taskId, opts.status, {
         actor: opts.actor ?? { kind: 'owner' },
         reason: opts.reason ?? null,
@@ -826,7 +858,10 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
             attempts: 0,
         }));
         await emitGroupTaskRelay(ctx, chair, updated, 'resumed', 'The owner resumed this task; work continues.');
-        return { task: updated, action, notice: null, nudgeQueued: true };
+        return {
+            task: updated, action, notice: null, nudgeQueued: true,
+            chairUnavailable: updated.chairDegradedAt != null,
+        };
     }
     // nudge + flag address a member (nudge) or the whole room (flag).
     const members = await store.listMembers(taskId);
@@ -876,7 +911,10 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
         attempts: 0,
     };
     await store.kvSet(`${exports.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`, JSON.stringify(nudge));
-    return { task, action, notice: null, nudgeQueued: true };
+    return {
+        task, action, notice: null, nudgeQueued: true,
+        chairUnavailable: task.chairDegradedAt != null,
+    };
 }
 // ---------------------------------------------------------------------------
 // Deliverables: owner ledger maintenance

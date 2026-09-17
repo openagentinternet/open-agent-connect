@@ -14,6 +14,7 @@ exports.StudyJobStoreError = exports.DEFAULT_QA_SURF_BUDGET_PER_NIGHT = exports.
 exports.studyTopicFingerprint = studyTopicFingerprint;
 exports.createStudyJobStore = createStudyJobStore;
 exports.inStudyWindow = inStudyWindow;
+exports.retireQaSurfJobsForSurf = retireQaSurfJobsForSurf;
 exports.buildStudySessionPrompt = buildStudySessionPrompt;
 exports.buildQaSurfSessionPrompt = buildQaSurfSessionPrompt;
 exports.parseStudyRunReport = parseStudyRunReport;
@@ -210,7 +211,7 @@ function createStudyJobStore(paths) {
         // Owner-disable path: stop the bot's active Q&A surfing job. Returns true
         // when an active job was disabled, false when there was nothing to stop.
         // Re-enabling later simply enqueues a fresh job.
-        disableQaSurfJob: (metabotSlug) => enqueue(async () => {
+        disableQaSurfJob: (metabotSlug, summary) => enqueue(async () => {
             const state = await readFile();
             const now = Date.now();
             let disabled = 0;
@@ -220,7 +221,7 @@ function createStudyJobStore(paths) {
                 if (job.status !== 'pending' && job.status !== 'running')
                     continue;
                 job.status = 'done';
-                job.summary = 'Disabled by the owner; nightly Q&A surfing stopped.';
+                job.summary = summary ?? 'Disabled by the owner; nightly Q&A surfing stopped.';
                 job.updatedAt = now;
                 disabled += 1;
             }
@@ -339,6 +340,20 @@ function createStudyJobStore(paths) {
 function inStudyWindow(now) {
     const hour = now.getHours();
     return hour >= exports.STUDY_WINDOW.startHour && hour < exports.STUDY_WINDOW.endHour;
+}
+/**
+ * Retire a bot's active qa-surf jobs when MetaWeb surf is enabled for it
+ * (IDBots 0.9.1 migration semantics): Q&A browsing now happens inside the
+ * nightly surf run, so the legacy recurring job is marked done instead of
+ * double-spending the night. Idempotent — done/failed jobs stay untouched.
+ */
+async function retireQaSurfJobsForSurf(store, metabotSlug) {
+    const jobs = await store.listStudyJobs(metabotSlug);
+    const active = jobs.some((job) => job.kind === 'qa-surf'
+        && (job.status === 'pending' || job.status === 'running'));
+    if (!active)
+        return false;
+    return store.disableQaSurfJob(metabotSlug, 'Superseded by MetaWeb surf: Q&A browsing now happens inside the nightly surf run.');
 }
 /** The unattended study prompt (IDBots parity, tool-allowlist note included). */
 function buildStudySessionPrompt(input) {
