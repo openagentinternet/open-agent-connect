@@ -46,6 +46,46 @@ and clears it the moment the overlay closes. Every Agent Internet
 URI clicked inside A2A — private chat or Group Tasks — opens in the
 right-Sidebar Bot Browser tab, the same reveal every other surface uses.
 
+**The panel is a pure reading pane.** Since the conversation-list tabs own
+every list, the overlay carries no header, no 私聊/群任务 mode tabs, and no
+list columns: what renders is the private thread full-width (Steer composer
+included; the empty state shows a hint plus the new-conversation composer
+that starts a brand-new chat) or the selected group task's detail
+(`GroupTaskView` in detail-only mode — info, members, deliverables,
+transcript, and the task drawer; its empty state points at the left list).
+Navigation arrives as one-shot targets on the panel store: an online row
+opens its thread, a task row opens that task, a collab row opens the guest
+transcript, and the 群任务 tab's + button opens the create-task modal (a
+grouptask target with an empty task key). Nothing auto-selects — with the
+lists on the left, the panel shows exactly what was clicked.
+
+**Conversation-list tabs (本地对话 / 线上对话 / 群任务).** IDBots parity: the
+left conversation list carries a three-cell tab strip — 本地对话 (local DSH
+sessions, the stock browsing region), 线上对话 (A2A private conversations),
+and 群任务 (group tasks) — with unread dots on the two OAC tabs and the
+choice persisted in localStorage. DSH has no slot above the browsing region
+(`sidebar.workspaces` is one single-kind cell), so the strip mounts through
+the DOM like the hero Bot identity, but on the slot renderer's own
+`[data-slot="sidebar.workspaces"]` wrapper — a stable, non-hashed anchor.
+The local tab renders nothing but the strip: the official region is never
+re-hosted or unmounted, only hidden by one namespaced `<html>` class
+(`oac-conv-tabs-active`) while 线上对话/群任务 show their OAC lists in its
+place (both reuse the A2A panel's row vocabulary, live SSE refresh, and the
+unread feed; the online list keeps its own remembered from-Bot). These
+lists are THE list surfaces for A2A chat (the center overlay is a pure
+reading pane): rows carry the IDBots hover menu (Copy Session ID / Rename /
+Pin / Archive — group-task archive asks first), and clicking one opens the
+A2A Chat overlay pre-positioned on that conversation, task, or OpenTeam
+collaboration through a one-shot target on the panel store (applied and
+consumed on arrival; `close` drops stale targets). The 群任务 tab also owns
+the engine-health note, the pending staffing slate (the owner's
+confirm/revise/skip surface), the OpenTeam guest collaborations list, and
+the + button that opens the panel's create-task modal. Session navigation —
+including 新会话 — returns to 本地对话, and every failure path fails safe: a
+missing anchor, a crashed surface (ErrorBoundary releases the mount), or a
+collapse to the 56px rail each drop the hiding class and leave the stock
+region exactly as DSH shipped it.
+
 **Chip order and unavailable Bots.** The chip lists the available Twin Bot
 first, then every other row in roster order, with local Bots sorted among
 themselves by profile creation time (oldest first — the newest Bot lands at
@@ -126,7 +166,8 @@ corpus imports/edits and full rebuilds.
 
 ## Group Tasks (群任务) and OpenTeam
 
-The **A2A Chat** panel has a second tab, **Group Tasks**: one
+**Group Tasks** live in the left 群任务 tab (list) and the A2A overlay
+(detail, opened by clicking a task row): one
 on-chain MetaWeb group chat per task, chaired by your Twin Bot. The OAC
 daemon's engine (5 s tick) drives every active task — chair planning, worker
 replies, status transitions — and the panel reads the synced stores directly
@@ -575,7 +616,7 @@ The host process is the only process that talks to `metabot`. The client half do
 
 The A2A Chat panel reads `conversations/list` and `conversations/messages` from the daemon's enriched `/api/conversations*` HTTP API first — peer names/avatars resolved through the daemon's profile index and chain-profile cache, the same source the OAC `/ui/conversations` page renders — falling back to the in-process projection and then the CLI when the daemon is unreachable. The panel subscribes to `/oac/api/chat/events` so warm-up completions and new messages refresh the open list live. Row- and message-level avatars travel as small chain references (rendered through the `/oac/api/file/avatar` proxy; peers that are local Bots resolve their fresh `avatarDataUrl` client-side from the Bot list) — inline data-URL avatars are never duplicated per row or per message, and the projection keeps an mtime-keyed parse cache, so list/switch calls stay in tens of milliseconds instead of re-reading whole histories.
 
-Every row in the private-chat list and the Group Tasks list carries the DSH home-list hover menu (the relative time swaps for a "…" button): **Copy Session ID** (the private conversation id, or the task's on-chain group id), **Rename** (a display-name override — empty clears back to the peer/task title), **Pin** (pinned rows float to the top and keep a ★ marker), and **Archive** (the row folds out of the list; records are fully preserved — the archived-with-restore surface is a follow-up; group-task archive asks for confirmation, IDBots parity). Private-chat pin/rename/archive persist through the OAC core conversation meta (`metabot conversations rename|pin|unpin|archive|unarchive` → daemon `POST /api/conversations/meta`, which also publishes the SSE refresh); group tasks reuse the existing `grouptask` verbs.
+Every row in the left 线上对话 and 群任务 lists carries the DSH home-list hover menu (the relative time swaps for a "…" button): **Copy Session ID** (the private conversation id, or the task's on-chain group id), **Rename** (a display-name override — empty clears back to the peer/task title), **Pin** (pinned rows float to the top and keep a ★ marker), and **Archive** (the row folds out of the list; records are fully preserved — the archived-with-restore surface is a follow-up; group-task archive asks for confirmation, IDBots parity). Private-chat pin/rename/archive persist through the OAC core conversation meta (`metabot conversations rename|pin|unpin|archive|unarchive` → daemon `POST /api/conversations/meta`, which also publishes the SSE refresh); group tasks reuse the existing `grouptask` verbs.
 
 On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone — with one legacy exception: the bare shared `oac` preset installed by pre-per-Bot releases is removed on reconcile (a dangling `agent-presets.default: oac` heals to `standard`). The persona carries the host-owned `<bot_type>` fact (rebuilt from the Bot registry on every apply, never bot-editable), so the Twin Bot always knows it is this machine's Twin Bot — and a Worker knows its role — even before the per-agent twin overlay section installs. An `oac-*` agent's per-agent tool set installs idempotently when the agent is created, and sessions that select the preset afterwards (the create-then-select flow) get the same set installed on the `agent-preset/selected` session event — no conversation starts without its tools.
 

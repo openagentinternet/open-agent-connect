@@ -8,16 +8,32 @@
  * to `layout.selectPanel`, so it is capture-intercepted and toggles this
  * apply-scope store instead. The overlay entry and the row's glyph read the
  * state through the inject `hooks` compartment.
+ *
+ * The store also carries a one-shot navigation target: the conversation-list
+ * tabs (本地对话 / 线上对话 / 群任务) own every list, so the overlay is a pure
+ * reading surface and rows navigate by opening it pre-positioned — on one
+ * private thread (`private`), one group task (`grouptask`; an empty taskKey
+ * opens the create-task modal), or one OpenTeam guest collaboration
+ * (`collab`). `openOn` writes the target, the mounted panel applies it and
+ * consumes it; `close` drops any unconsumed target so a stale one never
+ * re-applies on a later open.
  */
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+
+/** Where the panel should land when it opens (consumed on arrival). */
+export type A2APanelTarget =
+  | { mode: 'private'; from: string; peer: string }
+  | { mode: 'grouptask'; taskKey: string }
+  | { mode: 'collab'; slug: string; groupId: string }
 
 export type A2APanelState = {
   /** Whether the A2A Chat overlay covers the center column. */
   open: boolean
+  /** One-shot navigation target for the mounted panel; null once consumed. */
+  target: A2APanelTarget | null
 }
 
-const CLOSED: A2APanelState = { open: false }
-const OPEN: A2APanelState = { open: true }
+const CLOSED: A2APanelState = { open: false, target: null }
 
 export class A2APanelStore implements SnapshotStore<A2APanelState> {
   private readonly inner = createSnapshotStore<A2APanelState>(CLOSED)
@@ -32,11 +48,23 @@ export class A2APanelStore implements SnapshotStore<A2APanelState> {
 
   /** Flip the overlay (the panellist row's intercepted click). */
   toggle(): void {
-    this.set(this.inner.getSnapshot().open ? CLOSED : OPEN)
+    this.set(this.inner.getSnapshot().open ? CLOSED : { open: true, target: null })
+  }
+
+  /** Open the overlay positioned on one thread/task/collab (conversation-list tabs). */
+  openOn(target: A2APanelTarget): void {
+    this.set({ open: true, target })
+  }
+
+  /** Acknowledge the target after applying it (the mounted panel). */
+  consumeTarget(): void {
+    if (this.inner.getSnapshot().target !== null) {
+      this.inner.set({ ...this.inner.getSnapshot(), target: null })
+    }
   }
 
   /** Close the overlay (session navigation, or a global panel taking over). */
   close(): void {
-    if (this.inner.getSnapshot().open) this.set(CLOSED)
+    if (this.inner.getSnapshot().open || this.inner.getSnapshot().target !== null) this.set(CLOSED)
   }
 }

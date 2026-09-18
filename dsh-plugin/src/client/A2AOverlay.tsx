@@ -21,19 +21,14 @@
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { CommonKeyOf, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { UsePanelInfo } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { A2AConversation, type A2AConversationInjected } from './A2AConversation.tsx'
-import type { A2APanelState } from './a2a-panel-store.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 
 type Translate = (key: ConversationsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export type A2AOverlayInjected = Omit<A2AConversationInjected, 'hooks'> & {
-  hooks: A2AConversationInjected['hooks'] & {
-    /** The apply-scope A2A overlay open state. */
-    panel: SnapshotStore<A2APanelState>
-  }
+  hooks: A2AConversationInjected['hooks']
 }
 
 export type A2AOverlayProps =
@@ -76,7 +71,7 @@ export function A2AOverlay({ t, usePanelInfo, usePanel, ...face }: A2AOverlayPro
     <div className="oac-a2a-overlay" ref={rootRef} style={{ gridTemplateColumns: columns }}>
       <div aria-hidden="true" />
       <div className="oac-a2a-overlay-center">
-        <A2AConversation {...face} t={t} />
+        <A2AConversation {...face} usePanel={usePanel} t={t} />
       </div>
       <div aria-hidden="true" />
     </div>

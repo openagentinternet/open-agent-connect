@@ -230,7 +230,11 @@ button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); 
 .oac-a2a-panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-layer-2); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--dsw-alias-label-primary); }
-.oac-a2a-body { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.oac-a2a-body { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+/* Legacy two-column body (GroupTaskView with its list visible): the list
+   track rides its own class so the reading pane owns the full column
+   everywhere else. */
+.oac-a2a-body-with-list { grid-template-columns: 320px minmax(0, 1fr); }
 /* Row wrapper below the header: the private-chat / group-task body. */
 .oac-a2a-main { flex: 1; min-height: 0; display: flex; }
 .oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
@@ -281,11 +285,11 @@ button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); 
 .oac-a2a-id { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
 .oac-a2a-id code { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
 .oac-a2a-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.oac-a2a-msg { display: flex; gap: 10px; max-width: min(560px, 86%); }
+.oac-a2a-msg { display: flex; gap: 10px; max-width: 100%; }
 .oac-a2a-msg-peer { align-self: flex-start; }
 .oac-a2a-msg-local { align-self: flex-end; flex-direction: row-reverse; }
 .oac-a2a-msg-avatar { flex: none; width: 28px; height: 28px; font-size: 11px; }
-.oac-a2a-msg-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.oac-a2a-msg-body { min-width: 0; max-width: 70%; display: flex; flex-direction: column; gap: 4px; }
 .oac-a2a-msg-local .oac-a2a-msg-body { align-items: flex-end; }
 .oac-a2a-msg-head { display: flex; align-items: baseline; gap: 10px; }
 .oac-a2a-msg-local .oac-a2a-msg-head { flex-direction: row-reverse; }
@@ -589,7 +593,10 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-checkpoint-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--dsw-alias-state-warn-label); }
 .oac-gt-checkpoint-hint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
 .oac-gt-transcript { gap: 12px; }
-.oac-gt-msg { max-width: 100%; }
+/* Bubble width contract (IDBots messengerBubble parity): the row spans the
+   transcript, the avatar sits outside the column, and the name+bubble column
+   caps at 70% of the row — one rhythm for private chat and group tasks; no
+   absolute pixel cap anywhere. */
 .oac-gt-suspect { color: var(--dsw-alias-state-error-primary); }
 .oac-gt-sender-select { flex: none; width: auto; min-width: 120px; }
 .oac-gt-stars { display: inline-flex; gap: 2px; }
@@ -863,4 +870,40 @@ export const TRAFFIC_CSS = `
 .oac-kb-study-badge[data-status='running'] { color: #1d4ed8; background: rgba(59, 130, 246, .1); border-color: rgba(59, 130, 246, .3); }
 .oac-kb-study-badge[data-status='done'] { color: #047857; background: rgba(16, 185, 129, .1); border-color: rgba(16, 185, 129, .3); }
 .oac-kb-study-badge[data-status='failed'] { color: #b91c1c; background: rgba(239, 68, 68, .1); border-color: rgba(239, 68, 68, .3); }
+`
+
+export const CONVTABS_CSS = `
+/* Conversation-list tabs (本地对话/线上对话/群任务): the mounted strip above
+   the official browsing region plus the two OAC list bodies that replace it
+   while their tab is active. The official region itself is only ever hidden
+   by the namespaced html class below — never re-hosted, never unmounted —
+   and every rule here rides the --dsw-alias-* token set like the rest of
+   the plugin. */
+html.oac-conv-tabs-active [data-slot="sidebar.workspaces"] { display: none !important; }
+.oac-conv-tabs-host { flex: none; display: flex; flex-direction: column; min-height: 0; }
+.oac-conv-tablist { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 6px 4px 4px; padding: 2px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }
+.oac-conv-tab { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 24px; min-width: 0; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.oac-conv-tab:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.oac-conv-tab[aria-selected='true'] { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); font-weight: 500; }
+.oac-conv-tab:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; border-radius: 6px; }
+.oac-conv-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-conv-tab-dot { position: absolute; top: 3px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); }
+.oac-conv-list-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 4px 8px; overflow: hidden; --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.oac-conv-list-head { flex: none; display: flex; }
+.oac-conv-list-head .oac-input-select { flex: 1; min-width: 0; }
+.oac-conv-list-rows { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 2px; }
+.oac-conv-row { padding: 6px 8px; }
+.oac-conv-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.oac-conv-row-top .oac-a2a-row-name { flex: 0 1 auto; }
+.oac-conv-row-time { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.oac-conv-row .oac-gt-row-meta { gap: 6px; }
+
+/* Round-2 panel restructure: the left tabs own every list, so the group
+   list head carries a title + the create-task button, and the staffing
+   slate / collabs sections ride the narrow column with tighter padding. */
+.oac-conv-list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
+.oac-conv-staffing { padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.oac-conv-staffing .oac-gt-staffing-title { flex-wrap: wrap; gap: 4px; }
+.oac-conv-staffing .oac-gt-staffing-actions { flex-wrap: wrap; }
+.oac-conv-list-rows .oac-gt-collabs { padding-top: 6px; border-top: 1px solid var(--dsw-alias-border-l2); margin-top: 4px; }
 `

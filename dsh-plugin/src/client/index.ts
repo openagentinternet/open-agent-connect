@@ -27,6 +27,8 @@ import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore } from './a2a-panel-store.ts'
+import { ConvTabStore } from './conv-tab-store.ts'
+import { startConvTabMount } from './conv-tab-mount.ts'
 import { startA2APanelRowInterceptor } from './a2a-panel-row.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
@@ -53,7 +55,7 @@ import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { startHeroIdentityMount } from './hero-identity.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -83,7 +85,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -185,6 +187,30 @@ export function apply(ctx: ClientContext): void {
     thread: (from, peer) => api.conversationThread(from, peer),
   })
   ctx.effect(() => unreadController.start(), 'oac-dsh: a2a unread feed')
+  // One grouptask api face shared by the A2A overlay (task detail) and the
+  // conversation-list tabs (the 群任务 list surface).
+  const grouptaskApi = {
+    list: (tab: Parameters<typeof api.grouptaskList>[0], includeArchived: boolean) => api.grouptaskList(tab, includeArchived),
+    detail: (chair: string, taskId: number) => api.grouptaskDetail(chair, taskId),
+    invites: (chair: string, taskId: number) => api.grouptaskInvites(chair, taskId),
+    create: (input: Parameters<typeof api.grouptaskCreate>[0]) => api.grouptaskCreate(input),
+    post: (chair: string, taskId: number, input: Parameters<typeof api.grouptaskPost>[2]) => api.grouptaskPost(chair, taskId, input),
+    close: (chair: string, taskId: number, input: Parameters<typeof api.grouptaskClose>[2]) => api.grouptaskClose(chair, taskId, input),
+    reopen: (chair: string, taskId: number, reason?: string) => api.grouptaskReopen(chair, taskId, reason),
+    kick: (chair: string, taskId: number, member: { slug?: string; globalMetaId?: string }, reason?: string) =>
+      api.grouptaskKick(chair, taskId, member, reason),
+    rename: (chair: string, taskId: number, displayName: string) => api.grouptaskRename(chair, taskId, displayName),
+    pin: (chair: string, taskId: number, pinned: boolean) => api.grouptaskPin(chair, taskId, pinned),
+    archive: (chair: string, taskId: number, archived: boolean) => api.grouptaskArchive(chair, taskId, archived),
+    invite: (chair: string, taskId: number, input: Parameters<typeof api.grouptaskInvite>[2]) => api.grouptaskInvite(chair, taskId, input),
+    collabs: () => api.grouptaskCollabs(),
+    collabMessages: (slug: string, groupId: string) => api.grouptaskCollabMessages(slug, groupId),
+    health: () => api.grouptaskHealth(),
+    staffingList: () => api.grouptaskStaffingList(),
+    staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip') =>
+      api.grouptaskStaffingDecide(chair, proposalId, decision),
+    staffingCreate: (proposalId: number) => api.grouptaskStaffingCreate(proposalId),
+  }
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'oac-a2a',
@@ -197,28 +223,8 @@ export function apply(ctx: ClientContext): void {
       send: (from: string, to: string, content: string) => api.chatPrivate(from, to, content),
       guidance: (from: string, peer: string, guidance: string) =>
         api.conversationGuidance(from, peer, guidance),
-      meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
       browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
-      grouptask: {
-        list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
-        detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
-        invites: (chair, taskId) => api.grouptaskInvites(chair, taskId),
-        create: (input) => api.grouptaskCreate(input),
-        post: (chair, taskId, input) => api.grouptaskPost(chair, taskId, input),
-        close: (chair, taskId, input) => api.grouptaskClose(chair, taskId, input),
-        reopen: (chair, taskId, reason) => api.grouptaskReopen(chair, taskId, reason),
-        kick: (chair, taskId, member, reason) => api.grouptaskKick(chair, taskId, member, reason),
-        rename: (chair, taskId, displayName) => api.grouptaskRename(chair, taskId, displayName),
-        pin: (chair, taskId, pinned) => api.grouptaskPin(chair, taskId, pinned),
-        archive: (chair, taskId, archived) => api.grouptaskArchive(chair, taskId, archived),
-        invite: (chair, taskId, input) => api.grouptaskInvite(chair, taskId, input),
-        collabs: () => api.grouptaskCollabs(),
-        collabMessages: (slug, groupId) => api.grouptaskCollabMessages(slug, groupId),
-        health: () => api.grouptaskHealth(),
-        staffingList: () => api.grouptaskStaffingList(),
-        staffingDecide: (chair, proposalId, decision) => api.grouptaskStaffingDecide(chair, proposalId, decision),
-        staffingCreate: (proposalId) => api.grouptaskStaffingCreate(proposalId),
-      },
+      grouptask: grouptaskApi,
       hooks: {
         unread: unreadController.source,
         panel: a2aPanel,
@@ -226,6 +232,7 @@ export function apply(ctx: ClientContext): void {
       clearPrivateUnread: (from, peer) => unreadController.clearPrivateUnread(from, peer),
       clearGroupUnread: (key) => unreadController.clearGroupUnread(key),
       setView: (view) => unreadController.setView(view),
+      consumeTarget: () => a2aPanel.consumeTarget(),
     }),
   }, A2AOverlay))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
@@ -235,8 +242,28 @@ export function apply(ctx: ClientContext): void {
     label: () => tConv('nav'),
     inject: (): A2APanelGlyphInjected => ({ hooks: { unread: unreadController.source, panel: a2aPanel } }),
   }, A2APanelGlyph))
+  // Conversation-list tabs (本地对话 / 线上对话 / 群任务): the strip + list
+  // bodies mount above the official browsing region (no slot exists there);
+  // rows navigate by opening the A2A overlay pre-positioned on their thread
+  // (the pending-target path above). Started after the unread feed so the
+  // dots have data from the first paint.
+  const convTabs = new ConvTabStore()
+  ctx.effect(() => startConvTabMount(convTabs, {
+    bots: () => api.list(),
+    list: (from: string) => api.conversations(from),
+    grouptaskList: () => api.grouptaskList('all', false),
+    grouptask: grouptaskApi,
+    meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
+    openPrivate: (from, peer) => a2aPanel.openOn({ mode: 'private', from, peer }),
+    openGroupTask: (taskKey) => a2aPanel.openOn({ mode: 'grouptask', taskKey }),
+    openCollab: (slug, groupId) => a2aPanel.openOn({ mode: 'collab', slug, groupId }),
+    hooks: { unread: unreadController.source },
+    t: tConv,
+  }), 'oac-dsh: conversation tabs mount')
   // Session navigation closes the A2A overlay (the conversation underneath
-  // never unmounted, so the switch shows the moment it closes).
+  // never unmounted, so the switch shows the moment it closes) and returns
+  // the conversation-list tabs to 本地对话 — the new session should be
+  // visible, not hidden behind the online/group lists.
   ctx.inject(['sessions'], (scope: ClientContext) => {
     // Captured once while the context is active (the preset chip below does
     // the same): re-resolving after the context retires throws.
@@ -246,7 +273,10 @@ export function apply(ctx: ClientContext): void {
       const current = sessionsList.getSnapshot().current
       const navigated = current !== previous
       previous = current
-      if (navigated) a2aPanel.close()
+      if (navigated) {
+        a2aPanel.close()
+        convTabs.setTab('local')
+      }
     }), 'oac-dsh: a2a overlay session watch')
   })
   // ...but 新会话 (startSession) REUSES the workspace's existing blank
@@ -255,13 +285,17 @@ export function apply(ctx: ClientContext): void {
   // over the new-session page. Every kernel path back to the conversation
   // column (openSession from the tree, startSession with or without a
   // target) routes through layout.selectPanel(null), so wrap it: selecting
-  // the conversation column closes the overlay too. Re-equips when the
-  // layout service reloads; cleanup restores the prototype method.
+  // the conversation column closes the overlay and returns the tabs too.
+  // Re-equips when the layout service reloads; cleanup restores the
+  // prototype method.
   ctx.inject(['layout'], (scope: ClientContext) => {
     const layout = scope.layout
     const original = layout.selectPanel.bind(layout)
     layout.selectPanel = (panelId: Parameters<typeof original>[0]): void => {
-      if (panelId === null) a2aPanel.close()
+      if (panelId === null) {
+        a2aPanel.close()
+        convTabs.setTab('local')
+      }
       original(panelId)
     }
     return () => { delete (layout as { selectPanel?: unknown }).selectPanel }

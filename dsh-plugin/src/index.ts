@@ -763,6 +763,11 @@ export { HostLlmExecutor } from './host-llm-executor.js'
 export { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 export { validateCreatePayload } from './bots-input.js'
 export { sortBotsTwinFirst, pickDefaultBotSlug, type BotOrderFields } from './bot-order.js'
+export {
+  isConvTab,
+  parseGroupTaskKey,
+  type ConvTab,
+} from './conv-tab-logic.js'
 export { resolveAvatarUrl, extractAvatarPinReference, isAvatarContentReference } from './avatar-url.js'
 export { relativeTimeLabel } from './relative-time.js'
 export { daemonConversationsList, daemonConversationsMessages } from './conversation-bridge.js'
