@@ -27,6 +27,8 @@ import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore } from './a2a-panel-store.ts'
+import { ConvTabStore } from './conv-tab-store.ts'
+import { startConvTabMount } from './conv-tab-mount.ts'
 import { startA2APanelRowInterceptor } from './a2a-panel-row.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
@@ -53,7 +55,7 @@ import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { startHeroIdentityMount } from './hero-identity.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -83,7 +85,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -226,6 +228,7 @@ export function apply(ctx: ClientContext): void {
       clearPrivateUnread: (from, peer) => unreadController.clearPrivateUnread(from, peer),
       clearGroupUnread: (key) => unreadController.clearGroupUnread(key),
       setView: (view) => unreadController.setView(view),
+      consumeTarget: () => a2aPanel.consumeTarget(),
     }),
   }, A2AOverlay))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
@@ -235,8 +238,25 @@ export function apply(ctx: ClientContext): void {
     label: () => tConv('nav'),
     inject: (): A2APanelGlyphInjected => ({ hooks: { unread: unreadController.source, panel: a2aPanel } }),
   }, A2APanelGlyph))
+  // Conversation-list tabs (本地对话 / 线上对话 / 群任务): the strip + list
+  // bodies mount above the official browsing region (no slot exists there);
+  // rows navigate by opening the A2A overlay pre-positioned on their thread
+  // (the pending-target path above). Started after the unread feed so the
+  // dots have data from the first paint.
+  const convTabs = new ConvTabStore()
+  ctx.effect(() => startConvTabMount(convTabs, {
+    bots: () => api.list(),
+    list: (from: string) => api.conversations(from),
+    grouptaskList: () => api.grouptaskList('all', false),
+    openPrivate: (from, peer) => a2aPanel.openOn({ mode: 'private', from, peer }),
+    openGroupTask: (taskKey) => a2aPanel.openOn({ mode: 'grouptask', taskKey }),
+    hooks: { unread: unreadController.source },
+    t: tConv,
+  }), 'oac-dsh: conversation tabs mount')
   // Session navigation closes the A2A overlay (the conversation underneath
-  // never unmounted, so the switch shows the moment it closes).
+  // never unmounted, so the switch shows the moment it closes) and returns
+  // the conversation-list tabs to 本地对话 — the new session should be
+  // visible, not hidden behind the online/group lists.
   ctx.inject(['sessions'], (scope: ClientContext) => {
     // Captured once while the context is active (the preset chip below does
     // the same): re-resolving after the context retires throws.
@@ -246,7 +266,10 @@ export function apply(ctx: ClientContext): void {
       const current = sessionsList.getSnapshot().current
       const navigated = current !== previous
       previous = current
-      if (navigated) a2aPanel.close()
+      if (navigated) {
+        a2aPanel.close()
+        convTabs.setTab('local')
+      }
     }), 'oac-dsh: a2a overlay session watch')
   })
   // ...but 新会话 (startSession) REUSES the workspace's existing blank
@@ -255,13 +278,17 @@ export function apply(ctx: ClientContext): void {
   // over the new-session page. Every kernel path back to the conversation
   // column (openSession from the tree, startSession with or without a
   // target) routes through layout.selectPanel(null), so wrap it: selecting
-  // the conversation column closes the overlay too. Re-equips when the
-  // layout service reloads; cleanup restores the prototype method.
+  // the conversation column closes the overlay and returns the tabs too.
+  // Re-equips when the layout service reloads; cleanup restores the
+  // prototype method.
   ctx.inject(['layout'], (scope: ClientContext) => {
     const layout = scope.layout
     const original = layout.selectPanel.bind(layout)
     layout.selectPanel = (panelId: Parameters<typeof original>[0]): void => {
-      if (panelId === null) a2aPanel.close()
+      if (panelId === null) {
+        a2aPanel.close()
+        convTabs.setTab('local')
+      }
       original(panelId)
     }
     return () => { delete (layout as { selectPanel?: unknown }).selectPanel }

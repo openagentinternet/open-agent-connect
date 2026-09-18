@@ -46,6 +46,27 @@ and clears it the moment the overlay closes. Every Agent Internet
 URI clicked inside A2A — private chat or Group Tasks — opens in the
 right-Sidebar Bot Browser tab, the same reveal every other surface uses.
 
+**Conversation-list tabs (本地对话 / 线上对话 / 群任务).** IDBots parity: the
+left conversation list carries a three-cell tab strip — 本地对话 (local DSH
+sessions, the stock browsing region), 线上对话 (A2A private conversations),
+and 群任务 (group tasks) — with unread dots on the two OAC tabs and the
+choice persisted in localStorage. DSH has no slot above the browsing region
+(`sidebar.workspaces` is one single-kind cell), so the strip mounts through
+the DOM like the hero Bot identity, but on the slot renderer's own
+`[data-slot="sidebar.workspaces"]` wrapper — a stable, non-hashed anchor.
+The local tab renders nothing but the strip: the official region is never
+re-hosted or unmounted, only hidden by one namespaced `<html>` class
+(`oac-conv-tabs-active`) while 线上对话/群任务 show their OAC lists in its
+place (both reuse the A2A panel's row vocabulary, live SSE refresh, and the
+unread feed; the online list keeps its own remembered from-Bot). Rows
+navigate instead of rendering threads: clicking one opens the A2A Chat
+overlay pre-positioned on that conversation or task through a one-shot
+target on the panel store (applied and consumed on arrival; `close` drops
+stale targets). Session navigation — including 新会话 — returns to 本地对话,
+and every failure path fails safe: a missing anchor, a crashed surface
+(ErrorBoundary releases the mount), or a collapse to the 56px rail each
+drop the hiding class and leave the stock region exactly as DSH shipped it.
+
 **Chip order and unavailable Bots.** The chip lists the available Twin Bot
 first, then every other row in roster order, with local Bots sorted among
 themselves by profile creation time (oldest first — the newest Bot lands at

@@ -210,11 +210,15 @@ test('new-session and same-session navigation close the overlay via the selectPa
   // startSession reuses the workspace's existing blank session; when it is
   // already current, sessions.list never changes — the close must ride
   // layout.selectPanel(null), which every conversation-column navigation
-  // calls, not only the sessions.list watch.
+  // calls, not only the sessions.list watch. The same navigation also
+  // returns the conversation-list tabs to 本地对话 so the new session is
+  // visible, not hidden behind the online/group lists.
   const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(index, /ctx\.inject\(\['layout'\], \(scope: ClientContext\) =>/)
   assert.match(index, /layout\.selectPanel = \(panelId: Parameters<typeof original>\[0\]\): void => \{/)
-  assert.match(index, /if \(panelId === null\) a2aPanel\.close\(\)/)
+  assert.match(index, /if \(panelId === null\) \{/)
+  assert.match(index, /a2aPanel\.close\(\)/)
+  assert.match(index, /convTabs\.setTab\('local'\)/)
   // the wrap must restore the service method on cleanup (no stacked wrappers
   // across layout reloads)
   assert.match(index, /delete \(layout as \{ selectPanel\?: unknown \}\)\.selectPanel/)

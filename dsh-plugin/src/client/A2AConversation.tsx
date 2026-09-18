@@ -25,6 +25,7 @@ import { pickDefaultBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import type { UnreadState } from '../unread-logic.ts'
 import type { A2AUnreadView } from './a2a-unread-store.ts'
+import type { A2APanelState } from './a2a-panel-store.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -49,11 +50,15 @@ export interface A2AConversationInjected {
   hooks: {
     /** The apply-scope A2A unread feed (row dots + Group Tasks badges). */
     unread: SnapshotStore<UnreadState>
+    /** The apply-scope overlay state (open + one-shot navigation target). */
+    panel: SnapshotStore<A2APanelState>
   }
   clearPrivateUnread: (from: string, peer: string) => void
   clearGroupUnread: (key: string) => void
   /** Feed this panel's live view to the unread controller; cleared on unmount. */
   setView: (view: A2AUnreadView) => void
+  /** Acknowledge the applied navigation target (conversation-list tabs). */
+  consumeTarget: () => void
 }
 
 const GUIDANCE_POLL_MS = 1500
@@ -164,13 +169,18 @@ export function A2AConversation({
   grouptask,
   browserOpen,
   useUnread,
+  usePanel,
   clearPrivateUnread,
   clearGroupUnread,
   setView,
+  consumeTarget,
   t,
 }: InjectFace<A2AConversationInjected> & { t: Translate }): ReactNode {
   const [mode, setMode] = useState<'private' | 'grouptask'>('private')
   const [gtCreateSignal, setGtCreateSignal] = useState(0)
+  // External navigation (conversation-list tabs): the task to land on,
+  // re-armed per click (identity, not value, so repeat clicks re-fire).
+  const [gtOpen, setGtOpen] = useState<{ key: string; seq: number } | null>(null)
   const [profiles, setProfiles] = useState<BotRow[]>([])
   const [from, setFrom] = useState('')
   const [summaries, setSummaries] = useState<ConversationSummary[] | null>(null)
@@ -194,15 +204,42 @@ export function A2AConversation({
   // is on screen.
   const [taskKey, setTaskKey] = useState('')
   const unread = useUnread((state) => state)
+  const panelTarget = usePanel((state) => state.target)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const guidanceTokenRef = useRef(0)
   const lastFromRef = useRef('')
   const selectedPeerRef = useRef('')
+  // The peer a navigation target wants, riding a ref because a from-switch
+  // resets the selection — the list reload applies it once the rows land.
+  const pendingPeerRef = useRef('')
   const messagesRef = useRef<HTMLDivElement | null>(null)
   const pinnedToBottomRef = useRef(true)
   const forceScrollRef = useRef(false)
 
   const reloadList = useCallback((): void => setTick((value) => value + 1), [])
+
+  // One-shot navigation target (conversation-list tabs): land the panel on
+  // one private thread or group task, clear what it lights, acknowledge.
+  // The private branch rides pendingPeerRef (see above); the grouptask
+  // branch re-arms gtOpen so repeat clicks on the same task re-fire.
+  useEffect(() => {
+    const target = panelTarget
+    if (target === null) return
+    if (target.mode === 'private') {
+      setMode('private')
+      pendingPeerRef.current = target.peer
+      setTaskKey('')
+      if (target.from !== from) setFrom(target.from)
+      else reloadList()
+      clearPrivateUnread(target.from, target.peer)
+    } else {
+      setMode('grouptask')
+      setTaskKey(target.taskKey)
+      setGtOpen((prev) => ({ key: target.taskKey, seq: (prev?.seq ?? 0) + 1 }))
+      clearGroupUnread(target.taskKey)
+    }
+    consumeTarget()
+  }, [panelTarget, from, reloadList, clearPrivateUnread, clearGroupUnread, consumeTarget])
 
   useEffect(() => {
     selectedPeerRef.current = selectedPeer
@@ -255,6 +292,11 @@ export function A2AConversation({
         setSummaries(rows)
         setListError(null)
         setSelectedPeer((peer) => {
+          const pending = pendingPeerRef.current
+          if (pending !== '' && rows.some((row) => row.peerGlobalMetaId === pending)) {
+            pendingPeerRef.current = ''
+            return pending
+          }
           if (peer && rows.some((row) => row.peerGlobalMetaId === peer)) return peer
           return rows[0]?.peerGlobalMetaId ?? ''
         })
@@ -527,6 +569,7 @@ export function A2AConversation({
           gt={grouptask}
           t={t}
           createSignal={gtCreateSignal}
+          openTaskSignal={gtOpen}
           onOpenBotPage={openBotPage}
           onOpenUri={openResource}
           unreadTaskKeys={new Set(Object.keys(unread.group))}

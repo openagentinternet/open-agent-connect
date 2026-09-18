@@ -34,6 +34,7 @@ import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
 import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { isChipBotAvailable } from '../chip-logic.ts'
+import { parseGroupTaskKey } from '../conv-tab-logic.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -647,6 +648,7 @@ export function GroupTaskView({
   gt,
   t,
   createSignal,
+  openTaskSignal,
   onOpenBotPage,
   onOpenUri,
   unreadTaskKeys,
@@ -656,6 +658,8 @@ export function GroupTaskView({
   gt: GroupTaskInjectedApi
   t: Translate
   createSignal: number
+  /** External navigation (conversation-list tabs): land on one task; identity re-arms on repeat clicks. */
+  openTaskSignal?: { key: string; seq: number } | null
   /** Open one participant's Bot page in the right-sidebar Bot Browser. */
   onOpenBotPage?: (globalMetaId: string) => void
   /** Open one deliverable/resource URI in the right-sidebar Bot Browser. */
@@ -745,6 +749,18 @@ export function GroupTaskView({
       setCreateOpen(true)
     }
   }, [createSignal])
+
+  // External navigation (conversation-list tabs): land on one task. The
+  // signal's identity (not value) re-arms repeat clicks on the same task;
+  // parse failures are ignored — the list keeps its own selection.
+  useEffect(() => {
+    const signal = openTaskSignal
+    if (signal === null || signal === undefined || signal.key === '') return
+    const parsed = parseGroupTaskKey(signal.key)
+    if (parsed === null) return
+    setSelected({ chair: parsed.chair, taskId: parsed.taskId })
+    onTaskRead?.(signal.key)
+  }, [openTaskSignal, onTaskRead])
 
   // Task list follows the filter; keep the previous rows on screen during
   // reloads so the list does not flash. Archived tasks are always hidden

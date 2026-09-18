@@ -864,3 +864,30 @@ export const TRAFFIC_CSS = `
 .oac-kb-study-badge[data-status='done'] { color: #047857; background: rgba(16, 185, 129, .1); border-color: rgba(16, 185, 129, .3); }
 .oac-kb-study-badge[data-status='failed'] { color: #b91c1c; background: rgba(239, 68, 68, .1); border-color: rgba(239, 68, 68, .3); }
 `
+
+export const CONVTABS_CSS = `
+/* Conversation-list tabs (本地对话/线上对话/群任务): the mounted strip above
+   the official browsing region plus the two OAC list bodies that replace it
+   while their tab is active. The official region itself is only ever hidden
+   by the namespaced html class below — never re-hosted, never unmounted —
+   and every rule here rides the --dsw-alias-* token set like the rest of
+   the plugin. */
+html.oac-conv-tabs-active [data-slot="sidebar.workspaces"] { display: none !important; }
+.oac-conv-tabs-host { flex: none; display: flex; flex-direction: column; min-height: 0; }
+.oac-conv-tablist { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 6px 4px 4px; padding: 2px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }
+.oac-conv-tab { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 24px; min-width: 0; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.oac-conv-tab:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.oac-conv-tab[aria-selected='true'] { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); font-weight: 500; }
+.oac-conv-tab:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; border-radius: 6px; }
+.oac-conv-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-conv-tab-dot { position: absolute; top: 3px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); }
+.oac-conv-list-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 4px 8px; overflow: hidden; --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.oac-conv-list-head { flex: none; display: flex; }
+.oac-conv-list-head .oac-input-select { flex: 1; min-width: 0; }
+.oac-conv-list-rows { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 2px; }
+.oac-conv-row { padding: 6px 8px; }
+.oac-conv-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.oac-conv-row-top .oac-a2a-row-name { flex: 0 1 auto; }
+.oac-conv-row-time { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.oac-conv-row .oac-gt-row-meta { gap: 6px; }
+`
