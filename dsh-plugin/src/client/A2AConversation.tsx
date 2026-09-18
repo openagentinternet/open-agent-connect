@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Button,
   IconCloseOutline16,
-  IconSendOutline16,
+  IconSendOutline14,
   Input,
   MarkdownText,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -622,7 +622,7 @@ export function A2AConversation({
                       type="button"
                       variant="primary"
                       size="sm"
-                      icon={<IconSendOutline16 />}
+                      icon={<IconSendOutline14 />}
                       disabled={!guidanceDraft.trim()}
                       onClick={() => { void submitGuidance() }}
                     >
@@ -678,7 +678,7 @@ export function A2AConversation({
                   <Button
                     type="button"
                     variant="primary"
-                    icon={<IconSendOutline16 />}
+                    icon={<IconSendOutline14 />}
                     disabled={busy || !from || !draft.trim() || !peerDraft.trim()}
                     onClick={() => { void onSend() }}
                   >

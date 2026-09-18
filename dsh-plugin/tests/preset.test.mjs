@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -307,5 +307,87 @@ test('removePreset deletes oac-<slug> and ignores unknown ids', async () => {
     assert.deepEqual(mock.calls.remove, ['oac-alice'])
     await plugin.removePreset(ctx, 'missing')
     assert.ok(mock.calls.remove.includes('oac-missing'))
+  })
+})
+
+// Kernel upgrades can rename shipped-standard composition rows (0.1.6 renamed
+// workflow-worker-thread → workflow-ptc and dropped the old package, which
+// makes a stale preset fail to mount at all). generatePreset re-syncs existing
+// presets from agentPresets.read('standard'), keeping only the persona prefix.
+const STALE_COMPOSITION = FIXTURE_COMPOSITION.replace(
+  '- id: fs-realm',
+  `- id: workflow-worker-thread
+  name: '@deepseek-ai/dsh-workflow-worker-thread'
+  config:
+    provider: spawn
+- id: fs-realm`,
+)
+
+const UPGRADED_COMPOSITION = FIXTURE_COMPOSITION.replace(
+  '- id: fs-realm',
+  `- id: workflow-ptc
+  name: '@deepseek-ai/dsh-workflow-ptc'
+  config:
+    provider: spawn
+- id: fs-realm`,
+)
+
+function withReadableStandard(mock, standardText) {
+  return {
+    ...mock.agentPresets,
+    async read(id) {
+      if (id !== 'standard') throw new Error(`agent-preset/not-found: ${id}`)
+      return standardText
+    },
+  }
+}
+
+test('generatePreset: re-syncs stale composition rows to the current shipped standard', async () => {
+  await withPresetCtx(async (ctx, mock, tmp) => {
+    ctx.agentPresets = withReadableStandard(mock, UPGRADED_COMPOSITION)
+    const dir = join(tmp, '.agent-presets', 'oac-alice')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'agent.cordis.yml'), STALE_COMPOSITION, 'utf8')
+    await writeFile(join(dir, 'preset.yml'), FIXTURE_METADATA, 'utf8')
+
+    await plugin.generatePreset(ctx, makeBot({ name: 'Synced Name' }))
+    assert.deepEqual(mock.calls.copy, [], 'existing preset is healed in place, not re-copied')
+    const healed = await readFile(join(dir, 'agent.cordis.yml'), 'utf8')
+    assert.ok(healed.includes("name: '@deepseek-ai/dsh-workflow-ptc'"), 'renamed row follows the current standard')
+    assert.equal(healed.includes('workflow-worker-thread'), false, 'stale row is gone')
+    assert.ok(healed.includes('<name>Synced Name</name>'), 'persona prefix still rewritten')
+    assert.match(healed, /^ {4}suffix: Your working directory is \{\{cwd\}\}\./m, 'standard suffix kept')
+    assert.match(healed, /disabled: !!js process\.platform === 'win32'/, '!!js rows survive the round-trip')
+  })
+})
+
+test('generatePreset: skips the composition write when the preset already matches standard', async () => {
+  await withPresetCtx(async (ctx, mock, tmp) => {
+    ctx.agentPresets = withReadableStandard(mock, FIXTURE_COMPOSITION)
+    await plugin.generatePreset(ctx, makeBot({ name: 'First' }))
+    const path = join(tmp, '.agent-presets', 'oac-alice', 'agent.cordis.yml')
+    const before = (await stat(path)).mtimeMs
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    await plugin.generatePreset(ctx, makeBot({ name: 'First' }))
+    const after = (await stat(path)).mtimeMs
+    assert.equal(after, before, 'unchanged content is not rewritten (composition stamp preserved)')
+  })
+})
+
+test('generatePreset: falls back to the in-place persona rewrite when standard cannot be read', async () => {
+  await withPresetCtx(async (ctx, mock, tmp) => {
+    ctx.agentPresets = {
+      ...mock.agentPresets,
+      async read() { throw new Error('agent-preset/not-found: standard') },
+    }
+    const dir = join(tmp, '.agent-presets', 'oac-alice')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'agent.cordis.yml'), STALE_COMPOSITION, 'utf8')
+    await writeFile(join(dir, 'preset.yml'), FIXTURE_METADATA, 'utf8')
+
+    await plugin.generatePreset(ctx, makeBot({ name: 'Fallback Name' }))
+    const healed = await readFile(join(dir, 'agent.cordis.yml'), 'utf8')
+    assert.ok(healed.includes('<name>Fallback Name</name>'), 'persona still rewritten')
+    assert.ok(healed.includes('workflow-worker-thread'), 'composition rows stay as copied on the fallback path')
   })
 })

@@ -8,6 +8,16 @@
  * persona is the prefix, a copied row's `suffix` is kept, and any legacy
  * `text` key is dropped (0.1.5's persona schema requires `prefix` and ignores
  * `text`, so legacy rows must be healed here, not just appended to).
+ *
+ * Existing presets are re-synced to the CURRENT shipped `standard` on every
+ * apply (read through the agentPresets service, present since 0.1.3-alpha.2),
+ * not just persona-rewritten: a kernel upgrade can rename composition rows —
+ * 0.1.6 renamed `workflow-worker-thread` to `workflow-ptc` and dropped the old
+ * package, and a stale row makes the whole preset fail to mount
+ * (`agent-preset/invalid`), so every session on it would refuse to start. The
+ * sync keeps the Bot persona prefix and writes only when the content actually
+ * differs. When the service cannot read the shipped preset the legacy
+ * in-place persona rewrite runs instead (the composition stays as copied).
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -67,21 +77,20 @@ function isAlreadyExists(error: unknown): boolean {
   return error instanceof Error && /already exists/.test(error.message)
 }
 
-async function rewritePersona(ctx: HostContext, bot: BotPersonaInput, presetId: string): Promise<void> {
-  const dir = presetDir(ctx, presetId)
-  const compositionPath = join(dir, COMPOSITION_FILE)
-  const entries: unknown = yaml.load(await readFile(compositionPath, 'utf8'), { schema: entryListSchema })
-  if (!Array.isArray(entries)) {
-    throw new Error(`oac-dsh: preset composition is not an entry list: ${compositionPath}`)
-  }
-  const persona = (entries as EntryRow[]).find((entry) => entry?.id === 'persona')
+function personaRowFor(entries: EntryRow[], compositionPath: string): EntryRow {
+  const persona = entries.find((entry) => entry?.id === 'persona')
   if (persona === undefined) {
     throw new Error(`oac-dsh: source preset has no "persona" row to rewrite: ${compositionPath}`)
   }
+  return persona
+}
+
+function applyPersonaConfig(persona: EntryRow, bot: BotPersonaInput): void {
   const { text: _legacyText, ...rest } = persona.config ?? {}
   persona.config = { ...rest, prefix: buildPersonaPrompt(bot) }
-  await writeFile(compositionPath, yaml.dump(entries, { schema: entryListSchema }), 'utf8')
+}
 
+async function writePresetMetadata(dir: string, bot: BotPersonaInput): Promise<void> {
   const metadataPath = join(dir, METADATA_FILE)
   let metadata: unknown
   try {
@@ -96,9 +105,60 @@ async function rewritePersona(ctx: HostContext, bot: BotPersonaInput, presetId: 
   await writeFile(metadataPath, yaml.dump(row), 'utf8')
 }
 
+async function rewritePersona(ctx: HostContext, bot: BotPersonaInput, presetId: string): Promise<void> {
+  const dir = presetDir(ctx, presetId)
+  const compositionPath = join(dir, COMPOSITION_FILE)
+  const entries: unknown = yaml.load(await readFile(compositionPath, 'utf8'), { schema: entryListSchema })
+  if (!Array.isArray(entries)) {
+    throw new Error(`oac-dsh: preset composition is not an entry list: ${compositionPath}`)
+  }
+  applyPersonaConfig(personaRowFor(entries as EntryRow[], compositionPath), bot)
+  await writeFile(compositionPath, yaml.dump(entries, { schema: entryListSchema }), 'utf8')
+  await writePresetMetadata(dir, bot)
+}
+
 /**
- * Ensure `oac-<slug>` exists and its persona matches the Bot. Copy `standard`
- * only when the id is new; existing presets are rewritten in place.
+ * Re-sync an existing preset's composition to the current shipped `standard`,
+ * keeping only the Bot persona prefix. Returns false when the service cannot
+ * read the shipped preset (caller falls back to the in-place rewrite).
+ */
+async function syncCompositionFromStandard(
+  ctx: HostContext,
+  presets: AgentPresetsLike,
+  bot: BotPersonaInput,
+  presetId: string,
+): Promise<boolean> {
+  if (typeof presets.read !== 'function') return false
+  let standardText: string
+  try {
+    standardText = await presets.read(STANDARD_PRESET_ID)
+  } catch {
+    return false
+  }
+  const entries: unknown = yaml.load(standardText, { schema: entryListSchema })
+  if (!Array.isArray(entries)) {
+    throw new Error('oac-dsh: shipped "standard" preset composition is not an entry list')
+  }
+  applyPersonaConfig(personaRowFor(entries as EntryRow[], `shipped "${STANDARD_PRESET_ID}" preset`), bot)
+  const synced = yaml.dump(entries, { schema: entryListSchema })
+  const dir = presetDir(ctx, presetId)
+  const compositionPath = join(dir, COMPOSITION_FILE)
+  const current = await readFile(compositionPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  // Skip the write when nothing changed: every write bumps the composition
+  // stamp running sessions are keyed on.
+  if (current !== synced) await writeFile(compositionPath, synced, 'utf8')
+  await writePresetMetadata(dir, bot)
+  return true
+}
+
+/**
+ * Ensure `oac-<slug>` exists and matches the current kernel: `standard` is
+ * copied when the id is new, and existing presets are re-synced to the
+ * current shipped `standard` (persona prefix kept) so kernel row renames can
+ * never strand a Bot's preset.
  */
 export async function generatePreset(ctx: HostContext, bot: BotPersonaInput): Promise<string> {
   const presets = requirePresets(ctx)
@@ -108,7 +168,9 @@ export async function generatePreset(ctx: HostContext, bot: BotPersonaInput): Pr
   } catch (error) {
     if (!isAlreadyExists(error)) throw error
   }
-  await rewritePersona(ctx, bot, presetId)
+  if (!(await syncCompositionFromStandard(ctx, presets, bot, presetId))) {
+    await rewritePersona(ctx, bot, presetId)
+  }
   return presetId
 }
 

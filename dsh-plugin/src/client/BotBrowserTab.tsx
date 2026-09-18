@@ -21,7 +21,7 @@ import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
-import { shouldResetIframeSrc, type BotBrowserTabParams } from '../browser-open-flow.ts'
+import { shouldResetIframeSrc, shouldRestoreBrowserContent, type BotBrowserTabParams } from '../browser-open-flow.ts'
 import { BrowserStage } from './browser-stage.tsx'
 import type { BotBrowserState } from './browser-store.ts'
 import type { BrowserLocaleKey } from './locale-browser.ts'
@@ -110,6 +110,16 @@ function BotBrowserTabBody({
   useEffect(() => {
     if (shouldResetIframeSrc(paramsUrl, loadedUrl)) setLoadedUrl(paramsUrl)
   }, [paramsUrl, tab.navigation.revision, loadedUrl])
+
+  // Right-Sidebar layout persistence (DSH 0.1.6) restores this tab across
+  // page reloads with no navigation record: re-open the Browser home once so
+  // the iframe loads and ABC reconstructs the page state from the daemon.
+  // Mount-only — the open reveals this same tab with params, ending the
+  // condition; a fresh empty open (guide capsule) records revision 1 and is
+  // never touched.
+  useEffect(() => {
+    if (shouldRestoreBrowserContent(tab.navigation.revision, paramsUrl)) openHome()
+  }, [])
 
   if (loadedUrl === null) {
     return (

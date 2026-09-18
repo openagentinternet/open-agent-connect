@@ -48,6 +48,8 @@ export interface AgentPresetsLike {
   copy(from: string, id: string, name?: string): Promise<void>
   remove(id: string): Promise<void>
   list(): Promise<ReadonlyArray<{ id: string }>>
+  /** One preset's composition text, exactly as stored (resolves shipped presets too). */
+  read?(id: string): Promise<string>
   /** Live preset id for a composed agent context (e.g. 'oac-<slug>'). */
   composedPreset?(agentCtx: unknown): string | undefined
   /** Mount a preset composition onto a fresh agent context (agents.create setup). */

@@ -29,6 +29,7 @@ import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore } from './a2a-panel-store.ts'
 import { ConvTabStore } from './conv-tab-store.ts'
 import { startConvTabMount } from './conv-tab-mount.ts'
+import { currentMainViewSessionId } from '../current-session.ts'
 import { startA2APanelRowInterceptor } from './a2a-panel-row.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
@@ -137,6 +138,7 @@ export function apply(ctx: ClientContext): void {
     kind: BOT_BROWSER_TAB_KIND,
     title: () => tBrowser('title'),
     guide: [{
+      id: 'bot-browser',
       order: 20,
       title: () => tBrowser('guideTitle'),
       description: () => tBrowser('guideDesc'),
@@ -268,9 +270,9 @@ export function apply(ctx: ClientContext): void {
     // Captured once while the context is active (the preset chip below does
     // the same): re-resolving after the context retires throws.
     const sessionsList = scope.sessions.list
-    let previous = sessionsList.getSnapshot().current
+    let previous = currentMainViewSessionId(sessionsList.getSnapshot())
     scope.effect(() => sessionsList.subscribe(() => {
-      const current = sessionsList.getSnapshot().current
+      const current = currentMainViewSessionId(sessionsList.getSnapshot())
       const navigated = current !== previous
       previous = current
       if (navigated) {
@@ -299,7 +301,7 @@ export function apply(ctx: ClientContext): void {
       original(panelId)
     }
     return () => { delete (layout as { selectPanel?: unknown }).selectPanel }
-  }, 'oac-dsh: a2a overlay navigation close')
+  })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
@@ -450,7 +452,8 @@ export function apply(ctx: ClientContext): void {
       })),
       (): SeatSessionSummary | undefined => {
         const state = sessionsList.getSnapshot()
-        const summary = state.current === undefined ? undefined : state.byId[state.current]
+        const currentId = currentMainViewSessionId(state)
+        const summary = currentId === undefined ? undefined : state.byId[currentId as keyof typeof state.byId]
         if (summary === undefined) return undefined
         const agentPreset = summary.projectionValues?.agentPreset
         return {
