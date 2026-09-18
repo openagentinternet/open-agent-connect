@@ -285,11 +285,11 @@ button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); 
 .oac-a2a-id { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
 .oac-a2a-id code { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
 .oac-a2a-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.oac-a2a-msg { display: flex; gap: 10px; max-width: min(560px, 86%); }
+.oac-a2a-msg { display: flex; gap: 10px; max-width: 100%; }
 .oac-a2a-msg-peer { align-self: flex-start; }
 .oac-a2a-msg-local { align-self: flex-end; flex-direction: row-reverse; }
 .oac-a2a-msg-avatar { flex: none; width: 28px; height: 28px; font-size: 11px; }
-.oac-a2a-msg-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.oac-a2a-msg-body { min-width: 0; max-width: 70%; display: flex; flex-direction: column; gap: 4px; }
 .oac-a2a-msg-local .oac-a2a-msg-body { align-items: flex-end; }
 .oac-a2a-msg-head { display: flex; align-items: baseline; gap: 10px; }
 .oac-a2a-msg-local .oac-a2a-msg-head { flex-direction: row-reverse; }
@@ -593,7 +593,10 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-checkpoint-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--dsw-alias-state-warn-label); }
 .oac-gt-checkpoint-hint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
 .oac-gt-transcript { gap: 12px; }
-.oac-gt-msg { max-width: 100%; }
+/* Bubble width contract (IDBots messengerBubble parity): the row spans the
+   transcript, the avatar sits outside the column, and the name+bubble column
+   caps at 70% of the row — one rhythm for private chat and group tasks; no
+   absolute pixel cap anywhere. */
 .oac-gt-suspect { color: var(--dsw-alias-state-error-primary); }
 .oac-gt-sender-select { flex: none; width: auto; min-width: 120px; }
 .oac-gt-stars { display: inline-flex; gap: 2px; }
