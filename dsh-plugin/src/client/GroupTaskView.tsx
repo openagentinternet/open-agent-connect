@@ -1078,7 +1078,7 @@ export function GroupTaskView({
     && (row.status === 'pending' || row.status === 'confirmed' || row.status === 'skip_authorized')) ?? null
 
   return (
-    <div className="oac-a2a-body">
+    <div className={hideList === true ? 'oac-a2a-body' : 'oac-a2a-body oac-a2a-body-with-list'}>
       {hideList === true ? null : (
       <div className="oac-a2a-list">
         <div className="oac-a2a-list-head">

@@ -230,7 +230,11 @@ button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); 
 .oac-a2a-panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-layer-2); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--dsw-alias-label-primary); }
-.oac-a2a-body { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.oac-a2a-body { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+/* Legacy two-column body (GroupTaskView with its list visible): the list
+   track rides its own class so the reading pane owns the full column
+   everywhere else. */
+.oac-a2a-body-with-list { grid-template-columns: 320px minmax(0, 1fr); }
 /* Row wrapper below the header: the private-chat / group-task body. */
 .oac-a2a-main { flex: 1; min-height: 0; display: flex; }
 .oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
