@@ -187,6 +187,30 @@ export function apply(ctx: ClientContext): void {
     thread: (from, peer) => api.conversationThread(from, peer),
   })
   ctx.effect(() => unreadController.start(), 'oac-dsh: a2a unread feed')
+  // One grouptask api face shared by the A2A overlay (task detail) and the
+  // conversation-list tabs (the 群任务 list surface).
+  const grouptaskApi = {
+    list: (tab: Parameters<typeof api.grouptaskList>[0], includeArchived: boolean) => api.grouptaskList(tab, includeArchived),
+    detail: (chair: string, taskId: number) => api.grouptaskDetail(chair, taskId),
+    invites: (chair: string, taskId: number) => api.grouptaskInvites(chair, taskId),
+    create: (input: Parameters<typeof api.grouptaskCreate>[0]) => api.grouptaskCreate(input),
+    post: (chair: string, taskId: number, input: Parameters<typeof api.grouptaskPost>[2]) => api.grouptaskPost(chair, taskId, input),
+    close: (chair: string, taskId: number, input: Parameters<typeof api.grouptaskClose>[2]) => api.grouptaskClose(chair, taskId, input),
+    reopen: (chair: string, taskId: number, reason?: string) => api.grouptaskReopen(chair, taskId, reason),
+    kick: (chair: string, taskId: number, member: { slug?: string; globalMetaId?: string }, reason?: string) =>
+      api.grouptaskKick(chair, taskId, member, reason),
+    rename: (chair: string, taskId: number, displayName: string) => api.grouptaskRename(chair, taskId, displayName),
+    pin: (chair: string, taskId: number, pinned: boolean) => api.grouptaskPin(chair, taskId, pinned),
+    archive: (chair: string, taskId: number, archived: boolean) => api.grouptaskArchive(chair, taskId, archived),
+    invite: (chair: string, taskId: number, input: Parameters<typeof api.grouptaskInvite>[2]) => api.grouptaskInvite(chair, taskId, input),
+    collabs: () => api.grouptaskCollabs(),
+    collabMessages: (slug: string, groupId: string) => api.grouptaskCollabMessages(slug, groupId),
+    health: () => api.grouptaskHealth(),
+    staffingList: () => api.grouptaskStaffingList(),
+    staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip') =>
+      api.grouptaskStaffingDecide(chair, proposalId, decision),
+    staffingCreate: (proposalId: number) => api.grouptaskStaffingCreate(proposalId),
+  }
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'oac-a2a',
@@ -199,28 +223,8 @@ export function apply(ctx: ClientContext): void {
       send: (from: string, to: string, content: string) => api.chatPrivate(from, to, content),
       guidance: (from: string, peer: string, guidance: string) =>
         api.conversationGuidance(from, peer, guidance),
-      meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
       browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
-      grouptask: {
-        list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
-        detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
-        invites: (chair, taskId) => api.grouptaskInvites(chair, taskId),
-        create: (input) => api.grouptaskCreate(input),
-        post: (chair, taskId, input) => api.grouptaskPost(chair, taskId, input),
-        close: (chair, taskId, input) => api.grouptaskClose(chair, taskId, input),
-        reopen: (chair, taskId, reason) => api.grouptaskReopen(chair, taskId, reason),
-        kick: (chair, taskId, member, reason) => api.grouptaskKick(chair, taskId, member, reason),
-        rename: (chair, taskId, displayName) => api.grouptaskRename(chair, taskId, displayName),
-        pin: (chair, taskId, pinned) => api.grouptaskPin(chair, taskId, pinned),
-        archive: (chair, taskId, archived) => api.grouptaskArchive(chair, taskId, archived),
-        invite: (chair, taskId, input) => api.grouptaskInvite(chair, taskId, input),
-        collabs: () => api.grouptaskCollabs(),
-        collabMessages: (slug, groupId) => api.grouptaskCollabMessages(slug, groupId),
-        health: () => api.grouptaskHealth(),
-        staffingList: () => api.grouptaskStaffingList(),
-        staffingDecide: (chair, proposalId, decision) => api.grouptaskStaffingDecide(chair, proposalId, decision),
-        staffingCreate: (proposalId) => api.grouptaskStaffingCreate(proposalId),
-      },
+      grouptask: grouptaskApi,
       hooks: {
         unread: unreadController.source,
         panel: a2aPanel,
@@ -248,8 +252,11 @@ export function apply(ctx: ClientContext): void {
     bots: () => api.list(),
     list: (from: string) => api.conversations(from),
     grouptaskList: () => api.grouptaskList('all', false),
+    grouptask: grouptaskApi,
+    meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
     openPrivate: (from, peer) => a2aPanel.openOn({ mode: 'private', from, peer }),
     openGroupTask: (taskKey) => a2aPanel.openOn({ mode: 'grouptask', taskKey }),
+    openCollab: (slug, groupId) => a2aPanel.openOn({ mode: 'collab', slug, groupId }),
     hooks: { unread: unreadController.source },
     t: tConv,
   }), 'oac-dsh: conversation tabs mount')

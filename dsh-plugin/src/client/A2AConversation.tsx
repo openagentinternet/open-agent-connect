@@ -2,11 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Button,
   IconCloseOutline16,
-  IconPlusOutline16,
   IconSendOutline16,
   Input,
   MarkdownText,
-  Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -19,7 +17,6 @@ import {
   type ConversationThread,
 } from './api.ts'
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
-import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { pickDefaultBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
@@ -38,12 +35,6 @@ export interface A2AConversationInjected {
   thread: (from: string, peer: string) => Promise<ConversationThread>
   send: (from: string, to: string, content: string) => Promise<unknown>
   guidance: (from: string, peer: string, guidance: string) => Promise<unknown>
-  /** UI-meta write (pin/archive/rename) on one private conversation. */
-  meta: (from: string, peer: string, patch: {
-    pinned?: boolean
-    archived?: boolean
-    displayName?: string | null
-  }) => Promise<unknown>
   grouptask: GroupTaskInjectedApi
   /** Open a resource URI (e.g. `metaid://<globalMetaId>`) in the right-Sidebar Bot Browser tab. */
   browserOpen: (uri?: string) => Promise<void>
@@ -153,11 +144,16 @@ function MessageRow({
 
 /**
  * A2A Chat surface (mounted by the `shell.overlay` entry `oac-a2a` inside its
- * center-column cell): private peer conversations on the left, message thread
- * with a composer on the right, plus the Group Tasks tab. Data comes from the
- * same daemon endpoints the OAC `/ui/conversations` page reads. The panel is
- * root-scoped — it must not assume a Session — and mounts only while the
- * overlay is open, so the effects below run exactly while it is on screen.
+ * center-column cell): a pure reading pane. Every list lives in the left
+ * conversation-list tabs (线上对话 / 群任务), so this panel has no header, no
+ * mode tabs, and no list columns — what renders is the private thread (with
+ * its Steer composer) or the selected group task's detail (GroupTaskView,
+ * list hidden), positioned by the one-shot targets the left rows write.
+ * With nothing selected the private mode shows an empty state whose composer
+ * starts a brand-new conversation. Data comes from the same daemon endpoints
+ * the OAC `/ui/conversations` page reads. The panel is root-scoped — it must
+ * not assume a Session — and mounts only while the overlay is open, so the
+ * effects below run exactly while it is on screen.
  */
 export function A2AConversation({
   bots,
@@ -165,7 +161,6 @@ export function A2AConversation({
   thread,
   send,
   guidance,
-  meta,
   grouptask,
   browserOpen,
   useUnread,
@@ -177,10 +172,13 @@ export function A2AConversation({
   t,
 }: InjectFace<A2AConversationInjected> & { t: Translate }): ReactNode {
   const [mode, setMode] = useState<'private' | 'grouptask'>('private')
+  // The left group tab's + button arrives as a grouptask target with an
+  // empty taskKey; the create modal rides this counter (GroupTaskView).
   const [gtCreateSignal, setGtCreateSignal] = useState(0)
-  // External navigation (conversation-list tabs): the task to land on,
-  // re-armed per click (identity, not value, so repeat clicks re-fire).
+  // External navigation (conversation-list tabs): the task / collab to land
+  // on, re-armed per click (identity, not value, so repeat clicks re-fire).
   const [gtOpen, setGtOpen] = useState<{ key: string; seq: number } | null>(null)
+  const [gtCollab, setGtCollab] = useState<{ slug: string; groupId: string; seq: number } | null>(null)
   const [profiles, setProfiles] = useState<BotRow[]>([])
   const [from, setFrom] = useState('')
   const [summaries, setSummaries] = useState<ConversationSummary[] | null>(null)
@@ -196,10 +194,6 @@ export function A2AConversation({
   const [guidanceOpen, setGuidanceOpen] = useState(false)
   const [guidanceDraft, setGuidanceDraft] = useState('')
   const [guidanceStatus, setGuidanceStatus] = useState<string | null>(null)
-  // Row-menu rename modal (IDBots parity: empty save clears the override).
-  const [renameTarget, setRenameTarget] = useState<string | null>(null)
-  const [renameDraft, setRenameDraft] = useState('')
-  const [renameBusy, setRenameBusy] = useState(false)
   // The group task the user opened last; its live updates stay read while it
   // is on screen.
   const [taskKey, setTaskKey] = useState('')
@@ -219,9 +213,11 @@ export function A2AConversation({
   const reloadList = useCallback((): void => setTick((value) => value + 1), [])
 
   // One-shot navigation target (conversation-list tabs): land the panel on
-  // one private thread or group task, clear what it lights, acknowledge.
-  // The private branch rides pendingPeerRef (see above); the grouptask
-  // branch re-arms gtOpen so repeat clicks on the same task re-fire.
+  // one private thread, group task, or OpenTeam collab, clear what it
+  // lights, acknowledge. The private branch rides pendingPeerRef (see
+  // above); the grouptask/collab branches re-arm their signals so repeat
+  // clicks on the same row re-fire. A grouptask target with an empty
+  // taskKey is the left group tab's + button: open the create-task modal.
   useEffect(() => {
     const target = panelTarget
     if (target === null) return
@@ -232,9 +228,19 @@ export function A2AConversation({
       if (target.from !== from) setFrom(target.from)
       else reloadList()
       clearPrivateUnread(target.from, target.peer)
+    } else if (target.mode === 'collab') {
+      setMode('grouptask')
+      setTaskKey('')
+      setGtCollab((prev) => ({ slug: target.slug, groupId: target.groupId, seq: (prev?.seq ?? 0) + 1 }))
+    } else if (target.taskKey === '') {
+      setMode('grouptask')
+      setTaskKey('')
+      setGtOpen(null)
+      setGtCreateSignal((value) => value + 1)
     } else {
       setMode('grouptask')
       setTaskKey(target.taskKey)
+      setGtCollab(null)
       setGtOpen((prev) => ({ key: target.taskKey, seq: (prev?.seq ?? 0) + 1 }))
       clearGroupUnread(target.taskKey)
     }
@@ -275,9 +281,12 @@ export function A2AConversation({
     clearGroupUnread(key)
   }, [clearGroupUnread])
 
-  // Conversation list follows the selected local Bot; newest first comes from
-  // the api normalization. Switching Bots resets the selection; plain reloads
-  // (refresh tick, live conversation events) keep it.
+  // The conversation summary list is data, not UI: it feeds the thread
+  // header (peer name/avatar, conversation id) and validates targets. It
+  // follows the selected local Bot; newest first comes from the api
+  // normalization. Switching Bots resets the selection; plain reloads
+  // (refresh tick, live conversation events) keep it. Nothing auto-selects —
+  // with the lists in the left tabs, selection arrives only by navigation.
   useEffect(() => {
     if (!from) return
     let current = true
@@ -298,7 +307,7 @@ export function A2AConversation({
             return pending
           }
           if (peer && rows.some((row) => row.peerGlobalMetaId === peer)) return peer
-          return rows[0]?.peerGlobalMetaId ?? ''
+          return ''
         })
       },
       (cause: unknown) => {
@@ -392,18 +401,6 @@ export function A2AConversation({
     }
   }, [])
 
-  const selectPeer = (peer: string): void => {
-    clearPrivateUnread(from, peer)
-    if (peer === selectedPeer) {
-      const el = messagesRef.current
-      if (el) el.scrollTop = el.scrollHeight
-      return
-    }
-    setSelectedPeer(peer)
-    setGuidanceStatus(null)
-    setGuidanceOpen(false)
-  }
-
   // Avatar click: open the sender's Bot page in the right-Sidebar Bot
   // Browser tab (the overlay keeps the right Sidebar mounted).
   const openBotPage = useCallback((globalMetaId: string): void => {
@@ -411,33 +408,6 @@ export function A2AConversation({
     if (!gmid) return
     void browserOpen(`metaid://${gmid}`)
   }, [browserOpen])
-
-  // Row-menu writes (pin/archive/rename). One shared path: apply, then let the
-  // SSE conversation-update (published by the daemon write) plus this explicit
-  // reload race to refresh the list. Failures surface in the list error slot.
-  const applyConversationMeta = useCallback(async (
-    peer: string,
-    patch: { pinned?: boolean; archived?: boolean; displayName?: string | null },
-  ): Promise<void> => {
-    if (!from || !peer) return
-    try {
-      await meta(from, peer, patch)
-      reloadList()
-    } catch (cause) {
-      setListError(errorText(cause))
-    }
-  }, [from, meta, reloadList])
-
-  const submitRename = async (): Promise<void> => {
-    if (renameTarget === null || renameBusy) return
-    setRenameBusy(true)
-    try {
-      await applyConversationMeta(renameTarget, { displayName: renameDraft })
-      setRenameTarget(null)
-    } finally {
-      setRenameBusy(false)
-    }
-  }
 
   // Group-task drawer: open one deliverable/resource URI in the right-Sidebar
   // Bot Browser tab.
@@ -530,39 +500,6 @@ export function A2AConversation({
 
   return (
     <div className="oac-a2a-panel" aria-label={t('title')}>
-      <div className="oac-a2a-header">
-        <div className="oac-gt-header-left">
-          <h2>{t('title')}</h2>
-          <div className="oac-tablist oac-gt-mode-tabs" role="tablist">
-            {(['private', 'grouptask'] as const).map((key) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                className="oac-tab"
-                data-active={mode === key}
-                onClick={() => setMode(key)}
-              >
-                {t(key === 'private' ? 'tabPrivate' : 'tabGroup')}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="oac-gt-header-right">
-          {mode === 'grouptask' ? (
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              icon={<IconPlusOutline16 />}
-              onClick={() => setGtCreateSignal((value) => value + 1)}
-            >
-              {t('gtNew')}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      <div className="oac-a2a-main">
       {mode === 'grouptask' ? (
         <GroupTaskView
           bots={profiles}
@@ -570,289 +507,189 @@ export function A2AConversation({
           t={t}
           createSignal={gtCreateSignal}
           openTaskSignal={gtOpen}
+          openCollabSignal={gtCollab}
+          hideList
           onOpenBotPage={openBotPage}
           onOpenUri={openResource}
           unreadTaskKeys={new Set(Object.keys(unread.group))}
           onTaskRead={handleTaskRead}
         />
       ) : null}
+      {/* The private thread stays mounted (display-none'd) while the panel
+          reads a group task, so scroll and guidance state survive the trip. */}
       <div className="oac-a2a-body" style={mode === 'grouptask' ? { display: 'none' } : undefined}>
-              <div className="oac-a2a-list">
-                <div className="oac-a2a-list-head">
-                  <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-bot-avatar" />
-                  <select
-                    className="oac-input oac-input-select"
-                    value={from}
-                    disabled={profiles.length === 0}
-                    aria-label={t('fieldBot')}
-                    onChange={(event) => setFrom(event.target.value)}
-                  >
-                    {profiles.map((bot) => (
-                      <option key={bot.slug} value={bot.slug}>{bot.name}</option>
-                    ))}
-                  </select>
-                </div>
-                {listError ? <p className="oac-note error">{listError}</p> : null}
-                <div className="oac-a2a-list-rows">
-                  {summaries === null ? <p className="oac-note saving">{t('loading')}</p> : null}
-                  {summaries !== null && summaries.length === 0 ? (
-                    <p className="oac-note">{t('empty')}</p>
-                  ) : null}
-                  {summaries?.map((row) => {
-                    const rowTitle = row.displayName?.trim() || row.peerName || row.peerGlobalMetaId
-                    return (
-                      <div
-                        key={row.conversationId || row.peerGlobalMetaId}
-                        role="button"
-                        tabIndex={0}
-                        className={row.peerGlobalMetaId === selectedPeer ? 'oac-a2a-row active' : 'oac-a2a-row'}
-                        onClick={() => selectPeer(row.peerGlobalMetaId)}
-                        onKeyDown={(event) => {
-                          if (event.target !== event.currentTarget) return
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            selectPeer(row.peerGlobalMetaId)
-                          }
-                        }}
-                      >
-                        <BotAvatar
-                          name={rowTitle}
-                          src={localAvatarByMetaId.get(row.peerGlobalMetaId) ?? row.peerAvatar ?? undefined}
-                          className="oac-a2a-row-avatar"
-                        />
-                        <span className="oac-a2a-row-main">
-                          <span className="oac-a2a-row-name">{rowTitle}</span>
-                          <span className="oac-a2a-row-text">{row.latestText}</span>
-                        </span>
-                        {unread.private[`${from}:${row.peerGlobalMetaId}`]
-                          ? <span className="oac-unread-dot" aria-label={t('unread')} />
-                          : null}
-                        <ConversationRowMenu
-                          pinned={row.pinned}
-                          copyId={row.conversationId}
-                          time={row.latestAt}
-                          onRename={() => {
-                            setRenameTarget(row.peerGlobalMetaId)
-                            setRenameDraft(row.displayName ?? '')
-                          }}
-                          onTogglePin={(pinned) => { void applyConversationMeta(row.peerGlobalMetaId, { pinned }) }}
-                          onArchive={() => { void applyConversationMeta(row.peerGlobalMetaId, { archived: true }) }}
-                          t={t}
-                        />
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-              <div className="oac-a2a-thread">
-                <div className="oac-a2a-thread-head">
-                  {selectedSummary ? (
-                    <div className="oac-a2a-participants">
-                      <div className="oac-a2a-participant">
-                        <BotAvatarButton
-                          name={peerLabel}
-                          src={peerAvatar}
-                          className="oac-a2a-thread-avatar"
-                          label={`${t('openBotPage')}: ${peerLabel}`}
-                          onClick={() => openBotPage(selectedPeer)}
-                        />
-                        <strong className="oac-a2a-participant-name">{peerLabel}</strong>
-                        <span className="oac-a2a-gmid">
-                          <code title={selectedPeer}>{txidPreview(selectedPeer)}</code>
-                          <CopyIconButton
-                            value={selectedPeer}
-                            label={`${t('copyGmid')}: ${selectedPeer}`}
-                            copiedLabel={t('copied')}
-                          />
-                        </span>
-                      </div>
-                      <span className="oac-a2a-id" title={selectedSummary.conversationId}>
-                        <code>id: {selectedSummary.conversationId.slice(0, 8)}…</code>
-                        <CopyIconButton
-                          value={selectedSummary.conversationId}
-                          label={`${t('copyConversationId')}: ${selectedSummary.conversationId}`}
-                          copiedLabel={t('copied')}
-                        />
-                      </span>
-                      <div className="oac-a2a-participant oac-a2a-participant-local">
-                        {localGlobalMetaId
-                          ? (
-                            <BotAvatarButton
-                              name={localLabel}
-                              src={localAvatar}
-                              className="oac-a2a-thread-avatar"
-                              label={`${t('openBotPage')}: ${localLabel}`}
-                              onClick={() => openBotPage(localGlobalMetaId)}
-                            />
-                          )
-                          : <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-thread-avatar" />}
-                        <strong className="oac-a2a-participant-name">{localLabel}</strong>
-                        {localGlobalMetaId ? (
-                          <span className="oac-a2a-gmid">
-                            <code title={localGlobalMetaId}>{txidPreview(localGlobalMetaId)}</code>
-                            <CopyIconButton
-                              value={localGlobalMetaId}
-                              label={`${t('copyGmid')}: ${localGlobalMetaId}`}
-                              copiedLabel={t('copied')}
-                            />
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : (
-                    <span className="oac-note">{t('selectConversation')}</span>
-                  )}
-                </div>
-                <div className="oac-a2a-messages" ref={messagesRef} onScroll={onMessagesScroll}>
-                  {threadStatus === 'loading' ? <p className="oac-note saving">{t('loadingMessages')}</p> : null}
-                  {threadStatus === 'error' ? <p className="oac-note error">{threadError ?? t('error')}</p> : null}
-                  {threadStatus === 'ready' && threadData !== null && threadData.messages.length === 0 ? (
-                    <p className="oac-note">{t('noMessages')}</p>
-                  ) : null}
-                  {threadData?.messages.map((message) => (
-                    <MessageRow
-                      key={message.messageId || `${message.direction}-${message.timestamp}`}
-                      message={message}
-                      isLocal={isLocalMessage(message)}
-                      peerLabel={peerLabel}
-                      peerAvatar={peerAvatar}
-                      peerGlobalMetaId={selectedPeer}
-                      localLabel={localLabel}
-                      localAvatar={localAvatar}
-                      localGlobalMetaId={localGlobalMetaId}
-                      onOpenBotPage={openBotPage}
-                      t={t}
+        <div className="oac-a2a-thread">
+          <div className="oac-a2a-thread-head">
+            {selectedSummary ? (
+              <div className="oac-a2a-participants">
+                <div className="oac-a2a-participant">
+                  <BotAvatarButton
+                    name={peerLabel}
+                    src={peerAvatar}
+                    className="oac-a2a-thread-avatar"
+                    label={`${t('openBotPage')}: ${peerLabel}`}
+                    onClick={() => openBotPage(selectedPeer)}
+                  />
+                  <strong className="oac-a2a-participant-name">{peerLabel}</strong>
+                  <span className="oac-a2a-gmid">
+                    <code title={selectedPeer}>{txidPreview(selectedPeer)}</code>
+                    <CopyIconButton
+                      value={selectedPeer}
+                      label={`${t('copyGmid')}: ${selectedPeer}`}
+                      copiedLabel={t('copied')}
                     />
-                  ))}
+                  </span>
                 </div>
-                <div className="oac-a2a-composer">
-                  {selectedPeer ? (
-                    <div className="oac-a2a-guidance">
-                      {guidanceStatus !== null ? (
-                        <p className="oac-note">{guidanceStatus}</p>
-                      ) : guidanceOpen ? (
-                        <div className="oac-a2a-guidance-form">
-                          <Input
-                            className="oac-a2a-guidance-input"
-                            value={guidanceDraft}
-                            onChange={(event) => setGuidanceDraft(event.target.value)}
-                            placeholder={t('guidancePlaceholder')}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' && !event.shiftKey) {
-                                event.preventDefault()
-                                void submitGuidance()
-                              }
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            variant="primary"
-                            size="sm"
-                            icon={<IconSendOutline16 />}
-                            disabled={!guidanceDraft.trim()}
-                            onClick={() => { void submitGuidance() }}
-                          >
-                            {t('guidanceSend')}
-                          </Button>
-                          <button
-                            type="button"
-                            className="oac-a2a-guidance-close"
-                            aria-label={t('guidanceCancel')}
-                            title={t('guidanceCancel')}
-                            onClick={() => {
-                              setGuidanceOpen(false)
-                              setGuidanceDraft('')
-                            }}
-                          >
-                            <IconCloseOutline16 size={12} />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="oac-a2a-guidance-toggle"
-                          onClick={() => setGuidanceOpen(true)}
-                        >
-                          {t('guidanceToggle')}
-                        </button>
-                      )}
-                    </div>
-                  ) : null}
-                  {/* OAC /ui/conversations parity: a selected conversation is
-                      Steer-only — no free message composer. The plain composer
-                      exists solely to start a brand-new conversation. */}
-                  {!selectedPeer ? (
-                    <>
-                      <Input
-                        value={peerDraft}
-                        onChange={(event) => setPeerDraft(event.target.value)}
-                        placeholder={t('peerPlaceholder')}
+                <span className="oac-a2a-id" title={selectedSummary.conversationId}>
+                  <code>id: {selectedSummary.conversationId.slice(0, 8)}…</code>
+                  <CopyIconButton
+                    value={selectedSummary.conversationId}
+                    label={`${t('copyConversationId')}: ${selectedSummary.conversationId}`}
+                    copiedLabel={t('copied')}
+                  />
+                </span>
+                <div className="oac-a2a-participant oac-a2a-participant-local">
+                  {localGlobalMetaId
+                    ? (
+                      <BotAvatarButton
+                        name={localLabel}
+                        src={localAvatar}
+                        className="oac-a2a-thread-avatar"
+                        label={`${t('openBotPage')}: ${localLabel}`}
+                        onClick={() => openBotPage(localGlobalMetaId)}
                       />
-                      <div className="oac-a2a-composer-row">
-                        <Input
-                          value={draft}
-                          onChange={(event) => setDraft(event.target.value)}
-                          placeholder={t('messagePlaceholder')}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' && !event.shiftKey) {
-                              event.preventDefault()
-                              if (!busy) void onSend()
-                            }
-                          }}
-                        />
-                        <Button
-                          type="button"
-                          variant="primary"
-                          icon={<IconSendOutline16 />}
-                          disabled={busy || !from || !draft.trim() || !peerDraft.trim()}
-                          onClick={() => { void onSend() }}
-                        >
-                          {busy ? t('sending') : t('send')}
-                        </Button>
-                      </div>
-                    </>
+                    )
+                    : <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-thread-avatar" />}
+                  <strong className="oac-a2a-participant-name">{localLabel}</strong>
+                  {localGlobalMetaId ? (
+                    <span className="oac-a2a-gmid">
+                      <code title={localGlobalMetaId}>{txidPreview(localGlobalMetaId)}</code>
+                      <CopyIconButton
+                        value={localGlobalMetaId}
+                        label={`${t('copyGmid')}: ${localGlobalMetaId}`}
+                        copiedLabel={t('copied')}
+                      />
+                    </span>
                   ) : null}
                 </div>
               </div>
-            </div>
-      </div>
-            {/* Row-menu rename modal (DSH home-list rename pattern). */}
-            <Modal
-              closeLabel={t('close')}
-              open={renameTarget !== null}
-              onClose={() => { if (!renameBusy) setRenameTarget(null) }}
-              title={t('renameConversationTitle')}
-              className="oac-dialog-delete"
-              footer={(
-                <>
-                  <Button type="button" variant="outline" disabled={renameBusy} onClick={() => setRenameTarget(null)}>
-                    {t('guidanceCancel')}
-                  </Button>
-                  <Button type="button" variant="primary" disabled={renameBusy} onClick={() => { void submitRename() }}>
-                    {renameBusy ? t('sending') : t('menuRename')}
-                  </Button>
-                </>
-              )}
-            >
-              <div className="oac-gt-form">
-                <label className="oac-gt-form-field">
-                  <span className="oac-gt-field-label">{t('renameConversationField')}</span>
+            ) : (
+              <span className="oac-note">{listError ?? t('pickOnlineLeft')}</span>
+            )}
+          </div>
+          <div className="oac-a2a-messages" ref={messagesRef} onScroll={onMessagesScroll}>
+            {threadStatus === 'loading' ? <p className="oac-note saving">{t('loadingMessages')}</p> : null}
+            {threadStatus === 'error' ? <p className="oac-note error">{threadError ?? t('error')}</p> : null}
+            {threadStatus === 'ready' && threadData !== null && threadData.messages.length === 0 ? (
+              <p className="oac-note">{t('noMessages')}</p>
+            ) : null}
+            {threadData?.messages.map((message) => (
+              <MessageRow
+                key={message.messageId || `${message.direction}-${message.timestamp}`}
+                message={message}
+                isLocal={isLocalMessage(message)}
+                peerLabel={peerLabel}
+                peerAvatar={peerAvatar}
+                peerGlobalMetaId={selectedPeer}
+                localLabel={localLabel}
+                localAvatar={localAvatar}
+                localGlobalMetaId={localGlobalMetaId}
+                onOpenBotPage={openBotPage}
+                t={t}
+              />
+            ))}
+          </div>
+          <div className="oac-a2a-composer">
+            {selectedPeer ? (
+              <div className="oac-a2a-guidance">
+                {guidanceStatus !== null ? (
+                  <p className="oac-note">{guidanceStatus}</p>
+                ) : guidanceOpen ? (
+                  <div className="oac-a2a-guidance-form">
+                    <Input
+                      className="oac-a2a-guidance-input"
+                      value={guidanceDraft}
+                      onChange={(event) => setGuidanceDraft(event.target.value)}
+                      placeholder={t('guidancePlaceholder')}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault()
+                          void submitGuidance()
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      icon={<IconSendOutline16 />}
+                      disabled={!guidanceDraft.trim()}
+                      onClick={() => { void submitGuidance() }}
+                    >
+                      {t('guidanceSend')}
+                    </Button>
+                    <button
+                      type="button"
+                      className="oac-a2a-guidance-close"
+                      aria-label={t('guidanceCancel')}
+                      title={t('guidanceCancel')}
+                      onClick={() => {
+                        setGuidanceOpen(false)
+                        setGuidanceDraft('')
+                      }}
+                    >
+                      <IconCloseOutline16 size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="oac-a2a-guidance-toggle"
+                    onClick={() => setGuidanceOpen(true)}
+                  >
+                    {t('guidanceToggle')}
+                  </button>
+                )}
+              </div>
+            ) : null}
+            {/* OAC /ui/conversations parity: a selected conversation is
+                Steer-only — no free message composer. The plain composer
+                exists solely to start a brand-new conversation, and with the
+                lists in the left tabs it doubles as the empty state. */}
+            {!selectedPeer ? (
+              <>
+                <Input
+                  value={peerDraft}
+                  onChange={(event) => setPeerDraft(event.target.value)}
+                  placeholder={t('peerPlaceholder')}
+                />
+                <div className="oac-a2a-composer-row">
                   <Input
-                    value={renameDraft}
-                    disabled={renameBusy}
-                    autoFocus
-                    onChange={(event) => setRenameDraft(event.target.value)}
-                    placeholder={t('renameConversationPlaceholder')}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder={t('messagePlaceholder')}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                      if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault()
-                        if (!renameBusy) void submitRename()
+                        if (!busy) void onSend()
                       }
                     }}
                   />
-                </label>
-              </div>
-            </Modal>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    icon={<IconSendOutline16 />}
+                    disabled={busy || !from || !draft.trim() || !peerDraft.trim()}
+                    onClick={() => { void onSend() }}
+                  >
+                    {busy ? t('sending') : t('send')}
+                  </Button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

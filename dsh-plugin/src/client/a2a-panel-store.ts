@@ -10,10 +10,13 @@
  * state through the inject `hooks` compartment.
  *
  * The store also carries a one-shot navigation target: the conversation-list
- * tabs (本地对话 / 线上对话 / 群任务) navigate by opening this overlay
- * pre-positioned on one thread or task. `openOn` writes the target, the
- * mounted panel applies it and consumes it; `close` drops any unconsumed
- * target so a stale one never re-applies on a later open.
+ * tabs (本地对话 / 线上对话 / 群任务) own every list, so the overlay is a pure
+ * reading surface and rows navigate by opening it pre-positioned — on one
+ * private thread (`private`), one group task (`grouptask`; an empty taskKey
+ * opens the create-task modal), or one OpenTeam guest collaboration
+ * (`collab`). `openOn` writes the target, the mounted panel applies it and
+ * consumes it; `close` drops any unconsumed target so a stale one never
+ * re-applies on a later open.
  */
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 
@@ -21,6 +24,7 @@ import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client
 export type A2APanelTarget =
   | { mode: 'private'; from: string; peer: string }
   | { mode: 'grouptask'; taskKey: string }
+  | { mode: 'collab'; slug: string; groupId: string }
 
 export type A2APanelState = {
   /** Whether the A2A Chat overlay covers the center column. */
@@ -47,7 +51,7 @@ export class A2APanelStore implements SnapshotStore<A2APanelState> {
     this.set(this.inner.getSnapshot().open ? CLOSED : { open: true, target: null })
   }
 
-  /** Open the overlay positioned on one thread/task (conversation-list tabs). */
+  /** Open the overlay positioned on one thread/task/collab (conversation-list tabs). */
   openOn(target: A2APanelTarget): void {
     this.set({ open: true, target })
   }

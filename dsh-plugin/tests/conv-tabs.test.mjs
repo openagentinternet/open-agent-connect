@@ -77,11 +77,54 @@ test('the A2A panel store carries a one-shot navigation target', async () => {
   assert.match(store, /consumeTarget\(\)/)
   // close() drops an unconsumed target so a stale one never re-applies later.
   assert.match(store, /open \|\| this\.inner\.getSnapshot\(\)\.target !== null/)
+  // Round 2: collab navigation + the create-task form of the grouptask target.
+  assert.match(store, /\| \{ mode: 'collab'; slug: string; groupId: string \}/)
+})
+
+test('the A2A panel is a pure reading pane (no header, no mode tabs, no list)', async () => {
+  const panel = await readFile(join(root, 'src/client/A2AConversation.tsx'), 'utf8')
+  assert.doesNotMatch(panel, /oac-a2a-header/)
+  assert.doesNotMatch(panel, /oac-gt-mode-tabs/)
+  assert.doesNotMatch(panel, /oac-a2a-list/)
+  assert.doesNotMatch(panel, /ConversationRowMenu/)
+  // Detail-only group view + collab/crate targets flow through the signals.
+  assert.match(panel, /hideList/)
+  assert.match(panel, /openCollabSignal=\{gtCollab\}/)
+  assert.match(panel, /setGtCreateSignal\(\(value\) => value \+ 1\)/)
+  // Nothing auto-selects: with the lists on the left, selection arrives only
+  // by navigation (the empty hint shows otherwise).
+  assert.match(panel, /pickOnlineLeft/)
+  assert.doesNotMatch(panel, /rows\[0\]\?\.peerGlobalMetaId \?\? ''/)
+})
+
+test('GroupTaskView hides its list and shows the pick-left hint in detail-only mode', async () => {
+  const view = await readFile(join(root, 'src/client/GroupTaskView.tsx'), 'utf8')
+  assert.match(view, /hideList\?: boolean/)
+  assert.match(view, /if \(hideList === true\) return null/)
+  assert.match(view, /pickTaskLeft/)
+  assert.match(view, /openCollabSignal\?: \{ slug: string; groupId: string; seq: number \} \| null/)
+})
+
+test('the left lists carry the row menus, staffing slate, collabs, and the create button', async () => {
+  const tabs = await readFile(join(root, 'src/client/ConvTabs.tsx'), 'utf8')
+  // IDBots hover menu on both lists (rename/pin/archive ride it).
+  assert.match(tabs, /ConversationRowMenu/)
+  assert.match(tabs, /grouptask\.rename\(/)
+  assert.match(tabs, /grouptask\.archive\(/)
+  // Group archive asks first (IDBots parity).
+  assert.match(tabs, /gtArchiveConfirmTitle/)
+  // The 群任务 tab owns the health note, staffing slate, collabs, and +.
+  assert.match(tabs, /gtHealthNoChair/)
+  assert.match(tabs, /staffingDecide/)
+  assert.match(tabs, /openCollab\(collab\.slug, collab\.groupId\)/)
+  assert.match(tabs, /openGroupTask\(''\)/)
+  // Private row menus keep the UI-meta verbs the panel used to carry.
+  assert.match(tabs, /meta\(from, peer, patch\)|applyConversationMeta/)
 })
 
 test('the mounted lists keep locale coverage in both dictionaries', async () => {
   const locale = await readFile(join(root, 'src/client/locale-conversations.ts'), 'utf8')
-  for (const key of ['convTabStripLabel', 'convTabLocal', 'convTabOnline', 'convTabGroup']) {
+  for (const key of ['convTabStripLabel', 'convTabLocal', 'convTabOnline', 'convTabGroup', 'pickOnlineLeft', 'pickTaskLeft']) {
     const occurrences = locale.split(`${key}:`).length - 1
     assert.equal(occurrences, 2, `${key} must exist in both en and zh dictionaries`)
   }

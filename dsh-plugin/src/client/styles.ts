@@ -890,4 +890,13 @@ html.oac-conv-tabs-active [data-slot="sidebar.workspaces"] { display: none !impo
 .oac-conv-row-top .oac-a2a-row-name { flex: 0 1 auto; }
 .oac-conv-row-time { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
 .oac-conv-row .oac-gt-row-meta { gap: 6px; }
+
+/* Round-2 panel restructure: the left tabs own every list, so the group
+   list head carries a title + the create-task button, and the staffing
+   slate / collabs sections ride the narrow column with tighter padding. */
+.oac-conv-list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
+.oac-conv-staffing { padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.oac-conv-staffing .oac-gt-staffing-title { flex-wrap: wrap; gap: 4px; }
+.oac-conv-staffing .oac-gt-staffing-actions { flex-wrap: wrap; }
+.oac-conv-list-rows .oac-gt-collabs { padding-top: 6px; border-top: 1px solid var(--dsw-alias-border-l2); margin-top: 4px; }
 `

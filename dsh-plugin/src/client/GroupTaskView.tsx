@@ -229,7 +229,7 @@ function deliverableVerificationState(
   return 'unverified'
 }
 
-function guestInviteStatusKey(status: OpenTeamGuestInviteRow['status']): ConversationsLocaleKey {
+export function guestInviteStatusKey(status: OpenTeamGuestInviteRow['status']): ConversationsLocaleKey {
   switch (status) {
     case 'accepted': return 'gtGuestInviteAccepted'
     case 'declined': return 'gtGuestInviteDeclined'
@@ -649,6 +649,8 @@ export function GroupTaskView({
   t,
   createSignal,
   openTaskSignal,
+  openCollabSignal,
+  hideList,
   onOpenBotPage,
   onOpenUri,
   unreadTaskKeys,
@@ -660,6 +662,10 @@ export function GroupTaskView({
   createSignal: number
   /** External navigation (conversation-list tabs): land on one task; identity re-arms on repeat clicks. */
   openTaskSignal?: { key: string; seq: number } | null
+  /** External navigation: land on one OpenTeam guest collaboration (identity re-arms). */
+  openCollabSignal?: { slug: string; groupId: string; seq: number } | null
+  /** Detail-only mode (the A2A panel): the task list lives in the left 群任务 tab, so this view renders just the thread column and never auto-selects. */
+  hideList?: boolean
   /** Open one participant's Bot page in the right-sidebar Bot Browser. */
   onOpenBotPage?: (globalMetaId: string) => void
   /** Open one deliverable/resource URI in the right-sidebar Bot Browser. */
@@ -758,14 +764,25 @@ export function GroupTaskView({
     if (signal === null || signal === undefined || signal.key === '') return
     const parsed = parseGroupTaskKey(signal.key)
     if (parsed === null) return
+    setSelectedCollab(null)
     setSelected({ chair: parsed.chair, taskId: parsed.taskId })
     onTaskRead?.(signal.key)
   }, [openTaskSignal, onTaskRead])
 
+  // External navigation: land on one OpenTeam guest collaboration (clears
+  // any task selection — the two detail views are exclusive).
+  useEffect(() => {
+    const signal = openCollabSignal
+    if (signal === null || signal === undefined) return
+    setSelected(null)
+    setSelectedCollab({ slug: signal.slug, groupId: signal.groupId })
+  }, [openCollabSignal])
+
   // Task list follows the filter; keep the previous rows on screen during
   // reloads so the list does not flash. Archived tasks are always hidden
   // (IDBots parity: archive folds the row out of the live list; the archived
-  // surface with restore is a follow-up).
+  // surface with restore is a follow-up). In detail-only mode nothing
+  // auto-selects — selection arrives only from the left list's navigation.
   useEffect(() => {
     let current = true
     void gt.list(filter, false).then(
@@ -775,6 +792,7 @@ export function GroupTaskView({
         setListError(null)
         setSelected((value) => {
           if (value && rows.some((row) => row.chairSlug === value.chair && row.id === value.taskId)) return value
+          if (hideList === true) return null
           const first = rows[0]
           return first ? { chair: first.chairSlug, taskId: first.id } : null
         })
@@ -786,7 +804,7 @@ export function GroupTaskView({
       },
     )
     return () => { current = false }
-  }, [gt, filter, tick])
+  }, [gt, filter, tick, hideList])
 
   // Guest-side collaborations refresh with the list (failures leave the
   // section hidden rather than surfacing an error).
@@ -1061,6 +1079,7 @@ export function GroupTaskView({
 
   return (
     <div className="oac-a2a-body">
+      {hideList === true ? null : (
       <div className="oac-a2a-list">
         <div className="oac-a2a-list-head">
           <select
@@ -1221,8 +1240,13 @@ export function GroupTaskView({
           ) : null}
         </div>
       </div>
+      )}
       <div className="oac-a2a-thread">
-        {selectedCollab !== null ? (
+        {hideList === true && selectedCollab === null && selected === null ? (
+          <div className="oac-gt-placeholder">
+            <span className="oac-note">{listError ?? t('pickTaskLeft')}</span>
+          </div>
+        ) : selectedCollab !== null ? (
           <>
             {collabStatus === 'idle' || collabStatus === 'loading' ? (
               <div className="oac-gt-placeholder"><span className="oac-note saving">{t('gtLoading')}</span></div>
