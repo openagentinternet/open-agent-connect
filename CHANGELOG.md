@@ -5,6 +5,18 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
+## Unreleased
+
+### Changed
+
+- Integrated Agent Browser Core 0.6.0 across the root package and all skillpack
+  runtimes (host-contract, core, renderers, name-resolvers, ui, test-harness).
+  Upstream behavior changes verified compatible: the sandboxed PDF renderer
+  iframe now uses the html-iframe sandbox profile so Chrome's built-in PDF
+  viewer works (plus an "Open PDF" fallback link), and pin payloads whose JSON
+  body carries a `text/markdown` content field render as a safely rendered
+  markdown document.
+
 ## 0.8.0 - 2026-09-13
 
 ### Fixed
