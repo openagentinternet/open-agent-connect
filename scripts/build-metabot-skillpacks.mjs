@@ -31,6 +31,16 @@ const METABOT_SKILLS = [
   'metabot-upload-file',
   'metabot-wallet-manage',
   'metabot-schedule',
+  'metabot-memory',
+  'metabot-dream',
+  'metabot-knowledge-base',
+  'metabot-qanda',
+  'metabot-protocol',
+  'metabot-surf',
+  'metabot-media',
+  'metabot-simplenote',
+  'metabot-grouptask',
+  'metabot-twin',
 ];
 
 const HOSTS = {

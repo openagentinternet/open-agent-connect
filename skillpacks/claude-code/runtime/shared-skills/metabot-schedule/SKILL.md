@@ -150,7 +150,7 @@ $HOME/.metabot/bin/metabot schedule create --name "weekly review" \
 ## Handoff To
 
 - `metabot-help` for capability questions.
-- `metabot-memory-*` skills when a task's work is about memory.
+- `metabot-memory` when a task's work is about memory.
 - `metabot-metaweb` / `metabot-browser` when a task prompt needs web reads.
 
 ## Compatibility

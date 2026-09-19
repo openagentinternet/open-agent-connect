@@ -52,6 +52,17 @@ CLI help:
 {{METABOT_CLI}} config --help
 {{METABOT_CLI}} ui --help
 {{METABOT_CLI}} llm --help
+{{METABOT_CLI}} metaweb --help
+{{METABOT_CLI}} memory --help
+{{METABOT_CLI}} dream --help
+{{METABOT_CLI}} knowledge-base --help
+{{METABOT_CLI}} qanda --help
+{{METABOT_CLI}} protocol --help
+{{METABOT_CLI}} surf --help
+{{METABOT_CLI}} media --help
+{{METABOT_CLI}} simplenote --help
+{{METABOT_CLI}} grouptask --help
+{{METABOT_CLI}} twin --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill
@@ -171,6 +182,16 @@ or provider workflows:
 - Use `metabot-wallet-manage` for balances and transfers.
 - Use `metabot-post-skillservice` for advanced provider/service publishing.
 - Use `metabot-omni-reader` for read-only MetaWeb inspection.
+- Use `metabot-memory` for long-term memory, recall, and past conversations.
+- Use `metabot-dream` for dream runs, diaries, and self-identity.
+- Use `metabot-knowledge-base` for document knowledge bases.
+- Use `metabot-qanda` for the on-chain Q&A community.
+- Use `metabot-protocol` for the metaprotocol registry.
+- Use `metabot-surf` for autonomous MetaWeb surf runs.
+- Use `metabot-media` to understand images, videos, and audio.
+- Use `metabot-simplenote` for on-chain long-form articles.
+- Use `metabot-grouptask` for multi-Bot group tasks.
+- Use `metabot-twin` for the Twin Bot and local worker roster.
 
 ## Compatibility
 

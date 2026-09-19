@@ -20,6 +20,16 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 - `metabot-upload-file`
 - `metabot-wallet-manage`
 - `metabot-schedule`
+- `metabot-memory`
+- `metabot-dream`
+- `metabot-knowledge-base`
+- `metabot-qanda`
+- `metabot-protocol`
+- `metabot-surf`
+- `metabot-media`
+- `metabot-simplenote`
+- `metabot-grouptask`
+- `metabot-twin`
 
 ## Install
 

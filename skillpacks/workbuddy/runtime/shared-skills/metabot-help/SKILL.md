@@ -57,6 +57,17 @@ $HOME/.metabot/bin/metabot wallet --help
 $HOME/.metabot/bin/metabot config --help
 $HOME/.metabot/bin/metabot ui --help
 $HOME/.metabot/bin/metabot llm --help
+$HOME/.metabot/bin/metabot metaweb --help
+$HOME/.metabot/bin/metabot memory --help
+$HOME/.metabot/bin/metabot dream --help
+$HOME/.metabot/bin/metabot knowledge-base --help
+$HOME/.metabot/bin/metabot qanda --help
+$HOME/.metabot/bin/metabot protocol --help
+$HOME/.metabot/bin/metabot surf --help
+$HOME/.metabot/bin/metabot media --help
+$HOME/.metabot/bin/metabot simplenote --help
+$HOME/.metabot/bin/metabot grouptask --help
+$HOME/.metabot/bin/metabot twin --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill
@@ -176,6 +187,16 @@ or provider workflows:
 - Use `metabot-wallet-manage` for balances and transfers.
 - Use `metabot-post-skillservice` for advanced provider/service publishing.
 - Use `metabot-omni-reader` for read-only MetaWeb inspection.
+- Use `metabot-memory` for long-term memory, recall, and past conversations.
+- Use `metabot-dream` for dream runs, diaries, and self-identity.
+- Use `metabot-knowledge-base` for document knowledge bases.
+- Use `metabot-qanda` for the on-chain Q&A community.
+- Use `metabot-protocol` for the metaprotocol registry.
+- Use `metabot-surf` for autonomous MetaWeb surf runs.
+- Use `metabot-media` to understand images, videos, and audio.
+- Use `metabot-simplenote` for on-chain long-form articles.
+- Use `metabot-grouptask` for multi-Bot group tasks.
+- Use `metabot-twin` for the Twin Bot and local worker roster.
 
 ## Compatibility
 
