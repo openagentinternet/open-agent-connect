@@ -45,6 +45,19 @@ export function shouldResetIframeSrc(paramsUrl: string | null, loadedUrl: string
 }
 
 /**
+ * DSH 0.1.6 persists the right-Sidebar layout per session and restores it
+ * across page reloads. A restored bot-browser tab remounts with NO navigation
+ * in this window — `revision` 0 and no params (persistence stores only
+ * `{id, kind, contentId, title}`) — so the body must re-acquire its content;
+ * loading the Browser home lets ABC inside reconstruct the real page state
+ * from the daemon. A FRESH empty open (the guide-page capsule) records
+ * `revision` 1 and keeps its designed landing state.
+ */
+export function shouldRestoreBrowserContent(revision: number, paramsUrl: string | null): boolean {
+  return revision === 0 && paramsUrl === null
+}
+
+/**
  * openTab-retry delays: `ctx.sidebarRight.openTab` throws while no Session
  * surface is mounted (e.g. right after `selectPanel(null)` flips back from a
  * global main panel, before the right-Sidebar seat remounts). Three short

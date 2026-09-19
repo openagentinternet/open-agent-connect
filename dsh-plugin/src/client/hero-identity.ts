@@ -68,7 +68,7 @@ import type { BotPresetSeatState } from './preset-seat-store.ts'
  * pins the climb to the real headline.
  */
 function spansBrandMark(row: HTMLElement, brand: SVGElement): boolean {
-  for (const child of row.children) {
+  for (const child of Array.from(row.children)) {
     if (child instanceof HTMLSpanElement && child.contains(brand)) return true
   }
   return false
@@ -122,8 +122,10 @@ export function startHeroIdentityMount(store: SnapshotStore<BotPresetSeatState>)
   let root: Root | null = null
   let host: HTMLElement | null = null
 
+  // Re-anchor use only: unmount the current block. The observer and heartbeat
+  // stay alive — attach() below calls this mid-pass, so lifecycle teardown
+  // (disconnect/clearInterval) belongs exclusively to the returned stop.
   const release = (): void => {
-    clearInterval(heartbeat)
     // try/finally: a throwing root.unmount() must not skip the host removal —
     // a stranded host is exactly the stuck-avatar bug this mount exists to
     // avoid.
@@ -140,7 +142,7 @@ export function startHeroIdentityMount(store: SnapshotStore<BotPresetSeatState>)
     // Sweep orphaned identity hosts first: a stale client instance (reload
     // churn) or an exception-stranded host would render a duplicate block
     // beside this watcher's own.
-    for (const stray of document.querySelectorAll('[data-oac-hero-identity]')) {
+    for (const stray of Array.from(document.querySelectorAll('[data-oac-hero-identity]'))) {
       if (stray !== host) stray.remove()
     }
     if (host !== null && host.isConnected) {
@@ -176,5 +178,12 @@ export function startHeroIdentityMount(store: SnapshotStore<BotPresetSeatState>)
   // (and a dead observer cannot silence the mount).
   const heartbeat = setInterval(attach, 300)
   attach()
-  return release
+  // DSH 0.1.6 live-disables/reloads client bundles without a page unload:
+  // the stop must unwind EVERYTHING (observer included), or a disabled plugin
+  // keeps re-mounting the identity block off document.body mutations.
+  return () => {
+    observer.disconnect()
+    clearInterval(heartbeat)
+    release()
+  }
 }

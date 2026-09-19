@@ -123,6 +123,17 @@ test('shouldResetIframeSrc: fresh url replaces, same url and url-less navigation
   assert.equal(flow.shouldResetIframeSrc('http://a', null), true)
 })
 
+test('shouldRestoreBrowserContent: only a persistence-restored tab (revision 0, no url) restores', () => {
+  // DSH 0.1.6 right-Sidebar layout persistence remounts the tab after a page
+  // reload with no navigation record; the body re-acquires the Browser home.
+  assert.equal(flow.shouldRestoreBrowserContent(0, null), true)
+  // A fresh empty open (guide capsule) records revision 1: landing stays.
+  assert.equal(flow.shouldRestoreBrowserContent(1, null), false)
+  // Any carried url loads directly, nothing to restore.
+  assert.equal(flow.shouldRestoreBrowserContent(0, 'http://a'), false)
+  assert.equal(flow.shouldRestoreBrowserContent(2, 'http://a'), false)
+})
+
 test('client registers the bot-browser tab type, body, and title on the right Sidebar', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(text, /sidebarRightTabs\.register\(\{/)
@@ -167,6 +178,8 @@ test('bot-browser tab body reads navigation params and guards same-url reveals',
   assert.match(text, /tab\.navigation\.params/)
   assert.match(text, /tab\.navigation\.revision/)
   assert.match(text, /shouldResetIframeSrc\(paramsUrl, loadedUrl\)/)
+  // DSH 0.1.6 layout persistence: a restored tab re-acquires the Browser home.
+  assert.match(text, /shouldRestoreBrowserContent\(tab\.navigation\.revision, paramsUrl\)/)
   assert.match(text, /<BrowserStage/)
 })
 

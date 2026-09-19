@@ -769,6 +769,7 @@ export {
   type ConvTab,
 } from './conv-tab-logic.js'
 export { resolveAvatarUrl, extractAvatarPinReference, isAvatarContentReference } from './avatar-url.js'
+export { currentMainViewSessionId, type SessionListCurrentLike } from './current-session.js'
 export { relativeTimeLabel } from './relative-time.js'
 export { daemonConversationsList, daemonConversationsMessages } from './conversation-bridge.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'

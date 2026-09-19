@@ -116,7 +116,7 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
     const request = next ? surfEnable(bot.slug) : surfDisable(bot.slug)
     request
       .then(async (result) => {
-        if (next && 'qaSurfRetired' in result && result.qaSurfRetired) {
+        if (next && result && 'qaSurfRetired' in result && result.qaSurfRetired) {
           setSettingsNotice(t('surfQaSurfRetired'))
         }
         await loadStatus(20)

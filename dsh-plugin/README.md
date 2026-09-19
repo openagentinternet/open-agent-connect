@@ -8,21 +8,43 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
-Host kernel requirement: this plugin is built against the DSH **0.1.5-rc.2**
-client surface (npm `next` dist-tag) and verified against the **0.1.5-rc.1**
-source tree. The 0.1.3-alpha.2 persona prefix/suffix split is handled at preset
-write time: the Bot persona becomes the persona row's `prefix` (the copied
-`suffix` is kept), and legacy `text`-only rows from pre-split presets are
-healed in place on every reconcile — kernels ≥0.1.3-alpha.2 require `prefix`
-and ignore `text`, so older plugin releases silently lose the Bot persona
-there. Session format v3, the `ctx.agent` removal, and the Inbox API change
-all miss this plugin: sessions are read only through the in-process
-`snapshotEvents()`. The native-panels UI — the `sidebar.panellist`/`main`
-panel API and the right-Sidebar tab-type API (`layout`, `sidebarRight`,
-`sidebarRightTabs` services) — exists only on the 0.1.5 kernel line, so the
-web client now loads there only; the wider `^0.1.2-alpha.2 ||
-^0.1.3-alpha.1` peer ranges remain on the packages the preset/persona
-surface still shares. It will not
+Host kernel requirement: this plugin is built and verified against the DSH
+**0.1.6-alpha.2** client surface (npm `alpha` dist-tag; `next` still points
+at 0.1.5-rc.2) and runs on both the **0.1.5** and **0.1.6** kernel lines —
+most peer ranges are `^0.1.5-alpha.1 || ^0.1.6-alpha.1`, with the wider
+`^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
+preset/persona surface still shares. The 0.1.6 adaptations worth knowing
+about:
+
+- `sessions.list` no longer carries a `current` pointer: the current
+  conversation is derived from `SessionSummary.retainedBy.mainView`, with a
+  legacy-`current` fallback for 0.1.5 hosts.
+- Every reconcile re-syncs an `oac-*` preset's composition against the
+  host's CURRENT standard preset, leaving content-identical rows untouched:
+  0.1.6 renamed `workflow-worker-thread` to `workflow-ptc` and stale copied
+  rows hard-fail preset activation (`agent-preset/invalid`), so pre-0.1.6
+  installs are healed automatically on first reconcile. The 0.1.3-alpha.2
+  persona prefix/suffix split is handled the same way as before — the Bot
+  persona becomes the persona row's `prefix` (the copied `suffix` is kept),
+  and legacy `text`-only rows from pre-split presets are healed in place —
+  kernels ≥0.1.3-alpha.2 require `prefix` and ignore `text`, so older
+  plugin releases silently lose the Bot persona there.
+- The right-Sidebar guide entry carries a stable `id` (required by the
+  0.1.6 tab-type contract, ignored on 0.1.5), and the composer send glyph
+  is `IconSendOutline14` (the 16px variant exists only on 0.1.5).
+- On a 0.1.6 client reload the kernel restores right-Sidebar tabs as empty
+  shells (navigation revision 0); the Bot Browser detects that restore and
+  re-opens its home URL so the in-iframe Agent Browser rebuilds its real
+  page state from the daemon.
+
+Session format v3, the `ctx.agent` removal, and the Inbox API change all
+miss this plugin: sessions are read only through the in-process
+`snapshotEvents()`, and the assistant/turn event matching skips unknown
+event kinds, so additive 0.1.6 event types are tolerated. The native-panels
+UI — the `sidebar.panellist`/`main` panel API and the right-Sidebar
+tab-type API (`layout`, `sidebarRight`, `sidebarRightTabs` services) —
+exists only on the 0.1.5+ kernel lines, so the web client loads there
+only. It will not
 load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
 until their kernel is upgraded.
 

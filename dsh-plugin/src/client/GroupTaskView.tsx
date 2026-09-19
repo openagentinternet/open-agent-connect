@@ -5,7 +5,7 @@ import {
   IconPanelLeftOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
-  IconSendOutline16,
+  IconSendOutline14,
   IconWarningOutline16,
   Input,
   MarkdownText,
@@ -450,6 +450,7 @@ function GroupTaskDrawer({
                   <li key={invite.id} className="oac-gt-drawer-member">
                     <BotAvatar
                       name={invite.inviteeName ?? invite.inviteeGlobalMetaId}
+                      src={undefined}
                       className="oac-gt-member-avatar"
                     />
                     <span className="oac-gt-drawer-member-main">
@@ -1640,7 +1641,7 @@ export function GroupTaskView({
                   <Button
                     type="button"
                     variant="primary"
-                    icon={<IconSendOutline16 />}
+                    icon={<IconSendOutline14 />}
                     disabled={busy || !draft.trim()}
                     onClick={() => { void onSend() }}
                   >
