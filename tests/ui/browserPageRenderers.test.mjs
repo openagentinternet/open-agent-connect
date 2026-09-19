@@ -239,7 +239,10 @@ test('html-iframe renderer is sandboxed without privileged permissions', async (
 test('pdf, image, and video render with content-specific elements', async () => {
   const pdf = runWithResolve(result({ type: 'pdf', contentType: 'application/pdf', url: 'https://files.example/a.pdf' }));
   await waitFor(() => pdf.nodes['[data-browser-viewport]'].innerHTML.includes('browser-pdf'), 'pdf render');
-  assert.match(pdf.nodes['[data-browser-viewport]'].innerHTML, /<iframe class="browser-pdf" sandbox="" src="https:\/\/files\.example\/a\.pdf"/);
+  // ABC 0.6.0: the PDF iframe uses the html-iframe sandbox profile instead of
+  // sandbox="" — a fully sandboxed frame blocked Chrome's built-in PDF viewer.
+  assert.match(pdf.nodes['[data-browser-viewport]'].innerHTML, /<iframe class="browser-pdf" sandbox="allow-scripts allow-same-origin allow-downloads" src="https:\/\/files\.example\/a\.pdf"/);
+  assert.match(pdf.nodes['[data-browser-viewport]'].innerHTML, /<a href="https:\/\/files\.example\/a\.pdf" target="_blank" rel="noopener">Open PDF<\/a>/);
 
   const image = runWithResolve(result({ type: 'image', contentType: 'image/png', url: 'https://files.example/a.png' }));
   await waitFor(() => image.nodes['[data-browser-viewport]'].innerHTML.includes('browser-image'), 'image render');

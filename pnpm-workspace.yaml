@@ -32,3 +32,11 @@ overrides:
 allowBuilds:
   mvc-scrypt: true
   protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@openagentinternet/agent-browser-core@0.6.0'
+  - '@openagentinternet/agent-browser-host-contract@0.6.0'
+  - '@openagentinternet/agent-browser-name-resolvers@0.6.0'
+  - '@openagentinternet/agent-browser-renderers@0.6.0'
+  - '@openagentinternet/agent-browser-ui@0.6.0'
+  - '@openagentinternet/agent-browser-test-harness@0.6.0'
