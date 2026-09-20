@@ -684,7 +684,12 @@ async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyD
         verbatimSymlinks: true,
         filter: (sourcePath) => {
           const relativePath = path.relative(sourceDependencyRoot, sourcePath);
-          return !relativePath.split(path.sep).includes('.tap');
+          const segments = relativePath.split(path.sep);
+          // `.tap` is dependency test output; `.bin` holds pnpm's install-time
+          // command symlinks, whose presence depends on the build machine's
+          // filesystem (no symlinks on exFAT). Neither belongs in the packs;
+          // excluding both keeps builds filesystem-independent.
+          return !segments.includes('.tap') && !segments.includes('.bin');
         },
       },
     );
