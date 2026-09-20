@@ -31,6 +31,16 @@ const METABOT_SKILLS = [
   'metabot-upload-file',
   'metabot-wallet-manage',
   'metabot-schedule',
+  'metabot-memory',
+  'metabot-dream',
+  'metabot-knowledge-base',
+  'metabot-qanda',
+  'metabot-protocol',
+  'metabot-surf',
+  'metabot-media',
+  'metabot-simplenote',
+  'metabot-grouptask',
+  'metabot-twin',
 ];
 
 const HOSTS = {
@@ -69,6 +79,13 @@ const DEPRECATED_SKILLS = {
 // buildAgentConnectSkillpacks.
 
 const GENERATED_JUNK_FILENAMES = new Set(['.DS_Store']);
+
+// macOS AppleDouble sidecar files (`._foo`) appear whenever a tree round-trips
+// through a non-native filesystem such as exFAT (external-drive worktrees).
+// They are metadata noise, never content, and must never ride into the packs.
+function isGeneratedJunkFilename(name) {
+  return GENERATED_JUNK_FILENAMES.has(name) || name.startsWith('._');
+}
 
 function replaceAll(source, replacements) {
   return Object.entries(replacements).reduce(
@@ -527,7 +544,7 @@ async function copySkillDirectory(repoRoot, legacySkillName, targetDir) {
       if (!relativePath) return true;
       const segments = relativePath.split(path.sep);
       if (segments.includes('evals')) return false;
-      return !GENERATED_JUNK_FILENAMES.has(path.basename(sourcePath));
+      return !isGeneratedJunkFilename(path.basename(sourcePath));
     },
   });
   await sanitizeGeneratedTree(targetDir);
@@ -561,7 +578,7 @@ async function sanitizeGeneratedTree(rootPath) {
 
   for (const entry of entries) {
     const entryPath = path.join(rootPath, entry.name);
-    if (GENERATED_JUNK_FILENAMES.has(entry.name)) {
+    if (isGeneratedJunkFilename(entry.name)) {
       await fs.rm(entryPath, { recursive: true, force: true });
       continue;
     }

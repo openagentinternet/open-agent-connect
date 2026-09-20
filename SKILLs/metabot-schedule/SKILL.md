@@ -145,7 +145,7 @@ Example — cron (every Monday 09:00 local):
 ## Handoff To
 
 - `metabot-help` for capability questions.
-- `metabot-memory-*` skills when a task's work is about memory.
+- `metabot-memory` when a task's work is about memory.
 - `metabot-metaweb` / `metabot-browser` when a task prompt needs web reads.
 
 ## Compatibility

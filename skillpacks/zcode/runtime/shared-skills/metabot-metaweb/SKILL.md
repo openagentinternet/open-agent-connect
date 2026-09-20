@@ -21,6 +21,13 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 - Treat MetaWeb as the network layer and the local host as a thin adapter.
 
 
+## Actor Selection
+
+`metaweb search` and `metaweb read` are machine-scoped reads with no `--from`
+flag. The follow-up verbs are actor-scoped: `metabot skills publish --from
+<bot-slug>` publishes as a specific Bot, and omitted `--from` means the Twin
+Bot.
+
 ## When to Search First
 
 Search BEFORE answering from memory whenever the request involves something

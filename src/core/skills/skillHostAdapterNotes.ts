@@ -71,6 +71,46 @@ function metawebUriNetworkManageNote(displayName: string): string {
   ].join('\n');
 }
 
+function nativeToolsFirstSection(lines: string[]): string[] {
+  return ['### Native Tools First', '', ...lines];
+}
+
+function metawebUriGrouptaskNote(displayName: string): string {
+  return [
+    '### MetaWeb URI Links',
+    '',
+    metawebUriPresentation(displayName),
+    '',
+    ...nativeToolsFirstSection([
+      'Prefer the native `group_task` tool when it is available in this session\'s function list. Its `propose` action records the current DSH session as the proposal\'s source session — the anchor the source-session relay builds on; the CLI `grouptask staffing propose` only gains that anchor when you pass `--session <id>` explicitly. Fall back to the CLI `grouptask …` verbs when the tool is absent (plain sessions, other hosts).',
+    ]),
+  ].join('\n');
+}
+
+function metawebUriQandaNote(displayName: string): string {
+  return [
+    '### MetaWeb URI Links',
+    '',
+    metawebUriPresentation(displayName),
+    '',
+    ...nativeToolsFirstSection([
+      'Prefer the native Q&A tools when they are available in this session\'s function list — `search_qa`, `list_latest_questions`, `get_question_answers`, `post_simplequestion`, `post_simpleanswer`, `like_pin`: reads run in-process (faster than a CLI spawn) and out-of-workspace attachments stay behind the session approval gate. Fall back to the CLI `qanda …` verbs when the tools are absent.',
+    ]),
+  ].join('\n');
+}
+
+function metawebUriMemoryNote(displayName: string): string {
+  return [
+    '### MetaWeb URI Links',
+    '',
+    metawebUriPresentation(displayName),
+    '',
+    ...nativeToolsFirstSection([
+      'In an `oac-<slug>` Bot session on this host, memory injection and post-turn capture are automatic: the plugin appends the Bot\'s memory blocks to every turn and mirrors completed turns for extraction — never mirror turns manually here. Prefer the native memory tools when they are in this session\'s function list (`memory_user_edits`, `experience_recall`, `knowledge_recall`, `knowledge_upsert`, `recent_chats`, `conversation_search`, `oac_session_read_all`, `oac_session_read_latest`). The CLI `memory …` verbs are the fallback for plain sessions and hosts without the tools.',
+    ]),
+  ].join('\n');
+}
+
 /**
  * Extra adapter markdown for one skill on one host. Returns '' when the
  * skill carries no host-specific guidance. `displayName` feeds the generic
@@ -84,6 +124,9 @@ export function renderSkillHostAdapterNote(
   if (METAWEB_URI_CLIENT_HOSTS.has(hostId)) {
     if (skillName === 'metabot-browser') return metawebUriBrowserNote(displayName);
     if (skillName === 'metabot-network-manage') return metawebUriNetworkManageNote(displayName);
+    if (skillName === 'metabot-grouptask') return metawebUriGrouptaskNote(displayName);
+    if (skillName === 'metabot-qanda') return metawebUriQandaNote(displayName);
+    if (skillName === 'metabot-memory') return metawebUriMemoryNote(displayName);
     return metawebUriClientNote(displayName);
   }
   if (skillName === 'metabot-browser') {

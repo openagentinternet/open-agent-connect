@@ -16,6 +16,13 @@ MetaID — and open the pins that matter. One skill, two verbs:
 
 {{SYSTEM_ROUTING}}
 
+## Actor Selection
+
+`metaweb search` and `metaweb read` are machine-scoped reads with no `--from`
+flag. The follow-up verbs are actor-scoped: `metabot skills publish --from
+<bot-slug>` publishes as a specific Bot, and omitted `--from` means the Twin
+Bot.
+
 ## When to Search First
 
 Search BEFORE answering from memory whenever the request involves something
