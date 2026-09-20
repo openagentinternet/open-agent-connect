@@ -9,7 +9,14 @@
  * PanelRow's onClick never fires. The row keeps rendering (glyph, label,
  * unread dot) because the panellist entry list is independent of the `main`
  * panel registry.
+ *
+ * The left-rail button is currently hidden: conversation-list tabs
+ * (线上对话 / 群任务) own A2A navigation. Flip SHOW_A2A_PANELLIST_ROW to
+ * restore the row without rewriting the overlay wiring.
  */
+
+/** Left-rail A2A Chat button. Hidden while the conversation tabs own navigation. */
+export const SHOW_A2A_PANELLIST_ROW = false
 
 /** DOM marker the A2APanelGlyph carries so the interceptor can name its row. */
 export const A2A_PANEL_ROW_MARK = 'data-oac-a2a-panellist'

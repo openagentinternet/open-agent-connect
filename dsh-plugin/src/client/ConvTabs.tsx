@@ -32,6 +32,8 @@ import type {
   GroupTaskSummaryRow,
   OpenTeamCollabsPayload,
 } from './api.ts'
+import { resolveAvatarUrl } from '../avatar-url.ts'
+import { prefetchAvatars } from './avatar-cache.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { guestInviteStatusKey, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
@@ -244,6 +246,15 @@ function OnlineList({
     }
     return map
   }, [profiles])
+
+  // Warm the local avatar cache as soon as the list arrives so a remount
+  // (tab switch) paints peer faces from memory instead of the proxy.
+  useEffect(() => {
+    if (!summaries) return
+    prefetchAvatars(summaries.map((row) => (
+      resolveAvatarUrl(localAvatarByMetaId.get(row.peerGlobalMetaId) ?? row.peerAvatar ?? undefined)
+    )))
+  }, [summaries, localAvatarByMetaId])
 
   return (
     <div className="oac-conv-list-body">

@@ -153,9 +153,12 @@ test('client registers the bot-browser tab type, body, and title on the right Si
 
 test('client registers the A2A overlay panel and its panellist glyph, not a global main panel', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  const row = await readFile(join(root, 'src/client/a2a-panel-row.ts'), 'utf8')
   assert.match(text, /name: 'shell\.overlay'/)
   assert.match(text, /id: 'oac-a2a'/)
   assert.match(text, /name: 'sidebar\.panellist'/)
+  assert.match(row, /SHOW_A2A_PANELLIST_ROW = false/)
+  assert.match(text, /if \(SHOW_A2A_PANELLIST_ROW\)/)
   assert.doesNotMatch(text, /name: 'main'/)
   assert.doesNotMatch(text, /key: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
@@ -216,6 +219,7 @@ test('the A2A overlay mirrors the frame columns and the panellist row is capture
   assert.match(glyph, /data-open/)
   const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(index, /startA2APanelRowInterceptor\(\(\) => a2aPanel\.toggle\(\)\)/)
+  assert.match(index, /SHOW_A2A_PANELLIST_ROW/)
   assert.match(index, /sessionsList\.subscribe/)
 })
 

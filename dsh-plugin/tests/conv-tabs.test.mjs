@@ -69,6 +69,8 @@ test('the tab strip renders three tabs and hides the official region only via th
   // threads in the sidebar column.
   assert.match(component, /openPrivate\(from, row\.peerGlobalMetaId\)/)
   assert.match(component, /openGroupTask\(key\)/)
+  assert.match(component, /prefetchAvatars/)
+  assert.match(component, /resolveAvatarUrl/)
 })
 
 test('the A2A panel store carries a one-shot navigation target', async () => {

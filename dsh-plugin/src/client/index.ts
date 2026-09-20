@@ -1,8 +1,9 @@
 /**
  * Browser half of open-agent-connect-dsh: locale dictionaries, the Settings
  * sections, the new-session preset chip, the right-Sidebar `bot-browser` tab
- * type, and the A2A Chat `shell.overlay` panel with its `sidebar.panellist`
- * glyph. Does not shadow Settings → Agent presets.
+ * type, and the A2A Chat `shell.overlay` panel. The left-rail
+ * `sidebar.panellist` glyph is currently hidden (`SHOW_A2A_PANELLIST_ROW`).
+ * Does not shadow Settings → Agent presets.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
@@ -30,7 +31,7 @@ import { A2APanelStore } from './a2a-panel-store.ts'
 import { ConvTabStore } from './conv-tab-store.ts'
 import { startConvTabMount } from './conv-tab-mount.ts'
 import { currentMainViewSessionId } from '../current-session.ts'
-import { startA2APanelRowInterceptor } from './a2a-panel-row.ts'
+import { SHOW_A2A_PANELLIST_ROW, startA2APanelRowInterceptor } from './a2a-panel-row.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
@@ -166,7 +167,9 @@ export function apply(ctx: ClientContext): void {
       liveUrl: () => iframeBridge.liveUrl(),
       reveal: (params) => revealBotBrowserTab(openFace, params),
     })
-    const stopPanelRow = startA2APanelRowInterceptor(() => a2aPanel.toggle())
+    const stopPanelRow = SHOW_A2A_PANELLIST_ROW
+      ? startA2APanelRowInterceptor(() => a2aPanel.toggle())
+      : () => {}
     // Every Agent Internet URI click (any surface) reveals the right-Sidebar
     // Bot Browser — the A2A overlay keeps that Sidebar mounted, so one path
     // serves transcripts, avatars, and group-task links alike.
@@ -180,10 +183,10 @@ export function apply(ctx: ClientContext): void {
   }, 'oac-dsh: bot browser wiring')
 
   // A2A Chat: a `shell.overlay` panel (id `oac-a2a`) covering the center
-  // column only, plus its panellist glyph. The unread feed lives at apply
-  // scope so the glyph's dot works no matter which panel is selected; the
-  // panel feeds its live view back through setView so the thread being read
-  // stays read.
+  // column only. The left-rail panellist glyph is gated off
+  // (`SHOW_A2A_PANELLIST_ROW`); unread still lives at apply scope so the
+  // 线上对话 / 群任务 tab dots work. The panel feeds its live view back
+  // through setView so the thread being read stays read.
   const unreadController = new A2AUnreadController({
     list: (from) => api.conversations(from),
     thread: (from, peer) => api.conversationThread(from, peer),
@@ -237,13 +240,15 @@ export function apply(ctx: ClientContext): void {
       consumeTarget: () => a2aPanel.consumeTarget(),
     }),
   }, A2AOverlay))
-  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-    name: 'sidebar.panellist',
-    id: 'oac-a2a',
-    order: 0,
-    label: () => tConv('nav'),
-    inject: (): A2APanelGlyphInjected => ({ hooks: { unread: unreadController.source, panel: a2aPanel } }),
-  }, A2APanelGlyph))
+  if (SHOW_A2A_PANELLIST_ROW) {
+    ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+      name: 'sidebar.panellist',
+      id: 'oac-a2a',
+      order: 0,
+      label: () => tConv('nav'),
+      inject: (): A2APanelGlyphInjected => ({ hooks: { unread: unreadController.source, panel: a2aPanel } }),
+    }, A2APanelGlyph))
+  }
   // Conversation-list tabs (本地对话 / 线上对话 / 群任务): the strip + list
   // bodies mount above the official browsing region (no slot exists there);
   // rows navigate by opening the A2A overlay pre-positioned on their thread
