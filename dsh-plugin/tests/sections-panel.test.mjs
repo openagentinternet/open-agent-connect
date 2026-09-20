@@ -58,6 +58,7 @@ test('client registers four settings sections and the A2A overlay panel with its
   assert.match(text, /name: 'shell\.overlay'/)
   assert.doesNotMatch(text, /name: 'main'/)
   assert.match(text, /name: 'sidebar\.panellist'/)
+  assert.match(text, /if \(SHOW_A2A_PANELLIST_ROW\)/)
   assert.match(text, /id: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /order: 20/)

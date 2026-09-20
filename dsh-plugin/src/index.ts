@@ -769,6 +769,14 @@ export {
   type ConvTab,
 } from './conv-tab-logic.js'
 export { resolveAvatarUrl, extractAvatarPinReference, isAvatarContentReference } from './avatar-url.js'
+export {
+  AVATAR_BROWSER_CACHE_MAX_AGE,
+  AVATAR_PROXY_CACHE_TTL_MS,
+  avatarProxyCacheKey,
+  clearAvatarProxyCache,
+  getAvatarProxyCache,
+  setAvatarProxyCache,
+} from './avatar-proxy-cache.js'
 export { currentMainViewSessionId, type SessionListCurrentLike } from './current-session.js'
 export { relativeTimeLabel } from './relative-time.js'
 export { daemonConversationsList, daemonConversationsMessages } from './conversation-bridge.js'

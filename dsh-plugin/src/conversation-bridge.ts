@@ -11,6 +11,11 @@
  * in-process read and then the CLI.
  */
 import { get as httpGet, request as httpRequest } from 'node:http'
+import {
+  AVATAR_BROWSER_CACHE_MAX_AGE,
+  getAvatarProxyCache,
+  setAvatarProxyCache,
+} from './avatar-proxy-cache.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import type { MetabotCommandResult } from './cli-bridge.js'
 import type { PluginHttpRequest, PluginHttpResponse } from './context-types.js'
@@ -166,12 +171,26 @@ export async function daemonBotHomepageUpload(
   )
 }
 
+function writeAvatarBody(res: PluginHttpResponse, status: number, body: Buffer, contentType: string): void {
+  res.writeHead(status, {
+    'content-type': contentType || 'application/octet-stream',
+    'cache-control': `public, max-age=${AVATAR_BROWSER_CACHE_MAX_AGE}`,
+  })
+  res.end(body)
+}
+
 /**
  * Proxy one avatar from the daemon's `/api/file/avatar` (`GET
  * /oac/api/file/avatar?ref=…`) so the web client renders chain avatar
- * references same-origin.
+ * references same-origin. Successful bodies stay in the host cache so a
+ * second 线上对话 open does not re-hop to the daemon.
  */
 export async function proxyDaemonAvatar(ref: string, res: PluginHttpResponse): Promise<void> {
+  const cached = getAvatarProxyCache(ref)
+  if (cached) {
+    writeAvatarBody(res, 200, cached.body, cached.contentType)
+    return
+  }
   const baseUrl = await resolveDaemonBaseUrl()
   if (baseUrl === null) {
     writeJson(res, 404, { ok: false, state: 'failed', code: 'daemon_unreachable', message: 'OAC daemon is not reachable.' })
@@ -191,13 +210,17 @@ export async function proxyDaemonAvatar(ref: string, res: PluginHttpResponse): P
       if (settled) return
       settled = true
       clearTimeout(timer)
-      const headers: Record<string, string> = {}
-      const contentType = response.headers['content-type']
-      if (typeof contentType === 'string' && contentType !== '') headers['content-type'] = contentType
-      const cacheControl = response.headers['cache-control']
-      if (typeof cacheControl === 'string' && cacheControl !== '') headers['cache-control'] = cacheControl
-      res.writeHead(response.statusCode ?? 502, headers)
-      res.end(Buffer.concat(chunks))
+      const body = Buffer.concat(chunks)
+      const status = response.statusCode ?? 502
+      const contentType = typeof response.headers['content-type'] === 'string'
+        ? response.headers['content-type']
+        : 'application/octet-stream'
+      if (status === 200 && body.length > 0) {
+        setAvatarProxyCache(ref, body, contentType)
+        writeAvatarBody(res, 200, body, contentType)
+        return
+      }
+      writeJson(res, status, { ok: false, state: 'failed', code: 'avatar_proxy', message: 'Daemon avatar fetch failed.' })
     })
     response.on('error', (error) => fail(502, 'avatar_proxy', error.message))
   })
