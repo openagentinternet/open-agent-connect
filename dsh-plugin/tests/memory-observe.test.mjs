@@ -78,14 +78,11 @@ test('post-turn extraction mirrors transcripts and extracts once per completed t
   const session = {
     id: 'sess-1',
     header: { agentPreset: 'oac-alice' },
-    events: [
-      { type: 'turn/start', data: { turn: 1 } },
-      { type: 'user/message', data: USER_MESSAGE },
-      { type: 'assistant/message', data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '好的' }] } } },
-      { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
-    ],
   }
   listener(session, { type: 'agent-preset/selected', data: { agentPreset: 'oac-alice' } })
+  listener(session, { type: 'turn/start', data: { turn: 1 } })
+  listener(session, { type: 'user/message', data: USER_MESSAGE })
+  listener(session, { type: 'assistant/message', data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '好的' }] } } })
   listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
   // The per-session queue drains asynchronously; poll until it lands.
   const waitFor = async (predicate, timeoutMs = 3000) => {
@@ -103,8 +100,10 @@ test('post-turn extraction mirrors transcripts and extracts once per completed t
   assert.equal(extracts[0].file.userText, '帮我想想上次说的咖啡')
   assert.equal(extracts[0].file.channel, 'dsh')
 
-  // Interrupted turns and non-oac sessions are ignored.
+  // Interrupted turns discard the accumulated buffer without any CLI call.
   calls.length = 0
+  listener(session, { type: 'turn/start', data: { turn: 2 } })
+  listener(session, { type: 'user/message', data: USER_MESSAGE })
   listener(session, { type: 'turn/end', data: { turn: 2, reason: { kind: 'aborted' } } })
   await new Promise((resolve) => setTimeout(resolve, 100))
   assert.equal(calls.length, 0)
@@ -154,22 +153,19 @@ test('post-turn extraction mirrors only genuine user messages (source kind user)
     const session = {
       id: `sess-plugin-${index}`,
       header: { agentPreset: 'oac-alice' },
-      events: [
-        { type: 'turn/start', data: { turn: 1 } },
-        { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '<injected>' }], source: { kind, form: 'snapshot' } } },
-        { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
-      ],
     }
     listener(session, { type: 'agent-preset/selected', data: { agentPreset: 'oac-alice' } })
+    listener(session, { type: 'turn/start', data: { turn: 1 } })
+    listener(session, { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '<injected>' }], source: { kind, form: 'snapshot' } } })
     listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
   }
   await new Promise((resolve) => setTimeout(resolve, 200))
   assert.equal(calls.filter((call) => call.args[1] === 'extract').length, 0, 'machine-produced turns carry no user speech to extract')
 })
 
-test('post-turn extraction reads the live session log through snapshotEvents', async () => {
-  // Regression: DSH 0.1.2-alpha.4 removed the Session `events` getter
-  // (deepseek-harness 5660f44d29); the live class only has snapshotEvents().
+test('post-turn extraction consumes the delivered events, never the session log', async () => {
+  // Regression guard for the snapshotEvents migration: the session double
+  // throws on any log read, so extraction can only succeed from the stream.
   const calls = []
   const { ctx, listeners } = fakeCtx(null)
   plugin.applyMemoryExtraction(ctx, {
@@ -181,17 +177,15 @@ test('post-turn extraction reads the live session log through snapshotEvents', a
     },
   })
   const listener = listeners.find((entry) => entry.event === 'session/event').listener
-  const log = [
-    { type: 'turn/start', data: { turn: 1 } },
-    { type: 'user/message', data: USER_MESSAGE },
-    { type: 'assistant/message', data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '好的' }] } } },
-    { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
-  ]
   const session = {
-    id: 'sess-snapshot',
+    id: 'sess-stream',
     header: { agentPreset: 'oac-alice' },
-    snapshotEvents: () => [...log],
+    snapshotEvents: () => { throw new Error('deprecated log read must stay cold') },
+    get events() { throw new Error('deprecated log read must stay cold') },
   }
+  listener(session, { type: 'turn/start', data: { turn: 1 } })
+  listener(session, { type: 'user/message', data: USER_MESSAGE })
+  listener(session, { type: 'assistant/message', data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '好的' }] } } })
   listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
   const deadline = Date.now() + 3000
   while (Date.now() < deadline && calls.filter((call) => call.args[1] === 'extract').length < 1) {
@@ -201,6 +195,6 @@ test('post-turn extraction reads the live session log through snapshotEvents', a
   const extracts = calls.filter((call) => call.args[1] === 'extract')
   assert.equal(transcripts.length, 2)
   assert.equal(extracts.length, 1)
-  assert.equal(extracts[0].file.sessionId, 'sess-snapshot')
+  assert.equal(extracts[0].file.sessionId, 'sess-stream')
   assert.equal(extracts[0].file.userText, '帮我想想上次说的咖啡')
 })

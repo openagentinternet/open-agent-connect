@@ -107,6 +107,13 @@ function fakeDsh(handoffText, options = {}) {
   const cancelled = []
   const created = []
   const disposed = []
+  // The session/event firehose: turn events are delivered live, the way the
+  // real host delivers them — the plugin taps this stream instead of reading
+  // the session log back.
+  const sessionEventListeners = []
+  const fireSessionEvent = (session, event) => {
+    for (const listener of sessionEventListeners) listener(session, event)
+  }
   return {
     mounted,
     followedUp,
@@ -116,6 +123,13 @@ function fakeDsh(handoffText, options = {}) {
     ctx: {
       agentPresets: {
         mount: async (agentCtx, id) => mounted.push(id),
+      },
+      on: (event, listener) => {
+        if (event === 'session/event') sessionEventListeners.push(listener)
+        return () => {
+          const index = sessionEventListeners.indexOf(listener)
+          if (index >= 0) sessionEventListeners.splice(index, 1)
+        }
       },
       get: (key) => {
         if (key === 'agentDefaultModel' && options.hostModel) {
@@ -134,18 +148,19 @@ function fakeDsh(handoffText, options = {}) {
             : text && text !== 'never'
               ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]
               : []
+          const session = { id: createOptions.sessionId }
           return {
             agent: {
               id: createOptions.sessionId,
               ctx: {},
-              followup: (message) => followedUp.push(message),
+              followup: (message) => {
+                followedUp.push(message)
+                // The turn's events stream in while it runs, after followup.
+                for (const event of events) fireSessionEvent(session, event)
+              },
               whenIdle: () => text === 'never' ? new Promise(() => {}) : Promise.resolve(),
               cancel: (reason) => cancelled.push(reason),
-              session: {
-                id: createOptions.sessionId,
-                // the live DSH Session exposes its log through snapshotEvents()
-                snapshotEvents: () => events,
-              },
+              session,
             },
             dispose: async () => { disposed.push(createOptions.sessionId) },
           }
@@ -179,7 +194,7 @@ test('delegate runs a worker sub-session, returns the handoff, and keeps the ses
   assert.equal(dsh.created[0].meta.cwd, process.cwd())
   assert.match(dsh.followedUp[0].content[0].text, /<twin_delegation>/)
   assert.match(dsh.followedUp[0].content[0].text, /整理发布清单/)
-  // the handoff comes from the session log snapshot (snapshotEvents), and the
+  // the handoff comes from the live session/event stream tap, and the
   // tool result is the delivery channel — no extra ORCH-NOTIFY wake-up turn
   assert.equal(dsh.disposed.length, 0, 'worker session must stay live after the attempt')
   // settle marks the attempt notified so no pending-notify backlog can form
@@ -552,6 +567,7 @@ test('delegate resolves the agents registry through ctx.get when the Cordis inje
     get agents() { throw new Error('cannot get property "agents" without inject') },
     get: (key) => key === 'agents' ? dsh.ctx.agents : undefined,
     agentPresets: dsh.ctx.agentPresets,
+    on: dsh.ctx.on,
   }
   const orchestrator = plugin.createTwinOrchestrator(fencedCtx, 'alice', { run })
   const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })

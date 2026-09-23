@@ -28,6 +28,7 @@ import { runMetabotPinned } from './daemon-pinned-run.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
 import { oacMessageSource } from './message-source.js'
+import { tappedOrSnapshot, tapSessionEvents } from './session-event-tap.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import {
   agentsRegistryOf,
@@ -332,6 +333,9 @@ export function applyGroupTaskWorkerSessions(
     session.midTurnSends = 0
 
     const agent = session.agent
+    // Consume the turn's output from the live event stream, not the
+    // deprecated synchronous log read — subscribe before the turn starts.
+    const tap = tapSessionEvents(ctx, session.sessionId)
     agent.followup?.({
       id: randomUUID(),
       role: 'user',
@@ -359,11 +363,13 @@ export function applyGroupTaskWorkerSessions(
           // session may already be gone
         }
       } else {
-        sessionEvents = agent.session?.snapshotEvents?.() ?? []
+        sessionEvents = tappedOrSnapshot(tap, agent.session)
         handoff = textFromAssistantEvents(sessionEvents)
       }
     } catch (error) {
       failureText = error instanceof Error ? error.message : String(error)
+    } finally {
+      tap?.dispose()
     }
 
     if (timedOut) {

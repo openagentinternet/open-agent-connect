@@ -45,6 +45,14 @@ adaptations worth knowing about:
   the post-turn memory extraction no longer blocklists plugin kinds — it
   mirrors a `user/message` only when `source.kind === 'user'`, the single
   kind genuine human input carries on every supported host.
+- Turn output is consumed from the live `session/event` stream, never read
+  back from the log: DSH deprecated the synchronous Session reads
+  (`snapshotEvents`/`eventAt`/`ownEvents`) because the log is slated to move
+  behind storage I/O. Each runner (host executor, delegation, group-task
+  worker, schedule tick) taps the firehose for its session before the turn
+  starts (`src/session-event-tap.ts`), and the memory extractor accumulates
+  the in-flight turn's texts event by event. The deprecated read remains
+  only as a cold fallback for contexts without the cordis event surface.
 - The preset roster row drops the `trust` tier; built-in preset display copy
   is resolved by id through the DSH-owned `settings.agentPreset` dictionary.
 

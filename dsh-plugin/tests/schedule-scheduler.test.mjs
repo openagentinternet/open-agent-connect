@@ -23,6 +23,10 @@ const DUE_OK = {
 
 function fakeRegistry(overrides = {}) {
   const calls = { created: [], followedUp: [], cancelled: [] }
+  // The session/event firehose: turn events are delivered live, the way the
+  // real host delivers them — the plugin taps this stream instead of reading
+  // the session log back.
+  const sessionEventListeners = []
   const registry = {
     calls,
     create: async (options) => {
@@ -30,14 +34,34 @@ function fakeRegistry(overrides = {}) {
       // The DSH factory runs setup as part of create; mirror that so preset
       // mounts can be asserted after the tick.
       await options.setup?.({})
+      const session = { id: options.sessionId }
+      const turnEvents = overrides.turnEvents ?? []
       const agent = {
-        session: { snapshotEvents: () => [] },
-        followup: (message) => { calls.followedUp.push(message) },
+        session,
+        followup: (message) => {
+          calls.followedUp.push(message)
+          // The turn's events stream in while it runs, after followup.
+          for (const event of turnEvents) {
+            for (const listener of sessionEventListeners) listener(session, event)
+          }
+        },
         whenIdle: () => Promise.resolve(),
         cancel: (reason) => { calls.cancelled.push(reason) },
         ...(overrides.agent ?? {}),
       }
       return { agent, dispose: async () => {} }
+    },
+    tapEvents: (sessionId) => {
+      const events = []
+      const listener = (session, event) => { if (session?.id === sessionId) events.push(event) }
+      sessionEventListeners.push(listener)
+      return {
+        events,
+        dispose: () => {
+          const index = sessionEventListeners.indexOf(listener)
+          if (index >= 0) sessionEventListeners.splice(index, 1)
+        },
+      }
     },
   }
   return registry
@@ -84,6 +108,7 @@ test('schedule tick heartbeats, claims due auto tasks, runs a DSH session, and s
     run: runStub,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async (agentCtx, id) => { mounted.push(id) } },
     modelPair: MODEL_PAIR,
     cwd: '/host',
@@ -126,6 +151,7 @@ test('schedule tick settles a timed-out run as error and cancels the worker', as
     run: runStub,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async () => {} },
     modelPair: MODEL_PAIR,
     runTimeoutMs: 50,
@@ -170,6 +196,7 @@ test('schedule tick falls back to the CLI verbs when the daemon is unreachable',
     run,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async () => {} },
     modelPair: MODEL_PAIR,
   })
@@ -209,6 +236,7 @@ test('schedule tick leaves daemon-channel tasks to the daemon and only claims au
     run: runStub,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async () => {} },
     modelPair: MODEL_PAIR,
   })
@@ -228,6 +256,7 @@ test('schedule tick skips tasks whose claim is already taken', async () => {
     run: runStub,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async () => {} },
     modelPair: MODEL_PAIR,
   })
@@ -242,19 +271,16 @@ test('schedule tick skips tasks whose claim is already taken', async () => {
 test('schedule tick settles a turn that died with an error as error', async () => {
   const daemon = fakeDaemon({ due: () => DUE_OK })
   const registry = fakeRegistry({
-    agent: {
-      session: {
-        snapshotEvents: () => [{
-          type: 'turn/end',
-          data: { reason: { kind: 'error', error: { message: 'no model available' } } },
-        }],
-      },
-    },
+    turnEvents: [{
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: { message: 'no model available' } } },
+    }],
   })
   const outcomes = await plugin.runScheduleSchedulerTick({
     run: runStub,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async () => {} },
     modelPair: MODEL_PAIR,
   })
@@ -270,6 +296,7 @@ test('schedule tick settles as error when no LLM model route exists for the bot'
     run: runStub,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async () => {} },
     modelPair: () => null,
   })
@@ -302,6 +329,7 @@ test('schedule tick skips unavailable Bots (toggle off or no DSH LLM pair) witho
     run,
     daemon,
     agents: registry,
+    tapEvents: registry.tapEvents,
     agentPresets: { mount: async () => {} },
     modelPair: MODEL_PAIR,
   })

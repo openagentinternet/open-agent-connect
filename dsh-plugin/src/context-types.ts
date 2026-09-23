@@ -218,7 +218,7 @@ export interface HostContext {
   get?(key: string): unknown
   dshHomePath?: (...segments: string[]) => string
   /** Cordis event/waterfall surface (agent/pre-step, session/event, agent/created…). */
-  on?(event: string, listener: (...args: any[]) => unknown, options?: { prepend?: boolean }): void
+  on?(event: string, listener: (...args: any[]) => unknown, options?: { prepend?: boolean }): (() => void) | void
   agents?: HostAgentsRegistryLike
   /** Present when the DSH web composition mounts user-approval. */
   approval?: HostApproval

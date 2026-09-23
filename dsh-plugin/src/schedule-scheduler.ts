@@ -16,6 +16,7 @@ import { runMetabotPinned } from './daemon-pinned-run.js'
 import type { RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
 import { oacMessageSource } from './message-source.js'
+import { tappedOrSnapshot, tapSessionEvents, type SessionEventTap } from './session-event-tap.js'
 import type { AgentPresetsLike, HostAgentsRegistryLike, HostContext } from './context-types.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import {
@@ -245,6 +246,9 @@ async function runScheduledSession(
   let failureText: string | null = null
   let timedOut = false
   let sessionEvents: ReadonlyArray<{ type: string; data?: unknown }> = []
+  // Consume the turn's output from the live event stream, not the deprecated
+  // synchronous log read — subscribe before the turn starts.
+  const tap = deps.tapEvents?.(sessionId) ?? null
   try {
     const handle = await deps.agents.create({
       sessionId,
@@ -291,14 +295,14 @@ async function runScheduledSession(
         // worker may already be gone
       }
     } else {
-      // The live DSH Session exposes its log through snapshotEvents();
-      // there is no `events` property on it.
-      sessionEvents = worker.session?.snapshotEvents?.() ?? worker.session?.events ?? []
+      sessionEvents = tappedOrSnapshot(tap, worker.session)
     }
     // Keep the session alive after the run (IDBots parity): disposing would
     // delete it from the host store and drop its conversation row.
   } catch (error) {
     failureText = error instanceof Error ? error.message : String(error)
+  } finally {
+    tap?.dispose()
   }
   const turnError = errorFromTurnEvents(sessionEvents)
   const errorText = failureText
@@ -331,6 +335,8 @@ export interface ScheduleTickDeps {
   daemon: ScheduleDaemonLike
   agents: HostAgentsRegistryLike
   agentPresets: AgentPresetsLike
+  /** Live session-event tap factory; absent falls back to the legacy log read. */
+  tapEvents?: (sessionId: string) => SessionEventTap | null
   /** Bot DSH LLM pair with host-default fallback; null means no session can run. */
   modelPair: (profile: Record<string, unknown> | undefined) => DshModelPair | null
   /** Per-run idle watchdog (default 30 minutes). */
@@ -467,7 +473,7 @@ export function applyScheduleScheduler(ctx: HostContext, options: ScheduleSchedu
   const tick = (): void => {
     if (running) return
     running = true
-    void runScheduleSchedulerTick({ run, daemon, agents, agentPresets, modelPair, runTimeoutMs, cwd })
+    void runScheduleSchedulerTick({ run, daemon, agents, agentPresets, modelPair, runTimeoutMs, cwd, tapEvents: (sessionId) => tapSessionEvents(ctx, sessionId) })
       .then((outcomes) => {
         reportScheduleOutcomes(ctx, outcomes)
         options.onTick?.(outcomes)

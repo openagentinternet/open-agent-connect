@@ -33,6 +33,7 @@ import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { isChipBotAvailable, presetIdForSlug, slugFromPresetId } from './chip-logic.js'
 import type { HostAgentLike, HostAgentsRegistryLike, HostContext, HostToolDefinition, HostUserMessage } from './context-types.js'
 import { oacMessageSource } from './message-source.js'
+import { tappedOrSnapshot, tapSessionEvents } from './session-event-tap.js'
 
 /** Twin orchestration overlay, ported verbatim from IDBots coworkRunner.ts. */
 export const TWIN_OVERLAY_TEXT = `## Twin Bot Orchestration Role
@@ -416,6 +417,9 @@ export function createTwinOrchestrator(
       let sessionEvents: ReadonlyArray<{ type: string; data?: unknown }> = []
       let failureText: string | null = null
       let timedOut = false
+      // Consume the turn's output from the live event stream, not the
+      // deprecated synchronous log read — subscribe before the turn starts.
+      const tap = tapSessionEvents(ctx, workerSessionId)
       try {
         const handle = await agentsRegistry.create({
           sessionId: workerSessionId,
@@ -465,9 +469,7 @@ export function createTwinOrchestrator(
             // worker may already be gone
           }
         } else {
-          // The live DSH Session exposes its log through snapshotEvents();
-          // there is no `events` property on it.
-          sessionEvents = worker.session?.snapshotEvents?.() ?? worker.session?.events ?? []
+          sessionEvents = tappedOrSnapshot(tap, worker.session)
           handoff = textFromAssistantEvents(sessionEvents)
         }
         // Keep the Worker session alive after the attempt (IDBots parity):
@@ -475,6 +477,8 @@ export function createTwinOrchestrator(
         // sidebar row and strands any follow-up. The ledger owns the outcome.
       } catch (error) {
         failureText = error instanceof Error ? error.message : String(error)
+      } finally {
+        tap?.dispose()
       }
 
       const settleOverride = flight.settleOverride

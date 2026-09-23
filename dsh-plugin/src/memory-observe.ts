@@ -107,6 +107,10 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
   const run = options.run ?? runMetabot
   const presetBySession = new Map<string, string>()
   const queueBySession = new Map<string, Promise<unknown>>()
+  // The in-flight turn's texts, accumulated from the live stream. DSH
+  // deprecated the synchronous Session log reads (snapshotEvents/eventAt) —
+  // the turn's content is consumed as it is delivered, never read back.
+  const turnBufferBySession = new Map<string, { userTexts: string[]; assistantTexts: string[] }>()
 
   const enqueue = (sessionId: string, task: () => Promise<unknown>): void => {
     const next = (queueBySession.get(sessionId) ?? Promise.resolve()).then(task, task)
@@ -124,7 +128,36 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
         }
         return
       }
+      if (event.type === 'turn/start') {
+        turnBufferBySession.set(sessionId, { userTexts: [], assistantTexts: [] })
+        return
+      }
+      if (event.type === 'user/message') {
+        // Mirror only genuine human input. DSH v4 abolished the
+        // {kind:'plugin'} wrapper: every producer now stamps its own source
+        // kind — ours is 'plugin:oac-dsh', and DSH's own context injectors
+        // carry kinds like 'time-context', 'compact-checkpoint', 'schedule',
+        // or 'user-approval'. Anything but 'user' is machine-produced
+        // context, not the human's words.
+        const buffer = turnBufferBySession.get(sessionId)
+        const data = event.data as HostUserMessage | undefined
+        if (buffer && data?.source?.kind === 'user') {
+          const text = textFromBlocks(data?.content)
+          if (text) buffer.userTexts.push(text)
+        }
+        return
+      }
+      if (event.type === 'assistant/message') {
+        const buffer = turnBufferBySession.get(sessionId)
+        const data = event.data as { message?: { content?: unknown } } | undefined
+        const text = textFromBlocks(data?.message?.content)
+        if (buffer && text) buffer.assistantTexts.push(text)
+        return
+      }
       if (event.type !== 'turn/end') return
+      // Any turn ending releases the buffer: a later turn starts fresh.
+      const buffer = turnBufferBySession.get(sessionId)
+      turnBufferBySession.delete(sessionId)
       const reason = (event.data as { reason?: { kind?: unknown } } | undefined)?.reason
       if (reason?.kind !== 'completed') return
 
@@ -132,47 +165,9 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
         ?? session.header?.agentPreset
       const slug = preset ? slugFromPresetId(preset) : null
       if (!slug) return
-      const turn = (event.data as { turn?: unknown } | undefined)?.turn
 
-      // Slice the just-completed turn's user/assistant texts from the log.
-      // DSH removed the `events` getter (5660f44d29, dsh 0.1.2-alpha.4):
-      // `snapshotEvents()` is the only log read on the live Session class;
-      // the `events` fallback only exists for test doubles.
-      const events = typeof session.snapshotEvents === 'function'
-        ? session.snapshotEvents()
-        : (Array.isArray(session.events) ? session.events : [])
-      let turnStart = -1
-      for (let index = events.length - 1; index >= 0; index -= 1) {
-        const candidate = events[index]
-        if (candidate?.type === 'turn/start'
-          && (turn === undefined || (candidate.data as { turn?: unknown } | undefined)?.turn === turn)) {
-          turnStart = index
-          break
-        }
-      }
-      const slice = turnStart >= 0 ? events.slice(turnStart) : events.slice(-4)
-      const userTexts: string[] = []
-      const assistantTexts: string[] = []
-      for (const entry of slice) {
-        if (entry?.type === 'user/message') {
-          const data = entry.data as HostUserMessage | undefined
-          // Mirror only genuine human input. DSH v4 abolished the
-          // {kind:'plugin'} wrapper: every producer now stamps its own source
-          // kind — ours is 'plugin:oac-dsh', and DSH's own context injectors
-          // carry kinds like 'time-context', 'compact-checkpoint', 'schedule',
-          // or 'user-approval'. Anything but 'user' is machine-produced
-          // context, not the human's words.
-          if (data?.source?.kind !== 'user') continue
-          const text = textFromBlocks(data?.content)
-          if (text) userTexts.push(text)
-        } else if (entry?.type === 'assistant/message') {
-          const data = entry.data as { message?: { content?: unknown } } | undefined
-          const text = textFromBlocks(data?.message?.content)
-          if (text) assistantTexts.push(text)
-        }
-      }
-      const userText = userTexts.join('\n').trim()
-      const assistantText = assistantTexts.join('\n').trim()
+      const userText = (buffer?.userTexts ?? []).join('\n').trim()
+      const assistantText = (buffer?.assistantTexts ?? []).join('\n').trim()
       if (!userText && !assistantText) return
 
       const capturedSessionId = sessionId || `dsh-${Date.now()}`
