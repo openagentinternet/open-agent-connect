@@ -136,6 +136,33 @@ test('memory tools bridge to the CLI with the expected names and formatting', as
   assert.match(plugin.MEMORY_STRATEGY_TEXT, /experience_recall/)
 })
 
+test('post-turn extraction skips plugin-injected user messages on both source shapes', async () => {
+  const calls = []
+  const { ctx, listeners } = fakeCtx(null)
+  plugin.applyMemoryExtraction(ctx, {
+    run: async (args) => {
+      calls.push({ args })
+      return { ok: true, state: 'success', data: {} }
+    },
+  })
+  const listener = listeners.find((entry) => entry.event === 'session/event').listener
+  for (const [index, kind] of ['plugin', 'plugin:oac-dsh'].entries()) {
+    const session = {
+      id: `sess-plugin-${index}`,
+      header: { agentPreset: 'oac-alice' },
+      events: [
+        { type: 'turn/start', data: { turn: 1 } },
+        { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '<injected>' }], source: { kind, form: 'snapshot' } } },
+        { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+      ],
+    }
+    listener(session, { type: 'agent-preset/selected', data: { agentPreset: 'oac-alice' } })
+    listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  }
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(calls.filter((call) => call.args[1] === 'extract').length, 0, 'plugin turns carry no user speech to extract')
+})
+
 test('post-turn extraction reads the live session log through snapshotEvents', async () => {
   // Regression: DSH 0.1.2-alpha.4 removed the Session `events` getter
   // (deepseek-harness 5660f44d29); the live class only has snapshotEvents().

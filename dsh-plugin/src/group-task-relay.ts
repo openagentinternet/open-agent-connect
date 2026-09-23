@@ -12,6 +12,7 @@ import { type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import { liveOacAgents } from './twin-tools.js'
+import { oacMessageSource } from './message-source.js'
 import type {
   HostContext,
   HostPreStepDecision,
@@ -57,7 +58,7 @@ function relayMessageOf(text: string): HostUserMessage {
     id: randomUUID(),
     role: 'user',
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: 'oac-dsh', form: 'group-task-relay' },
+    source: oacMessageSource('group-task-relay'),
   }
 }
 
@@ -138,7 +139,7 @@ export function applyGroupTaskRelayDrain(
               id: randomUUID(),
               role: 'user' as const,
               content: [{ type: 'text' as const, text }],
-              source: { kind: 'plugin', plugin: 'oac-dsh', form: 'group-task-relay' },
+              source: oacMessageSource('group-task-relay'),
             }],
           }
         } catch {

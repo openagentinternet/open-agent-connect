@@ -15,6 +15,7 @@ import { type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import type { RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
+import { oacMessageSource } from './message-source.js'
 import type { AgentPresetsLike, HostAgentsRegistryLike, HostContext } from './context-types.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import {
@@ -268,7 +269,7 @@ async function runScheduledSession(
       id: randomUUID(),
       role: 'user',
       content: [{ type: 'text', text: `[Scheduled] ${task.name}: ${task.prompt}` }],
-      source: { kind: 'plugin', plugin: 'oac-dsh', form: 'scheduled-task' },
+      source: oacMessageSource('scheduled-task'),
     })
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<'timed_out'>((resolve) => {

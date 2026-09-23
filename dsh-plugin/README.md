@@ -34,6 +34,12 @@ adaptations worth knowing about:
   back to the legacy one, and restores the legacy default pixel size.
 - `agent.cancel({ kind: 'timeout' })` now throws; timeout cancellations use
   `{ kind: 'hook', reason: 'timeout' }` (legal on 0.1.6 too).
+- Session format v4 retired the `{ kind: 'plugin', plugin }` message-source
+  wrapper: durable messages require a producer-owned kind. Plugin-injected
+  user messages go through `src/message-source.ts`, which emits
+  `plugin:oac-dsh` on 0.1.7 (the same identity the v3→v4 migrator rewrites
+  the old wrapper to) and keeps the wrapper on ≤0.1.6, whose v2→v3 migration
+  admission rejects kinds outside its fixed vocabulary.
 - The preset roster row drops the `trust` tier; built-in preset display copy
   is resolved by id through the DSH-owned `settings.agentPreset` dictionary.
 

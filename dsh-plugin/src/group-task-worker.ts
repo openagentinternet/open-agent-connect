@@ -27,6 +27,7 @@ import { type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
+import { oacMessageSource } from './message-source.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import {
   agentsRegistryOf,
@@ -335,7 +336,7 @@ export function applyGroupTaskWorkerSessions(
       id: randomUUID(),
       role: 'user',
       content: [{ type: 'text', text: buildWorkMessage(claim) }],
-      source: { kind: 'plugin', plugin: 'oac-dsh', form: 'group-task-work' },
+      source: oacMessageSource('group-task-work'),
     })
 
     let handoff = ''

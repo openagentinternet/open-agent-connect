@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { runMetabot } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { slugFromPresetId } from './chip-logic.js'
+import { oacMessageSource } from './message-source.js'
 import type {
   HostAgentLike,
   HostContext,
@@ -88,12 +89,7 @@ export function applyMemoryInjection(ctx: HostContext, options: MemoryObserveOpt
           id: randomUUID(),
           role: 'user',
           content: [{ type: 'text', text: xml } as HostTextBlock],
-          source: {
-            kind: 'plugin',
-            plugin: 'oac-dsh',
-            form: 'snapshot',
-            sections: [{ name: 'oac:memory', text: xml }],
-          },
+          source: { ...oacMessageSource('snapshot'), sections: [{ name: 'oac:memory', text: xml }] },
         }
         return { kind: 'enter', messages: [...decision.messages, memoryMessage] }
       } catch {
@@ -160,7 +156,9 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
       for (const entry of slice) {
         if (entry?.type === 'user/message') {
           const data = entry.data as HostUserMessage | undefined
-          if (data?.source?.kind === 'plugin') continue
+          // Skip plugin-injected turns: v3 wrapper on ≤0.1.6, producer kind on
+          // 0.1.7 (native v4 writes and migrated v3 logs share it).
+          if (data?.source?.kind === 'plugin' || data?.source?.kind === 'plugin:oac-dsh') continue
           const text = textFromBlocks(data?.content)
           if (text) userTexts.push(text)
         } else if (entry?.type === 'assistant/message') {

@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { slugFromPresetId } from './chip-logic.js'
+import { oacMessageSource } from './message-source.js'
 import {
   escapeXml,
   parseMetaAppPinIdFromUri,
@@ -128,12 +129,7 @@ export function applyBrowserInjection(
           id: randomUUID(),
           role: 'user',
           content: [{ type: 'text', text: xml }],
-          source: {
-            kind: 'plugin',
-            plugin: 'oac-dsh',
-            form: 'snapshot',
-            sections: [{ name: 'oac:browser', text: xml }],
-          },
+          source: { ...oacMessageSource('snapshot'), sections: [{ name: 'oac:browser', text: xml }] },
         }
         return { kind: 'enter', messages: [...decision.messages, message] }
       } catch {
