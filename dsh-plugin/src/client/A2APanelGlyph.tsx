@@ -19,7 +19,7 @@
  * it.
  */
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
-import { IconNewChatOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconNewChatOutline16 } from './icons.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { hasAnyUnread, type UnreadState } from '../unread-logic.ts'

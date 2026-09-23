@@ -1,12 +1,6 @@
 import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react'
-import {
-  Button,
-  IconChevronLeftOutline14,
-  IconCloseOutline16,
-  IconPlusOutline16,
-  Input,
-  Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronLeftOutline14, IconCloseOutline16, IconPlusOutline16 } from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MetaAppListPayload } from '../apps.ts'
 import {

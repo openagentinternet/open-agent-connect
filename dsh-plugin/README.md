@@ -9,12 +9,35 @@ dsh plugin --profile web add open-agent-connect-dsh
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
 Host kernel requirement: this plugin is built and verified against the DSH
-**0.1.6-alpha.2** client surface (npm `alpha` dist-tag; `next` still points
-at 0.1.5-rc.2) and runs on both the **0.1.5** and **0.1.6** kernel lines —
-most peer ranges are `^0.1.5-alpha.1 || ^0.1.6-alpha.1`, with the wider
-`^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
-preset/persona surface still shares. The 0.1.6 adaptations worth knowing
-about:
+**0.1.7-alpha.2** client surface (npm `alpha` dist-tag; `next` still points
+at 0.1.5-rc.2) and runs on the **0.1.5**, **0.1.6**, and **0.1.7** kernel
+lines — most peer ranges are `^0.1.5-alpha.1 || ^0.1.6-alpha.1 ||
+^0.1.7-alpha.1`, with the wider `^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept
+on the packages the preset/persona surface still shares. The 0.1.7
+adaptations worth knowing about:
+
+- Directory presets (`~/.dsh/.agent-presets`, `agentPresets.copy/read/remove`)
+  are gone: presets are declarative in-memory `PresetDefinition`s registered
+  through `agentPresets.register` (feature-detected — the same plugin build
+  keeps the directory backend on ≤0.1.6). Each `oac-<slug>` definition's
+  plugins list is re-read from the host's CURRENT shipped
+  `@deepseek-ai/dsh-web-app/presets/standard.patch.yml` on every apply, with
+  the persona row rewritten to the Bot persona prefix; a content-identical
+  definition is left mounted, a drifted one is unregistered then
+  re-registered. Registrations are process-local, so a kernel restart simply
+  re-declares them; the legacy shared `oac` preset and the
+  `agent-presets.default` settings heal are pre-0.1.7 artifacts and do not
+  run on this backend.
+- Icons moved from pixel-size names (`IconSendOutline14`) to stroke weights
+  (`IconSendOutlineRegular`) with a 14px default size. All icon imports go
+  through `src/client/icons.ts`, which resolves the modern name first, falls
+  back to the legacy one, and restores the legacy default pixel size.
+- `agent.cancel({ kind: 'timeout' })` now throws; timeout cancellations use
+  `{ kind: 'hook', reason: 'timeout' }` (legal on 0.1.6 too).
+- The preset roster row drops the `trust` tier; built-in preset display copy
+  is resolved by id through the DSH-owned `settings.agentPreset` dictionary.
+
+The 0.1.6 adaptations worth knowing about:
 
 - `sessions.list` no longer carries a `current` pointer: the current
   conversation is derived from `SessionSummary.retainedBy.mainView`, with a
@@ -31,7 +54,8 @@ about:
   plugin releases silently lose the Bot persona there.
 - The right-Sidebar guide entry carries a stable `id` (required by the
   0.1.6 tab-type contract, ignored on 0.1.5), and the composer send glyph
-  is `IconSendOutline14` (the 16px variant exists only on 0.1.5).
+  resolves through the icon compatibility layer (`IconSendOutline14` on
+  ≤0.1.6, `IconSendOutlineRegular` on 0.1.7).
 - On a 0.1.6 client reload the kernel restores right-Sidebar tabs as empty
   shells (navigation revision 0); the Bot Browser detects that restore and
   re-opens its home URL so the in-iframe Agent Browser rebuilds its real

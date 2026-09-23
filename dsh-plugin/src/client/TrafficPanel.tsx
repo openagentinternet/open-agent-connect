@@ -8,8 +8,8 @@
  * face; copy lives in locale-traffic.ts; pure logic in ../traffic.ts.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  Button,
   IconCheckOutline16,
   IconCopyOutline16,
   IconLoadingOutline16,
@@ -17,8 +17,7 @@ import {
   IconSparkle16,
   IconUserOutline16,
   IconWarningOutline16,
-  Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import { OacApiError, type BotRow, type OwnerWhoPayload } from './api.ts'
 import {

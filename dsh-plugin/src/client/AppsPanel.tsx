@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  Button,
   IconBranchOutline16,
   IconCheckOutline16,
   IconCopyOutline16,
@@ -13,8 +13,7 @@ import {
   IconShareOutline16,
   IconTrashOutline16,
   IconWarningOutline16,
-  Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotRow, CommandEnvelope } from './api.ts'
 import type { MetaAppListPayload, MetaAppRecord } from '../apps.ts'

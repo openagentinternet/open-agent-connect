@@ -1,8 +1,15 @@
 /**
- * One MetaBot = one DSH agent preset (`oac-<slug>`). Copy shipped `standard`,
- * rewrite the persona row, leave other composition rows (including `!!js`)
- * untouched. Persona edits rewrite the file in place so running sessions keep
- * DSH's composition stamp; later sessions see the new text.
+ * One MetaBot = one DSH agent preset (`oac-<slug>`). Two host backends:
+ *
+ * - 0.1.5/0.1.6 (directory presets): copy shipped `standard`, rewrite the
+ *   persona row, leave other composition rows (including `!!js`) untouched.
+ *   Persona edits rewrite the file in place so running sessions keep DSH's
+ *   composition stamp; later sessions see the new text.
+ * - 0.1.7 (declarative registry, see preset-registry.ts): presets are
+ *   in-memory `PresetDefinition`s built from the host's shipped
+ *   `standard.patch.yml` and registered with `agentPresets.register`;
+ *   `copy`/`read`/`remove` no longer exist there. Feature detection is
+ *   `typeof agentPresets.register === 'function'`.
  *
  * DSH 0.1.3-alpha.2 split the persona config into `prefix`/`suffix`; the Bot
  * persona is the prefix, a copied row's `suffix` is kept, and any legacy
@@ -10,14 +17,15 @@
  * `text`, so legacy rows must be healed here, not just appended to).
  *
  * Existing presets are re-synced to the CURRENT shipped `standard` on every
- * apply (read through the agentPresets service, present since 0.1.3-alpha.2),
- * not just persona-rewritten: a kernel upgrade can rename composition rows —
- * 0.1.6 renamed `workflow-worker-thread` to `workflow-ptc` and dropped the old
- * package, and a stale row makes the whole preset fail to mount
- * (`agent-preset/invalid`), so every session on it would refuse to start. The
- * sync keeps the Bot persona prefix and writes only when the content actually
- * differs. When the service cannot read the shipped preset the legacy
- * in-place persona rewrite runs instead (the composition stays as copied).
+ * apply (read through the agentPresets service on <=0.1.6, through the shipped
+ * patch file on 0.1.7), not just persona-rewritten: a kernel upgrade can
+ * rename composition rows — 0.1.6 renamed `workflow-worker-thread` to
+ * `workflow-ptc` and dropped the old package, and a stale row makes the whole
+ * preset fail to mount (`agent-preset/invalid`), so every session on it would
+ * refuse to start. The sync keeps the Bot persona prefix and writes only when
+ * the content actually differs. On <=0.1.6, when the service cannot read the
+ * shipped preset the legacy in-place persona rewrite runs instead (the
+ * composition stays as copied).
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -27,6 +35,12 @@ import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { isOacPresetId, presetIdForSlug } from './chip-logic.js'
 import type { AgentPresetsLike, HostContext } from './context-types.js'
 import { buildPersonaPrompt, parseBotListData, type BotPersonaInput } from './persona.js'
+import {
+  ensureRegistryPreset,
+  reconcileRegistryPresets,
+  registryBackendOf,
+  removeRegistryPreset,
+} from './preset-registry.js'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 
 export const STANDARD_PRESET_ID = 'standard'
@@ -162,6 +176,8 @@ async function syncCompositionFromStandard(
  */
 export async function generatePreset(ctx: HostContext, bot: BotPersonaInput): Promise<string> {
   const presets = requirePresets(ctx)
+  const registry = registryBackendOf(presets)
+  if (registry !== undefined) return ensureRegistryPreset(ctx, registry, bot)
   const presetId = presetIdForSlug(bot.slug)
   try {
     await presets.copy(STANDARD_PRESET_ID, presetId, bot.name)
@@ -175,9 +191,12 @@ export async function generatePreset(ctx: HostContext, bot: BotPersonaInput): Pr
 }
 
 export async function removePreset(ctx: HostContext, slug: string): Promise<void> {
+  const presets = requirePresets(ctx)
+  const registry = registryBackendOf(presets)
+  if (registry !== undefined) return removeRegistryPreset(ctx, registry, slug)
   const presetId = presetIdForSlug(slug)
   try {
-    await requirePresets(ctx).remove(presetId)
+    await presets.remove(presetId)
   } catch (error) {
     if (error instanceof Error && /not found/.test(error.message)) return
     throw error
@@ -233,6 +252,8 @@ export async function reconcilePresets(
   }
   const bots = parseBotListData(result.data)
   const presets = requirePresets(ctx)
+  const registry = registryBackendOf(presets)
+  if (registry !== undefined) return reconcileRegistryPresets(ctx, registry, bots)
   const existing = await presets.list()
   const owned = existing.map((row) => row.id).filter(isOacPresetId)
   const wanted = bots.map((bot) => presetIdForSlug(bot.slug))

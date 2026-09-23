@@ -17,7 +17,8 @@ export function slugFromPresetId(id: string): string | undefined {
 
 export type ChipPresetOption = {
   id: string
-  trust: 'system' | 'user'
+  /** 0.1.6 directory presets carried a trust tier; the 0.1.7 registry roster drops it. */
+  trust?: 'system' | 'user'
   name?: string
   description?: string
   broken?: string
@@ -66,7 +67,7 @@ export type AdvertisedGroup = {
 export function filterSelectablePresets(presets: readonly ChipPresetOption[]): ChipPresetOption[] {
   return presets.filter((preset) => preset.broken === undefined).map((preset) => ({
     id: preset.id,
-    trust: preset.trust,
+    ...(preset.trust === undefined ? {} : { trust: preset.trust }),
     ...(preset.name === undefined ? {} : { name: preset.name }),
     ...(preset.description === undefined ? {} : { description: preset.description }),
   }))

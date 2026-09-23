@@ -44,6 +44,29 @@ export interface PluginLogger {
   info?(message: string): void
 }
 
+/** One composition row inside a 0.1.7 declarative preset definition. */
+export interface HostPresetEntry {
+  id?: string
+  name?: string
+  group?: boolean
+  isolate?: Record<string, boolean>
+  disabled?: unknown
+  config?: unknown
+  [key: string]: unknown
+}
+
+/**
+ * Structural mirror of the 0.1.7 `PresetDefinition` (dsh-agent-preset-registry):
+ * presets are declared in memory, never read from directories.
+ */
+export interface HostPresetDefinition {
+  id: string
+  name?: string
+  description?: string
+  order?: number
+  plugins: readonly HostPresetEntry[]
+}
+
 export interface AgentPresetsLike {
   copy(from: string, id: string, name?: string): Promise<void>
   remove(id: string): Promise<void>
@@ -54,6 +77,12 @@ export interface AgentPresetsLike {
   composedPreset?(agentCtx: unknown): string | undefined
   /** Mount a preset composition onto a fresh agent context (agents.create setup). */
   mount?(agentCtx: unknown, id?: string): Promise<void>
+  /**
+   * 0.1.7 registry backend: declare a preset in memory; resolves to the
+   * unregister disposer. Its presence is the 0.1.7 feature detection — the
+   * legacy directory backend (`copy`/`read`/`remove`) is gone there.
+   */
+  register?(definition: HostPresetDefinition): Promise<(() => Promise<void>) | (() => void)>
 }
 
 /** Content block + user message shapes the agent loop consumes (structural). */

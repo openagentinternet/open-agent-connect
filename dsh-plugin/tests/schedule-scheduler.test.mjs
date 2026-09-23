@@ -131,7 +131,7 @@ test('schedule tick settles a timed-out run as error and cancels the worker', as
     runTimeoutMs: 50,
   })
   assert.equal(outcomes[0].failed, 1)
-  assert.deepEqual(registry.calls.cancelled, [{ kind: 'timeout' }])
+  assert.deepEqual(registry.calls.cancelled, [{ kind: 'hook', reason: 'timeout' }])
   const [, , completeInput] = daemon.calls.complete[0]
   assert.match(completeInput.error, /timed out after/)
 })

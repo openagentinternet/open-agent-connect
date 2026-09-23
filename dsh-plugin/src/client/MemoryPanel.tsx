@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  Button,
   IconChevronDownOutline14,
   IconChevronRightOutline14,
   IconPlusOutline16,
   IconRefreshOutline16,
-  Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   BotRow,
