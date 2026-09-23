@@ -71,6 +71,8 @@ import { applyGroupTaskWorkerSessions } from './group-task-worker.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { createPerAgentInstaller } from './per-agent-install.js'
 import { reconcilePresets } from './preset.js'
+import { registryBackendOf } from './preset-registry.js'
+import { configureMessageSources, oacMessageSource } from './message-source.js'
 import { dispatchSection } from './sections.js'
 import { isTrustedApiRequest } from './trust-fence.js'
 
@@ -506,7 +508,7 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
         id: randomUUID(),
         role: 'user',
         content: [{ type: 'text', text: input.prompt }],
-        source: { kind: 'plugin', plugin: 'oac-dsh', form: 'a2a-reply' },
+        source: oacMessageSource('a2a-reply'),
       })
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined
       const timeout = new Promise<'timed_out'>((resolve) => {
@@ -537,6 +539,9 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
 }
 
 export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promise<void> {
+  // Session format v4 (0.1.7) requires producer-owned source kinds; flip the
+  // message-source shape before anything can inject a user message.
+  configureMessageSources(registryBackendOf(ctx.agentPresets) !== undefined)
   let health: HealthPayload = emptyHealth()
   const browserHub = new BrowserEventHub()
   const sourceCache = createBrowserSourceCache()

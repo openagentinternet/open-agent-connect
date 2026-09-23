@@ -98,6 +98,9 @@ export interface HostUserMessage {
   id?: string
   role: 'user'
   content: HostTextBlock[]
+  /** Producer attribution: v3 wrapper `{ kind: 'plugin', plugin }` on ≤0.1.6,
+   * producer-owned `plugin:oac-dsh` on 0.1.7 (format v4 rejects the wrapper).
+   * Build through oacMessageSource() — never literal. */
   source: { kind: string; plugin?: string; form?: string; sections?: Array<{ name: string; text: string }> }
 }
 

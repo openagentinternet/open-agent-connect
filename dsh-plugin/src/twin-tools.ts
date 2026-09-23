@@ -32,6 +32,7 @@ import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { isChipBotAvailable, presetIdForSlug, slugFromPresetId } from './chip-logic.js'
 import type { HostAgentLike, HostAgentsRegistryLike, HostContext, HostToolDefinition, HostUserMessage } from './context-types.js'
+import { oacMessageSource } from './message-source.js'
 
 /** Twin orchestration overlay, ported verbatim from IDBots coworkRunner.ts. */
 export const TWIN_OVERLAY_TEXT = `## Twin Bot Orchestration Role
@@ -441,7 +442,7 @@ export function createTwinOrchestrator(
         worker.followup?.({
           role: 'user',
           content: [{ type: 'text', text: buildDelegationMessage({ ...input, taskId, stepId }) }],
-          source: { kind: 'plugin', plugin: 'oac-dsh', form: 'delegation' },
+          source: oacMessageSource('delegation'),
         })
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined
         const timeout = new Promise<'timed_out'>((resolve) => {
@@ -721,7 +722,7 @@ export function createTwinOrchestrator(
           id: randomUUID(),
           role: 'user',
           content: [{ type: 'text', text: `[Cross-session message from ${twinSlug}]: ${text}` }],
-          source: { kind: 'plugin', plugin: 'oac-dsh', form: 'cross-session' },
+          source: oacMessageSource('cross-session'),
         })
       } catch (error) {
         return failure('delivery_failed', error instanceof Error ? error.message : String(error))
