@@ -65,6 +65,7 @@ import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { bindGlobalKnowledgeToolInstall, installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { agentsRegistryOf, errorFromTurnEvents, installTwinOnAgent, liveOacAgents, textFromAssistantEvents } from './twin-tools.js'
+import { tappedOrSnapshot, tapSessionEvents } from './session-event-tap.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
 import { applyGroupTaskRelayDrain } from './group-task-relay.js'
 import { applyGroupTaskWorkerSessions } from './group-task-worker.js'
@@ -492,6 +493,9 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
   return async (input) => {
     const { randomUUID } = await import('node:crypto')
     const sessionId = randomUUID()
+    // Consume the turn's output from the live event stream, not the
+    // deprecated synchronous log read — subscribe before the turn starts.
+    const tap = tapSessionEvents(ctx, sessionId)
     let handle: { agent: HostAgentLike; dispose(): Promise<void> | void } | undefined
     try {
       handle = await agents.create({
@@ -525,7 +529,7 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
         }
         throw new Error(`DSH agent turn timed out after ${Math.round(input.timeoutMs / 1000)}s`)
       }
-      const events = agent.session?.snapshotEvents?.() ?? []
+      const events = tappedOrSnapshot(tap, agent.session)
       const text = textFromAssistantEvents(events)
       if (!text.trim()) {
         const turnError = errorFromTurnEvents(events)
@@ -533,6 +537,7 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
       }
       return text
     } finally {
+      tap?.dispose()
       void Promise.resolve(handle?.dispose()).catch(() => undefined)
     }
   }

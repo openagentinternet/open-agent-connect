@@ -62,12 +62,26 @@ function harness(options = {}) {
     return { ok: true, state: 'success', data: {} }
   }
   const handoffText = options.handoffText === undefined ? '封面做好了 [DELIVERABLE] metaapp://pin-1' : options.handoffText
+  // The session/event firehose: turn events are delivered live, the way the
+  // real host delivers them — the plugin taps this stream instead of reading
+  // the session log back.
+  const sessionEventListeners = []
+  const fireSessionEvent = (session, event) => {
+    for (const listener of sessionEventListeners) listener(session, event)
+  }
   const ctx = {
     logger: { warn: (message) => warnings.push(message) },
     agentPresets: { mount: async (agentCtx, id) => created.push({ mount: id }) },
     get: (key) => (key === 'agentDefaultModel' && options.hostModel
       ? { currentSelection: () => options.hostModel }
       : undefined),
+    on: (event, listener) => {
+      if (event === 'session/event') sessionEventListeners.push(listener)
+      return () => {
+        const index = sessionEventListeners.indexOf(listener)
+        if (index >= 0) sessionEventListeners.splice(index, 1)
+      }
+    },
     agents: (() => {
       const registryAgents = new Map()
       return {
@@ -79,20 +93,25 @@ function harness(options = {}) {
           : handoffText
             ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: handoffText }] } } }]
             : []
+          const session = { id: createOptions.sessionId }
           const agent = {
             id: createOptions.sessionId,
             ctx: {
               systemPrompt: { section: () => () => {} },
               tools: { register: (def) => { tools.push(def); return () => {} } },
             },
-            followup: (message) => created.push({ followup: message }),
+            followup: (message) => {
+              created.push({ followup: message })
+              // The turn's events stream in while it runs, after followup.
+              for (const event of events) fireSessionEvent(session, event)
+            },
             whenIdle: async () => {
               if (handoffText === 'never') return new Promise(() => {})
               // Test seam: mid-turn tool calls happen while the turn runs.
               if (options.beforeIdle) await options.beforeIdle()
             },
             cancel: (reason) => created.push({ cancel: reason }),
-            session: { id: createOptions.sessionId, snapshotEvents: () => events },
+            session,
           }
           registryAgents.set(agent.id, agent)
           return { agent, dispose: async () => {} }
