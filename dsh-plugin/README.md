@@ -40,6 +40,11 @@ adaptations worth knowing about:
   `plugin:oac-dsh` on 0.1.7 (the same identity the v3→v4 migrator rewrites
   the old wrapper to) and keeps the wrapper on ≤0.1.6, whose v2→v3 migration
   admission rejects kinds outside its fixed vocabulary.
+- The same wrapper retirement renames every first-party context injection
+  (`time-context`, `compact-checkpoint`, `schedule`, `user-approval`, …), so
+  the post-turn memory extraction no longer blocklists plugin kinds — it
+  mirrors a `user/message` only when `source.kind === 'user'`, the single
+  kind genuine human input carries on every supported host.
 - The preset roster row drops the `trust` tier; built-in preset display copy
   is resolved by id through the DSH-owned `settings.agentPreset` dictionary.
 
