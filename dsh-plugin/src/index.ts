@@ -517,7 +517,7 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
       clearTimeout(timeoutTimer)
       if (outcome === 'timed_out') {
         try {
-          agent.cancel?.({ kind: 'timeout' })
+          agent.cancel?.({ kind: 'hook', reason: 'timeout' })
         } catch {
           // session may already be gone
         }
@@ -890,3 +890,4 @@ export {
   removePreset,
   STANDARD_PRESET_ID,
 } from './preset.js'
+export { setStandardPatchResolverForTests } from './preset-registry.js'

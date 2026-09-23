@@ -391,3 +391,188 @@ test('generatePreset: falls back to the in-place persona rewrite when standard c
     assert.ok(healed.includes('workflow-worker-thread'), 'composition rows stay as copied on the fallback path')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 0.1.7 registry backend: presets are declarative in-memory definitions
+// registered through agentPresets.register (feature-detected); the shipped
+// `standard` composition comes from the host's standard.patch.yml.
+// Registrations live in process-global state, so every test uses its own slug
+// and unregisters it again before returning.
+// ---------------------------------------------------------------------------
+
+const REGISTRY_PATCH = `# fixture standard preset declaration (0.1.7 patch shape)
+- insert:
+    - id: preset-standard
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: standard
+        order: 1
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              suffix: Your working directory is {{cwd}}.
+              prefix: You are a coding agent powered by the {{model}} model.
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+`
+
+function createMockRegistryPresets() {
+  const calls = { register: [], dispose: [] }
+  const active = new Map()
+  const agentPresets = {
+    async register(definition) {
+      // Record every attempt (even rejected duplicates) so tests can assert
+      // the plugin really did try to register over a foreign declaration.
+      const snapshot = JSON.parse(JSON.stringify(definition))
+      calls.register.push(snapshot)
+      if (active.has(definition.id)) {
+        throw new Error(`Duplicate agent preset "${definition.id}"`)
+      }
+      active.set(definition.id, snapshot)
+      return async () => {
+        active.delete(definition.id)
+        calls.dispose.push(definition.id)
+      }
+    },
+    async list() {
+      return [...active.keys()].map((id) => ({ id }))
+    },
+  }
+  return { agentPresets, calls, active }
+}
+
+async function withRegistryCtx(run) {
+  const tmp = await mkdtemp(join(tmpdir(), 'oac-dsh-preset-reg-'))
+  const patchPath = join(tmp, 'standard.patch.yml')
+  await writeFile(patchPath, REGISTRY_PATCH, 'utf8')
+  plugin.setStandardPatchResolverForTests(async () => patchPath)
+  const mock = createMockRegistryPresets()
+  const warnings = []
+  const ctx = {
+    agentPresets: mock.agentPresets,
+    dshHomePath: (...segments) => join(tmp, ...segments),
+    logger: { warn: (message) => warnings.push(message) },
+    webRuntime: { trustedHosts: [] },
+    webServer: { register: () => () => {} },
+    effect: (fn) => { fn() },
+  }
+  try {
+    await run(ctx, mock, tmp, warnings)
+  } finally {
+    plugin.setStandardPatchResolverForTests(undefined)
+    await rm(tmp, { recursive: true, force: true })
+  }
+}
+
+test('generatePreset (registry backend): declares an in-memory preset from the shipped standard patch', async () => {
+  await withRegistryCtx(async (ctx, mock) => {
+    const presetId = await plugin.generatePreset(ctx, makeBot({ slug: 'regalice', name: 'Reg Alice' }))
+    assert.equal(presetId, 'oac-regalice')
+    assert.equal(mock.calls.register.length, 1)
+    const definition = mock.calls.register[0]
+    assert.equal(definition.id, 'oac-regalice')
+    assert.equal(definition.name, 'Reg Alice')
+    assert.equal(definition.order, 10)
+    assert.ok(definition.description.includes('regalice'))
+    const persona = definition.plugins.find((entry) => entry.id === 'persona')
+    assert.ok(persona.config.prefix.includes('<slug>regalice</slug>'))
+    assert.ok(persona.config.prefix.includes('<name>Reg Alice</name>'))
+    assert.equal(persona.config.suffix, 'Your working directory is {{cwd}}.', 'shipped suffix kept')
+    assert.equal('text' in persona.config, false, 'legacy text key dropped')
+    const bash = definition.plugins.find((entry) => entry.id === 'tool-bash')
+    assert.deepEqual(bash.disabled, { __jsExpr: "process.platform === 'win32'" }, '!!js rows stay js-expr markers')
+    await plugin.removePreset(ctx, 'regalice')
+    assert.deepEqual(mock.calls.dispose, ['oac-regalice'])
+  })
+})
+
+test('generatePreset (registry backend): identical content is not re-registered, drift swaps the registration', async () => {
+  await withRegistryCtx(async (ctx, mock) => {
+    await plugin.generatePreset(ctx, makeBot({ slug: 'regbob', name: 'Bob One' }))
+    await plugin.generatePreset(ctx, makeBot({ slug: 'regbob', name: 'Bob One' }))
+    assert.equal(mock.calls.register.length, 1, 'identical definition is left mounted')
+    assert.deepEqual(mock.calls.dispose, [])
+    await plugin.generatePreset(ctx, makeBot({ slug: 'regbob', name: 'Bob Two' }))
+    assert.equal(mock.calls.register.length, 2)
+    assert.deepEqual(mock.calls.dispose, ['oac-regbob'], 'drift unregisters before re-registering')
+    assert.equal(mock.calls.register[1].name, 'Bob Two')
+    await plugin.removePreset(ctx, 'regbob')
+  })
+})
+
+test('generatePreset (registry backend): a foreign declaration owning the id wins and is left alone', async () => {
+  await withRegistryCtx(async (ctx, mock, tmp, warnings) => {
+    // A profile patch (or another plugin) declared the id first.
+    await mock.agentPresets.register({ id: 'oac-regcarol', plugins: [] })
+    const presetId = await plugin.generatePreset(ctx, makeBot({ slug: 'regcarol', name: 'Carol' }))
+    assert.equal(presetId, 'oac-regcarol')
+    assert.equal(mock.calls.register.length, 2, 'the duplicate attempt reached the registry')
+    assert.equal(mock.active.get('oac-regcarol').plugins.length, 0, 'foreign declaration kept')
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /declared outside the plugin/)
+    await plugin.removePreset(ctx, 'regcarol')
+    assert.deepEqual(mock.calls.dispose, [], 'a foreign declaration is never disposed by the plugin')
+    assert.equal(mock.active.has('oac-regcarol'), true)
+  })
+})
+
+test('reconcilePresets (registry backend): registers every Bot and unregisters plugin orphans', async () => {
+  await withRegistryCtx(async (ctx, mock) => {
+    // Orphaned registration from an earlier apply whose Bot is gone.
+    await plugin.generatePreset(ctx, makeBot({ slug: 'reggone', name: 'Gone' }))
+    const result = await plugin.reconcilePresets(ctx, async () => ({
+      ok: true,
+      state: 'success',
+      data: {
+        profiles: [
+          makeBot({ slug: 'regdora', name: 'Dora', botType: 'worker' }),
+          makeBot({ slug: 'regeric', name: 'Eric', botType: 'twin' }),
+        ],
+      },
+    }))
+    assert.deepEqual(result.wanted.sort(), ['oac-regdora', 'oac-regeric'])
+    assert.deepEqual(result.removed, ['oac-reggone'])
+    assert.deepEqual([...mock.active.keys()].sort(), ['oac-regdora', 'oac-regeric'])
+    const dora = mock.active.get('oac-regdora')
+    assert.ok(dora.plugins.find((entry) => entry.id === 'persona').config.prefix.includes('<bot_type>worker</bot_type>'))
+    await plugin.removePreset(ctx, 'regdora')
+    await plugin.removePreset(ctx, 'regeric')
+  })
+})
+
+test('generatePreset (registry backend): fails loud when the shipped standard patch cannot be read', async () => {
+  await withRegistryCtx(async (ctx, mock, tmp) => {
+    plugin.setStandardPatchResolverForTests(async () => join(tmp, 'missing.patch.yml'))
+    await assert.rejects(plugin.generatePreset(ctx, makeBot({ slug: 'regfail' })), /ENOENT/)
+    assert.equal(mock.calls.register.length, 0, 'nothing is registered on a guess-composed preset')
+  })
+})
+
+test('generatePreset (registry backend): composes from the installed dsh-web-app standard patch', async () => {
+  // No resolver override and no profileContext: the plugin's own install
+  // location anchors resolution to the devDependency copy of
+  // @deepseek-ai/dsh-web-app — a smoke test against the real shipped patch.
+  const tmp = await mkdtemp(join(tmpdir(), 'oac-dsh-preset-real-'))
+  const mock = createMockRegistryPresets()
+  const ctx = {
+    agentPresets: mock.agentPresets,
+    dshHomePath: (...segments) => join(tmp, ...segments),
+    webRuntime: { trustedHosts: [] },
+    webServer: { register: () => () => {} },
+    effect: (fn) => { fn() },
+  }
+  try {
+    await plugin.generatePreset(ctx, makeBot({ slug: 'regreal', name: 'Real' }))
+    assert.equal(mock.calls.register.length, 1)
+    const definition = mock.calls.register[0]
+    const persona = definition.plugins.find((entry) => entry.id === 'persona')
+    assert.ok(persona.config.prefix.includes('<slug>regreal</slug>'))
+    assert.equal(typeof persona.config.suffix, 'string', 'real patch persona suffix kept')
+    assert.ok(definition.plugins.some((entry) => entry.id === 'tool-bash'), 'real patch composition rows present')
+    await plugin.removePreset(ctx, 'regreal')
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
+})

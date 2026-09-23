@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
-import { IconCopyOutline16, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCopyOutline16 } from './icons.ts'
 
 /**
  * Icon-only copy button (the OAC `copy-action` port): copies `value` on click

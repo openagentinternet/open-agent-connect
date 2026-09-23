@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Button, Input, MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  Button,
   IconCloseOutline16,
   IconPanelLeftOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
   IconSendOutline14,
   IconWarningOutline16,
-  Input,
-  MarkdownText,
-  Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   timestampLabel,

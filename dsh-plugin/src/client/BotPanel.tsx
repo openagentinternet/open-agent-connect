@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  Button,
   IconBrowseOutline16,
   IconEditOutline16,
   IconLoadingOutline16,
@@ -8,8 +8,7 @@ import {
   IconRefreshOutline16,
   IconRightUpOutline16,
   IconWarningOutline16,
-  Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MetaAppListPayload } from '../apps.ts'
 import {

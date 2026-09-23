@@ -3,7 +3,7 @@ import {
   IconCheckOutline16,
   IconChevronDownOutline14,
   IconChevronRightOutline14,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from './icons.ts'
 import type { LlmDirectory } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
 

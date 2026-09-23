@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Button, IconWarningOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconWarningOutline16 } from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotBackupPayload, BotRow } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'

@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import {
-  Button,
-  IconCloseOutline16,
-  IconSendOutline14,
-  Input,
-  MarkdownText,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutline16, IconSendOutline14 } from './icons.ts'
 import type { CommonKeyOf, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {

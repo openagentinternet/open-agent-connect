@@ -285,7 +285,7 @@ async function runScheduledSession(
     if (outcome === 'timed_out') {
       timedOut = true
       try {
-        worker.cancel?.({ kind: 'timeout' })
+        worker.cancel?.({ kind: 'hook', reason: 'timeout' })
       } catch {
         // worker may already be gone
       }

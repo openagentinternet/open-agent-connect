@@ -353,7 +353,7 @@ export function applyGroupTaskWorkerSessions(
       if (outcome === 'timed_out') {
         timedOut = true
         try {
-          agent.cancel?.({ kind: 'timeout' })
+          agent.cancel?.({ kind: 'hook', reason: 'timeout' })
         } catch {
           // session may already be gone
         }

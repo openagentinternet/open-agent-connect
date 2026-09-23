@@ -11,7 +11,8 @@ export type AgentPresetTranslate = TranslateNS<'settings.agentPreset'>
 
 export type PresetDisplaySource = {
   readonly id: string
-  readonly trust: 'system' | 'user'
+  /** 0.1.6 directory presets carried a trust tier; the 0.1.7 registry roster drops it. */
+  readonly trust?: 'system' | 'user'
   readonly name?: string
   readonly description?: string
 }
@@ -37,7 +38,10 @@ export function presetDisplayText(
   preset: PresetDisplaySource,
   t: AgentPresetTranslate,
 ): PresetDisplayText {
-  const keys = preset.trust === 'system' ? BUILT_IN_PRESET_KEYS[preset.id] : undefined
+  // 0.1.7 roster rows carry no trust tier; the built-in ids still resolve
+  // through the DSH-owned dictionary there, so only an explicit 'user' tier
+  // (0.1.6) skips it.
+  const keys = preset.trust === 'user' ? undefined : BUILT_IN_PRESET_KEYS[preset.id]
   if (keys !== undefined) return { name: t(keys.name), description: t(keys.description) }
   return {
     name: preset.name ?? preset.id,

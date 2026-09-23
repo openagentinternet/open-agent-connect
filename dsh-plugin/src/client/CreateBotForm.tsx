@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { IconCloseOutline16, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutline16 } from './icons.ts'
 import type { LlmDirectory } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
 import { LlmPicker } from './LlmPicker.tsx'

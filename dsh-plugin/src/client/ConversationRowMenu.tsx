@@ -1,14 +1,16 @@
 import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  IconArchiveOutline20,
-  IconCopyOutline16,
-  IconEditOutline16,
-  IconEllipsisOutline16,
   Menu,
   writeClipboard,
   type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconArchiveOutline20,
+  IconCopyOutline16,
+  IconEditOutline16,
+  IconEllipsisOutline16,
+} from './icons.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import { timestampLabel } from './api.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'

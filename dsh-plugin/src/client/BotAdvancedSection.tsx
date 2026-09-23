@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
-import {
-  Button,
-  IconDownloadOutline16,
-  IconRightUpOutline16,
-  IconTrashOutline16,
-  Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconDownloadOutline16, IconRightUpOutline16, IconTrashOutline16 } from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   METAAPP_METAFILE_REFERENCE_PATTERN,
