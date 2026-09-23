@@ -136,7 +136,7 @@ test('memory tools bridge to the CLI with the expected names and formatting', as
   assert.match(plugin.MEMORY_STRATEGY_TEXT, /experience_recall/)
 })
 
-test('post-turn extraction skips plugin-injected user messages on both source shapes', async () => {
+test('post-turn extraction mirrors only genuine user messages (source kind user)', async () => {
   const calls = []
   const { ctx, listeners } = fakeCtx(null)
   plugin.applyMemoryExtraction(ctx, {
@@ -146,7 +146,11 @@ test('post-turn extraction skips plugin-injected user messages on both source sh
     },
   })
   const listener = listeners.find((entry) => entry.event === 'session/event').listener
-  for (const [index, kind] of ['plugin', 'plugin:oac-dsh'].entries()) {
+  // v3 plugin wrapper, our v4 producer kind, and the first-party kinds that
+  // replaced the wrapper on 0.1.7 (time-context/compact-checkpoint/schedule)
+  // are all machine-produced context — none of them may reach extraction.
+  const machineKinds = ['plugin', 'plugin:oac-dsh', 'time-context', 'compact-checkpoint', 'schedule']
+  for (const [index, kind] of machineKinds.entries()) {
     const session = {
       id: `sess-plugin-${index}`,
       header: { agentPreset: 'oac-alice' },
@@ -160,7 +164,7 @@ test('post-turn extraction skips plugin-injected user messages on both source sh
     listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
   }
   await new Promise((resolve) => setTimeout(resolve, 200))
-  assert.equal(calls.filter((call) => call.args[1] === 'extract').length, 0, 'plugin turns carry no user speech to extract')
+  assert.equal(calls.filter((call) => call.args[1] === 'extract').length, 0, 'machine-produced turns carry no user speech to extract')
 })
 
 test('post-turn extraction reads the live session log through snapshotEvents', async () => {

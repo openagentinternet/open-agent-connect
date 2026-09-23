@@ -156,9 +156,13 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
       for (const entry of slice) {
         if (entry?.type === 'user/message') {
           const data = entry.data as HostUserMessage | undefined
-          // Skip plugin-injected turns: v3 wrapper on ≤0.1.6, producer kind on
-          // 0.1.7 (native v4 writes and migrated v3 logs share it).
-          if (data?.source?.kind === 'plugin' || data?.source?.kind === 'plugin:oac-dsh') continue
+          // Mirror only genuine human input. DSH v4 abolished the
+          // {kind:'plugin'} wrapper: every producer now stamps its own source
+          // kind — ours is 'plugin:oac-dsh', and DSH's own context injectors
+          // carry kinds like 'time-context', 'compact-checkpoint', 'schedule',
+          // or 'user-approval'. Anything but 'user' is machine-produced
+          // context, not the human's words.
+          if (data?.source?.kind !== 'user') continue
           const text = textFromBlocks(data?.content)
           if (text) userTexts.push(text)
         } else if (entry?.type === 'assistant/message') {
