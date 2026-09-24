@@ -48,12 +48,12 @@ const BARE_BROWSER_GLOBAL_META_ID_PATTERN = /^id[qpzryt]1[qpzry9x8gf2tvdw0s3jn54
 type LocalUiPageBuilder = (i18n: LocalUiI18nContext) => LocalUiPageDefinition;
 
 const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
-  'hub': () => buildHubPageDefinition(),
-  'publish': () => buildPublishPageDefinition(),
+  'hub': buildHubPageDefinition,
+  'publish': buildPublishPageDefinition,
   'my-services': (i18n) => buildMyServicesPageDefinition({ i18n }),
   'trace': () => buildTracePageDefinition(),
-  'refund': () => buildRefundPageDefinition(),
-  'bot': () => buildBotPageDefinition(),
+  'refund': buildRefundPageDefinition,
+  'bot': buildBotPageDefinition,
   'conversations': buildConversationsPageDefinition,
   'services': buildServicesPageDefinition,
   'apps': buildAppsPageDefinition,

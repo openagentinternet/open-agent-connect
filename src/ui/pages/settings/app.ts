@@ -32,6 +32,21 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
               </select>
             </label>
           </article>
+          <article class="settings-panel" data-user-section>
+            <div>
+              <h2 data-i18n-key="settings.user.title">${i18n.t('settings.user.title')}</h2>
+              <p data-i18n-key="settings.user.body">${i18n.t('settings.user.body')}</p>
+            </div>
+            <dl class="settings-user-verbs">
+              <div class="settings-user-verb"><dt><code>metabot user who</code></dt><dd data-i18n-key="settings.user.verbWho">${i18n.t('settings.user.verbWho')}</dd></div>
+              <div class="settings-user-verb"><dt><code>metabot user create --name &lt;name&gt;</code></dt><dd data-i18n-key="settings.user.verbCreate">${i18n.t('settings.user.verbCreate')}</dd></div>
+              <div class="settings-user-verb"><dt><code>metabot user import --mnemonic &lt;words&gt;</code></dt><dd data-i18n-key="settings.user.verbImport">${i18n.t('settings.user.verbImport')}</dd></div>
+              <div class="settings-user-verb"><dt><code>metabot user rename --name &lt;name&gt;</code></dt><dd data-i18n-key="settings.user.verbRename">${i18n.t('settings.user.verbRename')}</dd></div>
+              <div class="settings-user-verb"><dt><code>metabot user reveal</code></dt><dd data-i18n-key="settings.user.verbReveal">${i18n.t('settings.user.verbReveal')}</dd></div>
+              <div class="settings-user-verb"><dt><code>metabot user delete</code></dt><dd data-i18n-key="settings.user.verbDelete">${i18n.t('settings.user.verbDelete')}</dd></div>
+            </dl>
+            <p class="settings-user-note" data-i18n-key="settings.user.consoleNote">${i18n.t('settings.user.consoleNote')}</p>
+          </article>
           <article class="settings-panel">
             <div>
               <h2 data-i18n-key="settings.network.title">${i18n.t('settings.network.title')}</h2>

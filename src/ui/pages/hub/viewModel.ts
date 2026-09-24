@@ -22,9 +22,21 @@ export interface HubServiceDirectoryViewModel {
   emptyBody: string;
 }
 
+export type HubTranslate = (key: string, fallback?: string, replacements?: Record<string, string | number>) => string;
+
 export function buildHubServiceDirectoryViewModel(input: {
   services?: Array<Record<string, unknown>> | null;
+  t?: HubTranslate;
 }): HubServiceDirectoryViewModel {
+  // Localize through the injected translator when the caller provides one (the
+  // browser page injects its i18n-backed uiText). Server-side callers (tests,
+  // diagnostics) omit `t` and get the byte-identical English defaults.
+  const replaceTokens = (template: string, replacements?: Record<string, string | number>): string =>
+    Object.keys(replacements || {}).reduce(
+      (text, name) => text.split('{' + name + '}').join(String((replacements || {})[name])),
+      String(template == null ? '' : template),
+    );
+  const t: HubTranslate = input.t ?? ((_key, fallback, replacements) => replaceTokens(fallback ?? '', replacements));
   const normalizeText = (value: unknown): string =>
     typeof value === 'string' ? value.trim() : '';
   const normalizeTimestamp = (value: unknown): number | null => {
@@ -52,13 +64,13 @@ export function buildHubServiceDirectoryViewModel(input: {
 
     const displayName = normalizeText(service.displayName)
       || normalizeText(service.serviceName)
-      || 'Unnamed MetaBot service';
+      || t('hub.unnamedService', 'Unnamed MetaBot service');
     const providerName = normalizeText(service.providerName);
     const providerGmid = normalizeText(service.providerGlobalMetaId);
     const providerLabel = providerName && providerGmid
       ? `${providerName}(${providerGmid})`
-      : providerGmid || providerName || 'Unknown provider';
-    const description = normalizeText(service.description) || 'No service description published yet.';
+      : providerGmid || providerName || t('hub.unknownProvider', 'Unknown provider');
+    const description = normalizeText(service.description) || t('hub.noDescription', 'No service description published yet.');
     const priceAmount = normalizeText(service.price);
     const priceCurrency = normalizeText(service.currency);
     const capabilityLabel = normalizeText(service.providerSkill)
@@ -78,9 +90,13 @@ export function buildHubServiceDirectoryViewModel(input: {
       providerLabel,
       providerName,
       providerGmid,
-      priceLabel: [priceAmount, priceCurrency].filter(Boolean).join(' ') || 'Free / unknown',
+      priceLabel: [priceAmount, priceCurrency].filter(Boolean).join(' ') || t('hub.priceFree', 'Free / unknown'),
       capabilityLabel,
-      statusLabel: online ? 'Online now' : lastSeenAtMs ? 'Recently seen' : 'Offline',
+      statusLabel: online
+        ? t('hub.statusOnline', 'Online now')
+        : lastSeenAtMs
+          ? t('hub.statusRecent', 'Recently seen')
+          : t('hub.statusOffline', 'Offline'),
       statusTone: online ? 'online' : lastSeenAtMs ? 'recent' : 'offline',
       updatedAtMs,
       lastSeenAtMs,
@@ -114,7 +130,7 @@ export function buildHubServiceDirectoryViewModel(input: {
   return {
     countLabel: String(entries.length),
     entries,
-    emptyTitle: 'No online MetaBot services yet',
-    emptyBody: 'The local yellow pages has no visible services right now. Add a directory source or wait for an online MetaBot to publish itself on-chain.',
+    emptyTitle: t('hub.emptyTitle', 'No online MetaBot services yet'),
+    emptyBody: t('hub.emptyBody', 'The local yellow pages has no visible services right now. Add a directory source or wait for an online MetaBot to publish itself on-chain.'),
   };
 }

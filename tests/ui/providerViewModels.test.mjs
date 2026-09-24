@@ -165,6 +165,7 @@ function runPublishPage(search = '') {
     window: {
       location: { search },
       history: { replaceState() {} },
+      addEventListener() {},
     },
     fetch: fetchImpl,
     navigator: { clipboard: null },

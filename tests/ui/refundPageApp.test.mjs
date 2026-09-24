@@ -160,7 +160,7 @@ function runRefundPage(fetchImpl, elements = createElements(), search = '') {
       querySelector: (selector) => elements[selector] || null,
       querySelectorAll: (selector) => elements.__querySelectorAll?.[selector] || [],
     },
-    window: { location: { search } },
+    window: { location: { search }, addEventListener() {} },
     fetch: fetchImpl,
     AbortController,
     setTimeout,
