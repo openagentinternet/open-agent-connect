@@ -877,6 +877,12 @@ function resolveLocalUiPath(page: string): string {
   if (page === 'chat') {
     return '/ui/chat/app/chat.html';
   }
+  // Standalone console pages served by the daemon at /ui/<page>. Listed
+  // explicitly so new pages are recognized by the localUiUrl plumbing the
+  // moment they are added to SUPPORTED_UI_PAGES.
+  if (page === 'kb' || page === 'surf') {
+    return `/ui/${page}`;
+  }
   return `/ui/${page}`;
 }
 

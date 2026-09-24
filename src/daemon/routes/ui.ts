@@ -9,6 +9,8 @@ import { buildBotPageDefinition } from '../../ui/pages/bot/app';
 import { buildConversationsPageDefinition } from '../../ui/pages/conversations/app';
 import { buildAppsPageDefinition } from '../../ui/pages/apps/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
+import { buildKbPageDefinition } from '../../ui/pages/kb/app';
+import { buildSurfPageDefinition } from '../../ui/pages/surf/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
@@ -52,6 +54,8 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'conversations': buildConversationsPageDefinition,
   'services': buildServicesPageDefinition,
   'apps': buildAppsPageDefinition,
+  'kb': buildKbPageDefinition,
+  'surf': buildSurfPageDefinition,
   'settings': buildSettingsPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
@@ -61,6 +65,8 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'conversations', labelKey: 'nav.conversations' },
   { page: 'services', labelKey: 'nav.services' },
   { page: 'apps', labelKey: 'nav.apps' },
+  { page: 'kb', labelKey: 'nav.knowledge' },
+  { page: 'surf', labelKey: 'nav.surf' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();
