@@ -7,6 +7,21 @@ export interface AutoReplyConfig {
     maxTurns: number;
     cooldownMs: number;
 }
+export interface AutomationConfig {
+    /**
+     * Daemon nightly dream tick (dream due → run + pre-dream surf gate +
+     * memory-hygiene tail) for this profile. Default enabled so non-DSH
+     * installs get nightly dreams out of the box; the tick also stands down
+     * while the DSH host-executor bridge is connected.
+     */
+    dreamTickEnabled: boolean;
+    /**
+     * Daemon chain-history summary drain (bounded on-chain read/write
+     * summarization) for this profile. Default enabled; same DSH stand-down
+     * as the dream tick.
+     */
+    chainHistorySummaryEnabled: boolean;
+}
 export declare const AUTO_REPLY_MAX_TURNS_OPTIONS: readonly number[];
 export declare const AUTO_REPLY_COOLDOWN_MS_OPTIONS: readonly number[];
 export declare const DEFAULT_AUTO_REPLY_MAX_TURNS = 10;
@@ -30,6 +45,7 @@ export interface MetabotConfig {
     chain: ChainConfig;
     a2a: A2AConfig;
     autoReply: AutoReplyConfig;
+    automation: AutomationConfig;
     browser: BrowserConfig;
 }
 export declare function isDefaultWriteNetwork(value: unknown): value is DefaultWriteNetwork;

@@ -105,6 +105,7 @@ function normalizeConfig(input: unknown): MetabotConfig {
   const root = input as Record<string, unknown>;
   const maybeA2A = root['a2a'];
   const maybeAutoReply = root['autoReply'];
+  const maybeAutomation = root['automation'];
   const maybeBrowser = root['browser'];
   const maybeChain = root['chain'];
 
@@ -113,6 +114,9 @@ function normalizeConfig(input: unknown): MetabotConfig {
     : {};
   const autoReplySource = maybeAutoReply && typeof maybeAutoReply === 'object'
     ? maybeAutoReply as Record<string, unknown>
+    : {};
+  const automationSource = maybeAutomation && typeof maybeAutomation === 'object'
+    ? maybeAutomation as Record<string, unknown>
     : {};
   const browserSource = maybeBrowser && typeof maybeBrowser === 'object'
     ? maybeBrowser as Record<string, unknown>
@@ -155,6 +159,16 @@ function normalizeConfig(input: unknown): MetabotConfig {
         autoReplySource.cooldownMs,
         AUTO_REPLY_COOLDOWN_MS_OPTIONS,
         defaults.autoReply.cooldownMs,
+      ),
+    },
+    automation: {
+      dreamTickEnabled: normalizeBoolean(
+        automationSource.dreamTickEnabled,
+        defaults.automation.dreamTickEnabled,
+      ),
+      chainHistorySummaryEnabled: normalizeBoolean(
+        automationSource.chainHistorySummaryEnabled,
+        defaults.automation.chainHistorySummaryEnabled,
       ),
     },
     browser: {

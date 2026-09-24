@@ -760,6 +760,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot config get --from alice chain.defaultWriteNetwork',
       'metabot config get --from alice a2a.simplemsgListenerEnabled',
+      'metabot config get --from alice automation.dreamTickEnabled',
     ],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
@@ -779,6 +780,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot config set --from alice chain.defaultWriteNetwork opcat',
       'metabot config set --from alice a2a.simplemsgListenerEnabled false',
+      'metabot config set --from alice automation.chainHistorySummaryEnabled false',
     ],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
@@ -833,6 +835,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'freeGrant',
       'featureUnavailable',
       'identity',
+      'localUiUrl (the /ui/traffic page; omitted when no daemon base URL is resolvable)',
     ],
     failureSemantics: [
       'Returns account/freeGrant/identity as null when no owner identity exists on this machine.',
@@ -867,6 +870,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     successFields: [
       'account',
       'featureUnavailable',
+      'localUiUrl (the /ui/traffic page; omitted when no daemon base URL is resolvable)',
     ],
     failureSemantics: [
       'Returns { account: null, featureUnavailable: true } when the backend has no /v1/traffic/* endpoints.',
@@ -2930,6 +2934,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'search', summary: 'Keyword-search mirrored transcripts and A2A conversations.' },
       { name: 'recall', summary: 'Recall dream diaries by date range or keyword.' },
       { name: 'knowledge', summary: 'Manage topic-anchored knowledge points (know_how/pitfall/principle).' },
+      { name: 'procedure', summary: 'Manage repeatable-workflow procedures (recall/save/archive).' },
       { name: 'impressions', summary: 'Inspect person-anchored (GlobalMetaID) impression snapshots.' },
       { name: 'hygiene', summary: 'Nightly memory-hygiene pass: status/due/run plus per-Bot thresholds.' },
     ],
@@ -2952,6 +2957,33 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot memory knowledge list --from alice --kind pitfall',
       'metabot memory knowledge upsert --from alice --payload-file /tmp/knowledge.json',
+    ],
+  },
+  {
+    commandPath: ['memory', 'procedure'],
+    summary: 'Repeatable-workflow procedures: list/recall/save/archive (the DSH procedure_recall/save/archive surface).',
+    usage: 'metabot memory procedure <list|recall|save|archive> [--from <bot-slug>] [--payload-file <path>]',
+    subcommands: [
+      { name: 'list', summary: 'List saved procedures, newest update first.' },
+      { name: 'recall', summary: 'Score active procedures against a task description (top matches get use-tracked).' },
+      { name: 'save', summary: 'Create or rewrite a procedure (same title bumps the version).' },
+      { name: 'archive', summary: 'Archive one procedure by exact title.' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--query', value: '<text>', description: 'For recall: what you are about to do (colloquial wording works).' },
+      { flag: '--title', value: '<title>', description: 'For archive: the exact procedure title.' },
+      { flag: '--status', value: '<active|archived>', description: 'For list: filter by status (default lists all).' },
+      { flag: '--limit', value: '<n>', description: 'For list: maximum rows. For recall: maximum matches (default 3).' },
+      { flag: '--payload-file', value: '<path>', description: 'For save: JSON payload { title, steps[], pitfalls?, triggerText?, sourcePinIds?, category?, tags?, confidence?, origin? }.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['procedures', 'matches', 'procedure', 'created', 'archived'],
+    examples: [
+      'metabot memory procedure list --from alice',
+      'metabot memory procedure recall --from alice --query "publish a chain article"',
+      'metabot memory procedure save --from alice --payload-file /tmp/procedure.json',
+      'metabot memory procedure archive --from alice --title "Publish a chain article"',
     ],
   },
   {
@@ -3001,7 +3033,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--include-deleted', description: 'Include soft-deleted entries.' },
       HELP_JSON_FLAG,
     ],
-    successFields: ['entries'],
+    successFields: ['entries', 'localUiUrl (the /ui/memory page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot memory list --from alice --query 咖啡'],
   },
   {
@@ -3233,7 +3265,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Show surf runs (newest first), the pre-dream surf toggle, and the interaction budget.',
     usage: 'metabot surf status [--from <bot-slug>] [--limit <n>]',
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG, { flag: '--limit', description: 'Max run rows (default 5, max 50).' }],
-    successFields: ['runs', 'running', 'surfBeforeDreamEnabled', 'interactionBudget'],
+    successFields: ['runs', 'running', 'surfBeforeDreamEnabled', 'interactionBudget', 'localUiUrl (the /ui/surf page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot surf status --from alice'],
   },
   {
@@ -3246,7 +3278,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--trigger', description: 'Run trigger label (default manual-ui).' },
       { flag: '--wait', description: 'Wait for the run to finish and print its report.' },
     ],
-    successFields: ['runId', 'status', 'trigger'],
+    successFields: ['runId', 'status', 'trigger', 'localUiUrl (the /ui/surf page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot surf run --from alice --wait'],
   },
   {
@@ -3286,7 +3318,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Show dream runs, diary count, and self-identity presence.',
     usage: 'metabot dream status [--from <bot-slug>]',
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    successFields: ['runs', 'summaryCount', 'latestSummaryDate', 'hasSelfIdentity'],
+    successFields: ['runs', 'summaryCount', 'latestSummaryDate', 'hasSelfIdentity', 'localUiUrl (the /ui/dream page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot dream status --from alice'],
   },
   {
@@ -3330,7 +3362,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--payload-file', value: '<path>', description: 'Optional JSON payload: { llm?, limits?, isRepair? }.' },
       HELP_JSON_FLAG,
     ],
-    successFields: ['date', 'kind', 'commit'],
+    successFields: ['date', 'kind', 'commit', 'localUiUrl (the /ui/dream page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot dream run --from alice --date 2026-08-19'],
   },
   {
@@ -3393,7 +3425,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--disabled', value: '', description: 'Create the task disabled.' },
       HELP_JSON_FLAG,
     ],
-    successFields: ['task'],
+    successFields: ['task', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
     examples: [
       'metabot schedule create --from alice --name "morning digest" --prompt "Summarize yesterday\'s dream diary." --at 2026-09-06T08:00:00',
       'metabot schedule create --name "kb sweep" --prompt "Scan MetaWeb for new guides and save them to the knowledge base." --every 3600000',
@@ -3405,7 +3437,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'List scheduled tasks for one Bot (or the Twin default).',
     usage: 'metabot schedule list [--from <bot-slug>]',
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    successFields: ['tasks'],
+    successFields: ['tasks', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot schedule list --from alice'],
   },
   {
@@ -3465,7 +3497,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot schedule run --id <task-id> [--from <bot-slug>]',
     requiredFlags: [{ flag: '--id', value: '<task-id>', description: 'Scheduled task id.' }],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    successFields: ['taskId', 'output'],
+    successFields: ['taskId', 'output', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot schedule run --from alice --id <task-id>'],
   },
   {
@@ -3572,8 +3604,32 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'query', summary: 'Search one or all knowledge bases (bm25+phrase ranking).' },
       { name: 'add-document', summary: 'Save a document into a knowledge base (SimpleNote-JSON provenance wrapper).' },
       { name: 'learn', summary: 'Index raw documents (incremental by default, --full to rebuild from scratch).' },
+      { name: 'study', summary: 'Nightly study-job queue: enqueue/status/retry (the DSH metaweb_study_* surface).' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['knowledge-base', 'study'],
+    summary: 'Autonomous nightly MetaWeb study jobs: the daemon drains the queue into the Bot\'s knowledge base during the nightly window (00:00-06:00).',
+    usage: 'metabot knowledge-base study <enqueue|status|retry> [--from <bot-slug>]',
+    subcommands: [
+      { name: 'enqueue', summary: 'Queue a study topic (dedupes against a pending/running job of the same topic).' },
+      { name: 'status', summary: 'List this Bot\'s study jobs with status, runs, failures, and summaries.' },
+      { name: 'retry', summary: 'Put failed jobs back into the nightly queue (by --job-id, --topic substring, or all failed).' },
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--topic', value: '<text>', description: 'For enqueue: what to study (max 200 chars). For retry: retry failed jobs whose topic contains this text.' },
+      { flag: '--budget-pins', value: '<n>', description: 'For enqueue: max metaweb documents saved per night (1-50, default 20).' },
+      { flag: '--job-id', value: '<id>', description: 'For retry: one failed job id from study status.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['job', 'created', 'jobs', 'retried', 'count'],
+    examples: [
+      'metabot knowledge-base study enqueue --from alice --topic "MetaID protocol deep dive" --budget-pins 10',
+      'metabot knowledge-base study status --from alice',
+      'metabot knowledge-base study retry --from alice',
+    ],
   },
   {
     commandPath: ['knowledge-base', 'query'],
@@ -3589,7 +3645,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       FROM_BOT_FLAG,
       HELP_JSON_FLAG,
     ],
-    successFields: ['results'],
+    successFields: ['results', 'localUiUrl (the /ui/kb page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot knowledge-base query --text "民法 合同" --from alice'],
   },
   {
@@ -3602,7 +3658,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       FROM_BOT_FLAG,
       HELP_JSON_FLAG,
     ],
-    successFields: ['knowledgeBase'],
+    successFields: ['knowledgeBase', 'localUiUrl (the /ui/kb page; omitted when no daemon base URL is resolvable)'],
     examples: ['metabot knowledge-base learn --from alice', 'metabot knowledge-base learn --full --id kb1'],
   },
   {
@@ -3919,10 +3975,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['ui', 'open'],
-    summary: 'Open one local MetaBot runtime HTML page such as bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, or refund.',
+    summary: 'Open one local MetaBot runtime HTML page such as bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, schedule, or traffic.',
     usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>] [--mode <mode>] [--host <provider>]',
     requiredFlags: [
-      { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, or refund.' },
+      { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, schedule, or traffic.' },
     ],
     optionalFlags: [
       FROM_BOT_FLAG,

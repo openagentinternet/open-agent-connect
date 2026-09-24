@@ -79,6 +79,9 @@ import { normalizeOptionalDshLlmId, normalizeOptionalDshLlmReasoningEffort, read
 import { normalizeBotType, normalizeOptionalGlobalMetaId } from '../core/bot/botRole';
 import { applyTwinInvariant, resolveCurrentTwinSlug, resolveTwinHomeDir } from '../core/bot/twinRole';
 import { createSurfDaemonHandlers } from './surfHandlers';
+import { createDreamDaemonHandlers } from './dreamHandlers';
+import { createMemoryDaemonHandlers } from './memoryHandlers';
+import { createKbDaemonHandlers } from './kbHandlers';
 import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
 import {
   buildPublishedService,
@@ -208,6 +211,7 @@ import {
 import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
 import { createGroupTaskDaemonHandlers } from './grouptaskHandlers';
 import { createScheduleDaemonHandlers } from './scheduleHandlers';
+import { createUserDaemonHandlers } from './userHandlers';
 import type { ScheduleStore } from '../core/schedule/store';
 import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
 import {
@@ -6602,6 +6606,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
         : createRuntimeStateStore(normalizedProfileHomeDir),
       signer: createSignerForProfileHome(normalizedProfileHomeDir),
     };
+  }
+
+  /**
+   * Shared bot resolution for the local-service handler groups
+   * (dream/memory/kb): explicit slug, else the machine Twin — the same
+   * semantics as the surf group's resolveBot, factored out so all three
+   * groups resolve actors identically.
+   */
+  async function resolveLocalServiceBot(from: unknown): Promise<
+    | { slug: string; name: string; homeDir: string }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const requestedSlug = normalizeText(from);
+    let profileHomeDir = await resolveTwinHomeDir(normalizedSystemHomeDir) ?? input.homeDir;
+    let slug: string | null = null;
+    if (requestedSlug) {
+      const selectedProfile = await resolveMetabotProfileBySelector(requestedSlug);
+      if (!selectedProfile) {
+        return {
+          failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+        };
+      }
+      profileHomeDir = selectedProfile.homeDir;
+      slug = selectedProfile.slug;
+    } else {
+      slug = await resolveCurrentTwinSlug(normalizedSystemHomeDir);
+    }
+    const name = (await getMetabotProfile(normalizedSystemHomeDir, slug ?? ''))?.name ?? slug ?? 'Bot';
+    const effectiveSlug = slug ?? 'default';
+    return { slug: effectiveSlug, name, homeDir: profileHomeDir };
   }
 
   async function resolveMetaAppOwnerActor(rawActor: unknown): Promise<
@@ -13424,6 +13458,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
         budget: (rawInput: { from?: string; budget?: number }) => group.budget(rawInput),
       };
     })(),
+    // Dream/memory/kb groups: local-service surfaces for the standalone UI
+    // pages (Phase 2 of the codex-dsh parity plan). All additive — no
+    // existing handler group is touched.
+    dream: createDreamDaemonHandlers({
+      resolveBot: resolveLocalServiceBot,
+      llmExecutor: input.llmExecutor ?? null,
+      log: (message) => console.warn(message),
+    }),
+    memory: createMemoryDaemonHandlers({
+      resolveBot: resolveLocalServiceBot,
+      llmExecutor: input.llmExecutor ?? null,
+    }),
+    kb: createKbDaemonHandlers({
+      resolveBot: resolveLocalServiceBot,
+    }),
     skills: {
       publish: async (rawInput) => {
         const actor = await resolveActorWriteContext(rawInput.from);
@@ -14661,6 +14710,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
     },
+    // Owner identity (the /ui/settings User section): the `metabot user *`
+    // CLI surface over HTTP, additive next to the Bot-profile group above.
+    user: createUserDaemonHandlers({ systemHomeDir: normalizedSystemHomeDir }),
     network: {
       listServices: async ({ online, query, cached }) => {
         const state = await runtimeStateStore.readState();
@@ -17214,6 +17266,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
       systemHomeDir: normalizedSystemHomeDir,
       createScheduleStore: input.schedule?.createScheduleStore,
       hostLeases: input.schedule?.hostLeases,
+      // Run-now shares the daemon's passive-LLM chain (DSH pair first, then
+      // the local runtime fallback), exactly like the dream/surf handlers.
+      llmExecutor: input.llmExecutor ?? null,
       log: (message) => console.warn(message),
     }),
     chat: {

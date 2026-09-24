@@ -40,6 +40,10 @@ const DEFAULT_CONFIG = {
     maxTurns: 10,
     cooldownMs: 60000,
   },
+  automation: {
+    dreamTickEnabled: true,
+    chainHistorySummaryEnabled: true,
+  },
   browser: DEFAULT_BROWSER_CONFIG,
 };
 
@@ -113,6 +117,10 @@ test('createConfigStore defaults to the active runtime config and persists updat
         maxTurns: 10,
         cooldownMs: 600000,
       },
+      automation: {
+        dreamTickEnabled: false,
+        chainHistorySummaryEnabled: true,
+      },
       browser: {
         blockExplorerBaseUrl: 'https://explorer.example.test/tx',
         walletApiBaseUrl: 'https://wallet.example.test',
@@ -178,6 +186,10 @@ test('read ignores retired askMaster and evolution_network config fields', async
         maxTurns: 10,
         cooldownMs: 60000,
       },
+      automation: {
+        dreamTickEnabled: true,
+        chainHistorySummaryEnabled: true,
+      },
       browser: DEFAULT_BROWSER_CONFIG,
     });
   });
@@ -239,6 +251,10 @@ test('set drops retired askMaster and evolution_network fields from persisted co
         maxTurns: 10,
         cooldownMs: 60000,
       },
+      automation: {
+        dreamTickEnabled: true,
+        chainHistorySummaryEnabled: true,
+      },
       browser: DEFAULT_BROWSER_CONFIG,
     });
   });
@@ -297,5 +313,35 @@ test('read keeps valid persisted autoReply params and falls back to defaults for
       assert.equal(reloaded.autoReply.maxTurns, 10, `maxTurns falls back for ${JSON.stringify(invalid)}`);
       assert.equal(reloaded.autoReply.cooldownMs, 60000, `cooldownMs falls back for ${JSON.stringify(invalid)}`);
     }
+  });
+});
+
+test('automation tick flags default to enabled and normalize malformed values', async () => {
+  await withTempProfileHome(async () => {
+    const store = createConfigStore();
+    const initial = await store.read();
+    assert.deepEqual(initial.automation, {
+      dreamTickEnabled: true,
+      chainHistorySummaryEnabled: true,
+    });
+
+    await store.set({
+      ...initial,
+      automation: { dreamTickEnabled: false, chainHistorySummaryEnabled: false },
+    });
+    const disabled = JSON.parse(await fs.readFile(store.paths.configPath, 'utf8'));
+    assert.deepEqual(disabled.automation, {
+      dreamTickEnabled: false,
+      chainHistorySummaryEnabled: false,
+    });
+
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+      automation: { dreamTickEnabled: 'false', chainHistorySummaryEnabled: 0 },
+    }, null, 2)}\n`, 'utf8');
+    const reloaded = await store.read();
+    assert.deepEqual(reloaded.automation, {
+      dreamTickEnabled: true,
+      chainHistorySummaryEnabled: true,
+    });
   });
 });

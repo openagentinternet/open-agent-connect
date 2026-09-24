@@ -67,6 +67,8 @@ $HOME/.metabot/bin/metabot metaweb --help
 $HOME/.metabot/bin/metabot memory --help
 $HOME/.metabot/bin/metabot dream --help
 $HOME/.metabot/bin/metabot knowledge-base --help
+$HOME/.metabot/bin/metabot schedule --help
+$HOME/.metabot/bin/metabot traffic --help
 $HOME/.metabot/bin/metabot qanda --help
 $HOME/.metabot/bin/metabot protocol --help
 $HOME/.metabot/bin/metabot surf --help

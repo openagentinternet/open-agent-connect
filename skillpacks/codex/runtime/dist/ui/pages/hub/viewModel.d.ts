@@ -20,6 +20,8 @@ export interface HubServiceDirectoryViewModel {
     emptyTitle: string;
     emptyBody: string;
 }
+export type HubTranslate = (key: string, fallback?: string, replacements?: Record<string, string | number>) => string;
 export declare function buildHubServiceDirectoryViewModel(input: {
     services?: Array<Record<string, unknown>> | null;
+    t?: HubTranslate;
 }): HubServiceDirectoryViewModel;

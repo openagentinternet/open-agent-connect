@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .schedule-shell {
+        display: grid;
+        gap: 18px;
+      }
+      .schedule-toolbar {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .schedule-toolbar h1 {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -.01em;
+      }
+      .schedule-toolbar p {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .schedule-toolbar-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .schedule-context {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .schedule-context .field {
+        min-width: 260px;
+      }
+      .schedule-tasks {
+        display: grid;
+        gap: 10px;
+      }
+      .schedule-task-name {
+        display: grid;
+        gap: 2px;
+      }
+      .schedule-task-name strong {
+        font-size: 13px;
+        color: var(--text);
+      }
+      .schedule-task-name span {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 320px;
+        display: inline-block;
+      }
+      .schedule-cadence {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--dim);
+      }
+      .schedule-cadence-kind {
+        display: inline-flex;
+        padding: 2px 7px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--surface2);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--dim);
+      }
+      .schedule-row-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .schedule-error-line {
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--red);
+        overflow-wrap: anywhere;
+      }
+      .schedule-editor {
+        display: grid;
+        gap: 14px;
+      }
+      .schedule-editor[hidden] {
+        display: none;
+      }
+      .schedule-kind-row {
+        display: grid;
+        gap: 10px;
+      }
+      .schedule-interval-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .schedule-interval-row input {
+        max-width: 120px;
+      }
+      .schedule-editor-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .schedule-runs {
+        display: grid;
+        gap: 10px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .data-table tbody tr[data-selected="true"] {
+        background: var(--accent-dim);
+      }
+      @media (max-width: 900px) {
+        .schedule-context {
+          align-items: stretch;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">__PAGE_EYEBROW__</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

@@ -28,6 +28,10 @@ function createDefaultConfig() {
             maxTurns: exports.DEFAULT_AUTO_REPLY_MAX_TURNS,
             cooldownMs: exports.DEFAULT_AUTO_REPLY_COOLDOWN_MS,
         },
+        automation: {
+            dreamTickEnabled: true,
+            chainHistorySummaryEnabled: true,
+        },
         browser: {
             botHomepageTemplateId: browserDefaults.botHomepageTemplateId,
             renderCustomBotPages: browserDefaults.renderCustomBotPages,

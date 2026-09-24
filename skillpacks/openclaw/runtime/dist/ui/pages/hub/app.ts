@@ -1,14 +1,16 @@
 import type { LocalUiPageDefinition } from '../types';
+import { createI18nContext } from '../../i18n';
+import type { LocalUiI18nContext } from '../../i18n';
 import { buildHubServiceDirectoryViewModel } from './viewModel';
 
-export function buildHubPageDefinition(): LocalUiPageDefinition {
+export function buildHubPageDefinition(i18n: LocalUiI18nContext = createI18nContext()): LocalUiPageDefinition {
   const buildHubServiceDirectoryViewModelSource = buildHubServiceDirectoryViewModel.toString();
   return {
     page: 'hub',
-    title: 'MetaBot Service Hub',
-    eyebrow: 'Service Hub',
-    heading: 'Online MetaBot Services',
-    description: 'Live directory of online MetaBot services on MetaWeb.',
+    title: i18n.t('hub.title'),
+    eyebrow: i18n.t('hub.eyebrow'),
+    heading: i18n.t('hub.heading'),
+    description: i18n.t('hub.description'),
     panels: [],
     script: `(() => {
   const buildHubServiceDirectoryViewModel = ${buildHubServiceDirectoryViewModelSource};
@@ -21,12 +23,27 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   const copyBtn = $('[data-svc-copy-btn]');
   const closeBtn = $('[data-svc-close-btn]');
   let currentPromptText = '';
+  let lastPayload = null;
+
+  const formatText = (template, replacements) => Object.keys(replacements || {}).reduce(
+    (text, name) => text.split('{' + name + '}').join(String(replacements[name])),
+    String(template == null ? '' : template)
+  );
+  const uiText = (key, fallback, replacements) => {
+    try {
+      if (typeof window !== 'undefined' && window.__oacLocalUiI18n && typeof window.__oacLocalUiI18n.t === 'function') {
+        const translated = window.__oacLocalUiI18n.t(key, replacements || {});
+        if (translated && translated !== key) return translated;
+      }
+    } catch {}
+    return formatText(fallback, replacements || {});
+  };
 
   const formatAgo = (agoSec) => {
     if (typeof agoSec !== 'number') return null;
-    if (agoSec < 60) return agoSec + 's ago';
-    if (agoSec < 3600) return Math.floor(agoSec / 60) + 'm ago';
-    return Math.floor(agoSec / 3600) + 'h ago';
+    if (agoSec < 60) return uiText('hub.agoSeconds', '{n}s ago', { n: agoSec });
+    if (agoSec < 3600) return uiText('hub.agoMinutes', '{n}m ago', { n: Math.floor(agoSec / 60) });
+    return uiText('hub.agoHours', '{n}h ago', { n: Math.floor(agoSec / 3600) });
   };
 
   const formatTime = (ms) => {
@@ -39,8 +56,8 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   };
 
   const openGetServiceModal = (serviceName) => {
-    const cleanName = String(serviceName || 'Unknown Service');
-    currentPromptText = 'Please request execution of remote service: ' + cleanName;
+    const cleanName = String(serviceName || uiText('hub.unknownService', 'Unknown Service'));
+    currentPromptText = uiText('hub.requestPrompt', 'Please request execution of remote service: ') + cleanName;
     if (modalPrompt) {
       modalPrompt.value = currentPromptText;
       modalPrompt.focus();
@@ -50,17 +67,18 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   };
 
   const renderTable = (payload) => {
+    lastPayload = payload;
     const services = Array.isArray(payload && payload.data && payload.data.services)
       ? payload.data.services : [];
-    const model = buildHubServiceDirectoryViewModel({ services });
+    const model = buildHubServiceDirectoryViewModel({ services, t: uiText });
 
     const onlineCount = model.entries.filter(e => e.statusTone === 'online').length;
     setText($('[data-online-count]'), String(onlineCount));
     setText($('[data-total-count]'), String(model.entries.length));
-    setText($('[data-top-service]'), model.entries[0]?.displayName || '—');
-    setText($('[data-directory-mode]'), payload?.data?.discoverySource || 'chain');
-    setText($('[data-online-badge]'), onlineCount + ' online');
-    setText($('[data-directory-updated]'), 'updated ' + new Date().toLocaleTimeString());
+    setText($('[data-top-service]'), model.entries[0]?.displayName || uiText('hub.none', '—'));
+    setText($('[data-directory-mode]'), (payload && payload.data && payload.data.discoverySource) || uiText('hub.sourceFallback', 'chain'));
+    setText($('[data-online-badge]'), uiText('hub.onlineBadge', '{count} online', { count: onlineCount }));
+    setText($('[data-directory-updated]'), uiText('hub.updated', 'updated {time}', { time: new Date().toLocaleTimeString() }));
 
     const tbody = $('[data-service-list]');
     if (!tbody) return;
@@ -126,7 +144,7 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
       const tdSeen = document.createElement('td');
       tdSeen.className = 'last-seen';
       const agoSec = typeof entry.lastSeenAgoSeconds === 'number' ? entry.lastSeenAgoSeconds : null;
-      tdSeen.textContent = agoSec != null ? formatAgo(agoSec) : (entry.lastSeenAtMs ? formatTime(entry.lastSeenAtMs) : '—');
+      tdSeen.textContent = agoSec != null ? formatAgo(agoSec) : (entry.lastSeenAtMs ? formatTime(entry.lastSeenAtMs) : uiText('hub.none', '—'));
 
       // Action
       const tdAction = document.createElement('td');
@@ -134,7 +152,7 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
       const actionBtn = document.createElement('button');
       actionBtn.className = 'btn btn-sm';
       actionBtn.type = 'button';
-      actionBtn.textContent = 'Get Service';
+      actionBtn.textContent = uiText('hub.getService', 'Get Service');
       actionBtn.addEventListener('click', () => openGetServiceModal(entry.displayName));
       tdAction.appendChild(actionBtn);
 
@@ -149,17 +167,19 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
     });
   };
 
+  const renderLoadFailed = () => {
+    const tbody = $('[data-service-list]');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="table-empty"><strong>' + uiText('hub.loadFailedTitle', 'Load failed') + '</strong>' + uiText('hub.loadFailedBody', 'Could not reach the local daemon. Is it running?') + '</td></tr>';
+    setText($('[data-online-count]'), '0');
+    setText($('[data-total-count]'), '0');
+    setText($('[data-directory-updated]'), uiText('hub.failed', 'failed {time}', { time: new Date().toLocaleTimeString() }));
+  };
+
   const load = () => {
     fetch('/api/network/services?online=true', { cache: 'no-store' })
       .then(r => r.json())
       .then(renderTable)
-      .catch(() => {
-        const tbody = $('[data-service-list]');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="table-empty"><strong>Load failed</strong>Could not reach the local daemon. Is it running?</td></tr>';
-        setText($('[data-online-count]'), '0');
-        setText($('[data-total-count]'), '0');
-        setText($('[data-directory-updated]'), 'failed ' + new Date().toLocaleTimeString());
-      });
+      .catch(renderLoadFailed);
   };
 
   const refreshBtn = document.getElementById('refresh-btn');
@@ -178,8 +198,8 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
         modalPrompt.select();
         document.execCommand('copy');
       }
-      copyBtn.textContent = 'Copied';
-      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+      copyBtn.textContent = uiText('hub.copied', 'Copied');
+      setTimeout(() => { copyBtn.textContent = uiText('hub.copy', 'Copy'); }, 1200);
     } catch {
       if (modalPrompt) {
         modalPrompt.focus();
@@ -189,6 +209,9 @@ export function buildHubPageDefinition(): LocalUiPageDefinition {
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closeModal();
+  });
+  window.addEventListener('oac:i18n-changed', () => {
+    if (lastPayload) renderTable(lastPayload);
   });
 
   load();

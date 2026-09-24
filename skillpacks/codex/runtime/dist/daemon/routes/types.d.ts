@@ -4,7 +4,7 @@ import type { BrowserHttpHandlers } from '../../browser/http';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { MetaAppStageEvent } from '../../core/metaapp/stageEvents';
 export type Awaitable<T> = T | Promise<T>;
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'conversations' | 'services' | 'apps' | 'settings' | 'metaapps' | 'browser';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'conversations' | 'services' | 'apps' | 'settings' | 'kb' | 'surf' | 'memory' | 'schedule' | 'traffic' | 'dream' | 'metaapps' | 'browser';
 export interface ServiceRefundSyncResponse {
     scanned: {
         requestPins: number;
@@ -137,6 +137,17 @@ export interface MetabotDaemonHttpHandlers {
             profileSlug?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    /** Machine-wide human owner identity (the `metabot user *` CLI surface;
+     *  no `from` selection — the owner file is system-scoped). Mirrors the CLI
+     *  shapes: create/import also return the mnemonic (shown once). */
+    user?: {
+        who?: () => Awaitable<MetabotCommandResult<unknown>>;
+        create?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        import?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        rename?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        reveal?: () => Awaitable<MetabotCommandResult<unknown>>;
+        delete?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
     network?: {
         listServices?: (input: {
@@ -338,6 +349,214 @@ export interface MetabotDaemonHttpHandlers {
         list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         show?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         runs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Management verbs (UI surface): every one of them requires an explicit
+         *  `from` bot selector, same as the lease-protocol verbs above. */
+        create?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        enable?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        disable?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        /**
+         * Run-now for the standalone schedule UI (the `metabot schedule run` twin,
+         * executed inside the daemon process). Body: { from, id, wait? }. `wait:
+         * true` holds the request until the run settles; the default starts the
+         * run and returns immediately, same contract as `/api/dream/run`.
+         * Requires an explicit `from` bot selector like every management verb.
+         */
+        run?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    /** Dream reads + manual run-now. Mirrors the `metabot dream *` CLI deps. */
+    dream?: {
+        due?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        status?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        summaries?: (input: {
+            from?: string;
+            limit?: number;
+            before?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        selfIdentity?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        capabilities?: (input: {
+            from?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        /**
+         * Manual dream run for one date (default: last night). `wait: true` holds
+         * the request until the run settles; the default starts the run inside the
+         * daemon process and returns immediately (status observable via `status`,
+         * same contract as `/api/surf/run`).
+         */
+        run?: (input: {
+            from?: string;
+            date?: string;
+            wait?: boolean;
+            llm?: string | null;
+            limits?: Record<string, unknown>;
+            isRepair?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    /** Memory management surface for a standalone UI. Mirrors the
+     *  `metabot memory *` CLI deps; JSON payloads are identical. */
+    memory?: {
+        list?: (input: {
+            from?: string;
+            scopeKind?: string;
+            scopeKey?: string;
+            usageClass?: string;
+            status?: string;
+            origin?: string;
+            query?: string;
+            limit?: number;
+            includeDeleted?: boolean;
+            includeArchived?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        search?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        recall?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        add?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        delete?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        unarchive?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeList?: (input: {
+            from?: string;
+            kind?: string;
+            category?: string;
+            status?: string;
+            query?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeUpsert?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeUpdate?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeArchive?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeDelete?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        impressionsList?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        impressionsShow?: (input: {
+            from?: string;
+            subject: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        policyGet?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        policySet?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        policyDelete?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        hygieneStatus?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        hygieneDue?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        hygieneRun?: (input: {
+            from?: string;
+            noDeep?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        hygieneConfigGet?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        hygieneConfigSet?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    /** Knowledge-base management + nightly study-job surface. Mirrors the
+     *  `metabot knowledge-base *` CLI deps and the DSH study tools. */
+    kb?: {
+        list?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        create?: (input: {
+            from?: string;
+            name: string;
+            description?: string;
+            rawDir?: string;
+            autoLearn?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: {
+            from?: string;
+            id: string;
+            name?: string;
+            description?: string;
+            autoLearn?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        remove?: (input: {
+            from?: string;
+            id: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        query?: (input: {
+            from?: string;
+            text: string;
+            id?: string;
+            topK?: number;
+            minScore?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        addDocument?: (input: {
+            from?: string;
+            id?: string;
+            title: string;
+            content: string;
+            sourceType?: string;
+            url?: string;
+            pinId?: string;
+            tags?: string[];
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        learn?: (input: {
+            from?: string;
+            id?: string;
+            full?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        studyList?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        studyEnqueue?: (input: {
+            from?: string;
+            topic: string;
+            budgetPins?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        studyRetry?: (input: {
+            from?: string;
+            jobId?: string;
+            topic?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     file?: {
         upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

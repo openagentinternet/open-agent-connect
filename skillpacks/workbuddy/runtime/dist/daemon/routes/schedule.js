@@ -11,6 +11,15 @@ const POST_VERBS = {
     '/api/schedule/heartbeat': 'heartbeat',
     '/api/schedule/claim': 'claim',
     '/api/schedule/complete': 'complete',
+    // Management verbs for the standalone schedule UI (task CRUD + toggles);
+    // they join the lease protocol on the same handler group.
+    '/api/schedule/create': 'create',
+    '/api/schedule/update': 'update',
+    '/api/schedule/delete': 'delete',
+    '/api/schedule/enable': 'enable',
+    '/api/schedule/disable': 'disable',
+    // Run-now (the /ui/schedule "Run now" action); `wait` mirrors /api/dream/run.
+    '/api/schedule/run': 'run',
 };
 const GET_VERBS = {
     '/api/schedule/due': 'due',

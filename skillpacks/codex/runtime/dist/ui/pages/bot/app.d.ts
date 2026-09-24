@@ -1,2 +1,3 @@
 import type { LocalUiPageDefinition } from '../types';
-export declare function buildBotPageDefinition(): LocalUiPageDefinition;
+import type { LocalUiI18nContext } from '../../i18n';
+export declare function buildBotPageDefinition(i18n?: LocalUiI18nContext): LocalUiPageDefinition;

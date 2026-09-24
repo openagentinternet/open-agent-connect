@@ -34,6 +34,7 @@ export interface PublishPageViewModel {
     skills: PublishSkillOptionViewModel[];
     availability: PublishAvailabilityViewModel;
 }
+export type PublishTranslate = (key: string, fallback?: string, replacements?: Record<string, string | number>) => string;
 export declare function buildPublishPageViewModel(input: {
     providerSummary?: Record<string, unknown> | null;
     profiles?: unknown[] | null;
@@ -42,4 +43,5 @@ export declare function buildPublishPageViewModel(input: {
     publishSkills?: Record<string, unknown> | null;
     publishSkillsError?: Record<string, unknown> | null;
     publishResult?: Record<string, unknown> | null;
+    t?: PublishTranslate;
 }): PublishPageViewModel;

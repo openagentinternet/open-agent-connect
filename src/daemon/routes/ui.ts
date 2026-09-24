@@ -9,6 +9,11 @@ import { buildBotPageDefinition } from '../../ui/pages/bot/app';
 import { buildConversationsPageDefinition } from '../../ui/pages/conversations/app';
 import { buildAppsPageDefinition } from '../../ui/pages/apps/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
+import { buildKbPageDefinition } from '../../ui/pages/kb/app';
+import { buildSurfPageDefinition } from '../../ui/pages/surf/app';
+import { buildMemoryPageDefinition } from '../../ui/pages/memory/app';
+import { buildSchedulePageDefinition } from '../../ui/pages/schedule/app';
+import { buildTrafficPageDefinition } from '../../ui/pages/traffic/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
@@ -43,15 +48,20 @@ const BARE_BROWSER_GLOBAL_META_ID_PATTERN = /^id[qpzryt]1[qpzry9x8gf2tvdw0s3jn54
 type LocalUiPageBuilder = (i18n: LocalUiI18nContext) => LocalUiPageDefinition;
 
 const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
-  'hub': () => buildHubPageDefinition(),
-  'publish': () => buildPublishPageDefinition(),
+  'hub': buildHubPageDefinition,
+  'publish': buildPublishPageDefinition,
   'my-services': (i18n) => buildMyServicesPageDefinition({ i18n }),
   'trace': () => buildTracePageDefinition(),
-  'refund': () => buildRefundPageDefinition(),
-  'bot': () => buildBotPageDefinition(),
+  'refund': buildRefundPageDefinition,
+  'bot': buildBotPageDefinition,
   'conversations': buildConversationsPageDefinition,
   'services': buildServicesPageDefinition,
   'apps': buildAppsPageDefinition,
+  'kb': buildKbPageDefinition,
+  'surf': buildSurfPageDefinition,
+  'memory': buildMemoryPageDefinition,
+  'schedule': buildSchedulePageDefinition,
+  'traffic': buildTrafficPageDefinition,
   'settings': buildSettingsPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
@@ -61,6 +71,10 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'conversations', labelKey: 'nav.conversations' },
   { page: 'services', labelKey: 'nav.services' },
   { page: 'apps', labelKey: 'nav.apps' },
+  { page: 'kb', labelKey: 'nav.knowledge' },
+  { page: 'surf', labelKey: 'nav.surf' },
+  { page: 'memory', labelKey: 'nav.memory' },
+  { page: 'schedule', labelKey: 'nav.schedule' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();
@@ -357,6 +371,28 @@ export const handleUiRoutes: RouteHandler = async (context) => {
     const location = await resolveTraceRedirectLocation(context, url);
     context.res.writeHead(302, {
       'Location': location,
+      'Cache-Control': 'no-store',
+    });
+    context.res.end();
+    return true;
+  }
+
+  // Dream is a tab inside the Memory page (DSH MemoryPanel parity), the same
+  // way trace collapsed into conversations. Keep `/ui/dream` alive as a
+  // permanent redirect so existing links and bookmarks keep working; the
+  // bot scoping (`from`) and language params pass through.
+  if (url.pathname === '/ui/dream') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const location = new URL('/ui/memory?tab=dream', 'http://placeholder.local');
+    const from = url.searchParams.get('from');
+    if (from) location.searchParams.set('from', from);
+    const language = url.searchParams.get('lang');
+    if (language) location.searchParams.set('lang', language);
+    context.res.writeHead(302, {
+      'Location': `${location.pathname}${location.search}`,
       'Cache-Control': 'no-store',
     });
     context.res.end();

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .surf-shell {
+        display: grid;
+        gap: 18px;
+      }
+      .surf-toolbar {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .surf-toolbar h1 {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -.01em;
+      }
+      .surf-toolbar p {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .surf-toolbar-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .surf-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .surf-settings {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+      .surf-settings-row {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .surf-settings-row strong {
+        font-size: 13px;
+        color: var(--text);
+      }
+      .surf-budget-field {
+        max-width: 220px;
+      }
+      .surf-reports {
+        display: grid;
+        gap: 10px;
+      }
+      .surf-run-error {
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--red);
+        overflow-wrap: anywhere;
+      }
+      .surf-report-viewer {
+        min-height: 120px;
+      }
+      .report-body {
+        font-size: 13px;
+        line-height: 1.65;
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+      .report-body h1,
+      .report-body h2,
+      .report-body h3,
+      .report-body h4,
+      .report-body h5,
+      .report-body h6 {
+        margin: 14px 0 6px;
+        font-weight: 750;
+        letter-spacing: -.01em;
+      }
+      .report-body h1 { font-size: 17px; }
+      .report-body h2 { font-size: 15px; }
+      .report-body h3 { font-size: 14px; }
+      .report-body p { margin: 6px 0; }
+      .report-body ul,
+      .report-body ol {
+        margin: 6px 0 6px 20px;
+      }
+      .report-body blockquote {
+        margin: 8px 0;
+        padding: 6px 12px;
+        border-left: 3px solid var(--border2);
+        color: var(--muted);
+      }
+      .report-body .md-inline-code {
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .status-pill[data-surf-pulse="true"] .status-dot {
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .data-table tbody tr[data-selected="true"] {
+        background: var(--accent-dim);
+      }
+      @media (max-width: 900px) {
+        .surf-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">__PAGE_EYEBROW__</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

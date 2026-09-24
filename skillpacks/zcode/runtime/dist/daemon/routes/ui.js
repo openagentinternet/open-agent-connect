@@ -15,8 +15,13 @@ const app_6 = require("../../ui/pages/bot/app");
 const app_7 = require("../../ui/pages/conversations/app");
 const app_8 = require("../../ui/pages/apps/app");
 const app_9 = require("../../ui/pages/metaapps/app");
-const app_10 = require("../../ui/pages/services/app");
-const app_11 = require("../../ui/pages/settings/app");
+const app_10 = require("../../ui/pages/kb/app");
+const app_11 = require("../../ui/pages/surf/app");
+const app_12 = require("../../ui/pages/memory/app");
+const app_13 = require("../../ui/pages/schedule/app");
+const app_14 = require("../../ui/pages/traffic/app");
+const app_15 = require("../../ui/pages/services/app");
+const app_16 = require("../../ui/pages/settings/app");
 const browser_1 = require("@openagentinternet/agent-browser-ui/browser");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
@@ -38,16 +43,21 @@ const BARE_BROWSER_PIN_ID_PATTERN = /^[0-9a-f]{64}i\d+$/iu;
 const BARE_BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu;
 const BARE_BROWSER_GLOBAL_META_ID_PATTERN = /^id[qpzryt]1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/iu;
 const PAGE_BUILDERS = {
-    'hub': () => (0, app_1.buildHubPageDefinition)(),
-    'publish': () => (0, app_3.buildPublishPageDefinition)(),
+    'hub': app_1.buildHubPageDefinition,
+    'publish': app_3.buildPublishPageDefinition,
     'my-services': (i18n) => (0, app_2.buildMyServicesPageDefinition)({ i18n }),
     'trace': () => (0, app_5.buildTracePageDefinition)(),
-    'refund': () => (0, app_4.buildRefundPageDefinition)(),
-    'bot': () => (0, app_6.buildBotPageDefinition)(),
+    'refund': app_4.buildRefundPageDefinition,
+    'bot': app_6.buildBotPageDefinition,
     'conversations': app_7.buildConversationsPageDefinition,
-    'services': app_10.buildServicesPageDefinition,
+    'services': app_15.buildServicesPageDefinition,
     'apps': app_8.buildAppsPageDefinition,
-    'settings': app_11.buildSettingsPageDefinition,
+    'kb': app_10.buildKbPageDefinition,
+    'surf': app_11.buildSurfPageDefinition,
+    'memory': app_12.buildMemoryPageDefinition,
+    'schedule': app_13.buildSchedulePageDefinition,
+    'traffic': app_14.buildTrafficPageDefinition,
+    'settings': app_16.buildSettingsPageDefinition,
     'metaapps': app_9.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
@@ -55,6 +65,10 @@ const NAV_ITEMS = [
     { page: 'conversations', labelKey: 'nav.conversations' },
     { page: 'services', labelKey: 'nav.services' },
     { page: 'apps', labelKey: 'nav.apps' },
+    { page: 'kb', labelKey: 'nav.knowledge' },
+    { page: 'surf', labelKey: 'nav.surf' },
+    { page: 'memory', labelKey: 'nav.memory' },
+    { page: 'schedule', labelKey: 'nav.schedule' },
 ];
 const HIDDEN_UI_PAGES = new Set();
 function escapeHtml(value) {
@@ -320,6 +334,29 @@ const handleUiRoutes = async (context) => {
         const location = await resolveTraceRedirectLocation(context, url);
         context.res.writeHead(302, {
             'Location': location,
+            'Cache-Control': 'no-store',
+        });
+        context.res.end();
+        return true;
+    }
+    // Dream is a tab inside the Memory page (DSH MemoryPanel parity), the same
+    // way trace collapsed into conversations. Keep `/ui/dream` alive as a
+    // permanent redirect so existing links and bookmarks keep working; the
+    // bot scoping (`from`) and language params pass through.
+    if (url.pathname === '/ui/dream') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const location = new URL('/ui/memory?tab=dream', 'http://placeholder.local');
+        const from = url.searchParams.get('from');
+        if (from)
+            location.searchParams.set('from', from);
+        const language = url.searchParams.get('lang');
+        if (language)
+            location.searchParams.set('lang', language);
+        context.res.writeHead(302, {
+            'Location': `${location.pathname}${location.search}`,
             'Cache-Control': 'no-store',
         });
         context.res.end();

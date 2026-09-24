@@ -185,5 +185,43 @@ export async function runKnowledgeBaseCommand(
     });
   }
 
+  if (subcommand === 'study') {
+    const verb = args[1];
+    if (verb === 'enqueue') {
+      const handler = requireKbHandler(context, 'studyEnqueue');
+      if (isFailure(handler)) return handler;
+      const topic = readFlagValue(args, '--topic');
+      if (!topic?.trim()) return commandMissingFlag('--topic');
+      const budgetPins = readNumberFlag(args, '--budget-pins');
+      if (budgetPins === 'invalid') {
+        return commandFailed('invalid_flag', '--budget-pins must be a number.');
+      }
+      return handler({
+        from,
+        topic: topic.trim(),
+        ...(budgetPins !== undefined ? { budgetPins } : {}),
+      });
+    }
+    if (verb === 'status') {
+      const handler = requireKbHandler(context, 'studyList');
+      if (isFailure(handler)) return handler;
+      return handler({ from });
+    }
+    if (verb === 'retry') {
+      const handler = requireKbHandler(context, 'studyRetry');
+      if (isFailure(handler)) return handler;
+      const jobId = readFlagValue(args, '--job-id');
+      const topic = readFlagValue(args, '--topic');
+      if (jobId !== null && jobId.trim() === '') return commandMissingFlag('--job-id');
+      if (topic !== null && topic.trim() === '') return commandMissingFlag('--topic');
+      return handler({
+        from,
+        ...(jobId !== null ? { jobId: jobId.trim() } : {}),
+        ...(topic !== null ? { topic: topic.trim() } : {}),
+      });
+    }
+    return commandUnknownSubcommand(`knowledge-base study ${String(verb ?? '')}`.trim());
+  }
+
   return commandUnknownSubcommand(`knowledge-base ${String(subcommand ?? '')}`.trim());
 }

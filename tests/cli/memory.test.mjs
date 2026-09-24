@@ -132,3 +132,46 @@ test('runCli rejects malformed memory invocations', async () => {
   // config set without --payload-file
   assert.equal(await run(['memory', 'hygiene', 'config', 'set', '--from', 'alice']), 1);
 });
+
+test('runCli dispatches memory procedure subcommands to the procedure handlers', async () => {
+  const calls = [];
+  const record = (name) => async (input) => {
+    calls.push([name, input]);
+    return commandSuccess({});
+  };
+  const dependencies = {
+    memory: {
+      procedureList: record('procedureList'),
+      procedureRecall: record('procedureRecall'),
+      procedureSave: record('procedureSave'),
+      procedureArchive: record('procedureArchive'),
+    },
+  };
+  const context = {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    readTextFile: async () => JSON.stringify({ title: 'Publish a chain article', steps: ['draft', 'publish'] }),
+    dependencies,
+  };
+  const run = (args) => runCli(args, context);
+
+  assert.equal(await run(['memory', 'procedure', 'list', '--from', 'alice']), 0);
+  assert.equal(await run(['memory', 'procedure', 'list', '--status', 'archived', '--limit', '5']), 0);
+  assert.equal(await run(['memory', 'procedure', 'list', '--status', 'sideways']), 1, 'bad --status fails');
+  assert.equal(await run(['memory', 'procedure', 'recall', '--from', 'alice', '--query', 'publish article']), 0);
+  assert.equal(await run(['memory', 'procedure', 'recall', '--from', 'alice']), 1, 'recall without --query fails');
+  assert.equal(await run(['memory', 'procedure', 'save', '--from', 'alice', '--payload-file', 'p.json']), 0);
+  assert.equal(await run(['memory', 'procedure', 'archive', '--from', 'alice', '--title', 'Publish a chain article']), 0);
+  assert.equal(await run(['memory', 'procedure', 'archive', '--from', 'alice']), 1, 'archive without --title fails');
+  assert.equal(await run(['memory', 'procedure', 'frobnicate']), 1, 'unknown nested subcommand fails');
+
+  assert.deepEqual(calls.map(([name]) => name), [
+    'procedureList', 'procedureList', 'procedureRecall', 'procedureSave', 'procedureArchive',
+  ]);
+  assert.deepEqual(calls[0][1], { from: 'alice' });
+  assert.deepEqual(calls[1][1], { from: undefined, status: 'archived', limit: 5 });
+  assert.deepEqual(calls[2][1], { from: 'alice', query: 'publish article' });
+  assert.equal(calls[3][1].payload.title, 'Publish a chain article');
+  assert.deepEqual(calls[3][1].payload.steps, ['draft', 'publish']);
+  assert.deepEqual(calls[4][1], { from: 'alice', title: 'Publish a chain article' });
+});

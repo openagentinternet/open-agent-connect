@@ -18,6 +18,9 @@ const qanda_1 = require("./routes/qanda");
 const protocol_1 = require("./routes/protocol");
 const chain_1 = require("./routes/chain");
 const surf_1 = require("./routes/surf");
+const dream_1 = require("./routes/dream");
+const memory_1 = require("./routes/memory");
+const kb_1 = require("./routes/kb");
 const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
 const grouptask_1 = require("./routes/grouptask");
@@ -25,6 +28,7 @@ const schedule_1 = require("./routes/schedule");
 const conversations_1 = require("./routes/conversations");
 const file_1 = require("./routes/file");
 const identity_1 = require("./routes/identity");
+const user_1 = require("./routes/user");
 const network_1 = require("./routes/network");
 const provider_1 = require("./routes/provider");
 const metaapp_1 = require("./routes/metaapp");
@@ -46,6 +50,9 @@ const ROUTES = [
     protocol_1.handleProtocolRoutes,
     chain_1.handleChainRoutes,
     surf_1.handleSurfRoutes,
+    dream_1.handleDreamRoutes,
+    memory_1.handleMemoryRoutes,
+    kb_1.handleKbRoutes,
     daemon_1.handleDaemonRoutes,
     chat_1.handleChatRoutes,
     grouptask_1.handleGroupTaskRoutes,
@@ -53,6 +60,7 @@ const ROUTES = [
     conversations_1.handleConversationRoutes,
     file_1.handleFileRoutes,
     identity_1.handleIdentityRoutes,
+    user_1.handleUserRoutes,
     network_1.handleNetworkRoutes,
     provider_1.handleProviderRoutes,
     metaapp_1.handleMetaAppRoutes,

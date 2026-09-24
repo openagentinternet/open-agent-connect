@@ -343,3 +343,36 @@ test('runCli supports `metabot config set a2a.simplemsgListenerEnabled false`', 
   const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
   assert.equal(configFromDisk.a2a.simplemsgListenerEnabled, false);
 });
+
+test('runCli supports the automation tick config keys with disk round-trip', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-automation-tick-');
+
+  const dreamDefault = await runConfigCli(homeDir, ['config', 'get', 'automation.dreamTickEnabled']);
+  assert.equal(dreamDefault.exitCode, 0);
+  assert.deepEqual(dreamDefault.payload.data, {
+    key: 'automation.dreamTickEnabled',
+    value: true,
+  });
+
+  const setDream = await runConfigCli(homeDir, ['config', 'set', 'automation.dreamTickEnabled', 'false']);
+  assert.equal(setDream.exitCode, 0);
+  assert.deepEqual(setDream.payload.data, {
+    key: 'automation.dreamTickEnabled',
+    value: false,
+  });
+
+  const setDrain = await runConfigCli(homeDir, ['config', 'set', 'automation.chainHistorySummaryEnabled', 'false']);
+  assert.equal(setDrain.exitCode, 0);
+  assert.deepEqual(setDrain.payload.data, {
+    key: 'automation.chainHistorySummaryEnabled',
+    value: false,
+  });
+
+  const getDream = await runConfigCli(homeDir, ['config', 'get', 'automation.dreamTickEnabled']);
+  assert.equal(getDream.payload.data.value, false);
+
+  const configPath = resolveMetabotPaths(homeDir).configPath;
+  const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
+  assert.equal(configFromDisk.automation.dreamTickEnabled, false);
+  assert.equal(configFromDisk.automation.chainHistorySummaryEnabled, false);
+});

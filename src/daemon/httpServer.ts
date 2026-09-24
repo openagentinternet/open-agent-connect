@@ -12,6 +12,9 @@ import { handleQandaRoutes } from './routes/qanda';
 import { handleProtocolRoutes } from './routes/protocol';
 import { handleChainRoutes } from './routes/chain';
 import { handleSurfRoutes } from './routes/surf';
+import { handleDreamRoutes } from './routes/dream';
+import { handleMemoryRoutes } from './routes/memory';
+import { handleKbRoutes } from './routes/kb';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
 import { handleGroupTaskRoutes } from './routes/grouptask';
@@ -19,6 +22,7 @@ import { handleScheduleRoutes } from './routes/schedule';
 import { handleConversationRoutes } from './routes/conversations';
 import { handleFileRoutes } from './routes/file';
 import { handleIdentityRoutes } from './routes/identity';
+import { handleUserRoutes } from './routes/user';
 import { handleNetworkRoutes } from './routes/network';
 import { handleProviderRoutes } from './routes/provider';
 import { handleMetaAppRoutes } from './routes/metaapp';
@@ -43,6 +47,9 @@ const ROUTES: RouteHandler[] = [
   handleProtocolRoutes,
   handleChainRoutes,
   handleSurfRoutes,
+  handleDreamRoutes,
+  handleMemoryRoutes,
+  handleKbRoutes,
   handleDaemonRoutes,
   handleChatRoutes,
   handleGroupTaskRoutes,
@@ -50,6 +57,7 @@ const ROUTES: RouteHandler[] = [
   handleConversationRoutes,
   handleFileRoutes,
   handleIdentityRoutes,
+  handleUserRoutes,
   handleNetworkRoutes,
   handleProviderRoutes,
   handleMetaAppRoutes,
