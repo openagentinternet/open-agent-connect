@@ -83,10 +83,10 @@
   "dependencies": {
     "@metalet/utxo-wallet-service": "^0.3.33-beta.5",
     "@opcat-labs/scrypt-ts-opcat": "^4.0.0",
-    "@openagentinternet/agent-browser-core": "0.6.0",
-    "@openagentinternet/agent-browser-host-contract": "0.6.0",
-    "@openagentinternet/agent-browser-name-resolvers": "0.6.0",
-    "@openagentinternet/agent-browser-ui": "0.6.0",
+    "@openagentinternet/agent-browser-core": "0.6.1",
+    "@openagentinternet/agent-browser-host-contract": "0.6.1",
+    "@openagentinternet/agent-browser-name-resolvers": "0.6.1",
+    "@openagentinternet/agent-browser-ui": "0.6.1",
     "@scure/bip39": "^1.6.0",
     "adm-zip": "^0.6.1",
     "bitcoinjs-lib": "^6.1.6",
@@ -101,7 +101,7 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@openagentinternet/agent-browser-test-harness": "0.6.0",
+    "@openagentinternet/agent-browser-test-harness": "0.6.1",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^26.0.1",
     "@types/turndown": "^5.0.6",

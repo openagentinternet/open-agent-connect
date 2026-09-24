@@ -9,6 +9,14 @@ tags for releases.
 
 ### Changed
 
+- Integrated Agent Browser Core 0.6.1 across the root package and all skillpack
+  runtimes. Upstream change: pin inspector URI recognition now stops at
+  non-ASCII characters, so MetaWeb URIs and external links inside pin payloads
+  are no longer blended with adjacent CJK prose; regression tests cover the
+  CJK/URI boundary (`tests/ui/agentBrowserUriBoundary.test.mjs`). Known
+  upstream limitation carried by 0.6.1: in free-text URI autolink discovery,
+  URI bodies are truncated at an ASCII `s` or `k` (case-folding equivalence
+  with ſ/K inside the excluded non-ASCII range); watch for an upstream fix.
 - Integrated Agent Browser Core 0.6.0 across the root package and all skillpack
   runtimes (host-contract, core, renderers, name-resolvers, ui, test-harness).
   Upstream behavior changes verified compatible: the sandboxed PDF renderer
