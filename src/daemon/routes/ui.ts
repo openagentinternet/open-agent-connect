@@ -11,6 +11,7 @@ import { buildAppsPageDefinition } from '../../ui/pages/apps/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import { buildKbPageDefinition } from '../../ui/pages/kb/app';
 import { buildSurfPageDefinition } from '../../ui/pages/surf/app';
+import { buildMemoryPageDefinition } from '../../ui/pages/memory/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
@@ -56,6 +57,7 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'apps': buildAppsPageDefinition,
   'kb': buildKbPageDefinition,
   'surf': buildSurfPageDefinition,
+  'memory': buildMemoryPageDefinition,
   'settings': buildSettingsPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
@@ -67,6 +69,7 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'apps', labelKey: 'nav.apps' },
   { page: 'kb', labelKey: 'nav.knowledge' },
   { page: 'surf', labelKey: 'nav.surf' },
+  { page: 'memory', labelKey: 'nav.memory' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();
@@ -363,6 +366,28 @@ export const handleUiRoutes: RouteHandler = async (context) => {
     const location = await resolveTraceRedirectLocation(context, url);
     context.res.writeHead(302, {
       'Location': location,
+      'Cache-Control': 'no-store',
+    });
+    context.res.end();
+    return true;
+  }
+
+  // Dream is a tab inside the Memory page (DSH MemoryPanel parity), the same
+  // way trace collapsed into conversations. Keep `/ui/dream` alive as a
+  // permanent redirect so existing links and bookmarks keep working; the
+  // bot scoping (`from`) and language params pass through.
+  if (url.pathname === '/ui/dream') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const location = new URL('/ui/memory?tab=dream', 'http://placeholder.local');
+    const from = url.searchParams.get('from');
+    if (from) location.searchParams.set('from', from);
+    const language = url.searchParams.get('lang');
+    if (language) location.searchParams.set('lang', language);
+    context.res.writeHead(302, {
+      'Location': `${location.pathname}${location.search}`,
       'Cache-Control': 'no-store',
     });
     context.res.end();

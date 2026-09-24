@@ -414,7 +414,7 @@ test('runCli preserves the raw `--uri` token value when opening the browser', as
 });
 
 test('runCli dispatches provider console `metabot ui open --page` values', async () => {
-  for (const page of ['conversations', 'services', 'settings', 'kb', 'surf']) {
+  for (const page of ['conversations', 'services', 'settings', 'kb', 'surf', 'memory', 'dream']) {
     const harness = createHarness();
     const exitCode = await runCli(['ui', 'open', '--page', page, '--from', 'alice'], harness.context);
 

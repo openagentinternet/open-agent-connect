@@ -19,6 +19,8 @@ export type MetabotUiPageName =
   | 'settings'
   | 'kb'
   | 'surf'
+  | 'memory'
+  | 'dream'
   | 'metaapps'
   | 'browser';
 

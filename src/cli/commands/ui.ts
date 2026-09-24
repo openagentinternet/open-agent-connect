@@ -10,6 +10,8 @@ const SUPPORTED_UI_PAGES = new Set([
   'apps',
   'kb',
   'surf',
+  'memory',
+  'dream',
   'settings',
   'buzz',
   'chat',

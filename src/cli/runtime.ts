@@ -880,7 +880,7 @@ function resolveLocalUiPath(page: string): string {
   // Standalone console pages served by the daemon at /ui/<page>. Listed
   // explicitly so new pages are recognized by the localUiUrl plumbing the
   // moment they are added to SUPPORTED_UI_PAGES.
-  if (page === 'kb' || page === 'surf') {
+  if (page === 'kb' || page === 'surf' || page === 'memory' || page === 'dream') {
     return `/ui/${page}`;
   }
   return `/ui/${page}`;
