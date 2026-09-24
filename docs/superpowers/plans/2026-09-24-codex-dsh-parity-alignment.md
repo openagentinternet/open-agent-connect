@@ -191,8 +191,25 @@ New pages under `src/ui/pages/`, following the existing page-def pattern
   dream-enabled profile, `dream due` → `dream run` (Chain B→C; DSH pair wins
   when connected) → hygiene tail → pre-dream surf gate. Config under storage
   v2 profile `.runtime/`; opt-in default matching DSH semantics.
-- DSH plugin `dream-scheduler.ts` stands down when the daemon tick holds the
-  lease (same heartbeat pattern as schedule).
+- **Multi-host conflict avoidance (DSH-first, decided 2026-09-24):** with DSH
+  and Codex both installed/open against the same Bot, two ticks must never
+  double-dream. Three layers: (1) *stand-down* — the daemon tick skips
+  entirely while the DSH host-executor bridge is connected
+  (`/api/llm/host-executor/status`; zero dsh-plugin change required, unlike a
+  heartbeat lease which would touch the plugin); (2) *running-skip* — the
+  core due algorithm already skips dates with a `running` run, so a dream
+  started by DSH is invisible to the daemon's due check; (3) *idempotent
+  commit* — dream commit is idempotent per date, so even the residual
+  start-race window (both see `due` before either marks `running`, e.g. DSH
+  quits mid-boundary) can cost at most one duplicate LLM run, never two
+  diaries. Pre-dream surf is already guarded daemon-side by the surf run
+  watchdog + `preDreamDue` recency gates.
+- DSH plugin `dream-scheduler.ts` stays as-is (no plugin edits): when DSH is
+  open it owns the dream; when DSH is absent the daemon owns it. Known
+  accepted edge: a Bot without `dshLlmProvider/Model` configured is skipped
+  by the plugin and also skipped by the standing-down daemon while DSH is
+  open — it dreams only when DSH is closed (documented in the phase-3
+  implementation notes).
 - Memory-extract LLM judge: point the extract handler at
   `runLlmPromptWithRuntimeFallback` (Chain C) — the one-call gap at
   `src/cli/runtime.ts:4260-4290`.
