@@ -13,8 +13,12 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     description: i18n.t('conversations.description'),
     panels: [],
     contentHtml: `
+      <div class="conversations-view-toggle" role="tablist" aria-label="${i18n.t('conversations.grouptask.viewsAria')}">
+        <button class="conversations-view-btn active" type="button" data-view-toggle="conversations" data-i18n-key="conversations.grouptask.viewConversations">${i18n.t('conversations.grouptask.viewConversations')}</button>
+        <button class="conversations-view-btn" type="button" data-view-toggle="grouptask" data-i18n-key="conversations.grouptask.viewGroupTasks">${i18n.t('conversations.grouptask.viewGroupTasks')}</button>
+      </div>
       <section class="conversations-shell" data-conversations-shell>
-        <aside class="conversation-sidebar" aria-label="Bot conversations">
+        <aside class="conversation-sidebar" aria-label="${i18n.t('conversations.sidebarAria')}">
           <div class="conversation-local-picker">
             <label id="local-bot-picker-label" data-i18n-key="conversations.localBot">${i18n.t('conversations.localBot')}</label>
             <div class="local-bot-picker" data-local-bot-picker>
@@ -34,7 +38,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
           </div>
           <div class="conversation-list" data-conversation-list></div>
         </aside>
-        <section class="conversation-thread" data-conversation-detail aria-label="Conversation thread">
+        <section class="conversation-thread" data-conversation-detail aria-label="${i18n.t('conversations.threadAria')}">
           <header class="conversation-thread-header" data-conversation-detail-header>
             <div>
               <h2 data-i18n-key="conversations.selectConversation">${i18n.t('conversations.selectConversation')}</h2>
@@ -58,6 +62,27 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
             </form>
             <div class="conversation-guidance-status" data-guidance-status aria-live="polite"></div>
           </footer>
+        </section>
+      </section>
+      <section class="conversations-shell grouptask-shell" data-grouptask-shell hidden>
+        <aside class="conversation-sidebar grouptask-sidebar" aria-label="${i18n.t('conversations.grouptask.sidebarAria')}">
+          <div class="conversation-section-header">
+            <div>
+              <h2 data-i18n-key="conversations.grouptask.title">${i18n.t('conversations.grouptask.title')}</h2>
+              <p data-grouptask-status data-i18n-key="conversations.grouptask.loading">${i18n.t('conversations.grouptask.loading')}</p>
+            </div>
+            <button class="btn btn-sm" type="button" data-grouptask-refresh data-i18n-key="conversations.refresh">${i18n.t('conversations.refresh')}</button>
+          </div>
+          <div class="grouptask-list" data-grouptask-list></div>
+        </aside>
+        <section class="conversation-thread grouptask-detail" data-grouptask-detail aria-label="${i18n.t('conversations.grouptask.detailAria')}">
+          <header class="conversation-thread-header grouptask-detail-header" data-grouptask-detail-header>
+            <div>
+              <h2 data-i18n-key="conversations.grouptask.selectTask">${i18n.t('conversations.grouptask.selectTask')}</h2>
+              <span data-i18n-key="conversations.grouptask.chooseTask">${i18n.t('conversations.grouptask.chooseTask')}</span>
+            </div>
+          </header>
+          <div class="conversation-messages grouptask-detail-body" data-grouptask-detail-body></div>
         </section>
       </section>
     `,
@@ -1091,6 +1116,367 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     if (state.eventSource) state.eventSource.close();
   });
   window.addEventListener('oac:i18n-changed', () => render());
+
+  // ── Group task section (DSH GroupTaskView parity) ──────────────────────────
+  const gtElements = {
+    viewToggles: Array.from(document.querySelectorAll('[data-view-toggle]')),
+    shell: document.querySelector('[data-conversations-shell]'),
+    gtShell: document.querySelector('[data-grouptask-shell]'),
+    status: document.querySelector('[data-grouptask-status]'),
+    refresh: document.querySelector('[data-grouptask-refresh]'),
+    list: document.querySelector('[data-grouptask-list]'),
+    detailHeader: document.querySelector('[data-grouptask-detail-header]'),
+    detailBody: document.querySelector('[data-grouptask-detail-body]'),
+  };
+  const gtState = {
+    tasks: [],
+    selectedChair: '',
+    selectedTaskId: 0,
+    detail: null,
+    messages: [],
+    loading: false,
+    loadingDetail: false,
+    error: '',
+    activeView: query.get('view') === 'grouptask' ? 'grouptask' : 'conversations',
+    busyAction: '',
+    confirmKey: '',
+  };
+
+  const gtStatusPillKind = (status) => ({
+    planning: '',
+    executing: 'status-active',
+    review: 'status-online',
+    done: 'status-completed',
+    cancelled: 'status-failure',
+  })[status] || '';
+  const gtTaskStatusLabel = (status) => uiText('conversations.grouptask.taskStatus.' + status, status);
+  const gtRoleLabel = (role) => uiText('conversations.grouptask.role.' + role, role);
+  const gtMemberStatusLabel = (status) => uiText('conversations.grouptask.memberStatus.' + status, status);
+  const gtWorkStatusLabel = (status) => uiText('conversations.grouptask.workStatus.' + status, status);
+  const gtDeliverableStatusLabel = (status) => uiText('conversations.grouptask.deliverableStatus.' + status, status);
+  const gtFormatTime = (value) => {
+    const ms = Number(value);
+    if (!Number.isFinite(ms) || ms <= 0) return '';
+    const date = new Date(ms);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+  };
+  const gtFormatChainTime = (value) => {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) return '';
+    return gtFormatTime(seconds * 1000);
+  };
+  const gtShortText = (value, max) => {
+    const limit = max || 80;
+    const text = normalizeText(value).replace(/\\s+/g, ' ');
+    if (!text) return '';
+    return text.length > limit ? text.slice(0, Math.max(0, limit - 3)) + '...' : text;
+  };
+
+  const gtSetView = (view) => {
+    gtState.activeView = view === 'grouptask' ? 'grouptask' : 'conversations';
+    if (gtElements.shell) gtElements.shell.hidden = gtState.activeView !== 'conversations';
+    if (gtElements.gtShell) gtElements.gtShell.hidden = gtState.activeView !== 'grouptask';
+    gtElements.viewToggles.forEach((button) => {
+      button.classList.toggle('active', button.getAttribute('data-view-toggle') === gtState.activeView);
+    });
+    const next = new URLSearchParams(window.location.search);
+    if (gtState.activeView === 'grouptask') next.set('view', 'grouptask');
+    else next.delete('view');
+    const suffix = next.toString();
+    window.history.replaceState(null, '', window.location.pathname + (suffix ? '?' + suffix : ''));
+    if (gtState.activeView === 'grouptask' && !gtState.tasks.length && !gtState.loading) gtLoadTasks();
+  };
+
+  const gtRenderStatus = () => {
+    if (!gtElements.status) return;
+    if (gtState.error) {
+      gtElements.status.textContent = gtState.error;
+      return;
+    }
+    if (gtState.loading) {
+      gtElements.status.textContent = uiText('conversations.grouptask.loading', 'Loading group tasks...');
+      return;
+    }
+    const count = gtState.tasks.length;
+    gtElements.status.textContent = uiText(
+      count === 1 ? 'conversations.grouptask.countOne' : 'conversations.grouptask.countMany',
+      count === 1 ? '1 group task' : '{count} group tasks',
+      { count },
+    );
+  };
+
+  const gtRenderList = () => {
+    if (!gtElements.list) return;
+    gtElements.list.innerHTML = '';
+    if (!gtState.tasks.length) {
+      gtElements.list.innerHTML = '<div class="conversation-empty"><strong>'
+        + escapeHtml(uiText('conversations.grouptask.emptyTitle', 'No group tasks yet'))
+        + '</strong><p>' + escapeHtml(uiText('conversations.grouptask.emptyMessage', 'Group tasks created by your Bots appear here.')) + '</p></div>';
+      return;
+    }
+    gtState.tasks.forEach((task) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'conversation-row';
+      button.dataset.selected = (task.chairSlug === gtState.selectedChair && Number(task.id) === gtState.selectedTaskId) ? 'true' : 'false';
+      const title = normalizeText(task.displayName) || normalizeText(task.title) || uiText('conversations.grouptask.untitled', 'Untitled task');
+      const status = normalizeText(task.status);
+      const pillKind = gtStatusPillKind(status);
+      const updatedLabel = gtFormatTime(task.updatedAt) || gtFormatTime(task.createdAt);
+      button.innerHTML = '<div class="conversation-row-main">'
+        + '<strong>' + escapeHtml(title) + '</strong>'
+        + '<p>' + escapeHtml(gtShortText(task.goal, 80)) + '</p>'
+        + '<div class="conversation-kind-list"><span class="status-pill ' + pillKind + '"><span class="status-dot"></span>' + escapeHtml(gtTaskStatusLabel(status)) + '</span></div>'
+        + '</div>'
+        + '<div class="conversation-row-meta"><span>' + escapeHtml(normalizeText(task.chairSlug)) + '</span><span>' + escapeHtml(updatedLabel) + '</span></div>';
+      button.addEventListener('click', () => gtSelectTask(task.chairSlug, Number(task.id)));
+      gtElements.list.appendChild(button);
+    });
+  };
+
+  const gtActionButton = (kind, label, options) => {
+    const armed = gtState.confirmKey === kind + ':' + (options && options.key || '');
+    const busy = gtState.busyAction === kind;
+    return '<button class="btn btn-sm' + (options && options.danger ? ' btn-danger' : '') + '" type="button" data-grouptask-action="' + kind + '" data-grouptask-ref="' + escapeHtml(options && options.key || '') + '"'
+      + (busy ? ' disabled' : '') + '>'
+      + escapeHtml(busy ? label + '…' : (armed ? uiText('conversations.grouptask.confirm', 'Confirm?') : label))
+      + '</button>';
+  };
+
+  const gtRenderDetail = () => {
+    if (!gtElements.detailHeader || !gtElements.detailBody) return;
+    const detail = gtState.detail;
+    if (!detail) {
+      gtElements.detailHeader.innerHTML = '<div><h2>' + escapeHtml(uiText('conversations.grouptask.selectTask', 'Select a group task')) + '</h2><span>' + escapeHtml(uiText('conversations.grouptask.chooseTask', 'Choose a task to inspect members, deliverables, and transcript.')) + '</span></div>';
+      gtElements.detailBody.innerHTML = '';
+      return;
+    }
+    const status = normalizeText(detail.status);
+    const terminal = status === 'done' || status === 'cancelled';
+    const title = normalizeText(detail.displayName) || normalizeText(detail.title) || uiText('conversations.grouptask.untitled', 'Untitled task');
+    const pillKind = gtStatusPillKind(status);
+    let actions = '';
+    if (terminal) {
+      actions = gtActionButton('reopen', uiText('conversations.grouptask.reopen', 'Reopen'), { key: detail.chairSlug + ':' + detail.id });
+    } else {
+      actions = gtActionButton('done', uiText('conversations.grouptask.markDone', 'Mark done'), { key: detail.chairSlug + ':' + detail.id })
+        + gtActionButton('cancel', uiText('conversations.grouptask.cancelTask', 'Cancel task'), { key: detail.chairSlug + ':' + detail.id, danger: true });
+    }
+    gtElements.detailHeader.innerHTML = '<div class="conversation-thread-participants"><div class="thread-participant"><div><strong>'
+      + escapeHtml(title) + '</strong><span class="status-pill ' + pillKind + '"><span class="status-dot"></span>' + escapeHtml(gtTaskStatusLabel(status)) + '</span>'
+      + '</div></div><div class="grouptask-actions">' + actions + '</div></div>';
+    gtElements.detailBody.innerHTML = gtRenderDetailBody(detail);
+    gtBindDetailActions(detail);
+  };
+
+  const gtRenderDetailBody = (detail) => {
+    const status = normalizeText(detail.status);
+    const terminal = status === 'done' || status === 'cancelled';
+    const parts = [];
+    parts.push('<p class="grouptask-summary">' + escapeHtml(normalizeText(detail.goal) || uiText('conversations.grouptask.noGoal', 'No goal recorded.')) + '</p>');
+    const chips = [];
+    chips.push(escapeHtml(uiText('conversations.grouptask.chair', 'Chair')) + ': ' + escapeHtml(normalizeText(detail.chairSlug)));
+    const createdLabel = gtFormatTime(detail.createdAt);
+    if (createdLabel) chips.push(escapeHtml(uiText('conversations.grouptask.created', 'Created')) + ': ' + escapeHtml(createdLabel));
+    if (detail.openTeam) chips.push(escapeHtml(uiText('conversations.grouptask.openTeam', 'OpenTeam')));
+    parts.push('<div class="grouptask-meta-chips"><span>' + chips.join('</span><span>') + '</span></div>');
+
+    parts.push('<h3 class="grouptask-section-title">' + escapeHtml(uiText('conversations.grouptask.membersTitle', 'Members')) + '</h3>');
+    const members = Array.isArray(detail.members) ? detail.members : [];
+    if (!members.length) {
+      parts.push('<div class="grouptask-empty">' + escapeHtml(uiText('conversations.grouptask.noMembers', 'No members.')) + '</div>');
+    } else {
+      const rows = members.map((member) => {
+        const name = normalizeText(member.displayName) || normalizeText(member.slug) || normalizeText(member.globalMetaId) || uiText('conversations.grouptask.unknownSender', 'Unknown');
+        const kick = member.slug && !member.removedAt && !terminal
+          ? '<button class="btn btn-sm" type="button" data-grouptask-kick="' + escapeHtml(member.slug) + '">' + escapeHtml(uiText('conversations.grouptask.kick', 'Kick')) + '</button>'
+          : '';
+        return '<tr><td>' + escapeHtml(name) + '</td><td>' + escapeHtml(gtRoleLabel(normalizeText(member.role))) + '</td><td>' + escapeHtml(gtMemberStatusLabel(normalizeText(member.status))) + '</td><td>' + escapeHtml(gtWorkStatusLabel(normalizeText(member.workStatus))) + '</td><td>' + kick + '</td></tr>';
+      }).join('');
+      parts.push('<div class="grouptask-table-wrap"><table class="grouptask-table"><thead><tr><th>' + escapeHtml(uiText('conversations.grouptask.colMember', 'Member')) + '</th><th>' + escapeHtml(uiText('conversations.grouptask.colRole', 'Role')) + '</th><th>' + escapeHtml(uiText('conversations.grouptask.colStatus', 'Status')) + '</th><th>' + escapeHtml(uiText('conversations.grouptask.colWorkStatus', 'Work status')) + '</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+    }
+
+    parts.push('<h3 class="grouptask-section-title">' + escapeHtml(uiText('conversations.grouptask.deliverablesTitle', 'Deliverables')) + '</h3>');
+    const deliverables = Array.isArray(detail.deliverables) ? detail.deliverables : [];
+    if (!deliverables.length) {
+      parts.push('<div class="grouptask-empty">' + escapeHtml(uiText('conversations.grouptask.noDeliverables', 'No deliverables recorded yet.')) + '</div>');
+    } else {
+      parts.push('<div class="grouptask-deliverables">' + deliverables.map((deliverable) => {
+        const label = normalizeText(deliverable.uri) || normalizeText(deliverable.kind) || normalizeText(deliverable.msgPinId) || uiText('conversations.grouptask.untitledDeliverable', 'Untitled deliverable');
+        const statusKind = normalizeText(deliverable.status);
+        return '<div class="grouptask-deliverable"><code>' + escapeHtml(label) + '</code><span class="status-pill"><span class="status-dot"></span>' + escapeHtml(gtDeliverableStatusLabel(statusKind)) + '</span></div>';
+      }).join('') + '</div>');
+    }
+
+    parts.push('<h3 class="grouptask-section-title">' + escapeHtml(uiText('conversations.grouptask.transcriptTitle', 'Transcript')) + '</h3>');
+    const messages = Array.isArray(gtState.messages) ? gtState.messages.slice().sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0)) : [];
+    if (!messages.length) {
+      parts.push('<div class="grouptask-empty">' + escapeHtml(uiText('conversations.grouptask.noTranscript', 'No transcript messages yet.')) + '</div>');
+    } else {
+      parts.push('<div class="grouptask-transcript">' + messages.map((message) => {
+        const sender = normalizeText(message.senderName) || normalizeText(message.senderGlobalMetaId) || uiText('conversations.grouptask.unknownSender', 'Unknown');
+        const time = gtFormatChainTime(message.chainTimestamp);
+        const suspect = message.senderSuspect === true;
+        return '<div class="grouptask-msg' + (suspect ? ' grouptask-msg-suspect' : '') + '"><div class="grouptask-msg-head"><strong>' + escapeHtml(sender) + '</strong><span>' + escapeHtml(time) + '</span></div><div class="grouptask-msg-body">' + escapeHtml(message.content) + '</div></div>';
+      }).join('') + '</div>');
+    }
+    return parts.join('');
+  };
+
+  const gtBindDetailActions = (detail) => {
+    if (!gtElements.detailBody) return;
+    gtElements.detailBody.querySelectorAll('[data-grouptask-kick]').forEach((button) => {
+      button.addEventListener('click', () => gtKickMember(detail.chairSlug, Number(detail.id), button.getAttribute('data-grouptask-kick') || '', button));
+    });
+    gtElements.detailHeader.querySelectorAll('[data-grouptask-action]').forEach((button) => {
+      button.addEventListener('click', () => gtRunAction(button));
+    });
+  };
+
+  const gtLoadTasks = async () => {
+    gtState.loading = true;
+    gtState.error = '';
+    gtRenderStatus();
+    try {
+      const payload = await fetchJson('/api/grouptask/list?tab=all');
+      gtState.tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+      gtState.loading = false;
+      if (!gtState.selectedTaskId && gtState.tasks.length) {
+        gtState.selectedChair = normalizeText(gtState.tasks[0].chairSlug);
+        gtState.selectedTaskId = Number(gtState.tasks[0].id) || 0;
+      }
+      gtRenderStatus();
+      gtRenderList();
+      if (gtState.selectedChair && gtState.selectedTaskId) await gtLoadDetail(gtState.selectedChair, gtState.selectedTaskId);
+      else gtRenderDetail();
+    } catch (error) {
+      gtState.loading = false;
+      gtState.error = error.message || uiText('conversations.grouptask.loadFailed', 'Group tasks failed to load.');
+      gtRenderStatus();
+    }
+  };
+
+  const gtLoadDetail = async (chair, taskId) => {
+    gtState.loadingDetail = true;
+    gtRenderList();
+    gtRenderDetail();
+    try {
+      const detailPayload = await fetchJson('/api/grouptask/detail?chair=' + encodeURIComponent(chair) + '&task=' + encodeURIComponent(String(taskId)) + '&view=full');
+      const messagesPayload = await fetchJson('/api/grouptask/messages?chair=' + encodeURIComponent(chair) + '&task=' + encodeURIComponent(String(taskId)) + '&limit=50');
+      gtState.detail = detailPayload && detailPayload.id !== undefined ? detailPayload : null;
+      gtState.messages = Array.isArray(messagesPayload.messages) ? messagesPayload.messages : [];
+      gtState.loadingDetail = false;
+      gtRenderList();
+      gtRenderDetail();
+    } catch (error) {
+      gtState.loadingDetail = false;
+      gtState.detail = null;
+      gtState.messages = [];
+      if (gtElements.detailBody) {
+        gtElements.detailBody.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(error.message || uiText('conversations.grouptask.detailLoadFailed', 'Group task detail failed to load.')) + '</strong></div>';
+      }
+    }
+  };
+
+  const gtSelectTask = async (chair, taskId) => {
+    if (!chair || !taskId) return;
+    gtState.selectedChair = chair;
+    gtState.selectedTaskId = taskId;
+    gtState.confirmKey = '';
+    gtRenderList();
+    await gtLoadDetail(chair, taskId);
+  };
+
+  const gtRunAction = async (button) => {
+    const kind = button.getAttribute('data-grouptask-action') || '';
+    const ref = button.getAttribute('data-grouptask-ref') || '';
+    if (gtState.busyAction) return;
+    if (gtState.confirmKey !== kind + ':' + ref) {
+      gtState.confirmKey = kind + ':' + ref;
+      gtRenderDetail();
+      return;
+    }
+    const chair = gtState.selectedChair;
+    const taskId = gtState.selectedTaskId;
+    if (!chair || !taskId) return;
+    gtState.busyAction = kind;
+    gtRenderDetail();
+    try {
+      if (kind === 'reopen') {
+        await fetchJson('/api/grouptask/reopen', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chair, taskId }),
+        });
+      } else {
+        await fetchJson('/api/grouptask/close', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chair, taskId, outcome: kind === 'done' ? 'done' : 'cancelled' }),
+        });
+      }
+      gtState.confirmKey = '';
+      gtState.busyAction = '';
+      await gtLoadTasks();
+    } catch (error) {
+      gtState.busyAction = '';
+      const messages = {
+        done: uiText('conversations.grouptask.closeFailed', 'Closing the task failed.'),
+        cancel: uiText('conversations.grouptask.closeFailed', 'Closing the task failed.'),
+        reopen: uiText('conversations.grouptask.reopenFailed', 'Reopening the task failed.'),
+      };
+      if (gtElements.detailBody) {
+        gtElements.detailBody.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(error.message || messages[kind] || uiText('conversations.grouptask.actionFailed', 'The action failed.')) + '</strong></div>';
+      }
+    }
+  };
+
+  const gtKickMember = async (chair, taskId, slug, button) => {
+    if (gtState.busyAction) return;
+    const confirmKey = 'kick:' + chair + ':' + taskId + ':' + slug;
+    if (gtState.confirmKey !== confirmKey) {
+      gtState.confirmKey = confirmKey;
+      if (gtElements.detailBody) {
+        gtElements.detailBody.querySelectorAll('[data-grouptask-kick]').forEach((candidate) => {
+          candidate.textContent = candidate.getAttribute('data-grouptask-kick') === slug
+            ? uiText('conversations.grouptask.confirm', 'Confirm?')
+            : uiText('conversations.grouptask.kick', 'Kick');
+        });
+      }
+      return;
+    }
+    gtState.busyAction = 'kick';
+    if (button) button.disabled = true;
+    try {
+      await fetchJson('/api/grouptask/member/kick', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chair, taskId, slug }),
+      });
+      gtState.confirmKey = '';
+      gtState.busyAction = '';
+      await gtLoadDetail(chair, taskId);
+    } catch (error) {
+      gtState.busyAction = '';
+      if (button) {
+        button.disabled = false;
+        button.textContent = error.message || uiText('conversations.grouptask.kickFailed', 'Kicking the member failed.');
+      }
+    }
+  };
+
+  gtElements.viewToggles.forEach((button) => {
+    button.addEventListener('click', () => gtSetView(button.getAttribute('data-view-toggle') || 'conversations'));
+  });
+  if (gtElements.refresh) {
+    gtElements.refresh.addEventListener('click', () => { gtLoadTasks().catch(() => undefined); });
+  }
+  window.addEventListener('oac:i18n-changed', () => {
+    gtRenderStatus();
+    gtRenderList();
+    gtRenderDetail();
+  });
+  if (gtState.activeView === 'grouptask') gtSetView('grouptask');
 
   loadProfiles()
     .then(() => {

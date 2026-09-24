@@ -77,6 +77,18 @@ $HOME/.metabot/bin/metabot dream run --from <bot-slug> --date 2026-09-18
 Check what is owed first with `dream due`; missed nights are listed oldest
 first and each can be run with an explicit `--date`.
 
+## Surfacing the Dream Page
+
+`dream status` and `dream run` success envelopes carry an additive
+`localUiUrl` field when the CLI can resolve a local daemon base URL (it is
+omitted otherwise — a missing link never fails the command). It deep-links
+the standalone dream page for the resolved Bot (the `/ui/dream` route
+resolves to the dream view), for example
+`http://127.0.0.1:10001/ui/dream?from=<bot-slug>`. When it is present, surface
+it to the user as a clickable link — opening it in the host's own browser or
+preview surface per the host-adapter note above — for example "Dream diary:
+<url>".
+
 ## When Dreams Fire Automatically
 
 - On the DSH host, a plugin scheduler dreams each night while DSH is running

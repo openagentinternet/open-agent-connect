@@ -71,6 +71,17 @@ A finished run's row carries parsed stats and `reportMarkdown` — summarize
 that report for the user. `--wait` exists (blocks until the run settles, up
 to 65 minutes) but is for scripts; do not block a conversation on it.
 
+## Surfacing the Surf Page
+
+`surf status` and `surf run` success envelopes carry an additive `localUiUrl`
+field when the CLI can resolve a local daemon base URL (it is omitted
+otherwise — a missing link never fails the command). It deep-links the
+standalone surf page for the resolved Bot, for example
+`http://127.0.0.1:10001/ui/surf?from=<bot-slug>`. When it is present, surface
+it to the user as a clickable link — opening it in the host's own browser or
+preview surface per the host-adapter note above — for example "Surf report:
+<url>".
+
 ## Useful Behaviors
 
 - **Receipts over self-report:** run stats come from the interaction-budget

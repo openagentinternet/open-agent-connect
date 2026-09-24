@@ -130,6 +130,7 @@ const registry_2 = require("../core/chain/adapters/registry");
 const nativeWallet_1 = require("../core/wallet/nativeWallet");
 const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
+const automationTicks_1 = require("../daemon/automationTicks");
 const grouptaskHandlers_1 = require("../daemon/grouptaskHandlers");
 const engine_1 = require("../core/grouptask/engine");
 const engineLog_1 = require("../core/grouptask/engineLog");
@@ -142,6 +143,7 @@ const format_4 = require("../core/surf/format");
 const studyJobs_1 = require("../core/knowledgebase/studyJobs");
 const service_2 = require("../core/knowledgebase/service");
 const studyJobs_2 = require("../core/knowledgebase/studyJobs");
+const kbHandlers_1 = require("../daemon/kbHandlers");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
 const simplemsgClassifier_1 = require("../core/a2a/simplemsgClassifier");
@@ -195,6 +197,19 @@ const CHAIN_NET = 'livenet';
 const DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 /** Scheduled-task daemon tick cadence (IDBots scheduler parity). */
 const SCHEDULE_TICK_INTERVAL_MS = 30_000;
+/**
+ * Dream automation tick cadence (DSH plugin dream-scheduler parity):
+ * 10-minute interval plus one boot pass shortly after daemon start; the
+ * due-date algorithm owns catch-up, the tick stays dumb.
+ */
+const DREAM_AUTOMATION_TICK_INTERVAL_MS = 10 * 60_000;
+const DREAM_AUTOMATION_TICK_BOOT_DELAY_MS = 15_000;
+/**
+ * Chain-history summary drain cadence (DSH plugin chain-history-summary
+ * parity): 30-minute interval plus one boot pass.
+ */
+const CHAIN_HISTORY_SUMMARY_TICK_INTERVAL_MS = 30 * 60_000;
+const CHAIN_HISTORY_SUMMARY_TICK_BOOT_DELAY_MS = 20_000;
 let cachedDaemonRuntimeFingerprint = null;
 function normalizeDispatcherPrivateChatMessage(message) {
     return {
@@ -321,6 +336,8 @@ const SUPPORTED_CONFIG_KEYS = new Set([
     'a2a.simplemsgListenerEnabled',
     'chain.defaultWriteNetwork',
     'chain.mvcSponsorUploadEnabled',
+    'automation.dreamTickEnabled',
+    'automation.chainHistorySummaryEnabled',
 ]);
 function isRecord(value) {
     return typeof value === 'object' && value !== null;
@@ -329,7 +346,10 @@ function isSupportedConfigKey(key) {
     return SUPPORTED_CONFIG_KEYS.has(key);
 }
 function isSupportedBooleanConfigKey(key) {
-    return key === 'a2a.simplemsgListenerEnabled' || key === 'chain.mvcSponsorUploadEnabled';
+    return key === 'a2a.simplemsgListenerEnabled'
+        || key === 'chain.mvcSponsorUploadEnabled'
+        || key === 'automation.dreamTickEnabled'
+        || key === 'automation.chainHistorySummaryEnabled';
 }
 function readConfigValue(config, key) {
     if (key === 'a2a.simplemsgListenerEnabled') {
@@ -341,7 +361,10 @@ function readConfigValue(config, key) {
     if (key === 'chain.mvcSponsorUploadEnabled') {
         return config.chain.mvcSponsorUploadEnabled;
     }
-    return config.chain.defaultWriteNetwork;
+    if (key === 'automation.dreamTickEnabled') {
+        return config.automation.dreamTickEnabled;
+    }
+    return config.automation.chainHistorySummaryEnabled;
 }
 function writeConfigValue(config, key, value) {
     if (key === 'chain.defaultWriteNetwork') {
@@ -368,6 +391,24 @@ function writeConfigValue(config, key, value) {
             a2a: {
                 ...config.a2a,
                 simplemsgListenerEnabled: value === true,
+            },
+        };
+    }
+    if (key === 'automation.dreamTickEnabled') {
+        return {
+            ...config,
+            automation: {
+                ...config.automation,
+                dreamTickEnabled: value === true,
+            },
+        };
+    }
+    if (key === 'automation.chainHistorySummaryEnabled') {
+        return {
+            ...config,
+            automation: {
+                ...config.automation,
+                chainHistorySummaryEnabled: value === true,
             },
         };
     }
@@ -633,6 +674,12 @@ function resolveLocalUiPath(page) {
     if (page === 'chat') {
         return '/ui/chat/app/chat.html';
     }
+    // Standalone console pages served by the daemon at /ui/<page>. Listed
+    // explicitly so new pages are recognized by the localUiUrl plumbing the
+    // moment they are added to SUPPORTED_UI_PAGES.
+    if (page === 'kb' || page === 'surf' || page === 'memory' || page === 'schedule' || page === 'traffic' || page === 'dream') {
+        return `/ui/${page}`;
+    }
     return `/ui/${page}`;
 }
 const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin']);
@@ -732,6 +779,16 @@ async function readReachableDaemonBaseUrl(context) {
         return normalizeBaseUrl(daemonRecord.baseUrl);
     }
     return null;
+}
+/**
+ * Builds the additive `localUiUrl` for a standalone /ui page, e.g.
+ * `<base>/ui/surf?from=<slug>`. Shared by the surf/kb/dream/schedule/memory/
+ * traffic command envelopes so no command hand-assembles page query strings.
+ */
+function buildStandalonePageLocalUiUrl(baseUrl, page, fromSlug) {
+    const slug = normalizeEnvText(fromSlug);
+    const suffix = slug ? `?from=${encodeURIComponent(slug)}` : '';
+    return `${baseUrl}${resolveLocalUiPath(page)}${suffix}`;
 }
 /**
  * Adds clickable per-item http links for hosts whose markdown renderer cannot
@@ -2730,6 +2787,26 @@ function createDefaultCliDependencies(context) {
             metafileContentBaseUrl: infrastructure.metafileContentBaseUrl,
         }).catch((error) => (0, commandResult_1.commandFailed)('metaapp_source_failed', error instanceof Error ? error.message : String(error)));
     }
+    // Additive localUiUrl decoration for success envelopes whose capability has
+    // a standalone /ui page. Mirrors the Browser link convention: best-effort —
+    // never starts a daemon and never turns a success into a failure — so the
+    // field is simply absent when no daemon base URL is resolvable.
+    async function withStandalonePageLocalUiUrl(result, page, fromSlug) {
+        if (!result.ok || !result.data || typeof result.data !== 'object' || Array.isArray(result.data)) {
+            return result;
+        }
+        const baseUrl = await readReachableDaemonBaseUrl(context);
+        if (!baseUrl) {
+            return result;
+        }
+        return {
+            ...result,
+            data: {
+                ...result.data,
+                localUiUrl: buildStandalonePageLocalUiUrl(baseUrl, page, fromSlug),
+            },
+        };
+    }
     return {
         config: {
             get: async (input) => {
@@ -2865,10 +2942,10 @@ function createDefaultCliDependencies(context) {
         // Traffic (流量) verbs are owner-scoped: no actor selection, every call is
         // a plain POST to the daemon's /api/traffic/* routes.
         traffic: {
-            status: async () => requestJsonForSelectedActor('POST', '/api/traffic/status'),
+            status: async () => withStandalonePageLocalUiUrl(await requestJsonForSelectedActor('POST', '/api/traffic/status'), 'traffic'),
             getMode: async () => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, {}),
             setMode: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, { mode: input.mode }),
-            balance: async () => requestJsonForSelectedActor('POST', '/api/traffic/balance'),
+            balance: async () => withStandalonePageLocalUiUrl(await requestJsonForSelectedActor('POST', '/api/traffic/balance'), 'traffic'),
             ledger: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/ledger', undefined, {
                 ...(input.cursor ? { cursor: input.cursor } : {}),
                 ...(input.limit ? { limit: input.limit } : {}),
@@ -3264,7 +3341,8 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                const store = (0, memoryStore_1.createMemoryStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const store = (0, memoryStore_1.createMemoryStore)(paths);
                 const entries = await store.list({
                     ...(input.scopeKind ? { scopeKind: input.scopeKind } : {}),
                     ...(input.scopeKey ? { scopeKey: input.scopeKey } : {}),
@@ -3276,7 +3354,7 @@ function createDefaultCliDependencies(context) {
                     ...(input.includeDeleted ? { includeDeleted: true } : {}),
                     ...(input.includeArchived ? { includeArchived: true } : {}),
                 });
-                return (0, commandResult_1.commandSuccess)({ entries });
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ entries }), 'memory', node_path_1.default.basename(paths.profileRoot));
             },
             add: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -3370,12 +3448,16 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                // LLM judge + multilingual turn extraction ride the daemon's
-                // host-executor generate route (the Bot's DSH pair through the
-                // connected DSH host). Every failure degrades to null — rule-only
-                // extraction, exactly the pre-wiring behavior — so a daemon that is
-                // down, old, or without a connected executor never breaks a turn.
-                const daemonComplete = async (system, prompt) => {
+                // LLM judge + multilingual turn extraction with DSH-first priority:
+                // the daemon's host-executor generate route first (the Bot's DSH pair
+                // through the connected DSH host), then the local CLI runtime chain
+                // (`runLlmPromptWithRuntimeFallback`) so the judge lights up on
+                // non-DSH installs too. Every failure still degrades to null —
+                // rule-only extraction, exactly the pre-wiring behavior — so a daemon
+                // that is down, old, or without any runtime never breaks a turn.
+                const actorPaths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const actorSlug = node_path_1.default.basename(actorPaths.profileRoot);
+                const hostComplete = async (system, prompt) => {
                     try {
                         const result = await requestJson(context, 'POST', '/api/llm/host-executor/generate', {
                             ...(input.from ? { botSlug: input.from } : {}),
@@ -3392,7 +3474,32 @@ function createDefaultCliDependencies(context) {
                         return null;
                     }
                 };
-                const result = await (0, memoryService_1.applyTurnMemoryExtraction)((0, paths_1.resolveMetabotPaths)(actor.homeDir), {
+                const localComplete = async (system, prompt) => {
+                    try {
+                        const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                            runtimeResolver: createCliLlmRuntimeResolver(actorPaths),
+                            llmExecutor: new executor_1.LlmExecutor({
+                                sessionsRoot: actorPaths.llmExecutorSessionsRoot,
+                                transcriptsRoot: actorPaths.llmExecutorTranscriptsRoot,
+                                skillsRoot: actorPaths.skillsRoot,
+                                systemHomeDir: actorPaths.systemHomeDir,
+                                env: context.env,
+                                backends: (0, executor_1.createRegistryBackendFactories)(),
+                            }),
+                            metaBotSlug: actorSlug,
+                            prompt,
+                            systemPrompt: system,
+                            timeoutMs: 20_000,
+                            pollIntervalMs: 500,
+                        });
+                        return outcome.status === 'completed' && outcome.output.trim() ? outcome.output : null;
+                    }
+                    catch {
+                        return null;
+                    }
+                };
+                const complete = async (system, prompt) => (await hostComplete(system, prompt)) ?? (await localComplete(system, prompt));
+                const result = await (0, memoryService_1.applyTurnMemoryExtraction)(actorPaths, {
                     userText: String(input.payload.userText ?? ''),
                     assistantText: String(input.payload.assistantText ?? ''),
                     sessionId: typeof input.payload.sessionId === 'string' ? input.payload.sessionId : undefined,
@@ -3403,10 +3510,10 @@ function createDefaultCliDependencies(context) {
                         : undefined,
                     userMessageId: typeof input.payload.userMessageId === 'string' ? input.payload.userMessageId : undefined,
                     assistantMessageId: typeof input.payload.assistantMessageId === 'string' ? input.payload.assistantMessageId : undefined,
-                    judgeComplete: async (systemPrompt, userPrompt) => (await daemonComplete(systemPrompt, userPrompt)) ?? '',
+                    judgeComplete: async (systemPrompt, userPrompt) => (await complete(systemPrompt, userPrompt)) ?? '',
                     llmExtract: async (extractionInput) => {
                         const prompts = (0, memoryTurnExtraction_1.buildTurnMemoryExtractionPrompts)(extractionInput);
-                        const text = await daemonComplete(prompts.system, prompts.user);
+                        const text = await complete(prompts.system, prompts.user);
                         return text ? (0, memoryTurnExtraction_1.parseTurnMemoryExtractionPayload)(text) : null;
                     },
                 });
@@ -3825,6 +3932,84 @@ function createDefaultCliDependencies(context) {
                 const config = await store.setHygieneConfig(input.payload);
                 return (0, commandResult_1.commandSuccess)({ config });
             },
+            // Repeatable-workflow procedures (DSH procedure_recall/save/archive
+            // parity): same core/memory/procedureStore the DSH tools drive through
+            // the local-read loader, same title-fingerprint rewrite semantics.
+            procedureList: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, procedureStore_1.createProcedureStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const rows = await store.listProcedures({
+                    ...(input.status ? { status: input.status } : {}),
+                });
+                const procedures = input.limit !== undefined ? rows.slice(0, input.limit) : rows;
+                return (0, commandResult_1.commandSuccess)({ procedures });
+            },
+            procedureRecall: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, procedureStore_1.createProcedureStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const rows = await store.listProcedures({ status: 'active' });
+                const scored = (0, procedureStore_1.scoreProceduresForQuery)(rows, input.query);
+                // DSH parity: only the returned top matches get their use counter
+                // touched (default top 3, like the procedure_recall tool).
+                const top = scored.slice(0, input.limit ?? 3);
+                for (const hit of top)
+                    await store.touchUsed(hit.procedure.id);
+                return (0, commandResult_1.commandSuccess)({
+                    matches: top.map((hit) => ({ procedure: hit.procedure, score: hit.score })),
+                });
+            },
+            procedureSave: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, procedureStore_1.createProcedureStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const payload = input.payload;
+                try {
+                    const result = await store.upsertProcedure({
+                        title: String(payload.title ?? ''),
+                        steps: Array.isArray(payload.steps)
+                            ? payload.steps.filter((step) => typeof step === 'string')
+                            : [],
+                        ...(Array.isArray(payload.pitfalls)
+                            ? { pitfalls: payload.pitfalls.filter((item) => typeof item === 'string') }
+                            : {}),
+                        ...(typeof payload.triggerText === 'string' ? { triggerText: payload.triggerText } : {}),
+                        ...(Array.isArray(payload.sourcePinIds)
+                            ? { sourcePinIds: payload.sourcePinIds.filter((item) => typeof item === 'string') }
+                            : {}),
+                        ...(typeof payload.category === 'string' ? { category: payload.category } : {}),
+                        ...(Array.isArray(payload.tags)
+                            ? { tags: payload.tags.filter((tag) => typeof tag === 'string') }
+                            : {}),
+                        ...(typeof payload.confidence === 'number' ? { confidence: payload.confidence } : {}),
+                        ...(payload.origin === 'agent' || payload.origin === 'dream' || payload.origin === 'owner'
+                            ? { origin: payload.origin }
+                            : {}),
+                    });
+                    return (0, commandResult_1.commandSuccess)({ procedure: result.procedure, created: result.created });
+                }
+                catch (error) {
+                    if (error instanceof procedureStore_1.ProcedureStoreError) {
+                        return (0, commandResult_1.commandFailed)(error.code, error.message);
+                    }
+                    throw error;
+                }
+            },
+            procedureArchive: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, procedureStore_1.createProcedureStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const archived = await store.archiveProcedureByTitle(input.title);
+                if (!archived) {
+                    return (0, commandResult_1.commandFailed)('not_found', `No procedure titled "${input.title}" found.`);
+                }
+                return (0, commandResult_1.commandSuccess)({ archived: true, procedure: archived });
+            },
         },
         chainhistory: {
             recordRead: async (input) => {
@@ -3931,8 +4116,9 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                const status = await (0, dreamService_1.dreamStatus)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
-                return (0, commandResult_1.commandSuccess)(status);
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const status = await (0, dreamService_1.dreamStatus)(paths);
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)(status), 'dream', node_path_1.default.basename(paths.profileRoot));
             },
             plan: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4048,7 +4234,7 @@ function createDefaultCliDependencies(context) {
                 if (result.kind === 'failed') {
                     return (0, commandResult_1.commandFailed)('dream_run_failed', result.error ?? 'dream run failed');
                 }
-                return (0, commandResult_1.commandSuccess)(result);
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)(result), 'dream', slug);
             },
             summaries: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4091,7 +4277,8 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const store = (0, store_2.createScheduleStore)(paths);
                 try {
                     const task = await store.createTask({
                         name: input.name,
@@ -4102,7 +4289,7 @@ function createDefaultCliDependencies(context) {
                         ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
                         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
                     });
-                    return (0, commandResult_1.commandSuccess)({ task });
+                    return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ task }), 'schedule', node_path_1.default.basename(paths.profileRoot));
                 }
                 catch (error) {
                     return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
@@ -4112,9 +4299,10 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const store = (0, store_2.createScheduleStore)(paths);
                 const tasks = await store.listTasks();
-                return (0, commandResult_1.commandSuccess)({ tasks });
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ tasks }), 'schedule', node_path_1.default.basename(paths.profileRoot));
             },
             show: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4227,7 +4415,7 @@ function createDefaultCliDependencies(context) {
                 if (result.kind === 'failed') {
                     return (0, commandResult_1.commandFailed)('schedule_run_failed', result.error);
                 }
-                return (0, commandResult_1.commandSuccess)({ taskId: input.id, output: result.output });
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ taskId: input.id, output: result.output }), 'schedule', slug);
             },
             runs: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4581,9 +4769,10 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                const service = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const service = (0, service_2.createKnowledgeBaseService)(paths);
                 const knowledgeBases = await service.store.listKnowledgeBases();
-                return (0, commandResult_1.commandSuccess)({ knowledgeBases });
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ knowledgeBases }), 'kb', node_path_1.default.basename(paths.profileRoot));
             },
             create: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4636,13 +4825,14 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                const service = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
-                const results = await service.queryKnowledgeBase(node_path_1.default.basename((0, paths_1.resolveMetabotPaths)(actor.homeDir).profileRoot), input.text, {
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const service = (0, service_2.createKnowledgeBaseService)(paths);
+                const results = await service.queryKnowledgeBase(node_path_1.default.basename(paths.profileRoot), input.text, {
                     ...(input.id ? { knowledgeBaseId: input.id } : {}),
                     ...(input.topK != null ? { topK: input.topK } : {}),
                     ...(input.minScore != null ? { minScore: input.minScore } : {}),
                 });
-                return (0, commandResult_1.commandSuccess)({ results });
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ results }), 'kb', node_path_1.default.basename(paths.profileRoot));
             },
             addDocument: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4664,9 +4854,59 @@ function createDefaultCliDependencies(context) {
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
-                const service = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
-                const knowledgeBase = await service.learnKnowledgeBase(node_path_1.default.basename((0, paths_1.resolveMetabotPaths)(actor.homeDir).profileRoot), input.id, input.full === true);
-                return (0, commandResult_1.commandSuccess)({ knowledgeBase });
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const service = (0, service_2.createKnowledgeBaseService)(paths);
+                const knowledgeBase = await service.learnKnowledgeBase(node_path_1.default.basename(paths.profileRoot), input.id, input.full === true);
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ knowledgeBase }), 'kb', node_path_1.default.basename(paths.profileRoot));
+            },
+            // Nightly study-job queue (DSH metaweb_study_* parity). Same store and
+            // the same retry helper as the /api/kb/study/* daemon handlers, so the
+            // CLI and HTTP surfaces agree on shapes; the daemon 30-min tick drains.
+            studyList: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const store = (0, studyJobs_2.createStudyJobStore)(paths);
+                const jobs = await store.listStudyJobs(node_path_1.default.basename(paths.profileRoot));
+                return (0, commandResult_1.commandSuccess)({ jobs });
+            },
+            studyEnqueue: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const store = (0, studyJobs_2.createStudyJobStore)(paths);
+                try {
+                    const result = await store.enqueueStudyJob({
+                        metabotSlug: node_path_1.default.basename(paths.profileRoot),
+                        topic: input.topic,
+                        ...(input.budgetPins !== undefined ? { budgetPins: input.budgetPins } : {}),
+                    });
+                    return (0, commandResult_1.commandSuccess)({ job: result.job, created: result.created });
+                }
+                catch (error) {
+                    if (error instanceof studyJobs_2.StudyJobStoreError) {
+                        return (0, commandResult_1.commandFailed)(error.code, error.message);
+                    }
+                    throw error;
+                }
+            },
+            studyRetry: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const store = (0, studyJobs_2.createStudyJobStore)(paths);
+                const outcome = await (0, kbHandlers_1.retryFailedStudyJobs)({
+                    store,
+                    slug: node_path_1.default.basename(paths.profileRoot),
+                    ...(input.jobId !== undefined ? { jobId: input.jobId } : {}),
+                    ...(input.topic !== undefined ? { topic: input.topic } : {}),
+                });
+                if ('failure' in outcome)
+                    return outcome.failure;
+                return (0, commandResult_1.commandSuccess)({ retried: outcome.retried, count: outcome.retried.length });
             },
         },
         surf: {
@@ -4688,16 +4928,22 @@ function createDefaultCliDependencies(context) {
                     && !running
                     && memoryEnabled
                     && (!Number.isFinite(finishedMs) || Date.now() - finishedMs >= 20 * 60 * 60 * 1000);
-                return (0, commandResult_1.commandSuccess)({
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({
                     runs,
                     running,
                     surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
                     interactionBudget: settings.interactionBudget,
                     preDreamDue,
                     formatted: (0, format_4.formatSurfRunList)(runs),
-                });
+                }), 'surf', node_path_1.default.basename(paths.profileRoot));
             },
             run: async (input) => {
+                // Resolve the actor up front (without failing the command) so every
+                // success variant can carry the additive /ui/surf localUiUrl deep link.
+                const actor = await resolveActorHomeDir(context, input.from);
+                const actorSlug = 'homeDir' in actor
+                    ? node_path_1.default.basename((0, paths_1.resolveMetabotPaths)(actor.homeDir).profileRoot)
+                    : undefined;
                 // The run itself lives in the daemon process; the CLI only starts it.
                 const start = await requestJsonForSelectedActor('POST', '/api/surf/run', typeof input.from === 'string' ? input.from : undefined, {
                     trigger: input.trigger ?? 'manual-ui',
@@ -4708,10 +4954,9 @@ function createDefaultCliDependencies(context) {
                 const startData = (start.data ?? {});
                 const runId = typeof startData.runId === 'string' ? startData.runId : null;
                 if (!input.wait || !runId) {
-                    return (0, commandResult_1.commandSuccess)({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running' });
+                    return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running' }), 'surf', actorSlug);
                 }
                 // --wait: poll the shared run store file until the run settles.
-                const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
                 const store = (0, store_3.createMetawebSurfStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
@@ -4720,17 +4965,17 @@ function createDefaultCliDependencies(context) {
                     await new Promise((resolve) => setTimeout(resolve, 10_000));
                     const run = await store.getRun(runId);
                     if (run && run.status !== 'running') {
-                        return (0, commandResult_1.commandSuccess)({
+                        return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({
                             runId,
                             trigger: run.trigger,
                             status: run.status,
                             stats: run.stats,
                             error: run.error,
                             reportMarkdown: run.reportMarkdown,
-                        });
+                        }), 'surf', actorSlug);
                     }
                     if (Date.now() > deadline) {
-                        return (0, commandResult_1.commandSuccess)({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running', note: 'wait timeout — the run continues in the daemon' });
+                        return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running', note: 'wait timeout — the run continues in the daemon' }), 'surf', actorSlug);
                     }
                 }
             },
@@ -6436,6 +6681,102 @@ async function serveCliDaemonProcess(context) {
         })();
     }, SCHEDULE_TICK_INTERVAL_MS);
     scheduleTimer.unref?.();
+    // Dream automation tick (Codex↔DSH parity Phase 3): the nightly dream pass
+    // for non-DSH installs — per-Bot `dream due` → pre-dream surf gate → dream
+    // runs → memory-hygiene tail, driving the SAME daemon handler code paths as
+    // /api/dream/* + /api/surf/* + /api/memory/* (Chain B→C through the daemon's
+    // injected executor). DSH-first: the whole tick stands down while the DSH
+    // host-executor bridge is connected (the plugin owns the dream there), and
+    // the core due algorithm skips `running` dates + idempotent commits bound
+    // the residual start-race window. Per-Bot opt-out via
+    // `metabot config set automation.dreamTickEnabled false`; per-Bot memory
+    // policy `dreamEnabled` and the availability toggle are respected exactly
+    // like the plugin scheduler. 10-min cadence + one boot pass; crash safety
+    // relies on the existing 30-min stale-running sweeps (no new locks).
+    const dreamAutomationTickLoop = handlers.dream && handlers.memory && handlers.surf
+        ? (0, automationTicks_1.startAutomationTickLoop)(() => (0, automationTicks_1.runDreamAutomationTick)({
+            listBots: () => (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir),
+            isHostExecutorConnected: automationTicks_1.isDshHostExecutorConnected,
+            isTickEnabled: async (profileHomeDir) => (await (0, configStore_1.createConfigStore)(profileHomeDir).read()).automation.dreamTickEnabled,
+            isDreamPolicyEnabled: async (profileHomeDir) => (await (0, memoryPolicy_1.createMemoryPolicyStore)((0, paths_1.resolveMetabotPaths)(profileHomeDir)).effectivePolicy()).dreamEnabled,
+            handlers: {
+                dream: {
+                    due: async (input) => (await handlers.dream.due(input)),
+                    run: async (input) => (await handlers.dream.run(input)),
+                },
+                memory: {
+                    hygieneDue: async (input) => (await handlers.memory.hygieneDue(input)),
+                    hygieneRun: async (input) => (await handlers.memory.hygieneRun(input)),
+                },
+                surf: {
+                    status: async (input) => (await handlers.surf.status(input)),
+                    run: async (input) => (await handlers.surf.run(input)),
+                },
+            },
+            log: (message) => groupTaskEngineLog(message),
+        }).then((outcomes) => {
+            (0, automationTicks_1.reportDreamTickOutcomes)(outcomes, (message) => groupTaskEngineLog(message));
+        }), {
+            tickMs: DREAM_AUTOMATION_TICK_INTERVAL_MS,
+            bootDelayMs: DREAM_AUTOMATION_TICK_BOOT_DELAY_MS,
+            log: (message) => groupTaskEngineLog(message),
+        })
+        : null;
+    // Chain-history summary drain (Codex↔DSH parity Phase 3): bounded on-chain
+    // read/write summarization per Bot through the unified passive-LLM chain
+    // (DSH pair first via the host-executor bridge, then the local runtime
+    // fallback), with the plugin's daily cap / per-tick budget semantics and the
+    // same DSH stand-down as the dream tick. Ledger bookkeeping stays in the
+    // core chain-history store (`chainhistory summary pending|apply` parity).
+    const chainHistorySummaryTickLoop = (0, automationTicks_1.startAutomationTickLoop)(() => (0, automationTicks_1.runChainHistorySummaryTick)({
+        listBots: () => (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir),
+        isHostExecutorConnected: automationTicks_1.isDshHostExecutorConnected,
+        isTickEnabled: async (profileHomeDir) => (await (0, configStore_1.createConfigStore)(profileHomeDir).read()).automation.chainHistorySummaryEnabled,
+        storeFor: (profileHomeDir) => (0, store_1.createChainHistoryStore)((0, paths_1.resolveMetabotPaths)(profileHomeDir)),
+        summarize: async ({ slug, homeDir, kind, title, path, content }) => {
+            const profilePaths = (0, paths_1.resolveMetabotPaths)(homeDir);
+            const { system, user } = (0, automationTicks_1.buildChainHistorySummaryPrompt)({ kind, title, path, content });
+            const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                dshLlmPath: profilePaths.dshLlmPath,
+                timeoutMs: automationTicks_1.CHAIN_HISTORY_SUMMARY_LLM_TIMEOUT_MS,
+            })({ botSlug: slug, system, user });
+            if (hostText !== null)
+                return hostText;
+            const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                runtimeResolver: (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+                    runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths),
+                    bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(profilePaths),
+                    getPreferredRuntimeId: async () => {
+                        try {
+                            const raw = await node_fs_1.default.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                            const data = JSON.parse(raw);
+                            return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                        }
+                        catch {
+                            return null;
+                        }
+                    },
+                }),
+                llmExecutor,
+                metaBotSlug: slug,
+                prompt: user,
+                systemPrompt: system,
+                timeoutMs: automationTicks_1.CHAIN_HISTORY_SUMMARY_LLM_TIMEOUT_MS,
+                pollIntervalMs: 5_000,
+            });
+            if (outcome.status !== 'completed') {
+                throw new Error(outcome.error || `Chain-history summary generation ended with status ${outcome.status}.`);
+            }
+            return outcome.output;
+        },
+        log: (message) => groupTaskEngineLog(message),
+    }).then((outcomes) => {
+        (0, automationTicks_1.reportChainHistorySummaryTickOutcomes)(outcomes, (message) => groupTaskEngineLog(message));
+    }), {
+        tickMs: CHAIN_HISTORY_SUMMARY_TICK_INTERVAL_MS,
+        bootDelayMs: CHAIN_HISTORY_SUMMARY_TICK_BOOT_DELAY_MS,
+        log: (message) => groupTaskEngineLog(message),
+    });
     // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
     // them (with their remaining budget) or settle expired waits into the
     // timeout + refund path. Runs even when the simplemsg listener is disabled —
@@ -6472,6 +6813,8 @@ async function serveCliDaemonProcess(context) {
         clearInterval(onlineServiceCacheInterval);
         clearInterval(providerWorkspaceSweepInterval);
         clearInterval(scheduleTimer);
+        dreamAutomationTickLoop?.stop();
+        chainHistorySummaryTickLoop.stop();
         serviceRefundSyncLoop.stop();
         let shutdownFailure = null;
         try {

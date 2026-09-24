@@ -173,5 +173,48 @@ async function runKnowledgeBaseCommand(args, context) {
             full: (0, helpers_1.hasFlag)(args, '--full'),
         });
     }
+    if (subcommand === 'study') {
+        const verb = args[1];
+        if (verb === 'enqueue') {
+            const handler = requireKbHandler(context, 'studyEnqueue');
+            if (isFailure(handler))
+                return handler;
+            const topic = (0, helpers_1.readFlagValue)(args, '--topic');
+            if (!topic?.trim())
+                return (0, helpers_1.commandMissingFlag)('--topic');
+            const budgetPins = readNumberFlag(args, '--budget-pins');
+            if (budgetPins === 'invalid') {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--budget-pins must be a number.');
+            }
+            return handler({
+                from,
+                topic: topic.trim(),
+                ...(budgetPins !== undefined ? { budgetPins } : {}),
+            });
+        }
+        if (verb === 'status') {
+            const handler = requireKbHandler(context, 'studyList');
+            if (isFailure(handler))
+                return handler;
+            return handler({ from });
+        }
+        if (verb === 'retry') {
+            const handler = requireKbHandler(context, 'studyRetry');
+            if (isFailure(handler))
+                return handler;
+            const jobId = (0, helpers_1.readFlagValue)(args, '--job-id');
+            const topic = (0, helpers_1.readFlagValue)(args, '--topic');
+            if (jobId !== null && jobId.trim() === '')
+                return (0, helpers_1.commandMissingFlag)('--job-id');
+            if (topic !== null && topic.trim() === '')
+                return (0, helpers_1.commandMissingFlag)('--topic');
+            return handler({
+                from,
+                ...(jobId !== null ? { jobId: jobId.trim() } : {}),
+                ...(topic !== null ? { topic: topic.trim() } : {}),
+            });
+        }
+        return (0, helpers_1.commandUnknownSubcommand)(`knowledge-base study ${String(verb ?? '')}`.trim());
+    }
     return (0, helpers_1.commandUnknownSubcommand)(`knowledge-base ${String(subcommand ?? '')}`.trim());
 }

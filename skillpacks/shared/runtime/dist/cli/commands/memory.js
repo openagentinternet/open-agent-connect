@@ -317,5 +317,66 @@ async function runMemoryCommand(args, context) {
         }
         return (0, helpers_1.commandUnknownSubcommand)(`memory hygiene ${String(nested ?? '')}`.trim());
     }
+    if (subcommand === 'procedure') {
+        if (nested === 'list') {
+            const handler = requireMemoryHandler(context, 'procedureList');
+            if (isFailure(handler))
+                return handler;
+            const limit = readOptionalLimit(args);
+            if (limit === 'invalid') {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--limit must be a positive integer.');
+            }
+            const status = (0, helpers_1.readFlagValue)(args, '--status') ?? undefined;
+            if (status !== undefined && status !== 'active' && status !== 'archived') {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--status must be active or archived.');
+            }
+            return handler({
+                from,
+                ...(status !== undefined ? { status: status } : {}),
+                ...(limit !== undefined ? { limit } : {}),
+            });
+        }
+        if (nested === 'recall') {
+            const handler = requireMemoryHandler(context, 'procedureRecall');
+            if (isFailure(handler))
+                return handler;
+            const query = (0, helpers_1.readFlagValue)(args, '--query');
+            if (!query?.trim()) {
+                return (0, helpers_1.commandMissingFlag)('--query');
+            }
+            const limit = readOptionalLimit(args);
+            if (limit === 'invalid') {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--limit must be a positive integer.');
+            }
+            return handler({
+                from,
+                query: query.trim(),
+                ...(limit !== undefined ? { limit } : {}),
+            });
+        }
+        if (nested === 'save') {
+            const handler = requireMemoryHandler(context, 'procedureSave');
+            if (isFailure(handler))
+                return handler;
+            const payload = await readPayload(context, args, { required: true });
+            if (isFailure(payload))
+                return payload;
+            if (typeof payload.title !== 'string' || !Array.isArray(payload.steps)) {
+                return (0, commandResult_1.commandFailed)('invalid_payload', 'payload.title and payload.steps (array) are required.');
+            }
+            return handler({ from, payload });
+        }
+        if (nested === 'archive') {
+            const handler = requireMemoryHandler(context, 'procedureArchive');
+            if (isFailure(handler))
+                return handler;
+            const title = (0, helpers_1.readFlagValue)(args, '--title');
+            if (!title?.trim()) {
+                return (0, helpers_1.commandMissingFlag)('--title');
+            }
+            return handler({ from, title: title.trim() });
+        }
+        return (0, helpers_1.commandUnknownSubcommand)(`memory procedure ${String(nested ?? '')}`.trim());
+    }
     return (0, helpers_1.commandUnknownSubcommand)(`memory ${String(subcommand ?? '')}`.trim());
 }

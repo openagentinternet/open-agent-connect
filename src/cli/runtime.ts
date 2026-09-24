@@ -1047,6 +1047,17 @@ async function readReachableDaemonBaseUrl(context: CliRuntimeContext): Promise<s
 }
 
 /**
+ * Builds the additive `localUiUrl` for a standalone /ui page, e.g.
+ * `<base>/ui/surf?from=<slug>`. Shared by the surf/kb/dream/schedule/memory/
+ * traffic command envelopes so no command hand-assembles page query strings.
+ */
+function buildStandalonePageLocalUiUrl(baseUrl: string, page: string, fromSlug?: string): string {
+  const slug = normalizeEnvText(fromSlug);
+  const suffix = slug ? `?from=${encodeURIComponent(slug)}` : '';
+  return `${baseUrl}${resolveLocalUiPath(page)}${suffix}`;
+}
+
+/**
  * Adds clickable per-item http links for hosts whose markdown renderer cannot
  * intercept metaapp:// or metaid:// deep links: `localUiUrl` opens the app in
  * the local Browser, `publisherLocalUiUrl` opens the publisher's Bot page.
@@ -3477,6 +3488,31 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     ));
   }
 
+  // Additive localUiUrl decoration for success envelopes whose capability has
+  // a standalone /ui page. Mirrors the Browser link convention: best-effort —
+  // never starts a daemon and never turns a success into a failure — so the
+  // field is simply absent when no daemon base URL is resolvable.
+  async function withStandalonePageLocalUiUrl(
+    result: MetabotCommandResult<unknown>,
+    page: string,
+    fromSlug?: string,
+  ): Promise<MetabotCommandResult<unknown>> {
+    if (!result.ok || !result.data || typeof result.data !== 'object' || Array.isArray(result.data)) {
+      return result;
+    }
+    const baseUrl = await readReachableDaemonBaseUrl(context);
+    if (!baseUrl) {
+      return result;
+    }
+    return {
+      ...result,
+      data: {
+        ...(result.data as Record<string, unknown>),
+        localUiUrl: buildStandalonePageLocalUiUrl(baseUrl, page, fromSlug),
+      },
+    };
+  }
+
   return {
     config: {
       get: async (input) => {
@@ -3705,10 +3741,16 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     // Traffic (流量) verbs are owner-scoped: no actor selection, every call is
     // a plain POST to the daemon's /api/traffic/* routes.
     traffic: {
-      status: async () => requestJsonForSelectedActor('POST', '/api/traffic/status'),
+      status: async () => withStandalonePageLocalUiUrl(
+        await requestJsonForSelectedActor('POST', '/api/traffic/status'),
+        'traffic',
+      ),
       getMode: async () => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, {}),
       setMode: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, { mode: input.mode }),
-      balance: async () => requestJsonForSelectedActor('POST', '/api/traffic/balance'),
+      balance: async () => withStandalonePageLocalUiUrl(
+        await requestJsonForSelectedActor('POST', '/api/traffic/balance'),
+        'traffic',
+      ),
       ledger: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/ledger', undefined, {
         ...(input.cursor ? { cursor: input.cursor } : {}),
         ...(input.limit ? { limit: input.limit } : {}),
@@ -4198,7 +4240,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       list: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const store = createMemoryStore(paths);
         const entries = await store.list({
           ...(input.scopeKind ? { scopeKind: input.scopeKind as never } : {}),
           ...(input.scopeKey ? { scopeKey: input.scopeKey } : {}),
@@ -4210,7 +4253,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           ...(input.includeDeleted ? { includeDeleted: true } : {}),
           ...(input.includeArchived ? { includeArchived: true } : {}),
         });
-        return commandSuccess({ entries });
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({ entries }),
+          'memory',
+          path.basename(paths.profileRoot),
+        );
       },
       add: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -4932,8 +4979,13 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       status: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const status = await dreamStatus(resolveMetabotPaths(actor.homeDir));
-        return commandSuccess(status as unknown as Record<string, unknown>);
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const status = await dreamStatus(paths);
+        return withStandalonePageLocalUiUrl(
+          commandSuccess(status as unknown as Record<string, unknown>),
+          'dream',
+          path.basename(paths.profileRoot),
+        );
       },
       plan: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -5044,7 +5096,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (result.kind === 'failed') {
           return commandFailed('dream_run_failed', result.error ?? 'dream run failed');
         }
-        return commandSuccess(result as unknown as Record<string, unknown>);
+        return withStandalonePageLocalUiUrl(
+          commandSuccess(result as unknown as Record<string, unknown>),
+          'dream',
+          slug,
+        );
       },
       summaries: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -5083,7 +5139,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       create: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const store = createScheduleStore(paths);
         try {
           const task = await store.createTask({
             name: input.name,
@@ -5094,7 +5151,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
             ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
           });
-          return commandSuccess({ task } as unknown as Record<string, unknown>);
+          return withStandalonePageLocalUiUrl(
+            commandSuccess({ task } as unknown as Record<string, unknown>),
+            'schedule',
+            path.basename(paths.profileRoot),
+          );
         } catch (error) {
           return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
         }
@@ -5102,9 +5163,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       list: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const store = createScheduleStore(paths);
         const tasks = await store.listTasks();
-        return commandSuccess({ tasks } as unknown as Record<string, unknown>);
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({ tasks } as unknown as Record<string, unknown>),
+          'schedule',
+          path.basename(paths.profileRoot),
+        );
       },
       show: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -5208,7 +5274,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (result.kind === 'failed') {
           return commandFailed('schedule_run_failed', result.error);
         }
-        return commandSuccess({ taskId: input.id, output: result.output } as unknown as Record<string, unknown>);
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({ taskId: input.id, output: result.output } as unknown as Record<string, unknown>),
+          'schedule',
+          slug,
+        );
       },
       runs: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -5592,9 +5662,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       list: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const service = createKnowledgeBaseService(resolveMetabotPaths(actor.homeDir));
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const service = createKnowledgeBaseService(paths);
         const knowledgeBases = await service.store.listKnowledgeBases();
-        return commandSuccess({ knowledgeBases });
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({ knowledgeBases }),
+          'kb',
+          path.basename(paths.profileRoot),
+        );
       },
       create: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -5643,9 +5718,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       query: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const service = createKnowledgeBaseService(resolveMetabotPaths(actor.homeDir));
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const service = createKnowledgeBaseService(paths);
         const results = await service.queryKnowledgeBase(
-          path.basename(resolveMetabotPaths(actor.homeDir).profileRoot),
+          path.basename(paths.profileRoot),
           input.text,
           {
             ...(input.id ? { knowledgeBaseId: input.id } : {}),
@@ -5653,7 +5729,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             ...(input.minScore != null ? { minScore: input.minScore } : {}),
           },
         );
-        return commandSuccess({ results });
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({ results }),
+          'kb',
+          path.basename(paths.profileRoot),
+        );
       },
       addDocument: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -5676,13 +5756,18 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       learn: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const service = createKnowledgeBaseService(resolveMetabotPaths(actor.homeDir));
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const service = createKnowledgeBaseService(paths);
         const knowledgeBase = await service.learnKnowledgeBase(
-          path.basename(resolveMetabotPaths(actor.homeDir).profileRoot),
+          path.basename(paths.profileRoot),
           input.id,
           input.full === true,
         );
-        return commandSuccess({ knowledgeBase });
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({ knowledgeBase }),
+          'kb',
+          path.basename(paths.profileRoot),
+        );
       },
       // Nightly study-job queue (DSH metaweb_study_* parity). Same store and
       // the same retry helper as the /api/kb/study/* daemon handlers, so the
@@ -5747,16 +5832,26 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           && !running
           && memoryEnabled
           && (!Number.isFinite(finishedMs) || Date.now() - finishedMs >= 20 * 60 * 60 * 1000);
-        return commandSuccess({
-          runs,
-          running,
-          surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
-          interactionBudget: settings.interactionBudget,
-          preDreamDue,
-          formatted: formatSurfRunList(runs),
-        });
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({
+            runs,
+            running,
+            surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
+            interactionBudget: settings.interactionBudget,
+            preDreamDue,
+            formatted: formatSurfRunList(runs),
+          }),
+          'surf',
+          path.basename(paths.profileRoot),
+        );
       },
       run: async (input) => {
+        // Resolve the actor up front (without failing the command) so every
+        // success variant can carry the additive /ui/surf localUiUrl deep link.
+        const actor = await resolveActorHomeDir(context, input.from);
+        const actorSlug = 'homeDir' in actor
+          ? path.basename(resolveMetabotPaths(actor.homeDir).profileRoot)
+          : undefined;
         // The run itself lives in the daemon process; the CLI only starts it.
         const start = await requestJsonForSelectedActor(
           'POST',
@@ -5772,10 +5867,13 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const startData = (start.data ?? {}) as { runId?: string };
         const runId = typeof startData.runId === 'string' ? startData.runId : null;
         if (!input.wait || !runId) {
-          return commandSuccess({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running' });
+          return withStandalonePageLocalUiUrl(
+            commandSuccess({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running' }),
+            'surf',
+            actorSlug,
+          );
         }
         // --wait: poll the shared run store file until the run settles.
-        const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
         const store = createMetawebSurfStore(resolveMetabotPaths(actor.homeDir));
         const deadline = Date.now() + 65 * 60_000;
@@ -5783,17 +5881,25 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           await new Promise((resolve) => setTimeout(resolve, 10_000));
           const run = await store.getRun(runId);
           if (run && run.status !== 'running') {
-            return commandSuccess({
-              runId,
-              trigger: run.trigger,
-              status: run.status,
-              stats: run.stats,
-              error: run.error,
-              reportMarkdown: run.reportMarkdown,
-            });
+            return withStandalonePageLocalUiUrl(
+              commandSuccess({
+                runId,
+                trigger: run.trigger,
+                status: run.status,
+                stats: run.stats,
+                error: run.error,
+                reportMarkdown: run.reportMarkdown,
+              }),
+              'surf',
+              actorSlug,
+            );
           }
           if (Date.now() > deadline) {
-            return commandSuccess({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running', note: 'wait timeout — the run continues in the daemon' });
+            return withStandalonePageLocalUiUrl(
+              commandSuccess({ runId, trigger: input.trigger ?? 'manual-ui', status: 'running', note: 'wait timeout — the run continues in the daemon' }),
+              'surf',
+              actorSlug,
+            );
           }
         }
       },

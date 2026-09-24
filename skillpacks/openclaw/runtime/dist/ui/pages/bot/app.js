@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildBotPageDefinition = buildBotPageDefinition;
+const i18n_1 = require("../../i18n");
 const personaPresets_1 = require("../../../core/bot/personaPresets");
 function inlineScriptJson(value) {
     return JSON.stringify(value)
@@ -8,13 +9,13 @@ function inlineScriptJson(value) {
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
 }
-function buildBotPageDefinition() {
+function buildBotPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'bot',
-        title: 'Bot Page — Open Agent Connect',
-        eyebrow: 'Provider Console',
-        heading: 'Bot Page',
-        description: 'Manage your Bot identity, public page, provider settings, and execution history.',
+        title: i18n.t('bot.pageTitle'),
+        eyebrow: i18n.t('bot.pageEyebrow'),
+        heading: i18n.t('bot.pageHeading'),
+        description: i18n.t('bot.pageDescription'),
         panels: [],
         script: buildBotPageScript(),
     };
@@ -383,7 +384,7 @@ function runtimeModalBodyMarkup(){
   var summaryFallback=rows.length===1?'{count} detected provider visible. Unavailable providers are hidden from this list.':'{count} detected providers visible. Unavailable providers are hidden from this list.';
   var body='<div class="runtime-modal-head">'+
     '<div><div class="runtime-modal-title">'+esc(uiText('bot.llmProviders','LLM Providers'))+'</div><div class="runtime-modal-summary" data-runtime-modal-status>'+esc(uiText(summaryKey,summaryFallback,{count:rows.length}))+'</div></div>'+
-    '<div class="runtime-modal-actions"><button class="btn btn-sm" data-act="refresh-runtime-modal"'+(refreshing?' disabled':'')+'>'+esc(refreshing?uiText('bot.refreshing','Refreshing...'):uiText('bot.refresh','Refresh'))+'</button><button class="icon-btn" data-act="close-runtime-modal" aria-label="Close">x</button></div>'+
+    '<div class="runtime-modal-actions"><button class="btn btn-sm" data-act="refresh-runtime-modal"'+(refreshing?' disabled':'')+'>'+esc(refreshing?uiText('bot.refreshing','Refreshing...'):uiText('bot.refresh','Refresh'))+'</button><button class="icon-btn" data-act="close-runtime-modal" aria-label="'+esc(uiText('bot.close','Close'))+'">x</button></div>'+
   '</div>';
   if(!rows.length){
     return body+'<div class="runtime-empty">'+esc(uiText('bot.noRuntimesFound','No healthy or detected LLM providers were found.'))+'</div>';
@@ -804,7 +805,7 @@ function chatAllowedSkillsMarkup(profile){
   var status=state.chatSkillOptionsStatusBySlug[slug]||'';
   var error=state.chatSkillOptionsErrorBySlug[slug]||'';
   var chips=selected.length?selected.map(function(skill){
-    return '<span class="skill-chip" data-chat-skill-chip="'+esc(skill)+'"><code>'+esc(skill)+'</code><button type="button" class="icon-btn" data-act="remove-chat-skill" data-skill="'+esc(skill)+'" aria-label="Remove '+esc(skill)+'">x</button></span>';
+    return '<span class="skill-chip" data-chat-skill-chip="'+esc(skill)+'"><code>'+esc(skill)+'</code><button type="button" class="icon-btn" data-act="remove-chat-skill" data-skill="'+esc(skill)+'" aria-label="'+esc(uiText('bot.removeSkillAria','Remove {skill}',{skill:skill}))+'">x</button></span>';
   }).join(''):'<div class="provider-empty">'+esc(uiText('bot.noChatSkillsAllowed','No chat skills allowed yet.'))+'</div>';
   var optionHtml='<option value="">'+esc(uiText('bot.selectSkill','Select a skill'))+'</option>'+options.map(function(skill){
     var label=skill.title&&skill.title!==skill.skillName?skill.title+' ('+skill.skillName+')':skill.skillName;
@@ -888,7 +889,7 @@ function toggleAutoReply(profile,nextEnabled){
       var toggle=queryWithin(panel,'[data-auto-reply-toggle]');
       var enabled=Boolean(state.autoReplyBySlug[slug]);
       if(toggle){toggle.classList.toggle('on',enabled);toggle.classList.toggle('loading',false);toggle.setAttribute('aria-checked',enabled?'true':'false');var labelEl=queryWithin(toggle,'.toggle-text');if(labelEl)labelEl.textContent=enabled?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off')}
-      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||'Failed to save.');status.className='save-status error'}
+      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||uiText('bot.saveFailed','Failed to save.'));status.className='save-status error'}
     }
   });
 }
@@ -934,7 +935,7 @@ function saveAutoReplyParams(profile,select,update){
     if(select)select.value=String(cached);
     if(state.selectedTab==='chatSkills'&&state.selectedSlug===slug){
       var panel=chatSkillsPanelForProfile(profile);
-      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||'Failed to save.');status.className='save-status error'}
+      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||uiText('bot.saveFailed','Failed to save.'));status.className='save-status error'}
     }
   });
 }
@@ -1022,7 +1023,7 @@ function renderMetabotList(){
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
       '<div class="metabot-item-info"><div class="metabot-item-name-row">'+defaultBotLabelMarkup(p)+noLlmLabelMarkup(p)+'<div class="metabot-item-name">'+esc(p.name||p.slug)+'</div></div>'+
       '<div class="metabot-item-id-row"><span class="metabot-item-id">'+esc(shortId(p.globalMetaId||p.slug))+'</span>'+
-      '<button class="icon-btn" data-act="copy-gmid" data-value="'+esc(p.globalMetaId||'')+'" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button></div></div></div>'
+      '<button class="icon-btn" data-act="copy-gmid" data-value="'+esc(p.globalMetaId||'')+'" title="'+esc(uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'))+'" aria-label="'+esc(uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'))+'">⧉</button></div></div></div>'
   }).join('');
   qq('.metabot-item').forEach(function(el){
     el.addEventListener('click',function(event){if(event.target&&event.target.closest('[data-act="copy-gmid"]'))return;selectMetabot(this.getAttribute('data-slug'))});
@@ -1043,10 +1044,10 @@ function renderBotHero(profile){
   var name=q('[data-hero-name]');if(name)name.textContent=profile.name||profile.slug||'Bot';
   var live=q('[data-live-indicator]');if(live){var online=uiText('bot.liveByDefault','Online');live.textContent='';live.setAttribute('aria-label',online);live.setAttribute('title',online)}
   var summary=q('[data-hero-summary]');if(summary){var bio=String(profile.bio||'').trim();summary.textContent=bio;summary.hidden=!bio}
-  var id=q('[data-hero-global-meta-id]');if(id)id.textContent=globalMetaId||'Pending GlobalMetaID';
+  var id=q('[data-hero-global-meta-id]');if(id)id.textContent=globalMetaId||uiText('bot.pendingGlobalMetaId','Pending GlobalMetaID');
   var uri=q('[data-hero-bot-uri]');if(uri)uri.textContent=botUri||'metaid://pending';
-  var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId);copyGlobal.setAttribute('aria-label','Copy GlobalMetaID');copyGlobal.setAttribute('title','Copy GlobalMetaID')}
-  var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri);copyUri.setAttribute('aria-label','Copy Homepage URI');copyUri.setAttribute('title','Copy Homepage URI')}
+  var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId);copyGlobal.setAttribute('aria-label',uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'));copyGlobal.setAttribute('title',uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'))}
+  var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri);copyUri.setAttribute('aria-label',uiText('bot.copyHomepageUri','Copy Homepage URI'));copyUri.setAttribute('title',uiText('bot.copyHomepageUri','Copy Homepage URI'))}
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!globalMetaId;
   var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!globalMetaId;
   var defaultControl=q('[data-default-bot-control]');if(defaultControl)defaultControl.hidden=state.profiles.length<2;
@@ -1096,7 +1097,20 @@ function selectMetabot(slug){
   renderMetabotList();
   renderDetailHeader(state.originalProfile);
   setDetailVisible(Boolean(state.originalProfile));
+  syncDeepLinks();
   renderCurrentTab();
+}
+
+// Knowledge/Scheduled deep links follow the selected Bot so the standalone
+// pages open scoped to the same Bot (the from query param they read).
+function syncDeepLinks(){
+  var profile=selectedProfile();
+  var slug=profile&&profile.slug?String(profile.slug):'';
+  qq('[data-tab-link]').forEach(function(el){
+    var target=el.getAttribute('data-tab-link');
+    var base=target==='kb'?'/ui/kb':'/ui/schedule';
+    el.setAttribute('href',slug?base+'?from='+encodeURIComponent(slug):base);
+  });
 }
 
 function renderCurrentTab(){
@@ -1120,21 +1134,21 @@ function renderInfoTab(options){
     '<div class="info-avatar-section">'+
     '<div class="info-avatar-preview" data-avatar-preview>'+avatarMarkup({name:nameValue,avatarDataUrl:avatar},true)+'</div>'+
     '<div class="info-avatar-actions">'+
-      '<button class="btn btn-sm" data-act="upload-avatar">Upload</button>'+
-      '<button class="btn btn-sm btn-danger" data-act="remove-avatar"'+(avatar?'':' hidden')+'>Remove</button>'+
+      '<button class="btn btn-sm" data-act="upload-avatar">'+esc(uiText('bot.upload','Upload'))+'</button>'+
+      '<button class="btn btn-sm btn-danger" data-act="remove-avatar"'+(avatar?'':' hidden')+'>'+esc(uiText('bot.removeAvatar','Remove'))+'</button>'+
       '<input type="file" data-avatar-input accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
       '<span class="save-status" data-avatar-status></span>'+
     '</div></div>'+
-    '<div class="info-id-row"><code>'+esc(profile.globalMetaId||'-')+'</code><button class="icon-btn" data-act="copy-profile-gmid" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button></div>'+
+    '<div class="info-id-row"><code>'+esc(profile.globalMetaId||'-')+'</code><button class="icon-btn" data-act="copy-profile-gmid" title="'+esc(uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'))+'" aria-label="'+esc(uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'))+'">⧉</button></div>'+
     '<div class="info-form-grid">'+
-      '<div class="field"><label for="bot-name">Name</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
-      providerPickerMarkup('primaryProvider','Primary Provider',primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
-      '<div class="field field-full"><label for="bot-role">Role</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-soul">Soul</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-goal">Goal</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
-      providerPickerMarkup('fallbackProvider','Fallback Provider',fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
+      '<div class="field"><label for="bot-name">'+esc(uiText('bot.name','Name'))+'</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
+      providerPickerMarkup('primaryProvider',uiText('bot.primaryProviderLabel','Primary Provider'),primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
+      '<div class="field field-full"><label for="bot-role">'+esc(uiText('bot.role','Role'))+'</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-soul">'+esc(uiText('bot.soul','Soul'))+'</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-goal">'+esc(uiText('bot.goal','Goal'))+'</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
+      providerPickerMarkup('fallbackProvider',uiText('bot.fallbackProviderLabel','Fallback Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-info">Save Changes</button><span class="save-status" data-save-status></span></div></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-info">'+esc(uiText('bot.saveChanges','Save Changes'))+'</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
   var upload=q('[data-act="upload-avatar"]');if(upload&&input)upload.addEventListener('click',function(){input.click()});
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
@@ -1503,7 +1517,7 @@ function openDynamicModal(title,body,options){
   var root=modalRoot();if(!root)return;
   state._modalClose=options.onClose||null;
   root.innerHTML='<div class="modal-box '+esc(options.boxClass||'')+'">'+
-    '<div class="modal-title-row"><div class="modal-title">'+esc(title)+'</div><button class="icon-btn" data-act="close-dynamic-modal" aria-label="Close">x</button></div>'+
+    '<div class="modal-title-row"><div class="modal-title">'+esc(title)+'</div><button class="icon-btn" data-act="close-dynamic-modal" aria-label="'+esc(uiText('bot.close','Close'))+'">x</button></div>'+
     body+
   '</div>';
   root.classList.remove('hidden');
@@ -1535,7 +1549,7 @@ function chainSuccessBodyMarkup(input){
     '<p class="modal-note">'+esc(input.message||uiText('bot.onChainOperationConfirmed','The on-chain operation has been confirmed.'))+'</p>'+
     '<div class="identity-result">'+
       '<div><span>'+esc(uiText('bot.globalMetaId','GlobalMetaID'))+'</span><code>'+esc(profile.globalMetaId||'-')+'</code></div>'+
-      '<button class="icon-btn" data-copy-value="'+esc(profile.globalMetaId||'')+'" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button>'+
+      '<button class="icon-btn" data-copy-value="'+esc(profile.globalMetaId||'')+'" title="'+esc(uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'))+'" aria-label="'+esc(uiText('bot.copyGlobalMetaId','Copy GlobalMetaID'))+'">⧉</button>'+
     '</div>'+
     '<div class="modal-section-title">'+esc(uiText('bot.transactionIds','Transaction IDs'))+'</div>'+
     chainWritesList(input.chainWrites||[])+
@@ -2056,7 +2070,7 @@ function switchTab(tab,silent){
 }
 
 function loadStats(){renderStats();return Promise.resolve()}
-function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();var defaultSlug=function(){var active=state.profiles.find(function(p){return p&&p.isActive===true});return(active&&active.slug)||(state.profiles[0]&&state.profiles[0].slug)||''};if(!state.selectedSlug&&state.profiles.length)setSelectedSlug(defaultSlug());if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))setSelectedSlug(defaultSlug());state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
+function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();var defaultSlug=function(){var active=state.profiles.find(function(p){return p&&p.isActive===true});return(active&&active.slug)||(state.profiles[0]&&state.profiles[0].slug)||''};if(!state.selectedSlug&&state.profiles.length)setSelectedSlug(defaultSlug());if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))setSelectedSlug(defaultSlug());state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));syncDeepLinks();renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];state.runtimeDiscoveryStatus=(r.data&&r.data.discoveryStatus)||null;state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];state.runtimeDiscoveryStatus=null;state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).then(maybeAutoDiscoverRuntimes)}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){

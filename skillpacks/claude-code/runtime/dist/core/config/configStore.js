@@ -91,6 +91,7 @@ function normalizeConfig(input) {
     const root = input;
     const maybeA2A = root['a2a'];
     const maybeAutoReply = root['autoReply'];
+    const maybeAutomation = root['automation'];
     const maybeBrowser = root['browser'];
     const maybeChain = root['chain'];
     const a2aSource = maybeA2A && typeof maybeA2A === 'object'
@@ -98,6 +99,9 @@ function normalizeConfig(input) {
         : {};
     const autoReplySource = maybeAutoReply && typeof maybeAutoReply === 'object'
         ? maybeAutoReply
+        : {};
+    const automationSource = maybeAutomation && typeof maybeAutomation === 'object'
+        ? maybeAutomation
         : {};
     const browserSource = maybeBrowser && typeof maybeBrowser === 'object'
         ? maybeBrowser
@@ -122,6 +126,10 @@ function normalizeConfig(input) {
             enabled: normalizeBoolean(autoReplySource.enabled, defaults.autoReply.enabled),
             maxTurns: normalizeNumberOption(autoReplySource.maxTurns, configTypes_1.AUTO_REPLY_MAX_TURNS_OPTIONS, defaults.autoReply.maxTurns),
             cooldownMs: normalizeNumberOption(autoReplySource.cooldownMs, configTypes_1.AUTO_REPLY_COOLDOWN_MS_OPTIONS, defaults.autoReply.cooldownMs),
+        },
+        automation: {
+            dreamTickEnabled: normalizeBoolean(automationSource.dreamTickEnabled, defaults.automation.dreamTickEnabled),
+            chainHistorySummaryEnabled: normalizeBoolean(automationSource.chainHistorySummaryEnabled, defaults.automation.chainHistorySummaryEnabled),
         },
         browser: {
             blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,

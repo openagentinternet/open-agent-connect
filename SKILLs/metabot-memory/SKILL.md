@@ -90,6 +90,17 @@ where `extract.json` carries `{ "userText": "...", "assistantText": "...", "sess
 Explicit `记住…` / `remember this…` requests should always become a `memory
 add` with `isExplicit: true`.
 
+## Surfacing the Memory Page
+
+`memory list` success envelopes carry an additive `localUiUrl` field when the
+CLI can resolve a local daemon base URL (it is omitted otherwise — a missing
+link never fails the command). It deep-links the standalone memory page for
+the resolved Bot, for example
+`http://127.0.0.1:10001/ui/memory?from=<bot-slug>`. When it is present,
+surface it to the user as a clickable link — opening it in the host's own
+browser or preview surface per the host-adapter note above — for example
+"Memory: <url>".
+
 ## Chain-History Recall
 
 `chainhistory recall` searches what the Bot itself published (writes) and

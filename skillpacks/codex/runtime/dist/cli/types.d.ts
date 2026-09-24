@@ -398,6 +398,25 @@ export interface CliDependencies {
             from?: string;
             payload: Record<string, unknown>;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Repeatable-workflow procedures (DSH procedure_recall/save/archive parity). */
+        procedureList?: (input: {
+            from?: string;
+            status?: 'active' | 'archived';
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        procedureRecall?: (input: {
+            from?: string;
+            query: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        procedureSave?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        procedureArchive?: (input: {
+            from?: string;
+            title: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     chainhistory?: {
         recordRead?: (input: {
@@ -530,6 +549,21 @@ export interface CliDependencies {
             from?: string;
             id?: string;
             full?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Nightly study-job queue (DSH metaweb_study_enqueue/status/retry parity;
+         *  the daemon nightly tick drains the queue). */
+        studyList?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        studyEnqueue?: (input: {
+            from?: string;
+            topic: string;
+            budgetPins?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        studyRetry?: (input: {
+            from?: string;
+            jobId?: string;
+            topic?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     schedule?: {

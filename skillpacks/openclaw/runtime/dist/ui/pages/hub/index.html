@@ -72,7 +72,7 @@
       <header class="topbar">
         <a class="topbar-logo" href="/ui/hub">MetaBot</a>
         <div class="topbar-sep"></div>
-        <span class="topbar-title">Service Hub</span>
+        <span class="topbar-title">__PAGE_EYEBROW__</span>
         <div class="topbar-spacer"></div>
         <nav class="topbar-nav">__PAGE_NAV__</nav>
       </header>
@@ -80,45 +80,45 @@
       <main class="content">
         <div class="stats-row">
           <div class="stat-card">
-            <div class="stat-label">Online Services</div>
+            <div class="stat-label" data-i18n-key="hub.statOnline">Online Services</div>
             <div class="stat-value green" data-online-count>—</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">Total Listed</div>
+            <div class="stat-label" data-i18n-key="hub.statTotal">Total Listed</div>
             <div class="stat-value" data-total-count>—</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">Top Service</div>
+            <div class="stat-label" data-i18n-key="hub.statTop">Top Service</div>
             <div class="stat-value sm" data-top-service>—</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">Directory Source</div>
+            <div class="stat-label" data-i18n-key="hub.statSource">Directory Source</div>
             <div class="stat-value sm" data-directory-mode>—</div>
           </div>
         </div>
 
         <div class="section-header">
-          <span class="section-title">LIVE SERVICES</span>
+          <span class="section-title" data-i18n-key="hub.sectionTitle">LIVE SERVICES</span>
           <span class="section-badge" data-online-badge>0 online</span>
           <span class="section-updated" data-directory-updated></span>
-          <button class="btn btn-sm" id="refresh-btn">↻ refresh</button>
+          <button class="btn btn-sm" id="refresh-btn" data-i18n-key="hub.refresh">↻ refresh</button>
         </div>
 
         <div class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Service</th>
-                <th>Provider</th>
-                <th>Price</th>
-                <th>Skill</th>
-                <th>Status</th>
-                <th>Last Seen</th>
-                <th>Action</th>
+                <th data-i18n-key="hub.colService">Service</th>
+                <th data-i18n-key="hub.colProvider">Provider</th>
+                <th data-i18n-key="hub.colPrice">Price</th>
+                <th data-i18n-key="hub.colSkill">Skill</th>
+                <th data-i18n-key="hub.colStatus">Status</th>
+                <th data-i18n-key="hub.colLastSeen">Last Seen</th>
+                <th data-i18n-key="hub.colAction">Action</th>
               </tr>
             </thead>
             <tbody data-service-list>
-              <tr><td colspan="7" class="table-empty"><strong>Loading…</strong>fetching online services</td></tr>
+              <tr><td colspan="7" class="table-empty"><strong data-i18n-key="hub.loadingTitle">Loading…</strong><span data-i18n-key="hub.loadingBody">fetching online services</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -129,11 +129,11 @@
     </div>
     <div class="svc-get-modal-backdrop" data-svc-get-modal-backdrop hidden>
       <div class="svc-get-modal" data-svc-get-modal>
-        <div class="svc-get-title">Please copy the following prompt into your agent chat window:</div>
+        <div class="svc-get-title" data-i18n-key="hub.modalTitle">Please copy the following prompt into your agent chat window:</div>
         <div class="svc-get-row">
           <textarea class="svc-get-prompt" data-svc-get-prompt readonly></textarea>
-          <button class="btn btn-sm" type="button" data-svc-copy-btn>Copy</button>
-          <button class="btn btn-sm" type="button" data-svc-close-btn>Close</button>
+          <button class="btn btn-sm" type="button" data-svc-copy-btn data-i18n-key="hub.copy">Copy</button>
+          <button class="btn btn-sm" type="button" data-svc-close-btn data-i18n-key="hub.close">Close</button>
         </div>
       </div>
     </div>

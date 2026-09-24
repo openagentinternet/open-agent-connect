@@ -62,6 +62,10 @@ Should not trigger when:
 | `memory transcript read` | read a mirrored session (any Bot with `--any-bot`) | `--session <id>`, `--limit`, `--any-bot` |
 | `memory knowledge list` | list knowledge points | `--kind know_how\|pitfall\|principle`, `--category`, `--status`, `--query`, `--limit` |
 | `memory knowledge upsert` | save/revise a knowledge point | `--payload-file { topic, summary, kind?, category?, tags?, sources? }` |
+| `memory procedure list` | list saved repeatable workflows | `--status active\|archived`, `--limit` |
+| `memory procedure recall` | score active procedures against a task description (top matches get use-tracked) | `--query` (required), `--limit` (default 3) |
+| `memory procedure save` | create/rewrite a procedure (same title bumps the version) | `--payload-file { title, steps[], pitfalls?, triggerText?, sourcePinIds?, category?, tags?, confidence?, origin? }` |
+| `memory procedure archive` | retire one procedure by exact title | `--title` |
 | `memory impressions list` / `show` | person impressions | `show` takes `--subject <globalMetaId>` |
 | `chainhistory recall` | the Bot's own on-chain writes/reads | `--query`, `--kind write\|read`, `--from-date`, `--to-date`, `--limit` |
 
@@ -90,6 +94,17 @@ $HOME/.metabot/bin/metabot memory extract --from <bot-slug> --payload-file extra
 where `extract.json` carries `{ "userText": "...", "assistantText": "...", "sessionId": "...", "channel": "<host-id>" }`.
 Explicit `记住…` / `remember this…` requests should always become a `memory
 add` with `isExplicit: true`.
+
+## Surfacing the Memory Page
+
+`memory list` success envelopes carry an additive `localUiUrl` field when the
+CLI can resolve a local daemon base URL (it is omitted otherwise — a missing
+link never fails the command). It deep-links the standalone memory page for
+the resolved Bot, for example
+`http://127.0.0.1:10001/ui/memory?from=<bot-slug>`. When it is present,
+surface it to the user as a clickable link — opening it in the host's own
+browser or preview surface per the host-adapter note above — for example
+"Memory: <url>".
 
 ## Chain-History Recall
 

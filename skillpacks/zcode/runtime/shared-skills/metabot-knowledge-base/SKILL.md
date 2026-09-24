@@ -55,6 +55,9 @@ Should not trigger when:
 | `knowledge-base query` | scored passage search (CJK bigram aware) | `--text`, `--id`, `--top-k` (default 8), `--min-score` (default 0.18) |
 | `knowledge-base add-document` | save one document (indexed immediately) | `--title`, exactly one of `--content` / `--content-file`, `--id`, `--source-type web\|metaweb\|manual`, `--url`, `--pin-id`, `--tags` |
 | `knowledge-base learn` | (re)index raw documents | `--id` (default KB), `--full` for a full rebuild |
+| `knowledge-base study enqueue` | queue a nightly MetaWeb study topic (dedupes while pending/running) | `--topic` (max 200 chars), `--budget-pins 1-50` (default 20) |
+| `knowledge-base study status` | the morning report: this Bot's jobs, runs, failures | — |
+| `knowledge-base study retry` | requeue failed jobs (3 consecutive nightly failures stop a job) | `--job-id` one job, `--topic` substring, or bare for all failed |
 
 Example — save a page the Bot just read on-chain:
 
@@ -70,6 +73,26 @@ Example — search across the default KB:
 $HOME/.metabot/bin/metabot knowledge-base query --from <bot-slug> --text "wallet recovery steps"
 ```
 
+Example — assign a long-horizon learning topic for the coming nights:
+
+```bash
+$HOME/.metabot/bin/metabot knowledge-base study enqueue --from <bot-slug> \
+  --topic "MetaID protocol deep dive" --budget-pins 10
+$HOME/.metabot/bin/metabot knowledge-base study status --from <bot-slug>
+```
+
+## Surfacing the Knowledge Page
+
+`knowledge-base list`, `knowledge-base query`, and `knowledge-base learn`
+success envelopes carry an additive `localUiUrl` field when the CLI can
+resolve a local daemon base URL (it is omitted otherwise — a missing link
+never fails the command). It deep-links the standalone knowledge-base page
+for the resolved Bot, for example
+`http://127.0.0.1:10001/ui/kb?from=<bot-slug>`. When it is present, surface it
+to the user as a clickable link — opening it in the host's own browser or
+preview surface per the host-adapter note above — for example "Knowledge
+base: <url>".
+
 ## Useful Behaviors
 
 - `add-document` refreshes the index on save — the document is searchable
@@ -77,6 +100,10 @@ $HOME/.metabot/bin/metabot knowledge-base query --from <bot-slug> --text "wallet
 - An empty `query` result means the KB genuinely lacks the material; do not
   lower `--min-score` to force hits, search MetaWeb instead and offer to save
   what you find.
+- `study enqueue` is for owner-assigned long-horizon learning, never for
+  questions the user wants answered now — the daemon drains the queue nightly
+  (00:00-06:00). A job that fails 3 nights in a row stops as `[failed]`;
+  `study retry` puts it back into the queue.
 - `remove` refuses without `--confirm` and deletes the raw documents — always
   echo what will be lost and get the user's confirmation first.
 

@@ -56,6 +56,8 @@ CLI help:
 {{METABOT_CLI}} memory --help
 {{METABOT_CLI}} dream --help
 {{METABOT_CLI}} knowledge-base --help
+{{METABOT_CLI}} schedule --help
+{{METABOT_CLI}} traffic --help
 {{METABOT_CLI}} qanda --help
 {{METABOT_CLI}} protocol --help
 {{METABOT_CLI}} surf --help
