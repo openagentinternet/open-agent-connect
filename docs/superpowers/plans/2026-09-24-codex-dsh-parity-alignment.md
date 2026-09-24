@@ -251,6 +251,17 @@ visible in `/ui/kb`. Record results in `docs/acceptance/`.
 
 ## 5. Constraints (repo rules this plan must honor)
 
+- **DSH-first (hard rule, supersedes every phase below):** this alignment is
+  additive-only. Every change must be a pure addition (new daemon routes, new
+  UI pages, new CLI verbs, new skill docs) that leaves the DSH plugin's
+  behavior, routes, tools, schedulers, and storage semantics byte-for-byte
+  untouched. If closing some Codex gap would require changing behavior the
+  DSH plugin depends on, or carries any risk of degrading the DSH user
+  experience, that item is descoped or deferred — DSH users must be
+  completely unaffected by this work. When a DSH-side change seems
+  unavoidable (e.g. plugin scheduler stand-down in Phase 3), it ships as an
+  opt-in/no-op-by-default path and is verified against the plugin before
+  merge.
 - CLI-first: every capability lands in `src/core/` + `metabot`/daemon first;
   UI and skills are thin exposures. No capability may become UI-only.
 - Storage v2 layout (`docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`);
