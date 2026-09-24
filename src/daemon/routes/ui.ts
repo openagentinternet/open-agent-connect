@@ -154,6 +154,19 @@ function buildPageDefinition(page: MetabotUiPageName, i18n: LocalUiI18nContext):
   return builder(i18n);
 }
 
+/**
+ * Tag `<title>` with the page's dictionary key so the shared client i18n
+ * script can re-apply `document.title` when the language is switched in the
+ * topbar (the server-rendered text already reflects the request locale).
+ */
+function applyPageTitleKey(html: string, titleKey: LocalUiPageDefinition['titleKey']): string {
+  if (!titleKey) return html;
+  return html.replace(
+    /<title>([\s\S]*?)<\/title>/,
+    (_match: string, title: string) => `<title data-i18n-title="${titleKey}">${title}</title>`,
+  );
+}
+
 async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: string | null): Promise<string> {
   const i18n = createI18nContext(languagePreference);
   const definition = buildPageDefinition(page, i18n);
@@ -173,7 +186,7 @@ async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: s
     .replace(/__PAGE_PANELS__/g, renderPanels(definition))
     .replace(/__PAGE_CONTENT__/g, content)
     .replace(/__PAGE_SCRIPT__/g, script);
-  return applyStaticI18n(injectTopbarChrome(html, i18n), i18n);
+  return applyStaticI18n(injectTopbarChrome(applyPageTitleKey(html, definition.titleKey), i18n), i18n);
 }
 
 function isBrowserPagePath(pathname: string): boolean {

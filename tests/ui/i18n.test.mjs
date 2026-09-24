@@ -246,6 +246,47 @@ test('language selector renders only concrete language options and selects the r
   assert.doesNotMatch(enAutoOptions, /value="auto"/);
 });
 
+test('client i18n script re-applies document.title from the data-i18n-title key', () => {
+  const listeners = new Map();
+  const values = new Map([['oac.localUi.languagePreference', 'zh-CN']]);
+  const titleElement = {
+    getAttribute: (name) => (name === 'data-i18n-title' ? 'kb.title' : null),
+  };
+  const documentElement = { lang: '' };
+  const document = {
+    title: 'Knowledge — Open Agent Connect',
+    documentElement,
+    addEventListener: (name, handler) => listeners.set(name, handler),
+    querySelectorAll: (selector) => ({ '[data-i18n-title]': [titleElement] })[selector] ?? [],
+  };
+  const context = {
+    CustomEvent,
+    URLSearchParams,
+    navigator: { languages: ['en-US'] },
+    localStorage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+    },
+    document,
+    window: {
+      location: { search: '' },
+      dispatchEvent() {},
+    },
+  };
+
+  vm.runInNewContext(renderClientI18nScript({
+    preference: 'en',
+    language: 'en',
+    t: (key) => DICTIONARIES.en[key] ?? key,
+  }), context);
+  assert.equal(document.title, '知识库 — Open Agent Connect', 'a stored zh-CN preference localizes the tab title on load');
+
+  const toggle = { closest: (selector) => (selector === '[data-language-toggle]' ? toggle : null) };
+  listeners.get('click')({ target: toggle, preventDefault() {} });
+  assert.equal(documentElement.lang, 'en');
+  assert.equal(document.title, 'Knowledge — Open Agent Connect', 'switching back to English relocalizes the tab title');
+});
+
 test('language icon toggles between English and Simplified Chinese and persists the choice', () => {
   const listeners = new Map();
   const values = new Map();

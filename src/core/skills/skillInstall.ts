@@ -98,9 +98,62 @@ export function normalizeSkillName(value: unknown): string {
   return name;
 }
 
+const BLOCK_SCALAR_INDICATOR_PATTERN = /^([|>])([-+]?)$/;
+
+function leadingIndent(line: string): number {
+  return /^[ \t]*/.exec(line)?.[0].length ?? 0;
+}
+
 /**
- * Minimal YAML frontmatter scan for the fields installation needs. Skill
- * frontmatter in practice is flat scalars; nested keys are ignored rather
+ * Test seam for `parseSkillFrontmatter`: read the literal (`|`) or folded (`>`)
+ * block scalar whose indicator sits on the line before `startIndex`, and unfold
+ * it with the optional `-`/`+` chomping indicator.
+ *
+ * The body is every following line that is blank or indented deeper than the
+ * key; the indentation to strip is that of the first non-empty body line.
+ * `lines` uses the frontmatter line convention, where the line break before the
+ * closing `---` is represented by a final empty entry: `-` drops the trailing
+ * break, the default keeps exactly one, and `+` keeps every trailing blank line.
+ */
+export function readBlockScalarValue(
+  lines: string[],
+  startIndex: number,
+  keyIndent: number,
+  style: string,
+  chomping: string,
+): { value: string; lastLineIndex: number } {
+  const rawBody: string[] = [];
+  let lastLineIndex = startIndex - 1;
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const rawLine = lines[index];
+    if (rawLine.trim() !== '' && leadingIndent(rawLine) <= keyIndent) break;
+    rawBody.push(rawLine);
+    lastLineIndex = index;
+  }
+
+  const firstContentLine = rawBody.find((rawLine) => rawLine.trim() !== '');
+  const bodyIndent = firstContentLine === undefined ? 0 : leadingIndent(firstContentLine);
+  const body = rawBody.map((rawLine) => (
+    rawLine.trim() === '' ? '' : rawLine.slice(Math.min(bodyIndent, leadingIndent(rawLine)))
+  ));
+
+  let trailingBlankCount = 0;
+  while (trailingBlankCount < body.length && body[body.length - 1 - trailingBlankCount] === '') {
+    trailingBlankCount += 1;
+  }
+  const contentLines = body.slice(0, body.length - trailingBlankCount);
+  const content = (style === '>' ? contentLines.join(' ') : contentLines.join('\n'));
+  if (!content) return { value: '', lastLineIndex };
+  if (chomping === '-') return { value: content, lastLineIndex };
+  if (chomping === '+') return { value: content + '\n'.repeat(trailingBlankCount), lastLineIndex };
+  return { value: `${content}\n`, lastLineIndex };
+}
+
+/**
+ * Minimal YAML frontmatter scan for the fields installation needs. Flat
+ * scalars are read directly; literal (`|`) and folded (`>`) block scalars are
+ * unfolded, and a value that is only a block indicator without a body counts
+ * as absent so the pin payload can supply it. Nested keys are ignored rather
  * than mis-parsed.
  */
 export function parseSkillFrontmatter(markdown: string): {
@@ -110,17 +163,30 @@ export function parseSkillFrontmatter(markdown: string): {
 } {
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(markdown);
   if (!match) return {};
+  // Keep the break before the closing `---` as a final empty line so the
+  // block-scalar chomping indicators count line breaks the way YAML does.
+  const lines = `${match[1]}\n`.split(/\r?\n/);
   const fields: Record<string, string> = {};
-  for (const rawLine of match[1].split(/\r?\n/)) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
     const separator = line.indexOf(':');
     if (separator <= 0) continue;
     const key = line.slice(0, separator).trim();
-    let value = line.slice(separator + 1).trim();
     if (!/^[A-Za-z0-9_-]+$/.test(key)) continue;
-    if (/^["'](.*)["']$/.test(value) && value.length >= 2) {
-      value = value.slice(1, -1);
+    const rawValue = line.slice(separator + 1).trim();
+    const indicator = BLOCK_SCALAR_INDICATOR_PATTERN.exec(rawValue);
+    let value: string;
+    if (indicator) {
+      const block = readBlockScalarValue(lines, index + 1, leadingIndent(rawLine), indicator[1], indicator[2]);
+      index = block.lastLineIndex;
+      value = block.value;
+    } else {
+      value = rawValue;
+      if (/^["'](.*)["']$/.test(value) && value.length >= 2) {
+        value = value.slice(1, -1);
+      }
     }
     if (value && !fields[key]) fields[key] = value;
   }

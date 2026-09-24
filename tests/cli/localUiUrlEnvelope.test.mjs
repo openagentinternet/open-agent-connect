@@ -128,6 +128,7 @@ for (const [label, page, run] of [
   ['schedule list', '/ui/schedule', (deps) => deps.schedule.list({ from: SLUG })],
   ['knowledge-base list', '/ui/kb', (deps) => deps.knowledgeBase.list({ from: SLUG })],
   ['knowledge-base query', '/ui/kb', (deps) => deps.knowledgeBase.query({ from: SLUG, text: 'hello' })],
+  ['knowledge-base study status', '/ui/kb', (deps) => deps.knowledgeBase.studyList({ from: SLUG })],
 ]) {
   test(`${label}: success envelope carries the additive /ui page localUiUrl with the resolved slug`, async () => {
     const { profileRoot, base } = await createTempProfileHome();

@@ -51,6 +51,7 @@ test('GET /ui/schedule serves the Schedule page with console chrome and the sche
   assert.match(html, /data-language-toggle/);
   assert.match(html, /data-settings-modal/);
   assert.match(html, /href="\/ui\/schedule"[^>]*class="active"|class="active"[^>]*href="\/ui\/schedule"/);
+  assert.match(html, /<title data-i18n-title="schedule\.title">Schedule — Open Agent Connect<\/title>/);
 });
 
 test('GET /ui/traffic serves the Traffic page with console chrome and the traffic API surface', async (t) => {
@@ -77,6 +78,7 @@ test('GET /ui/traffic serves the Traffic page with console chrome and the traffi
   assert.match(html, /data-traffic-ledger-table/);
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);
+  assert.match(html, /<title data-i18n-title="traffic\.title">Traffic — Open Agent Connect<\/title>/);
 });
 
 test('GET /ui/schedule localizes to Simplified Chinese with lang=zh-CN', async (t) => {
