@@ -9,6 +9,7 @@ import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 const require = createRequire(import.meta.url);
 const {
   parseSkillFrontmatter,
+  readBlockScalarValue,
   normalizeSkillName,
   extractSkillPinDescriptor,
   downloadSkillArchive,
@@ -57,6 +58,57 @@ test('parseSkillFrontmatter reads flat scalar fields', () => {
   );
   assert.deepEqual(parseSkillFrontmatter('# no frontmatter\n'), {});
   assert.deepEqual(parseSkillFrontmatter('---\nname: x\n'), {});
+});
+
+test('parseSkillFrontmatter unfolds literal and folded block scalars', () => {
+  // Literal `|` keeps the line breaks.
+  assert.deepEqual(
+    parseSkillFrontmatter('---\nname: metabot-block\nversion: 1.0.0\ndescription: |\n  First line of the real description.\n  Second line.\n---\n\n# body\n'),
+    { name: 'metabot-block', version: '1.0.0', description: 'First line of the real description.\nSecond line.' },
+  );
+  // Folded `>` joins the body lines with spaces.
+  assert.deepEqual(
+    parseSkillFrontmatter('---\nname: metabot-folded\ndescription: >\n  First line.\n  Second line.\n---\n'),
+    { name: 'metabot-folded', description: 'First line. Second line.' },
+  );
+  // Extra indentation inside the block survives the indentation strip.
+  assert.equal(
+    parseSkillFrontmatter('---\ndescription: |\n  Intro line.\n\n    Indented code line.\n---\n').description,
+    'Intro line.\n\n  Indented code line.',
+  );
+  // Every chomping indicator unfolds to the body text.
+  for (const indicator of ['|', '|-', '|+', '>', '>-', '>+']) {
+    assert.equal(
+      parseSkillFrontmatter(`---\nname: metabot-chomp\ndescription: ${indicator}\n  Kept body.\n---\n`).description,
+      'Kept body.',
+      `${indicator} should unfold the block scalar to its body text`,
+    );
+  }
+});
+
+test('readBlockScalarValue applies the `-`/`+` chomping indicators to trailing blank lines', () => {
+  // Two blank lines trail the body, plus the break before the closing `---`.
+  const lines = ['description: |+', '  body', '', ''];
+  assert.equal(readBlockScalarValue(lines, 1, 0, '|', '').value, 'body\n');
+  assert.equal(readBlockScalarValue(lines, 1, 0, '|', '-').value, 'body');
+  assert.equal(readBlockScalarValue(lines, 1, 0, '|', '+').value, 'body\n\n');
+
+  // Folded style joins the same body, and the body ends at the first line
+  // that is not indented deeper than the key.
+  const folded = ['description: >', '  one', '  two', 'version: 1.0.0'];
+  assert.deepEqual(readBlockScalarValue(folded, 1, 0, '>', ''), { value: 'one two\n', lastLineIndex: 2 });
+});
+
+test('parseSkillFrontmatter treats a block indicator without a body as absent', () => {
+  assert.deepEqual(
+    parseSkillFrontmatter('---\nname: metabot-empty\ndescription: |\n---\n'),
+    { name: 'metabot-empty' },
+  );
+  // A shallower key ends the body, so the indicator still has no body.
+  assert.deepEqual(
+    parseSkillFrontmatter('---\nname: metabot-empty\ndescription: |-\nversion: 1.0.0\n---\n'),
+    { name: 'metabot-empty', version: '1.0.0' },
+  );
 });
 
 test('normalizeSkillName accepts directory-safe names only', () => {
@@ -164,6 +216,40 @@ test('installSkillArchive installs a root-SKILL.md package with provenance', asy
   assert.equal(registry.skills['metabot-demo'].enabled, true);
   // Staging leftovers never survive an install.
   assert.equal((await fs.readdir(skillsRoot)).filter((name) => name.startsWith('.skill-install-')).length, 0);
+});
+
+test('installSkillArchive stores the unfolded block-scalar description (D1 acceptance shape)', async () => {
+  const root = mkdtempTempRootSync('skill-block-scalar-');
+  const skillsRoot = path.join(root, '.metabot', 'skills');
+  const archive = await makeSkillZip(path.join(root, 'pkg'), {
+    'SKILL.md': '---\nname: humanizer\nversion: 3.0.0\ndescription: |\n  First line of the real description.\n  Second line.\n---\n\n# humanizer\n',
+  });
+
+  const installed = await installSkillArchive({
+    skillsRoot,
+    archive,
+    source: { creatorMetaId: 'IDQ1', payloadDescription: 'Description from the pin payload.' },
+  });
+
+  assert.equal(installed.description, 'First line of the real description.\nSecond line.');
+  const registry = await readInstalledSkillsRegistry(skillsRoot);
+  assert.equal(registry.skills.humanizer.description, 'First line of the real description.\nSecond line.');
+});
+
+test('installSkillArchive falls back to the pin payload description when the frontmatter body is empty', async () => {
+  const root = mkdtempTempRootSync('skill-block-scalar-fallback-');
+  const skillsRoot = path.join(root, '.metabot', 'skills');
+  const archive = await makeSkillZip(path.join(root, 'pkg'), {
+    'SKILL.md': '---\nname: indicator-only\nversion: 1.0.0\ndescription: |\n---\n\n# indicator-only\n',
+  });
+
+  const installed = await installSkillArchive({
+    skillsRoot,
+    archive,
+    source: { creatorMetaId: 'IDQ1', payloadDescription: 'Description from the pin payload.' },
+  });
+
+  assert.equal(installed.description, 'Description from the pin payload.');
 });
 
 test('installSkillArchive unwraps a single wrapping directory', async () => {

@@ -78,10 +78,10 @@ Example — assign a long-horizon learning topic for the coming nights:
 
 ## Surfacing the Knowledge Page
 
-`knowledge-base list`, `knowledge-base query`, and `knowledge-base learn`
-success envelopes carry an additive `localUiUrl` field when the CLI can
-resolve a local daemon base URL (it is omitted otherwise — a missing link
-never fails the command). It deep-links the standalone knowledge-base page
+`knowledge-base list`, `knowledge-base query`, `knowledge-base learn`, and
+`knowledge-base study status` success envelopes carry an additive `localUiUrl`
+field when the CLI can resolve a local daemon base URL (it is omitted otherwise
+— a missing link never fails the command). It deep-links the standalone knowledge-base page
 for the resolved Bot, for example
 `http://127.0.0.1:10001/ui/kb?from=<bot-slug>`. When it is present, surface it
 to the user as a clickable link — opening it in the host's own browser or

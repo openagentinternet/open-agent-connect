@@ -6,6 +6,7 @@ export function buildMemoryPageDefinition(i18n: LocalUiI18nContext = createI18nC
   return {
     page: 'memory',
     title: i18n.t('memory.title'),
+    titleKey: 'memory.title',
     eyebrow: i18n.t('memory.eyebrow'),
     heading: i18n.t('memory.heading'),
     description: i18n.t('memory.description'),

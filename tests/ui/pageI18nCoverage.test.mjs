@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { DICTIONARIES } = require('../../dist/ui/i18n.js');
+const { DICTIONARIES, createI18nContext } = require('../../dist/ui/i18n.js');
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const EN = DICTIONARIES.en;
@@ -33,6 +33,17 @@ const HTML_TEMPLATES = [
   'src/ui/pages/hub/index.html',
   'src/ui/pages/publish/index.html',
   'src/ui/pages/refund/index.html',
+];
+
+// The console pages whose <title> carries a dictionary key: the renderer tags
+// `<title>` with `data-i18n-title="<key>"` and the shared client i18n script
+// re-applies document.title on a live language switch.
+const TITLE_KEY_PAGES = [
+  ['kb', 'buildKbPageDefinition', 'kb.title'],
+  ['surf', 'buildSurfPageDefinition', 'surf.title'],
+  ['memory', 'buildMemoryPageDefinition', 'memory.title'],
+  ['schedule', 'buildSchedulePageDefinition', 'schedule.title'],
+  ['traffic', 'buildTrafficPageDefinition', 'traffic.title'],
 ];
 
 // Non-copy literals that legitimately never enter the dictionary: brand and
@@ -97,6 +108,32 @@ test('i18n-debt pages keep every server-side i18n key and data-i18n-key in the d
       assert.ok(match[1] in EN, `${relative}: data-i18n-key ${match[1]} missing from the en dictionary`);
       assert.ok(match[1] in DICTIONARIES['zh-CN'], `${relative}: data-i18n-key ${match[1]} missing from the zh-CN dictionary`);
     }
+  }
+});
+
+test('console pages expose the dictionary key behind their <title> in both languages', () => {
+  for (const [page, builderName, key] of TITLE_KEY_PAGES) {
+    const { [builderName]: build } = require(`../../dist/ui/pages/${page}/app.js`);
+    const en = createI18nContext('en');
+    const definition = build(en);
+
+    assert.equal(definition.titleKey, key, `${page} should expose its title dictionary key`);
+    assert.equal(definition.title, en.t(key), `${page} title should come from its dictionary key`);
+    assert.ok(key in EN, `${key} should exist in the en dictionary`);
+    assert.ok(key in DICTIONARIES['zh-CN'], `${key} should exist in the zh-CN dictionary`);
+    assert.notEqual(
+      createI18nContext('zh-CN').t(key),
+      en.t(key),
+      `${key} should be really localized, not a copy of the English title`,
+    );
+
+    // The key lives on the page definition, not in a per-page title script.
+    const source = readFileSync(join(REPO_ROOT, `src/ui/pages/${page}/app.ts`), 'utf8');
+    assert.match(
+      source,
+      new RegExp(`titleKey: '${key.replace(/[.]/g, '\\.')}'`),
+      `${page}/app.ts should reserve ${key} for its title`,
+    );
   }
 });
 

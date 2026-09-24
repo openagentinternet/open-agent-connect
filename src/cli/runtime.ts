@@ -5778,7 +5778,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const paths = resolveMetabotPaths(actor.homeDir);
         const store = createStudyJobStore(paths);
         const jobs = await store.listStudyJobs(path.basename(paths.profileRoot));
-        return commandSuccess({ jobs });
+        return withStandalonePageLocalUiUrl(
+          commandSuccess({ jobs }),
+          'kb',
+          path.basename(paths.profileRoot),
+        );
       },
       studyEnqueue: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);

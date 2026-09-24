@@ -80,6 +80,22 @@ test('previewSkillProject derives metadata from frontmatter and reports real arc
   assert.deepEqual(plan.warnings, []);
 });
 
+test('previewSkillProject unfolds a block-scalar frontmatter description (D1 publish path)', async () => {
+  const root = mkdtempTempRootSync();
+  const dir = path.join(root, 'block-scalar-skill');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, 'SKILL.md'),
+    '---\nname: block-scalar-skill\nversion: 1.0.0\ndescription: |\n  First line of the real description.\n  Second line.\n---\n\n# block-scalar-skill\n',
+    'utf8',
+  );
+
+  const plan = await previewSkillProject({ skillDir: dir });
+
+  assert.equal(plan.description, 'First line of the real description.\nSecond line.');
+  assert.equal(plan.payload.description, 'First line of the real description.\nSecond line.');
+});
+
 test('flag overrides beat frontmatter and must still validate', async () => {
   const root = mkdtempTempRootSync();
   const dir = await makeSkillDir(root, 'demo-skill');

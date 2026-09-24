@@ -43,6 +43,8 @@ test('GET /ui/kb serves the Knowledge page with console chrome', async (t) => {
   assert.match(html, /data-language-toggle/);
   assert.match(html, /data-settings-modal/);
   assert.match(html, /href="\/ui\/kb"[^>]*class="active"|class="active"[^>]*href="\/ui\/kb"/);
+  // The client i18n script re-applies the tab title from this key.
+  assert.match(html, /<title data-i18n-title="kb\.title">Knowledge — Open Agent Connect<\/title>/);
 });
 
 test('GET /ui/surf serves the Surf page with console chrome', async (t) => {
@@ -61,6 +63,7 @@ test('GET /ui/surf serves the Surf page with console chrome', async (t) => {
   assert.match(html, /data-surf-reports-table/);
   assert.match(html, /data-language-toggle/);
   assert.match(html, /href="\/ui\/surf"[^>]*class="active"|class="active"[^>]*href="\/ui\/surf"/);
+  assert.match(html, /<title data-i18n-title="surf\.title">Surf — Open Agent Connect<\/title>/);
 });
 
 test('GET /ui/kb and /ui/surf localize to Simplified Chinese with lang=zh-CN', async (t) => {
@@ -71,6 +74,7 @@ test('GET /ui/kb and /ui/surf localize to Simplified Chinese with lang=zh-CN', a
   const kbHtml = await kbResponse.text();
   assert.equal(kbResponse.status, 200);
   assert.match(kbHtml, /知识库 — Open Agent Connect/);
+  assert.match(kbHtml, /<title data-i18n-title="kb\.title">知识库 — Open Agent Connect<\/title>/);
   assert.match(kbHtml, /创建知识库/);
   assert.match(kbHtml, /加入学习任务/);
 
@@ -78,6 +82,7 @@ test('GET /ui/kb and /ui/surf localize to Simplified Chinese with lang=zh-CN', a
   const surfHtml = await surfResponse.text();
   assert.equal(surfResponse.status, 200);
   assert.match(surfHtml, /冲浪 — Open Agent Connect/);
+  assert.match(surfHtml, /<title data-i18n-title="surf\.title">冲浪 — Open Agent Connect<\/title>/);
   assert.match(surfHtml, /立即冲浪/);
 });
 

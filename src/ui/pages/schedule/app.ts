@@ -6,6 +6,7 @@ export function buildSchedulePageDefinition(i18n: LocalUiI18nContext = createI18
   return {
     page: 'schedule',
     title: i18n.t('schedule.title'),
+    titleKey: 'schedule.title',
     eyebrow: i18n.t('schedule.eyebrow'),
     heading: i18n.t('schedule.heading'),
     description: i18n.t('schedule.description'),

@@ -6,6 +6,7 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
   return {
     page: 'surf',
     title: i18n.t('surf.title'),
+    titleKey: 'surf.title',
     eyebrow: i18n.t('surf.eyebrow'),
     heading: i18n.t('surf.heading'),
     description: i18n.t('surf.description'),
