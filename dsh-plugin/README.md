@@ -9,12 +9,12 @@ dsh plugin --profile web add open-agent-connect-dsh
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
 Host kernel requirement: this plugin is built and verified against the DSH
-**0.1.7-alpha.2** client surface (npm `alpha` dist-tag; `next` still points
-at 0.1.5-rc.2) and runs on the **0.1.5**, **0.1.6**, and **0.1.7** kernel
-lines — most peer ranges are `^0.1.5-alpha.1 || ^0.1.6-alpha.1 ||
-^0.1.7-alpha.1`, with the wider `^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept
-on the packages the preset/persona surface still shares. The 0.1.7
-adaptations worth knowing about:
+**0.1.7-rc.1** client surface (npm `next` dist-tag) and runs on the
+**0.1.5**, **0.1.6**, and **0.1.7** kernel lines — most peer ranges are
+`^0.1.5-alpha.1 || ^0.1.6-alpha.1 || ^0.1.7-alpha.1`, with the wider
+`^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
+preset/persona surface still shares. The 0.1.7 adaptations worth knowing
+about:
 
 - Directory presets (`~/.dsh/.agent-presets`, `agentPresets.copy/read/remove`)
   are gone: presets are declarative in-memory `PresetDefinition`s registered
@@ -55,6 +55,18 @@ adaptations worth knowing about:
   only as a cold fallback for contexts without the cordis event surface.
 - The preset roster row drops the `trust` tier; built-in preset display copy
   is resolved by id through the DSH-owned `settings.agentPreset` dictionary.
+- 0.1.7-rc.1 adds a plugin compatibility gate: at install time and at every
+  profile (re)composition the kernel checks each plugin's
+  `@deepseek-ai/dsh*` peer ranges against the running runtime version
+  (prereleases included) and disables an unsatisfied row with an stderr
+  diagnostic instead of letting it crash the profile. This plugin's peer
+  ranges already cover 0.1.7-rc.1, so install and boot stay silent — keep
+  every range anchored on a prerelease lower bound (`^0.1.7-alpha.1`, never
+  a bare `^0.1.7`, which excludes rc builds). If a future kernel outgrows
+  the ranges, `dsh plugin --profile web allow-version
+  open-agent-connect-dsh@<version> --dsh-version <exact-runtime>
+  --accept-risk` grants an exact plugin-version × runtime-version exemption,
+  recorded in the profile's `compatibility.json`.
 
 The 0.1.6 adaptations worth knowing about:
 
@@ -81,9 +93,10 @@ The 0.1.6 adaptations worth knowing about:
   page state from the daemon.
 
 Session format v3, the `ctx.agent` removal, and the Inbox API change all
-miss this plugin: sessions are read only through the in-process
-`snapshotEvents()`, and the assistant/turn event matching skips unknown
-event kinds, so additive 0.1.6 event types are tolerated. The native-panels
+miss this plugin: sessions are read only through the in-process session
+surface (the live `session/event` stream since the 0.1.7 migration,
+`snapshotEvents()` before it), and the assistant/turn event matching skips
+unknown event kinds, so additive 0.1.6 event types are tolerated. The native-panels
 UI — the `sidebar.panellist`/`main` panel API and the right-Sidebar
 tab-type API (`layout`, `sidebarRight`, `sidebarRightTabs` services) —
 exists only on the 0.1.5+ kernel lines, so the web client loads there
