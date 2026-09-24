@@ -11,6 +11,8 @@ const SUPPORTED_UI_PAGES = new Set([
   'kb',
   'surf',
   'memory',
+  'schedule',
+  'traffic',
   'dream',
   'settings',
   'buzz',

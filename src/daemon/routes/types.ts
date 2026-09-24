@@ -20,6 +20,8 @@ export type MetabotUiPageName =
   | 'kb'
   | 'surf'
   | 'memory'
+  | 'schedule'
+  | 'traffic'
   | 'dream'
   | 'metaapps'
   | 'browser';

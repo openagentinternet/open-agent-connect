@@ -12,6 +12,8 @@ import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import { buildKbPageDefinition } from '../../ui/pages/kb/app';
 import { buildSurfPageDefinition } from '../../ui/pages/surf/app';
 import { buildMemoryPageDefinition } from '../../ui/pages/memory/app';
+import { buildSchedulePageDefinition } from '../../ui/pages/schedule/app';
+import { buildTrafficPageDefinition } from '../../ui/pages/traffic/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
@@ -58,6 +60,8 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'kb': buildKbPageDefinition,
   'surf': buildSurfPageDefinition,
   'memory': buildMemoryPageDefinition,
+  'schedule': buildSchedulePageDefinition,
+  'traffic': buildTrafficPageDefinition,
   'settings': buildSettingsPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
@@ -70,6 +74,7 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'kb', labelKey: 'nav.knowledge' },
   { page: 'surf', labelKey: 'nav.surf' },
   { page: 'memory', labelKey: 'nav.memory' },
+  { page: 'schedule', labelKey: 'nav.schedule' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();

@@ -48,6 +48,13 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
           </article>
           <article class="settings-panel">
             <div>
+              <h2 data-i18n-key="settings.traffic.title">${i18n.t('settings.traffic.title')}</h2>
+              <p data-i18n-key="settings.traffic.body">${i18n.t('settings.traffic.body')}</p>
+            </div>
+            <a class="btn btn-sm" href="/ui/traffic" data-i18n-key="action.openTrafficPage">${i18n.t('action.openTrafficPage')}</a>
+          </article>
+          <article class="settings-panel">
+            <div>
               <h2 data-i18n-key="settings.llm.title">${i18n.t('settings.llm.title')}</h2>
               <p data-i18n-key="settings.llm.body">${i18n.t('settings.llm.body')}</p>
             </div>
