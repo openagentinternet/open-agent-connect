@@ -219,6 +219,54 @@ New pages under `src/ui/pages/`, following the existing page-def pattern
   `pnpm run test:fast`; integration tier if daemon-timing tests are added
   (register in `scripts/run-test-suite.mjs` `INTEGRATION_FILES` if slow).
 
+**Phase 3 implementation notes (2026-09-24):**
+
+- Daemon home: `src/daemon/automationTicks.ts` (`runDreamAutomationTick`,
+  `runChainHistorySummaryTick`, `startAutomationTickLoop`), registered in
+  `serveCliDaemonProcess` next to the schedule/study ticks: dream tick =
+  10-min interval + 15s boot pass; chain-history drain = 30-min interval +
+  20s boot pass. Both loops are serial per process, unref'd, and stopped in
+  the daemon shutdown path.
+- The dream tick drives the existing Phase 1 daemon handler groups
+  (`handlers.dream` due/run, `handlers.surf` status/run with
+  `trigger: 'pre-dream'`, `handlers.memory` hygieneDue/hygieneRun) — the same
+  code paths as the HTTP routes, so Chain B→C LLM wiring (host-executor lease
+  first, local runtime fallback) is shared, not rebuilt.
+- Stand-down: `isDshHostExecutorConnected()`
+  (`getActiveHostLlmExecutorBridge()?.connectedExecutors() > 0`) — while any
+  DSH host-executor lease is live, both ticks return without touching a
+  single store. Layers 2/3 (running-skip + idempotent commit) come free from
+  the core due algorithm and dream commit.
+- Config: per-profile `automation.dreamTickEnabled` /
+  `automation.chainHistorySummaryEnabled` in `.runtime/config.json`
+  (storage v2), both default **enabled**; managed via
+  `metabot config get/set automation.<key> [--from <bot>]`. Off = that Bot is
+  fully inert for the tick (dream + surf gate + hygiene tail / drain).
+- Extract judge fallback (item 2) lives in the CLI `memory extract` handler
+  (`src/cli/runtime.ts`): host-executor `/api/llm/host-executor/generate`
+  first, then `runLlmPromptWithRuntimeFallback` on the actor's local runtime
+  chain. The handler runs CLI-side (DSH per-turn hooks call it through the
+  pinned CLI); daemon-triggered extraction (`recordPrivateChatMemoryTurn` in
+  the A2A auto-reply path) never wires a judge by design, so there is nothing
+  to fall back there.
+- Chain-history drain deltas vs the plugin version (accepted, DSH-first):
+  (1) no `dshLlmProvider/Model` requirement — the unified passive chain
+  covers Codex-only installs (DSH-paired Bots are already served first
+  through the bridge when it is connected, which is exactly when the daemon
+  tick stands down); (2) unavailable (toggle-off) Bots are skipped, matching
+  every other daemon tick (the plugin drain predates that rule); (3) the
+  plugin's global `enabled` option becomes the per-profile
+  `automation.chainHistorySummaryEnabled` config key; (4) the 512-token
+  output cap is not enforceable through the daemon executor chain — the
+  prompt asks for 2–4 sentences and the stored summary is sliced to 500
+  chars, same as the plugin. Cadence (30 min + boot pass), per-tick budget
+  (10, global), per-Bot daily cap (40, done-only counts), writes-first-then-
+  reads ordering, and blank-content/apply-failure bookkeeping are ported
+  verbatim.
+- Known accepted edge (from the design above): a Bot without a configured
+  DSH LLM pair is skipped by the plugin scheduler and, while DSH is open, by
+  the standing-down daemon tick — it dreams only when DSH is closed.
+
 ### Phase 4 — CLI verb gaps (G4a, G4b)
 
 - `metabot memory procedure list/recall/save/archive` over

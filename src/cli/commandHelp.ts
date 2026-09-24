@@ -760,6 +760,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot config get --from alice chain.defaultWriteNetwork',
       'metabot config get --from alice a2a.simplemsgListenerEnabled',
+      'metabot config get --from alice automation.dreamTickEnabled',
     ],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
@@ -779,6 +780,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot config set --from alice chain.defaultWriteNetwork opcat',
       'metabot config set --from alice a2a.simplemsgListenerEnabled false',
+      'metabot config set --from alice automation.chainHistorySummaryEnabled false',
     ],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },

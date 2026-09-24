@@ -192,6 +192,17 @@ import {
 import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain, llmDiscoverySweepRunningForHomeDir, type A2ACallerReplyResumeReport } from '../daemon/defaultHandlers';
+import {
+  buildChainHistorySummaryPrompt,
+  isDshHostExecutorConnected,
+  reportChainHistorySummaryTickOutcomes,
+  reportDreamTickOutcomes,
+  runChainHistorySummaryTick,
+  runDreamAutomationTick,
+  startAutomationTickLoop,
+  CHAIN_HISTORY_SUMMARY_LLM_TIMEOUT_MS,
+  type AutomationCommandResult,
+} from '../daemon/automationTicks';
 import { createGroupTaskServiceContext } from '../daemon/grouptaskHandlers';
 import { createGroupTaskEngine } from '../core/grouptask/engine';
 import {
@@ -310,6 +321,19 @@ const CHAIN_NET = 'livenet';
 const DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 /** Scheduled-task daemon tick cadence (IDBots scheduler parity). */
 const SCHEDULE_TICK_INTERVAL_MS = 30_000;
+/**
+ * Dream automation tick cadence (DSH plugin dream-scheduler parity):
+ * 10-minute interval plus one boot pass shortly after daemon start; the
+ * due-date algorithm owns catch-up, the tick stays dumb.
+ */
+const DREAM_AUTOMATION_TICK_INTERVAL_MS = 10 * 60_000;
+const DREAM_AUTOMATION_TICK_BOOT_DELAY_MS = 15_000;
+/**
+ * Chain-history summary drain cadence (DSH plugin chain-history-summary
+ * parity): 30-minute interval plus one boot pass.
+ */
+const CHAIN_HISTORY_SUMMARY_TICK_INTERVAL_MS = 30 * 60_000;
+const CHAIN_HISTORY_SUMMARY_TICK_BOOT_DELAY_MS = 20_000;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
 type A2ASimplemsgInboundDispatcherMessage = Pick<
@@ -487,7 +511,11 @@ export function getDefaultDaemonPort(_systemHomeDir?: string): number {
   return DEFAULT_DAEMON_PORT;
 }
 
-type SupportedBooleanConfigKey = 'a2a.simplemsgListenerEnabled' | 'chain.mvcSponsorUploadEnabled';
+type SupportedBooleanConfigKey =
+  | 'a2a.simplemsgListenerEnabled'
+  | 'chain.mvcSponsorUploadEnabled'
+  | 'automation.dreamTickEnabled'
+  | 'automation.chainHistorySummaryEnabled';
 
 type SupportedEnumConfigKey = 'chain.defaultWriteNetwork';
 
@@ -499,6 +527,8 @@ const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
   'a2a.simplemsgListenerEnabled',
   'chain.defaultWriteNetwork',
   'chain.mvcSponsorUploadEnabled',
+  'automation.dreamTickEnabled',
+  'automation.chainHistorySummaryEnabled',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -510,7 +540,10 @@ function isSupportedConfigKey(key: string): key is SupportedConfigKey {
 }
 
 function isSupportedBooleanConfigKey(key: SupportedConfigKey): key is SupportedBooleanConfigKey {
-  return key === 'a2a.simplemsgListenerEnabled' || key === 'chain.mvcSponsorUploadEnabled';
+  return key === 'a2a.simplemsgListenerEnabled'
+    || key === 'chain.mvcSponsorUploadEnabled'
+    || key === 'automation.dreamTickEnabled'
+    || key === 'automation.chainHistorySummaryEnabled';
 }
 
 function readConfigValue(
@@ -526,7 +559,10 @@ function readConfigValue(
   if (key === 'chain.mvcSponsorUploadEnabled') {
     return config.chain.mvcSponsorUploadEnabled;
   }
-  return config.chain.defaultWriteNetwork;
+  if (key === 'automation.dreamTickEnabled') {
+    return config.automation.dreamTickEnabled;
+  }
+  return config.automation.chainHistorySummaryEnabled;
 }
 
 function writeConfigValue(
@@ -558,6 +594,24 @@ function writeConfigValue(
       a2a: {
         ...config.a2a,
         simplemsgListenerEnabled: value === true,
+      },
+    };
+  }
+  if (key === 'automation.dreamTickEnabled') {
+    return {
+      ...config,
+      automation: {
+        ...config.automation,
+        dreamTickEnabled: value === true,
+      },
+    };
+  }
+  if (key === 'automation.chainHistorySummaryEnabled') {
+    return {
+      ...config,
+      automation: {
+        ...config.automation,
+        chainHistorySummaryEnabled: value === true,
       },
     };
   }
@@ -4242,12 +4296,16 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       extract: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        // LLM judge + multilingual turn extraction ride the daemon's
-        // host-executor generate route (the Bot's DSH pair through the
-        // connected DSH host). Every failure degrades to null — rule-only
-        // extraction, exactly the pre-wiring behavior — so a daemon that is
-        // down, old, or without a connected executor never breaks a turn.
-        const daemonComplete = async (system: string, prompt: string): Promise<string | null> => {
+        // LLM judge + multilingual turn extraction with DSH-first priority:
+        // the daemon's host-executor generate route first (the Bot's DSH pair
+        // through the connected DSH host), then the local CLI runtime chain
+        // (`runLlmPromptWithRuntimeFallback`) so the judge lights up on
+        // non-DSH installs too. Every failure still degrades to null —
+        // rule-only extraction, exactly the pre-wiring behavior — so a daemon
+        // that is down, old, or without any runtime never breaks a turn.
+        const actorPaths = resolveMetabotPaths(actor.homeDir);
+        const actorSlug = path.basename(actorPaths.profileRoot);
+        const hostComplete = async (system: string, prompt: string): Promise<string | null> => {
           try {
             const result = await requestJson<{ output?: string }>(
               context,
@@ -4268,7 +4326,32 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             return null;
           }
         };
-        const result = await applyTurnMemoryExtraction(resolveMetabotPaths(actor.homeDir), {
+        const localComplete = async (system: string, prompt: string): Promise<string | null> => {
+          try {
+            const outcome = await runLlmPromptWithRuntimeFallback({
+              runtimeResolver: createCliLlmRuntimeResolver(actorPaths),
+              llmExecutor: new LlmExecutor({
+                sessionsRoot: actorPaths.llmExecutorSessionsRoot,
+                transcriptsRoot: actorPaths.llmExecutorTranscriptsRoot,
+                skillsRoot: actorPaths.skillsRoot,
+                systemHomeDir: actorPaths.systemHomeDir,
+                env: context.env,
+                backends: createRegistryBackendFactories(),
+              }),
+              metaBotSlug: actorSlug,
+              prompt,
+              systemPrompt: system,
+              timeoutMs: 20_000,
+              pollIntervalMs: 500,
+            });
+            return outcome.status === 'completed' && outcome.output.trim() ? outcome.output : null;
+          } catch {
+            return null;
+          }
+        };
+        const complete = async (system: string, prompt: string): Promise<string | null> =>
+          (await hostComplete(system, prompt)) ?? (await localComplete(system, prompt));
+        const result = await applyTurnMemoryExtraction(actorPaths, {
           userText: String(input.payload.userText ?? ''),
           assistantText: String(input.payload.assistantText ?? ''),
           sessionId: typeof input.payload.sessionId === 'string' ? input.payload.sessionId : undefined,
@@ -4279,10 +4362,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             : undefined,
           userMessageId: typeof input.payload.userMessageId === 'string' ? input.payload.userMessageId : undefined,
           assistantMessageId: typeof input.payload.assistantMessageId === 'string' ? input.payload.assistantMessageId : undefined,
-          judgeComplete: async (systemPrompt, userPrompt) => (await daemonComplete(systemPrompt, userPrompt)) ?? '',
+          judgeComplete: async (systemPrompt, userPrompt) => (await complete(systemPrompt, userPrompt)) ?? '',
           llmExtract: async (extractionInput) => {
             const prompts = buildTurnMemoryExtractionPrompts(extractionInput);
-            const text = await daemonComplete(prompts.system, prompts.user);
+            const text = await complete(prompts.system, prompts.user);
             return text ? parseTurnMemoryExtractionPayload(text) : null;
           },
         });
@@ -7342,6 +7425,112 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     })();
   }, SCHEDULE_TICK_INTERVAL_MS);
   scheduleTimer.unref?.();
+
+  // Dream automation tick (Codex↔DSH parity Phase 3): the nightly dream pass
+  // for non-DSH installs — per-Bot `dream due` → pre-dream surf gate → dream
+  // runs → memory-hygiene tail, driving the SAME daemon handler code paths as
+  // /api/dream/* + /api/surf/* + /api/memory/* (Chain B→C through the daemon's
+  // injected executor). DSH-first: the whole tick stands down while the DSH
+  // host-executor bridge is connected (the plugin owns the dream there), and
+  // the core due algorithm skips `running` dates + idempotent commits bound
+  // the residual start-race window. Per-Bot opt-out via
+  // `metabot config set automation.dreamTickEnabled false`; per-Bot memory
+  // policy `dreamEnabled` and the availability toggle are respected exactly
+  // like the plugin scheduler. 10-min cadence + one boot pass; crash safety
+  // relies on the existing 30-min stale-running sweeps (no new locks).
+  const dreamAutomationTickLoop = handlers.dream && handlers.memory && handlers.surf
+    ? startAutomationTickLoop(
+      () => runDreamAutomationTick({
+        listBots: () => listMetabotProfiles(systemHomeDir),
+        isHostExecutorConnected: isDshHostExecutorConnected,
+        isTickEnabled: async (profileHomeDir) =>
+          (await createConfigStore(profileHomeDir).read()).automation.dreamTickEnabled,
+        isDreamPolicyEnabled: async (profileHomeDir) =>
+          (await createMemoryPolicyStore(resolveMetabotPaths(profileHomeDir)).effectivePolicy()).dreamEnabled,
+        handlers: {
+          dream: {
+            due: async (input) => (await handlers.dream!.due!(input)) as unknown as AutomationCommandResult<{ dueDates?: unknown; repairDates?: unknown }>,
+            run: async (input) => (await handlers.dream!.run!(input)) as unknown as AutomationCommandResult<{ date?: string; status?: string; kind?: string; error?: string }>,
+          },
+          memory: {
+            hygieneDue: async (input) => (await handlers.memory!.hygieneDue!(input)) as unknown as AutomationCommandResult<{ due?: unknown; reason?: string }>,
+            hygieneRun: async (input) => (await handlers.memory!.hygieneRun!(input)) as unknown as AutomationCommandResult<Record<string, unknown>>,
+          },
+          surf: {
+            status: async (input) => (await handlers.surf!.status!(input)) as unknown as AutomationCommandResult<{ preDreamDue?: unknown }>,
+            run: async (input) => (await handlers.surf!.run!(input)) as unknown as AutomationCommandResult<{ status?: string; error?: string }>,
+          },
+        },
+        log: (message) => groupTaskEngineLog(message),
+      }).then((outcomes) => {
+        reportDreamTickOutcomes(outcomes, (message) => groupTaskEngineLog(message));
+      }),
+      {
+        tickMs: DREAM_AUTOMATION_TICK_INTERVAL_MS,
+        bootDelayMs: DREAM_AUTOMATION_TICK_BOOT_DELAY_MS,
+        log: (message) => groupTaskEngineLog(message),
+      },
+    )
+    : null;
+
+  // Chain-history summary drain (Codex↔DSH parity Phase 3): bounded on-chain
+  // read/write summarization per Bot through the unified passive-LLM chain
+  // (DSH pair first via the host-executor bridge, then the local runtime
+  // fallback), with the plugin's daily cap / per-tick budget semantics and the
+  // same DSH stand-down as the dream tick. Ledger bookkeeping stays in the
+  // core chain-history store (`chainhistory summary pending|apply` parity).
+  const chainHistorySummaryTickLoop = startAutomationTickLoop(
+    () => runChainHistorySummaryTick({
+      listBots: () => listMetabotProfiles(systemHomeDir),
+      isHostExecutorConnected: isDshHostExecutorConnected,
+      isTickEnabled: async (profileHomeDir) =>
+        (await createConfigStore(profileHomeDir).read()).automation.chainHistorySummaryEnabled,
+      storeFor: (profileHomeDir) => createChainHistoryStore(resolveMetabotPaths(profileHomeDir)),
+      summarize: async ({ slug, homeDir, kind, title, path, content }) => {
+        const profilePaths = resolveMetabotPaths(homeDir);
+        const { system, user } = buildChainHistorySummaryPrompt({ kind, title, path, content });
+        const hostText = await createHostFirstCompletion({
+          dshLlmPath: profilePaths.dshLlmPath,
+          timeoutMs: CHAIN_HISTORY_SUMMARY_LLM_TIMEOUT_MS,
+        })({ botSlug: slug, system, user });
+        if (hostText !== null) return hostText;
+        const outcome = await runLlmPromptWithRuntimeFallback({
+          runtimeResolver: createLlmRuntimeResolver({
+            runtimeStore: createLlmRuntimeStore(profilePaths),
+            bindingStore: createLlmBindingStore(profilePaths),
+            getPreferredRuntimeId: async () => {
+              try {
+                const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                const data = JSON.parse(raw) as { runtimeId?: string | null };
+                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+              } catch {
+                return null;
+              }
+            },
+          }),
+          llmExecutor,
+          metaBotSlug: slug,
+          prompt: user,
+          systemPrompt: system,
+          timeoutMs: CHAIN_HISTORY_SUMMARY_LLM_TIMEOUT_MS,
+          pollIntervalMs: 5_000,
+        });
+        if (outcome.status !== 'completed') {
+          throw new Error(outcome.error || `Chain-history summary generation ended with status ${outcome.status}.`);
+        }
+        return outcome.output;
+      },
+      log: (message) => groupTaskEngineLog(message),
+    }).then((outcomes) => {
+      reportChainHistorySummaryTickOutcomes(outcomes, (message) => groupTaskEngineLog(message));
+    }),
+    {
+      tickMs: CHAIN_HISTORY_SUMMARY_TICK_INTERVAL_MS,
+      bootDelayMs: CHAIN_HISTORY_SUMMARY_TICK_BOOT_DELAY_MS,
+      log: (message) => groupTaskEngineLog(message),
+    },
+  );
+
   // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
   // them (with their remaining budget) or settle expired waits into the
   // timeout + refund path. Runs even when the simplemsg listener is disabled —
@@ -7377,6 +7566,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     clearInterval(onlineServiceCacheInterval);
     clearInterval(providerWorkspaceSweepInterval);
     clearInterval(scheduleTimer);
+    dreamAutomationTickLoop?.stop();
+    chainHistorySummaryTickLoop.stop();
     serviceRefundSyncLoop.stop();
     let shutdownFailure: unknown = null;
     try {
