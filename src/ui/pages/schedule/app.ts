@@ -198,7 +198,9 @@ export function buildSchedulePageDefinition(i18n: LocalUiI18nContext = createI18
     confirmDeleteId: '',
     busyIds: {},
     formBusy: false,
+    runPollingId: '',
   };
+  let runPollTimer = 0;
   const editorMessage = { kind: '', text: '' };
   const statusState = { key: 'schedule.status.loading', replacements: null, text: '' };
 
@@ -347,6 +349,8 @@ export function buildSchedulePageDefinition(i18n: LocalUiI18nContext = createI18
       const toggleLabel = task.enabled
         ? uiText('schedule.disable', 'Disable')
         : uiText('schedule.enable', 'Enable');
+      const runNowButton = '<button class="btn btn-sm" type="button" data-run-task="' + escapeHtml(task.id) + '"'
+        + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('schedule.runNow', 'Run now')) + '</button>';
       const deleteButton = state.confirmDeleteId === task.id
         ? '<button class="btn btn-danger btn-sm" type="button" data-confirm-delete="' + escapeHtml(task.id) + '"' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('schedule.deleteConfirm', 'Confirm delete')) + '</button>'
         : '<button class="btn btn-sm" type="button" data-delete-task="' + escapeHtml(task.id) + '"' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('schedule.delete', 'Delete')) + '</button>';
@@ -358,6 +362,7 @@ export function buildSchedulePageDefinition(i18n: LocalUiI18nContext = createI18
         + '<td class="mono">' + escapeHtml(nextRun) + '</td>'
         + '<td class="mono" title="' + escapeHtml(formatDateTime(task.state && task.state.lastRunAtMs)) + '">' + escapeHtml(lastRun) + '</td>'
         + '<td><div class="schedule-row-actions">'
+        + runNowButton
         + '<button class="btn btn-sm" type="button" data-toggle-task="' + escapeHtml(task.id) + '"' + (busy ? ' disabled' : '') + '>' + escapeHtml(toggleLabel) + '</button>'
         + '<button class="btn btn-sm" type="button" data-edit-task="' + escapeHtml(task.id) + '"' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('schedule.edit', 'Edit')) + '</button>'
         + deleteButton
@@ -368,6 +373,9 @@ export function buildSchedulePageDefinition(i18n: LocalUiI18nContext = createI18
     elements.taskTable.innerHTML = '<table class="data-table">' + head + '<tbody>' + rows + '</tbody></table>';
     elements.taskTable.querySelectorAll('[data-toggle-task]').forEach((button) => {
       button.addEventListener('click', () => { toggleTask(button.getAttribute('data-toggle-task')); });
+    });
+    elements.taskTable.querySelectorAll('[data-run-task]').forEach((button) => {
+      button.addEventListener('click', () => { runTaskNow(button.getAttribute('data-run-task')); });
     });
     elements.taskTable.querySelectorAll('[data-edit-task]').forEach((button) => {
       button.addEventListener('click', () => { openEditor(button.getAttribute('data-edit-task')); });
@@ -547,6 +555,60 @@ export function buildSchedulePageDefinition(i18n: LocalUiI18nContext = createI18
       setStatusKey('schedule.status.saved', { name: task.name || id });
     } catch (error) {
       setStatusText((error && error.message) || uiText('schedule.saveFailed', 'Failed to update the task.'));
+    } finally {
+      setBusy(id, false);
+      render();
+    }
+  };
+
+  // Fire-and-poll, surf runSurf parity: /api/schedule/run starts the run
+  // inside the daemon and returns immediately; we poll the task's run history
+  // every few seconds until no run is running, then report the finish.
+  const scheduleRunPoll = () => {
+    if (!state.runPollingId || runPollTimer) return;
+    runPollTimer = setTimeout(() => {
+      runPollTimer = 0;
+      pollRunOnce().catch(() => undefined);
+    }, 3000);
+  };
+
+  const pollRunOnce = async () => {
+    const id = state.runPollingId;
+    if (!id) return;
+    try {
+      await loadTasks();
+      if (state.selectedTaskId === id) await loadRuns();
+      const running = (state.selectedTaskId === id ? state.runs : []).some((run) => run.status === 'running')
+        || state.tasks.some((task) => task.id === id
+          && task.state && task.state.lastStatus === 'running');
+      if (running) {
+        scheduleRunPoll();
+        return;
+      }
+      const task = state.tasks.find((candidate) => candidate.id === id);
+      state.runPollingId = '';
+      setStatusKey('schedule.status.runFinished', { name: (task && task.name) || id });
+      render();
+    } catch (error) {
+      state.runPollingId = '';
+      setStatusText((error && error.message) || uiText('schedule.runStatusFailed', 'Failed to refresh the run status.'));
+    }
+  };
+
+  const runTaskNow = async (id) => {
+    if (!id || state.busyIds[id]) return;
+    const task = state.tasks.find((candidate) => candidate.id === id);
+    setBusy(id, true);
+    render();
+    try {
+      await postJson('/api/schedule/run', { from: state.fromBot, id });
+      setStatusKey('schedule.status.runStarted', { name: (task && task.name) || id });
+      if (state.selectedTaskId !== id) selectTask(id);
+      else await loadRuns();
+      state.runPollingId = id;
+      scheduleRunPoll();
+    } catch (error) {
+      setStatusText((error && error.message) || uiText('schedule.runStartFailed', 'Failed to start the task run.'));
     } finally {
       setBusy(id, false);
       render();
@@ -736,12 +798,18 @@ export function buildSchedulePageDefinition(i18n: LocalUiI18nContext = createI18
     state.confirmDeleteId = '';
     state.editorOpen = false;
     state.editingId = '';
+    state.runPollingId = '';
+    if (runPollTimer) {
+      clearTimeout(runPollTimer);
+      runPollTimer = 0;
+    }
     load().catch(() => undefined);
   });
   window.addEventListener('oac:i18n-changed', () => {
     renderStatusLine();
     render();
   });
+  window.addEventListener('beforeunload', () => { if (runPollTimer) clearTimeout(runPollTimer); });
 
   load();
 })();`,

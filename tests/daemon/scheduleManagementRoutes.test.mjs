@@ -21,6 +21,7 @@ async function startServer() {
     delete: [],
     enable: [],
     disable: [],
+    run: [],
   };
   const server = createHttpServer({
     schedule: {
@@ -51,6 +52,10 @@ async function startServer() {
       disable: async (input) => {
         calls.disable.push(input);
         return commandSuccess({ task: { id: input.id, enabled: false }, warnings: [] });
+      },
+      run: async (input) => {
+        calls.run.push(input);
+        return commandSuccess({ taskId: input.id, status: 'running', wait: false });
       },
     },
   });
@@ -152,4 +157,40 @@ test('local daemon boundary rejects cross-site POSTs to /api/schedule/create bef
   assert.equal(response.status, 403);
   assert.equal(payload.code, 'forbidden_origin');
   assert.deepEqual(server.calls.create, []);
+});
+
+test('POST /api/schedule/run forwards the body and defaults to fire-and-return', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/schedule/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from: 'alice', id: 'task-1' }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(server.calls.run, [{ from: 'alice', id: 'task-1' }]);
+  assert.deepEqual(payload.data, { taskId: 'task-1', status: 'running', wait: false });
+});
+
+test('local daemon boundary rejects cross-site POSTs to /api/schedule/run before handlers run', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/schedule/run`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'https://attacker.example',
+    },
+    body: JSON.stringify({ from: 'alice', id: 'task-1' }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.equal(payload.code, 'forbidden_origin');
+  assert.deepEqual(server.calls.run, []);
 });

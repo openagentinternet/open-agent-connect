@@ -11,10 +11,47 @@ import path from 'node:path';
 
 import { commandFailed, commandSuccess } from '../core/contracts/commandResult';
 import { createKnowledgeBaseService } from '../core/knowledgebase/service';
-import { createStudyJobStore } from '../core/knowledgebase/studyJobs';
+import {
+  createStudyJobStore,
+  type StudyJobRecord,
+  type StudyJobStore,
+} from '../core/knowledgebase/studyJobs';
 import { resolveMetabotPaths } from '../core/state/paths';
 import type { DreamBotRef } from './dreamHandlers';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
+
+/**
+ * Shared failed-study-job retry selection + requeue (DSH metaweb_study_retry
+ * semantics): an explicit jobId must exist for this bot; otherwise every
+ * failed job matches, narrowed by an optional topic substring. Exported so the
+ * CLI `knowledge-base study retry` dependency drives the exact same logic and
+ * returns the exact same shape as the /api/kb/study/retry handler.
+ */
+export async function retryFailedStudyJobs(input: {
+  store: StudyJobStore;
+  slug: string;
+  jobId?: string;
+  topic?: string;
+}): Promise<{ retried: StudyJobRecord[] } | { failure: ReturnType<typeof commandFailed> }> {
+  const rows = await input.store.listStudyJobs(input.slug);
+  const jobId = input.jobId?.trim() ?? '';
+  const topic = input.topic?.trim() ?? '';
+  if (jobId && rows.every((job) => job.id !== jobId)) {
+    return { failure: commandFailed('study_job_not_found', `No study job with id "${jobId}" for this bot.`) };
+  }
+  const targets = rows.filter((job) => {
+    if (job.status !== 'failed') return false;
+    if (jobId) return job.id === jobId;
+    if (topic) return job.topic.toLowerCase().includes(topic.toLowerCase());
+    return true;
+  });
+  const retried: StudyJobRecord[] = [];
+  for (const job of targets) {
+    const result = await input.store.retryStudyJob(job.id);
+    if (result?.retried) retried.push(result.job);
+  }
+  return { retried };
+}
 
 export interface KbDaemonHandlersInput {
   /** Resolve the acting bot (explicit slug, else the machine Twin). */
@@ -161,24 +198,14 @@ export function createKbDaemonHandlers(
       const bot = await input.resolveBot(rawInput?.from);
       if ('failure' in bot) return bot.failure;
       const store = createStudyJobStore(resolveMetabotPaths(bot.homeDir));
-      const rows = await store.listStudyJobs(bot.slug);
-      const jobId = typeof rawInput?.jobId === 'string' ? rawInput.jobId.trim() : '';
-      const topic = typeof rawInput?.topic === 'string' ? rawInput.topic.trim() : '';
-      if (jobId && rows.every((job) => job.id !== jobId)) {
-        return commandFailed('study_job_not_found', `No study job with id "${jobId}" for this bot.`);
-      }
-      const targets = rows.filter((job) => {
-        if (job.status !== 'failed') return false;
-        if (jobId) return job.id === jobId;
-        if (topic) return String(job.topic).toLowerCase().includes(topic.toLowerCase());
-        return true;
+      const outcome = await retryFailedStudyJobs({
+        store,
+        slug: bot.slug,
+        ...(typeof rawInput?.jobId === 'string' ? { jobId: rawInput.jobId } : {}),
+        ...(typeof rawInput?.topic === 'string' ? { topic: rawInput.topic } : {}),
       });
-      const retried: unknown[] = [];
-      for (const job of targets) {
-        const result = await store.retryStudyJob(String(job.id));
-        if (result?.retried) retried.push(result.job);
-      }
-      return commandSuccess({ retried, count: retried.length });
+      if ('failure' in outcome) return outcome.failure;
+      return commandSuccess({ retried: outcome.retried, count: outcome.retried.length });
     },
   };
 }

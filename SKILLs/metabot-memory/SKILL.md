@@ -57,6 +57,10 @@ Should not trigger when:
 | `memory transcript read` | read a mirrored session (any Bot with `--any-bot`) | `--session <id>`, `--limit`, `--any-bot` |
 | `memory knowledge list` | list knowledge points | `--kind know_how\|pitfall\|principle`, `--category`, `--status`, `--query`, `--limit` |
 | `memory knowledge upsert` | save/revise a knowledge point | `--payload-file { topic, summary, kind?, category?, tags?, sources? }` |
+| `memory procedure list` | list saved repeatable workflows | `--status active\|archived`, `--limit` |
+| `memory procedure recall` | score active procedures against a task description (top matches get use-tracked) | `--query` (required), `--limit` (default 3) |
+| `memory procedure save` | create/rewrite a procedure (same title bumps the version) | `--payload-file { title, steps[], pitfalls?, triggerText?, sourcePinIds?, category?, tags?, confidence?, origin? }` |
+| `memory procedure archive` | retire one procedure by exact title | `--title` |
 | `memory impressions list` / `show` | person impressions | `show` takes `--subject <globalMetaId>` |
 | `chainhistory recall` | the Bot's own on-chain writes/reads | `--query`, `--kind write\|read`, `--from-date`, `--to-date`, `--limit` |
 

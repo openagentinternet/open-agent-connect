@@ -135,6 +135,17 @@ export interface MetabotDaemonHttpHandlers {
     create?: (input: { name: string; host?: string; profileSlug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
+  /** Machine-wide human owner identity (the `metabot user *` CLI surface;
+   *  no `from` selection — the owner file is system-scoped). Mirrors the CLI
+   *  shapes: create/import also return the mnemonic (shown once). */
+  user?: {
+    who?: () => Awaitable<MetabotCommandResult<unknown>>;
+    create?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    import?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    rename?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    reveal?: () => Awaitable<MetabotCommandResult<unknown>>;
+    delete?: () => Awaitable<MetabotCommandResult<unknown>>;
+  };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -291,6 +302,14 @@ export interface MetabotDaemonHttpHandlers {
     delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     enable?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     disable?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    /**
+     * Run-now for the standalone schedule UI (the `metabot schedule run` twin,
+     * executed inside the daemon process). Body: { from, id, wait? }. `wait:
+     * true` holds the request until the run settles; the default starts the
+     * run and returns immediately, same contract as `/api/dream/run`.
+     * Requires an explicit `from` bot selector like every management verb.
+     */
+    run?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   /** Dream reads + manual run-now. Mirrors the `metabot dream *` CLI deps. */
   dream?: {

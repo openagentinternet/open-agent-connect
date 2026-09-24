@@ -8,6 +8,7 @@
  */
 
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
 
 import {
   commandFailed,
@@ -27,12 +28,27 @@ import {
   type ScheduleSpec,
   type ScheduleStore,
 } from '../core/schedule/store';
+import { runScheduledTask } from '../core/schedule/service';
+import { createHostFirstCompletion } from '../core/llm/hostLlmExecutorBridge';
+import { createLlmBindingStore } from '../core/llm/llmBindingStore';
+import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
+import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
+import type { LlmExecutor } from '../core/llm/executor';
+import { runLlmPromptWithRuntimeFallback } from '../core/llm/llmRuntimeExecution';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
+
+const SCHEDULE_RUN_LLM_TIMEOUT_MS = 30 * 60_000;
 
 export interface ScheduleDaemonHandlersInput {
   systemHomeDir: string;
   createScheduleStore?: (homeDir: string) => ScheduleStore;
   hostLeases?: Map<string, { host: string; expiresAtMs: number }>;
+  /**
+   * The daemon's shared LLM executor (local-runtime chain) for the run-now
+   * verb. Absent → run-now fails with a clear error when an LLM call is
+   * actually needed, same contract as the dream run handler.
+   */
+  llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession'> | null;
   log?: (message: string) => void;
 }
 
@@ -61,6 +77,58 @@ export function createScheduleDaemonHandlers(input: ScheduleDaemonHandlersInput)
   );
   const hostLeases = input.hostLeases ?? new Map<string, { host: string; expiresAtMs: number }>();
   const log = input.log ?? (() => undefined);
+  // Run-now in-flight guard: one background run per profile+task, dream
+  // `startRun` parity; the store claim underneath is the durable guard.
+  const runInFlight = new Set<string>();
+
+  async function readPreferredRuntimeId(paths: ReturnType<typeof resolveMetabotPaths>): Promise<string | null> {
+    try {
+      const raw = await fs.readFile(paths.preferredLlmRuntimePath, 'utf8');
+      const data = JSON.parse(raw) as { runtimeId?: string | null };
+      return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The daemon-side scheduled-task LLM turn: DSH pair first, local chain fallback. */
+  function buildRunLlm(paths: ReturnType<typeof resolveMetabotPaths>, slug: string) {
+    const llmExecutor = input.llmExecutor ?? null;
+    const runtimeResolver = createLlmRuntimeResolver({
+      runtimeStore: createLlmRuntimeStore(paths),
+      bindingStore: createLlmBindingStore(paths),
+      getPreferredRuntimeId: () => readPreferredRuntimeId(paths),
+    });
+    return async (turn: { prompt: string; systemPrompt: string }) => {
+      if (!llmExecutor) {
+        return {
+          ok: false as const,
+          error: 'No LLM executor is configured on this daemon for scheduled task runs.',
+        };
+      }
+      const hostText = await createHostFirstCompletion({
+        dshLlmPath: paths.dshLlmPath,
+        timeoutMs: SCHEDULE_RUN_LLM_TIMEOUT_MS,
+      })({ botSlug: slug, system: turn.systemPrompt, user: turn.prompt });
+      if (hostText !== null) return { ok: true as const, output: hostText };
+      const outcome = await runLlmPromptWithRuntimeFallback({
+        runtimeResolver,
+        llmExecutor,
+        metaBotSlug: slug,
+        prompt: turn.prompt,
+        systemPrompt: turn.systemPrompt,
+        timeoutMs: SCHEDULE_RUN_LLM_TIMEOUT_MS,
+        pollIntervalMs: 5_000,
+      });
+      if (outcome.status !== 'completed') {
+        return {
+          ok: false as const,
+          error: outcome.error || `Scheduled task execution ended with status ${outcome.status}.`,
+        };
+      }
+      return { ok: true as const, output: outcome.output };
+    };
+  }
 
   async function resolveProfileHomeDir(from: unknown): Promise<
     { homeDir: string; slug: string; failure: MetabotCommandResult<never> | null }
@@ -285,6 +353,60 @@ export function createScheduleDaemonHandlers(input: ScheduleDaemonHandlersInput)
         return commandFailed('task_not_found', `Scheduled task not found: ${id}`);
       }
       return commandSuccess({ task: result.task, warnings: result.warnings });
+    },
+
+    // ---- Run-now verb (the standalone schedule UI "Run now" action; the CLI
+    // `metabot schedule run` twin runs in-process on the caller). Mirrors
+    // /api/dream/run: `wait: true` holds the request until the run settles;
+    // the default starts the run inside the daemon process and returns
+    // { taskId, status: 'running' } immediately — progress is observable via
+    // /api/schedule/runs. Same from-required actor rule as the verbs above;
+    // the store claim is the durable single-run guard. ----------------------
+
+    run: async (rawInput) => {
+      const resolved = await resolveProfileHomeDir(rawInput?.from);
+      if (resolved.failure) return resolved.failure;
+      const id = normalizeScheduleStoreInput(rawInput?.id);
+      if (!id) return commandFailed('missing_id', 'task id is required.');
+      const paths = resolveMetabotPaths(resolved.homeDir);
+      const key = `${paths.profileRoot}:${id}`;
+      if (runInFlight.has(key)) {
+        return commandFailed('already_running', `Scheduled task is already running: ${id}`);
+      }
+      const execute = async (): Promise<MetabotCommandResult<unknown>> => {
+        const result = await runScheduledTask(paths, {
+          taskId: id,
+          trigger: 'manual',
+          executor: 'daemon',
+        }, { runLlm: buildRunLlm(paths, resolved.slug) });
+        if (result.kind === 'already_running') {
+          return commandFailed('already_running', `Scheduled task is already running: ${id}`);
+        }
+        if (result.kind === 'failed') {
+          return commandFailed('schedule_run_failed', result.error);
+        }
+        return commandSuccess({ taskId: id, output: result.output });
+      };
+
+      if (rawInput?.wait === true) {
+        const outcome = await execute();
+        return outcome.ok ? commandSuccess({ ...outcome.data as Record<string, unknown>, wait: true }) : outcome;
+      }
+
+      runInFlight.add(key);
+      void (async () => {
+        try {
+          const outcome = await execute();
+          log(`[Schedule] run-now ${resolved.slug} task ${id} → ${outcome.ok
+            ? 'completed'
+            : `failed (${outcome.code ?? 'error'}: ${outcome.message ?? 'unknown'})`}`);
+        } catch (error) {
+          log(`[Schedule] run-now ${resolved.slug} task ${id} failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          runInFlight.delete(key);
+        }
+      })();
+      return commandSuccess({ taskId: id, status: 'running', wait: false });
     },
   };
 }

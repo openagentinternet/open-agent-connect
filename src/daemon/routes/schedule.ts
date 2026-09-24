@@ -21,6 +21,8 @@ const POST_VERBS: Record<string, ScheduleVerb> = {
   '/api/schedule/delete': 'delete',
   '/api/schedule/enable': 'enable',
   '/api/schedule/disable': 'disable',
+  // Run-now (the /ui/schedule "Run now" action); `wait` mirrors /api/dream/run.
+  '/api/schedule/run': 'run',
 };
 
 const GET_VERBS: Record<string, ScheduleVerb> = {

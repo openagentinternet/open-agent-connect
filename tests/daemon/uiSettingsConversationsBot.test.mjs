@@ -33,14 +33,13 @@ test('GET /ui/settings serves the owner identity (User) section in English', asy
   assert.equal(response.status, 200);
   assert.match(html, /data-user-section/);
   assert.match(html, /data-i18n-key="settings\.user\.title"/);
-  assert.match(html, /settings\.user\.verbWho/);
-  assert.match(html, /settings\.user\.verbCreate/);
-  assert.match(html, /settings\.user\.verbImport/);
-  assert.match(html, /settings\.user\.verbRename/);
-  assert.match(html, /settings\.user\.verbReveal/);
-  assert.match(html, /settings\.user\.verbDelete/);
-  assert.match(html, /settings\.user\.consoleNote/);
-  assert.match(html, /<code>metabot user who<\/code>/);
+  // The live card mounts here and drives /api/user/* from the page script.
+  assert.match(html, /data-user-live/);
+  assert.match(html, /\/api\/user\/who/);
+  assert.match(html, /settings\.user\.create/);
+  assert.match(html, /settings\.user\.import/);
+  assert.match(html, /settings\.user\.reveal/);
+  assert.match(html, /settings\.user\.delete/);
 });
 
 test('GET /ui/settings localizes the User section to Simplified Chinese with lang=zh-CN', async (t) => {
@@ -52,9 +51,11 @@ test('GET /ui/settings localizes the User section to Simplified Chinese with lan
 
   assert.equal(response.status, 200);
   assert.match(html, /data-user-section/);
+  // Server-rendered zh body copy plus the live-card script keys.
   assert.match(html, /所有者身份/);
-  assert.match(html, /查看当前所有者身份/);
-  assert.match(html, /metabot user 命令/);
+  assert.match(html, /settings\.user\.create/);
+  assert.match(html, /settings\.user\.reveal/);
+  assert.match(html, /settings\.user\.delete/);
 });
 
 test('GET /ui/conversations serves the group-task section with console chrome', async (t) => {

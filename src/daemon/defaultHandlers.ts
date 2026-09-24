@@ -211,6 +211,7 @@ import {
 import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
 import { createGroupTaskDaemonHandlers } from './grouptaskHandlers';
 import { createScheduleDaemonHandlers } from './scheduleHandlers';
+import { createUserDaemonHandlers } from './userHandlers';
 import type { ScheduleStore } from '../core/schedule/store';
 import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
 import {
@@ -14709,6 +14710,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
       },
     },
+    // Owner identity (the /ui/settings User section): the `metabot user *`
+    // CLI surface over HTTP, additive next to the Bot-profile group above.
+    user: createUserDaemonHandlers({ systemHomeDir: normalizedSystemHomeDir }),
     network: {
       listServices: async ({ online, query, cached }) => {
         const state = await runtimeStateStore.readState();
@@ -17262,6 +17266,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
       systemHomeDir: normalizedSystemHomeDir,
       createScheduleStore: input.schedule?.createScheduleStore,
       hostLeases: input.schedule?.hostLeases,
+      // Run-now shares the daemon's passive-LLM chain (DSH pair first, then
+      // the local runtime fallback), exactly like the dream/surf handlers.
+      llmExecutor: input.llmExecutor ?? null,
       log: (message) => console.warn(message),
     }),
     chat: {

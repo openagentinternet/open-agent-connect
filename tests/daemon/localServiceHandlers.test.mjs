@@ -15,6 +15,8 @@ const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createStudyJobStore } = require('../../dist/core/knowledgebase/studyJobs.js');
 const { createScheduleStore } = require('../../dist/core/schedule/store.js');
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
+const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { deriveSystemHome } = require('../helpers/profileHome.mjs');
 
 /**
@@ -222,4 +224,100 @@ test('schedule management verbs mutate the real store and require an explicit fr
   assert.equal(deleted.ok, true);
   const listedAfter = await group.list({ from: 'bot-1' });
   assert.equal(listedAfter.data.tasks.length, 0);
+});
+
+test('schedule run-now executes through the injected executor and honors wait', async () => {
+  const { homeDir, paths } = await createProfileHome();
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: 'Bot One',
+    homeDir,
+    globalMetaId: 'gm-bot-1',
+    mvcAddress: 'mvc-bot-1',
+  });
+  // The passive-LLM chain resolves bindings first: seed one healthy runtime
+  // so the fallback lands on the injected executor instead of "no runtime".
+  const now = new Date().toISOString();
+  await createLlmRuntimeStore(paths).upsertRuntime({
+    id: 'llm_stub_0',
+    provider: 'custom',
+    displayName: 'Stub runtime',
+    binaryPath: '',
+    version: '1.0.0',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: [],
+    lastSeenAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await createLlmBindingStore(paths).upsertBinding({
+    id: 'lb_bot1_stub_primary',
+    metaBotSlug: 'bot-1',
+    llmRuntimeId: 'llm_stub_0',
+    role: 'primary',
+    priority: 0,
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  });
+  // Deterministic executor: every turn completes instantly.
+  const logs = [];
+  const group = createScheduleDaemonHandlers({
+    systemHomeDir,
+    createScheduleStore: (dir) => createScheduleStore(resolveMetabotPaths(dir)),
+    llmExecutor: {
+      execute: async () => 'sess-1',
+      getSession: async () => ({ result: { status: 'completed', output: 'ran the prompt' } }),
+    },
+    log: (message) => logs.push(message),
+  });
+
+  const created = await group.create({
+    from: 'bot-1',
+    name: 'Ping',
+    prompt: 'say pong',
+    schedule: { type: 'interval', intervalMs: 60_000 },
+  });
+  const taskId = created.data.task.id;
+
+  // The from-required actor rule covers run-now too.
+  const missingFrom = await group.run({ id: taskId });
+  assert.equal(missingFrom.ok, false);
+  assert.equal(missingFrom.code, 'missing_from');
+
+  const missingTask = await group.run({ from: 'bot-1', id: 'task-nope', wait: true });
+  assert.equal(missingTask.ok, false);
+  assert.equal(missingTask.code, 'schedule_run_failed');
+
+  // wait: true holds the request until the run settles and returns the output.
+  const waited = await group.run({ from: 'bot-1', id: taskId, wait: true });
+  assert.equal(waited.ok, true);
+  assert.equal(waited.data.taskId, taskId);
+  assert.equal(waited.data.output, 'ran the prompt');
+  assert.equal(waited.data.wait, true);
+
+  // The settled run is recorded on the task's run ledger.
+  const runs = await group.runs({ from: 'bot-1', id: taskId });
+  assert.equal(runs.data.runs.length, 1);
+  assert.equal(runs.data.runs[0].status, 'success');
+  assert.equal(runs.data.runs[0].trigger, 'manual');
+
+  // The default starts the run in the background and returns immediately.
+  const started = await group.run({ from: 'bot-1', id: taskId });
+  assert.equal(started.ok, true);
+  assert.deepEqual(started.data, { taskId, status: 'running', wait: false });
+  // Wait for the background settle log (a run row reads as transient
+  // crash-recovery error while in flight, so the log is the reliable signal).
+  for (let attempt = 0; attempt < 200 && !logs.some((message) => message.includes('run-now')); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(
+    logs.some((message) => message.includes('run-now') && message.includes('completed')),
+    `expected a completed run-now log, got: ${JSON.stringify(logs)}`,
+  );
+  const runsAfter = await group.runs({ from: 'bot-1', id: taskId });
+  assert.equal(runsAfter.data.runs.length, 2);
+  assert.equal(runsAfter.data.runs[0].status, 'success');
 });

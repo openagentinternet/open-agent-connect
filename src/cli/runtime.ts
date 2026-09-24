@@ -88,7 +88,7 @@ import { createImpressionStore } from '../core/memory/impressionStore';
 import { resolveContactNames } from '../core/memory/contactNames';
 import { createKnowledgeStore, KNOWLEDGE_KINDS, type KnowledgeKind } from '../core/memory/knowledgeStore';
 import { formatKnowledgeUpsertResult } from '../core/memory/knowledgePromptBlocks';
-import { createProcedureStore, scoreProceduresForQuery } from '../core/memory/procedureStore';
+import { createProcedureStore, ProcedureStoreError, scoreProceduresForQuery } from '../core/memory/procedureStore';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createOrchestrationStore } from '../core/memory/orchestrationStore';
 import {
@@ -224,7 +224,9 @@ import {
   runStudyTick,
   runStudyTurnWithTools,
   STUDY_TICK_INTERVAL_MINUTES,
+  StudyJobStoreError,
 } from '../core/knowledgebase/studyJobs';
+import { retryFailedStudyJobs } from '../daemon/kbHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -4754,6 +4756,78 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const config = await store.setHygieneConfig(input.payload);
         return commandSuccess({ config });
       },
+      // Repeatable-workflow procedures (DSH procedure_recall/save/archive
+      // parity): same core/memory/procedureStore the DSH tools drive through
+      // the local-read loader, same title-fingerprint rewrite semantics.
+      procedureList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createProcedureStore(resolveMetabotPaths(actor.homeDir));
+        const rows = await store.listProcedures({
+          ...(input.status ? { status: input.status } : {}),
+        });
+        const procedures = input.limit !== undefined ? rows.slice(0, input.limit) : rows;
+        return commandSuccess({ procedures });
+      },
+      procedureRecall: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createProcedureStore(resolveMetabotPaths(actor.homeDir));
+        const rows = await store.listProcedures({ status: 'active' });
+        const scored = scoreProceduresForQuery(rows, input.query);
+        // DSH parity: only the returned top matches get their use counter
+        // touched (default top 3, like the procedure_recall tool).
+        const top = scored.slice(0, input.limit ?? 3);
+        for (const hit of top) await store.touchUsed(hit.procedure.id);
+        return commandSuccess({
+          matches: top.map((hit) => ({ procedure: hit.procedure, score: hit.score })),
+        });
+      },
+      procedureSave: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createProcedureStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        try {
+          const result = await store.upsertProcedure({
+            title: String(payload.title ?? ''),
+            steps: Array.isArray(payload.steps)
+              ? payload.steps.filter((step): step is string => typeof step === 'string')
+              : [],
+            ...(Array.isArray(payload.pitfalls)
+              ? { pitfalls: payload.pitfalls.filter((item): item is string => typeof item === 'string') }
+              : {}),
+            ...(typeof payload.triggerText === 'string' ? { triggerText: payload.triggerText } : {}),
+            ...(Array.isArray(payload.sourcePinIds)
+              ? { sourcePinIds: payload.sourcePinIds.filter((item): item is string => typeof item === 'string') }
+              : {}),
+            ...(typeof payload.category === 'string' ? { category: payload.category } : {}),
+            ...(Array.isArray(payload.tags)
+              ? { tags: payload.tags.filter((tag): tag is string => typeof tag === 'string') }
+              : {}),
+            ...(typeof payload.confidence === 'number' ? { confidence: payload.confidence } : {}),
+            ...(payload.origin === 'agent' || payload.origin === 'dream' || payload.origin === 'owner'
+              ? { origin: payload.origin }
+              : {}),
+          });
+          return commandSuccess({ procedure: result.procedure, created: result.created });
+        } catch (error) {
+          if (error instanceof ProcedureStoreError) {
+            return commandFailed(error.code, error.message);
+          }
+          throw error;
+        }
+      },
+      procedureArchive: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createProcedureStore(resolveMetabotPaths(actor.homeDir));
+        const archived = await store.archiveProcedureByTitle(input.title);
+        if (!archived) {
+          return commandFailed('not_found', `No procedure titled "${input.title}" found.`);
+        }
+        return commandSuccess({ archived: true, procedure: archived });
+      },
     },
     chainhistory: {
       recordRead: async (input) => {
@@ -5609,6 +5683,50 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           input.full === true,
         );
         return commandSuccess({ knowledgeBase });
+      },
+      // Nightly study-job queue (DSH metaweb_study_* parity). Same store and
+      // the same retry helper as the /api/kb/study/* daemon handlers, so the
+      // CLI and HTTP surfaces agree on shapes; the daemon 30-min tick drains.
+      studyList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const store = createStudyJobStore(paths);
+        const jobs = await store.listStudyJobs(path.basename(paths.profileRoot));
+        return commandSuccess({ jobs });
+      },
+      studyEnqueue: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const store = createStudyJobStore(paths);
+        try {
+          const result = await store.enqueueStudyJob({
+            metabotSlug: path.basename(paths.profileRoot),
+            topic: input.topic,
+            ...(input.budgetPins !== undefined ? { budgetPins: input.budgetPins } : {}),
+          });
+          return commandSuccess({ job: result.job, created: result.created });
+        } catch (error) {
+          if (error instanceof StudyJobStoreError) {
+            return commandFailed(error.code, error.message);
+          }
+          throw error;
+        }
+      },
+      studyRetry: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const store = createStudyJobStore(paths);
+        const outcome = await retryFailedStudyJobs({
+          store,
+          slug: path.basename(paths.profileRoot),
+          ...(input.jobId !== undefined ? { jobId: input.jobId } : {}),
+          ...(input.topic !== undefined ? { topic: input.topic } : {}),
+        });
+        if ('failure' in outcome) return outcome.failure;
+        return commandSuccess({ retried: outcome.retried, count: outcome.retried.length });
       },
     },
     surf: {

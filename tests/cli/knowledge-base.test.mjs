@@ -91,3 +91,37 @@ test('knowledge-base add-document reads --content-file and rejects both content 
   assert.equal(await run(['knowledge-base', 'add-document', '--title', 'T', '--content', 'a', '--content-file', contentFile]), 1);
   assert.equal(calls.length, 1, 'both-flags call never reaches the handler');
 });
+
+test('runCli dispatches knowledge-base study subcommands to the study handlers', async () => {
+  const calls = [];
+  const record = (name) => async (input) => {
+    calls.push([name, input]);
+    return commandSuccess({});
+  };
+  const dependencies = {
+    knowledgeBase: {
+      studyList: record('studyList'),
+      studyEnqueue: record('studyEnqueue'),
+      studyRetry: record('studyRetry'),
+    },
+  };
+  const run = (args) => runCli(args, makeContext(dependencies));
+
+  assert.equal(await run(['knowledge-base', 'study', 'enqueue', '--from', 'alice', '--topic', 'MetaID 协议', '--budget-pins', '10']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'enqueue', '--topic', 'x', '--budget-pins', 'abc']), 1, 'non-numeric --budget-pins fails');
+  assert.equal(await run(['knowledge-base', 'study', 'enqueue']), 1, 'missing --topic fails');
+  assert.equal(await run(['knowledge-base', 'study', 'status', '--from', 'alice']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'retry', '--from', 'alice']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'retry', '--job-id', 'study-1']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'retry', '--topic', 'metaid']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'frobnicate']), 1, 'unknown study verb fails');
+
+  assert.deepEqual(calls.map(([name]) => name), [
+    'studyEnqueue', 'studyList', 'studyRetry', 'studyRetry', 'studyRetry',
+  ]);
+  assert.deepEqual(calls[0][1], { from: 'alice', topic: 'MetaID 协议', budgetPins: 10 });
+  assert.deepEqual(calls[1][1], { from: 'alice' });
+  assert.deepEqual(calls[2][1], { from: 'alice' });
+  assert.deepEqual(calls[3][1], { from: undefined, jobId: 'study-1' });
+  assert.deepEqual(calls[4][1], { from: undefined, topic: 'metaid' });
+});

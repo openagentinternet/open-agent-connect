@@ -84,6 +84,9 @@ function createHarness(fetchImpl) {
   const context = {
     URLSearchParams,
     encodeURIComponent,
+    // The run-now poll uses timers; tests stub them so the loop never fires.
+    setTimeout: () => 0,
+    clearTimeout: () => {},
     fetch: async (url, options) => {
       calls.push({ url, options });
       return fetchImpl(url, options);
@@ -384,4 +387,67 @@ test('schedule page scopes requests to the selected bot and surfaces list errors
   await new Promise((resolve) => setImmediate(resolve));
   // Profile load fails, so the status line carries the raw error.
   assert.equal(failing.elements['[data-schedule-status]'].textContent, 'daemon offline');
+});
+
+test('schedule page run-now posts to /api/schedule/run and reports the start', async () => {
+  const calls = [];
+  const h = createHarness(async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url === '/api/bot/profiles') return jsonResponse(profilesPayload());
+    if (url.startsWith('/api/schedule/list')) return jsonResponse(listPayload);
+    if (url.startsWith('/api/schedule/runs')) {
+      return jsonResponse({ ok: true, state: 'success', data: { runs: [] } });
+    }
+    if (url === '/api/schedule/run') {
+      return jsonResponse({ ok: true, state: 'success', data: { taskId: 'task-1', status: 'running', wait: false } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vm.runInNewContext(buildSchedulePageDefinition().script, h.context);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // Wire the row button the way the rendered table would.
+  h.buttonRegistry.set('[data-run-task]', [makeActionButton('data-run-task', 'task-1')]);
+  const refreshHandler = h.elements['[data-schedule-refresh]'].listener('click');
+  refreshHandler();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await h.buttonRegistry.get('[data-run-task]')[0].listener('click')();
+  const runCall = calls.find((call) => call.url === '/api/schedule/run');
+  assert.ok(runCall, 'run endpoint should be called');
+  assert.deepEqual(JSON.parse(runCall.options.body), { from: 'alice', id: 'task-1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    h.elements['[data-schedule-status]'].textContent,
+    'Started "Hourly brief" — running in the daemon.',
+  );
+});
+
+test('schedule page run-now surfaces the daemon error', async () => {
+  const h = createHarness(async (url) => {
+    if (url === '/api/bot/profiles') return jsonResponse(profilesPayload());
+    if (url.startsWith('/api/schedule/list')) return jsonResponse(listPayload);
+    if (url.startsWith('/api/schedule/runs')) {
+      return jsonResponse({ ok: true, state: 'success', data: { runs: [] } });
+    }
+    if (url === '/api/schedule/run') {
+      return jsonResponse({ ok: false, state: 'failed', code: 'already_running', message: 'Scheduled task is already running: task-1' });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vm.runInNewContext(buildSchedulePageDefinition().script, h.context);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  h.buttonRegistry.set('[data-run-task]', [makeActionButton('data-run-task', 'task-1')]);
+  h.elements['[data-schedule-refresh]'].listener('click')();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await h.buttonRegistry.get('[data-run-task]')[0].listener('click')();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    h.elements['[data-schedule-status]'].textContent,
+    'Scheduled task is already running: task-1',
+  );
 });

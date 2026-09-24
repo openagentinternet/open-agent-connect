@@ -22,6 +22,7 @@ import { handleScheduleRoutes } from './routes/schedule';
 import { handleConversationRoutes } from './routes/conversations';
 import { handleFileRoutes } from './routes/file';
 import { handleIdentityRoutes } from './routes/identity';
+import { handleUserRoutes } from './routes/user';
 import { handleNetworkRoutes } from './routes/network';
 import { handleProviderRoutes } from './routes/provider';
 import { handleMetaAppRoutes } from './routes/metaapp';
@@ -56,6 +57,7 @@ const ROUTES: RouteHandler[] = [
   handleConversationRoutes,
   handleFileRoutes,
   handleIdentityRoutes,
+  handleUserRoutes,
   handleNetworkRoutes,
   handleProviderRoutes,
   handleMetaAppRoutes,
