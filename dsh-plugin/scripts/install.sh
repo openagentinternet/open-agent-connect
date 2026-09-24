@@ -23,7 +23,7 @@ Usage:
 
   version      npm version or range (default latest). Example: 0.3.6
   --link       mount this checkout: dsh plugin add link:<abs-path>
-  --profile    target profile (default web)
+  --profile    target profile (default web; the desktop app runs "desktop")
   --dry-run    print the command only
 
 Environment: DSH_HOME (default ~/.dsh), DSH_CMD (default dsh)
