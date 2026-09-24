@@ -32,6 +32,11 @@ const RUNTIME_LAST_FILE = 'tests/cli/runtime.test.mjs';
 function collectTestFiles(dir) {
   const found = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // macOS AppleDouble metadata siblings ("._name") on non-native volumes
+    // must never be discovered as test files.
+    if (entry.name.startsWith('._')) {
+      continue;
+    }
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       found.push(...collectTestFiles(fullPath));

@@ -12,6 +12,9 @@ import { handleQandaRoutes } from './routes/qanda';
 import { handleProtocolRoutes } from './routes/protocol';
 import { handleChainRoutes } from './routes/chain';
 import { handleSurfRoutes } from './routes/surf';
+import { handleDreamRoutes } from './routes/dream';
+import { handleMemoryRoutes } from './routes/memory';
+import { handleKbRoutes } from './routes/kb';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
 import { handleGroupTaskRoutes } from './routes/grouptask';
@@ -43,6 +46,9 @@ const ROUTES: RouteHandler[] = [
   handleProtocolRoutes,
   handleChainRoutes,
   handleSurfRoutes,
+  handleDreamRoutes,
+  handleMemoryRoutes,
+  handleKbRoutes,
   handleDaemonRoutes,
   handleChatRoutes,
   handleGroupTaskRoutes,

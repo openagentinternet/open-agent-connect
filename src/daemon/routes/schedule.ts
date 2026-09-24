@@ -14,6 +14,13 @@ const POST_VERBS: Record<string, ScheduleVerb> = {
   '/api/schedule/heartbeat': 'heartbeat',
   '/api/schedule/claim': 'claim',
   '/api/schedule/complete': 'complete',
+  // Management verbs for the standalone schedule UI (task CRUD + toggles);
+  // they join the lease protocol on the same handler group.
+  '/api/schedule/create': 'create',
+  '/api/schedule/update': 'update',
+  '/api/schedule/delete': 'delete',
+  '/api/schedule/enable': 'enable',
+  '/api/schedule/disable': 'disable',
 };
 
 const GET_VERBS: Record<string, ScheduleVerb> = {

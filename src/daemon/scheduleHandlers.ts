@@ -24,6 +24,7 @@ import {
   createScheduleStore,
   SCHEDULE_HOST_LEASE_MS,
   type ScheduleRunExecutor,
+  type ScheduleSpec,
   type ScheduleStore,
 } from '../core/schedule/store';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
@@ -192,6 +193,98 @@ export function createScheduleDaemonHandlers(input: ScheduleDaemonHandlersInput)
         return commandFailed('task_run_not_found', `Scheduled task run not found: ${runId}`);
       }
       return commandSuccess({ settled: result.settled, run: result.run, task: result.task });
+    },
+
+    // ---- Management verbs (the /api/schedule UI surface). Same actor rule
+    // as the lease protocol above: an explicit `from` bot selector. ---------
+
+    create: async (rawInput) => {
+      const resolved = await resolveProfileHomeDir(rawInput?.from);
+      if (resolved.failure) return resolved.failure;
+      const name = normalizeScheduleStoreInput(rawInput?.name);
+      if (!name) return commandFailed('missing_name', 'task name is required.');
+      const prompt = normalizeScheduleStoreInput(rawInput?.prompt);
+      if (!prompt) return commandFailed('missing_prompt', 'task prompt is required.');
+      const schedule = rawInput?.schedule;
+      if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) {
+        return commandFailed('invalid_argument', 'schedule ({type: at|interval|cron, ...}) is required.');
+      }
+      try {
+        const task = await storeFor(resolved.homeDir).createTask({
+          name,
+          prompt,
+          schedule: schedule as ScheduleSpec,
+          ...(typeof rawInput?.workingDirectory === 'string' && rawInput.workingDirectory.trim()
+            ? { workingDirectory: rawInput.workingDirectory.trim() }
+            : {}),
+          ...(normalizeScheduleStoreInput(rawInput?.channel)
+            ? { channel: normalizeScheduleStoreInput(rawInput.channel) as 'auto' | 'host' | 'daemon' }
+            : {}),
+          ...(typeof rawInput?.expiresAt === 'string' && rawInput.expiresAt.trim()
+            ? { expiresAt: rawInput.expiresAt.trim() }
+            : {}),
+          ...(typeof rawInput?.enabled === 'boolean' ? { enabled: rawInput.enabled } : {}),
+        });
+        return commandSuccess({ task });
+      } catch (error) {
+        return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+      }
+    },
+
+    update: async (rawInput) => {
+      const resolved = await resolveProfileHomeDir(rawInput?.from);
+      if (resolved.failure) return resolved.failure;
+      const id = normalizeScheduleStoreInput(rawInput?.id);
+      if (!id) return commandFailed('missing_id', 'task id is required.');
+      const payload = rawInput?.payload;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return commandFailed('invalid_payload', 'payload (partial task fields) is required.');
+      }
+      try {
+        const result = await storeFor(resolved.homeDir).updateTask(id, payload as Record<string, unknown>);
+        if ('notFound' in result) {
+          return commandFailed('task_not_found', `Scheduled task not found: ${id}`);
+        }
+        return commandSuccess({ task: result.task, warnings: result.warnings });
+      } catch (error) {
+        return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+      }
+    },
+
+    delete: async (rawInput) => {
+      const resolved = await resolveProfileHomeDir(rawInput?.from);
+      if (resolved.failure) return resolved.failure;
+      const id = normalizeScheduleStoreInput(rawInput?.id);
+      if (!id) return commandFailed('missing_id', 'task id is required.');
+      const result = await storeFor(resolved.homeDir).deleteTask(id);
+      if (!result.deleted) {
+        return commandFailed('task_not_found', `Scheduled task not found: ${id}`);
+      }
+      return commandSuccess({ deleted: true });
+    },
+
+    enable: async (rawInput) => {
+      const resolved = await resolveProfileHomeDir(rawInput?.from);
+      if (resolved.failure) return resolved.failure;
+      const id = normalizeScheduleStoreInput(rawInput?.id);
+      if (!id) return commandFailed('missing_id', 'task id is required.');
+      const result = await storeFor(resolved.homeDir).setEnabled(id, true);
+      if ('notFound' in result) {
+        return commandFailed('task_not_found', `Scheduled task not found: ${id}`);
+      }
+      return commandSuccess({ task: result.task, warnings: result.warnings });
+    },
+
+    disable: async (rawInput) => {
+      const resolved = await resolveProfileHomeDir(rawInput?.from);
+      if (resolved.failure) return resolved.failure;
+      const id = normalizeScheduleStoreInput(rawInput?.id);
+      if (!id) return commandFailed('missing_id', 'task id is required.');
+      const result = await storeFor(resolved.homeDir).setEnabled(id, false);
+      if ('notFound' in result) {
+        return commandFailed('task_not_found', `Scheduled task not found: ${id}`);
+      }
+      return commandSuccess({ task: result.task, warnings: result.warnings });
     },
   };
 }
