@@ -6,6 +6,7 @@ function buildMemoryPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'memory',
         title: i18n.t('memory.title'),
+        titleKey: 'memory.title',
         eyebrow: i18n.t('memory.eyebrow'),
         heading: i18n.t('memory.heading'),
         description: i18n.t('memory.description'),

@@ -3143,6 +3143,13 @@ export function renderClientI18nScript(i18n: LocalUiI18nContext): string {
     queryAll('[data-i18n-key]').forEach((element) => {
       element.textContent = t(element.getAttribute('data-i18n-key') || '');
     });
+    // Pages whose <title> carries a dictionary key re-apply it here, so a live
+    // language switch localizes the tab title like the rest of the copy.
+    const titleElement = queryAll('[data-i18n-title]')[0];
+    const titleKey = titleElement && typeof titleElement.getAttribute === 'function'
+      ? titleElement.getAttribute('data-i18n-title') || ''
+      : '';
+    if (titleKey && typeof document !== 'undefined') document.title = t(titleKey);
     queryAll('[data-language-select]').forEach((element) => {
       element.value = currentPreference === 'auto' ? currentLanguage : currentPreference;
       if (typeof element.querySelectorAll !== 'function') return;

@@ -61,8 +61,25 @@ export interface SkillInstallResult {
 /** Directory-safe skill name: must round-trip as a single path segment. */
 export declare function normalizeSkillName(value: unknown): string;
 /**
- * Minimal YAML frontmatter scan for the fields installation needs. Skill
- * frontmatter in practice is flat scalars; nested keys are ignored rather
+ * Test seam for `parseSkillFrontmatter`: read the literal (`|`) or folded (`>`)
+ * block scalar whose indicator sits on the line before `startIndex`, and unfold
+ * it with the optional `-`/`+` chomping indicator.
+ *
+ * The body is every following line that is blank or indented deeper than the
+ * key; the indentation to strip is that of the first non-empty body line.
+ * `lines` uses the frontmatter line convention, where the line break before the
+ * closing `---` is represented by a final empty entry: `-` drops the trailing
+ * break, the default keeps exactly one, and `+` keeps every trailing blank line.
+ */
+export declare function readBlockScalarValue(lines: string[], startIndex: number, keyIndent: number, style: string, chomping: string): {
+    value: string;
+    lastLineIndex: number;
+};
+/**
+ * Minimal YAML frontmatter scan for the fields installation needs. Flat
+ * scalars are read directly; literal (`|`) and folded (`>`) block scalars are
+ * unfolded, and a value that is only a block indicator without a body counts
+ * as absent so the pin payload can supply it. Nested keys are ignored rather
  * than mis-parsed.
  */
 export declare function parseSkillFrontmatter(markdown: string): {

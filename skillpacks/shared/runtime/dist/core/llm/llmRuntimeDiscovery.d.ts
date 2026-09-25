@@ -1,4 +1,5 @@
 import type { LlmRuntime, LlmProvider } from './llmTypes';
+import type { LlmBackendFactory } from './executor/backends/backend';
 export interface DiscoveryInput {
     env?: NodeJS.ProcessEnv;
     providers?: LlmProvider[];
@@ -44,6 +45,18 @@ export declare function findExecutablesInPath(name: string, pathDirs?: string[])
 export declare function readExecutableVersion(binaryPath: string, versionArgs?: string[], timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<string | undefined>;
 export declare function probeExecutableVersion(binaryPath: string, versionArgs?: string[], timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<ExecutableVersionProbe>;
 export declare function readinessSemanticInactivityTimeoutForProvider(provider: LlmProvider, readinessTimeoutMs: number): number;
+/**
+ * Test seam: `deps` lets tests substitute provider backends, so the default
+ * probe's ephemeral-home lifecycle can be exercised without spawning a real CLI.
+ */
+export declare function defaultRuntimeReadinessProbe(input: {
+    runtime: LlmRuntime;
+    env: NodeJS.ProcessEnv;
+    timeoutMs: number;
+    cwd?: string;
+}, deps?: {
+    backendFactories?: Record<string, LlmBackendFactory>;
+}): Promise<RuntimeReadinessProbeResult>;
 export declare function discoverProvider(provider: LlmProvider, pathDirs: string[], options?: {
     createId?: () => string;
     now?: () => string;

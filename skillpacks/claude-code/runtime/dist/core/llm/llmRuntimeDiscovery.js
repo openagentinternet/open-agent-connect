@@ -8,6 +8,7 @@ exports.findExecutablesInPath = findExecutablesInPath;
 exports.readExecutableVersion = readExecutableVersion;
 exports.probeExecutableVersion = probeExecutableVersion;
 exports.readinessSemanticInactivityTimeoutForProvider = readinessSemanticInactivityTimeoutForProvider;
+exports.defaultRuntimeReadinessProbe = defaultRuntimeReadinessProbe;
 exports.discoverProvider = discoverProvider;
 exports.testLlmRuntimeReadiness = testLlmRuntimeReadiness;
 exports.discoverLlmRuntimes = discoverLlmRuntimes;
@@ -22,11 +23,15 @@ const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
 const WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS = 1_000;
+const PROBE_HOME_REMOVE_ATTEMPTS = 3;
+const PROBE_HOME_REMOVE_RETRY_DELAY_MS = 50;
 const DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY = 8;
 const DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS = 30 * 60 * 1000;
 const READINESS_PROMPT = 'Reply exactly OK.';
 const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
 const PROBE_KILL_GRACE_MS = 2_000;
+const PROBE_HOME_TMP_PREFIX = 'oac-probe-home-';
+const PROBE_CWD_TMP_PREFIX = 'oac-probe-cwd-';
 function getPathEnv(env) {
     return (env ?? process.env).PATH ?? '';
 }
@@ -376,6 +381,9 @@ function probeHintsForProvider(provider) {
         return undefined;
     return (0, platformRegistry_1.getRuntimePlatformDefinition)(provider).runtime.probeHints;
 }
+function probeHomePolicyForProvider(provider) {
+    return probeHintsForProvider(provider)?.probeHome;
+}
 function readinessTimeoutForProvider(provider, override) {
     if (override !== undefined)
         return override;
@@ -390,12 +398,44 @@ function readinessSemanticInactivityTimeoutForProvider(provider, readinessTimeou
         return hint;
     return Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
 }
-async function defaultRuntimeReadinessProbe(input) {
+function delay(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+/**
+ * Removes ephemeral probe artifacts. A child aborted mid-turn can still be
+ * flushing files into its state home, which makes a single `fs.rm` fail with
+ * ENOTEMPTY or EBUSY; retry briefly so a mid-flush removal cannot leak it.
+ */
+async function removeProbeArtifacts(targets) {
+    for (let attempt = 0; attempt < PROBE_HOME_REMOVE_ATTEMPTS; attempt += 1) {
+        const failures = await Promise.all(targets.map(async (target) => {
+            try {
+                await node_fs_1.promises.rm(target, { recursive: true, force: true });
+                return false;
+            }
+            catch {
+                return true;
+            }
+        }));
+        if (!failures.includes(true))
+            return;
+        await delay(PROBE_HOME_REMOVE_RETRY_DELAY_MS);
+    }
+    await Promise.all(targets.map((target) => node_fs_1.promises.rm(target, { recursive: true, force: true }).catch(() => undefined)));
+}
+/**
+ * Test seam: `deps` lets tests substitute provider backends, so the default
+ * probe's ephemeral-home lifecycle can be exercised without spawning a real CLI.
+ */
+async function defaultRuntimeReadinessProbe(input, deps) {
     const binaryPath = input.runtime.binaryPath;
     if (!binaryPath) {
         return { ok: false, message: 'Runtime has no binary path.' };
     }
-    const factory = (0, registry_1.createRegistryBackendFactories)()[input.runtime.provider];
+    const backendFactories = deps?.backendFactories ?? (0, registry_1.createRegistryBackendFactories)();
+    const factory = backendFactories[input.runtime.provider];
     if (!factory) {
         return { ok: false, message: `No readiness backend is registered for provider: ${input.runtime.provider}` };
     }
@@ -421,19 +461,40 @@ async function defaultRuntimeReadinessProbe(input) {
             }, WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS);
         }, input.timeoutMs);
     });
-    // Codex app-server records every thread it starts. Readiness is an internal
-    // capability check, so run it with an ephemeral CODEX_HOME to keep the
-    // synthetic probe turn out of the user's conversation history.
+    // Readiness is an internal capability check, but it runs a real CLI turn,
+    // and most CLIs record every thread they start. Keep the synthetic probe
+    // turn out of the user's conversation history: run it from an ephemeral
+    // working directory, and when the CLI documents a state-home env override,
+    // redirect its whole state home (seeded with auth/config files) so probe
+    // sessions land in a temp directory that is removed afterwards.
+    const probeHomePolicy = probeHomePolicyForProvider(input.runtime.provider);
     let probeHome;
     let backendEnv = compactEnv(input.env);
-    if (input.runtime.provider === 'codex') {
-        probeHome = await node_fs_1.promises.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), 'oac-codex-probe-'));
-        const sourceHome = backendEnv.CODEX_HOME ?? process.env.CODEX_HOME ?? node_path_1.default.join(node_os_1.default.homedir(), '.codex');
-        for (const fileName of ['auth.json', 'config.toml']) {
-            await node_fs_1.promises.copyFile(node_path_1.default.join(sourceHome, fileName), node_path_1.default.join(probeHome, fileName)).catch(() => undefined);
+    if (probeHomePolicy) {
+        probeHome = await node_fs_1.promises.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), PROBE_HOME_TMP_PREFIX));
+        const sourceHome = backendEnv[probeHomePolicy.envName]
+            ?? process.env[probeHomePolicy.envName]
+            ?? (probeHomePolicy.defaultSourceHome
+                ? node_path_1.default.join(node_os_1.default.homedir(), probeHomePolicy.defaultSourceHome)
+                : undefined);
+        if (sourceHome) {
+            for (const seedPath of probeHomePolicy.seedPaths ?? []) {
+                const source = node_path_1.default.join(sourceHome, seedPath);
+                const target = node_path_1.default.join(probeHome, seedPath);
+                await node_fs_1.promises.mkdir(node_path_1.default.dirname(target), { recursive: true }).catch(() => undefined);
+                // Seed entries are small auth/config files or directories (fs.cp
+                // handles both); anything missing is skipped: seeding is best-effort.
+                await node_fs_1.promises.cp(source, target, { recursive: true, force: false }).catch(() => undefined);
+            }
         }
-        backendEnv = { ...backendEnv, CODEX_HOME: probeHome };
+        backendEnv = { ...backendEnv, [probeHomePolicy.envName]: probeHome };
     }
+    // A probe turn must not attach to the daemon's working directory either:
+    // CLIs that key sessions by cwd would file it under the user's project.
+    const ownedProbeCwd = input.cwd
+        ? undefined
+        : await node_fs_1.promises.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), PROBE_CWD_TMP_PREFIX));
+    const probeCwd = input.cwd ?? ownedProbeCwd ?? process.cwd();
     const backend = factory(binaryPath, backendEnv);
     const outputParts = [];
     const probe = backend.execute({
@@ -442,7 +503,7 @@ async function defaultRuntimeReadinessProbe(input) {
         prompt: READINESS_PROMPT,
         timeout: input.timeoutMs,
         semanticInactivityTimeout: readinessSemanticInactivityTimeoutForProvider(input.runtime.provider, input.timeoutMs),
-        cwd: input.cwd ?? process.cwd(),
+        cwd: probeCwd,
         model: input.runtime.model,
     }, {
         emit(event) {
@@ -470,6 +531,21 @@ async function defaultRuntimeReadinessProbe(input) {
         ok: false,
         message: error instanceof Error ? error.message : String(error),
     }));
+    // The ephemeral probe home and working directory must not outlive the
+    // probe. Removals run through a single chain, and both are removed again
+    // whenever the backend settles, so a child that keeps writing into them
+    // cannot leave them behind.
+    const cleanupTargets = [probeHome, ownedProbeCwd].filter((target) => Boolean(target));
+    let cleanupChain = Promise.resolve();
+    const disposeProbeArtifacts = () => {
+        if (!cleanupTargets.length)
+            return cleanupChain;
+        cleanupChain = cleanupChain.then(() => removeProbeArtifacts(cleanupTargets));
+        return cleanupChain;
+    };
+    if (cleanupTargets.length) {
+        void probe.then(() => disposeProbeArtifacts()).catch(() => undefined);
+    }
     try {
         return await Promise.race([probe, timeout]);
     }
@@ -478,8 +554,14 @@ async function defaultRuntimeReadinessProbe(input) {
             clearTimeout(timer);
         if (fallbackTimer)
             clearTimeout(fallbackTimer);
-        if (probeHome)
-            await node_fs_1.promises.rm(probeHome, { recursive: true, force: true }).catch(() => undefined);
+        if (cleanupTargets.length) {
+            // On timeout the backend is still in flight: give it the abort grace to
+            // settle before removing, but never block the caller on a hung child.
+            if (timedOut) {
+                await Promise.race([probe, delay(WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS)]);
+            }
+            await disposeProbeArtifacts();
+        }
     }
 }
 async function discoverProvider(provider, pathDirs, options) {

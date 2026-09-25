@@ -6,6 +6,7 @@ function buildSurfPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'surf',
         title: i18n.t('surf.title'),
+        titleKey: 'surf.title',
         eyebrow: i18n.t('surf.eyebrow'),
         heading: i18n.t('surf.heading'),
         description: i18n.t('surf.description'),

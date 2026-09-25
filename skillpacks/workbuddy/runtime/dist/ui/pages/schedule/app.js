@@ -6,6 +6,7 @@ function buildSchedulePageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'schedule',
         title: i18n.t('schedule.title'),
+        titleKey: 'schedule.title',
         eyebrow: i18n.t('schedule.eyebrow'),
         heading: i18n.t('schedule.heading'),
         description: i18n.t('schedule.description'),

@@ -133,6 +133,16 @@ function buildPageDefinition(page, i18n) {
     }
     return builder(i18n);
 }
+/**
+ * Tag `<title>` with the page's dictionary key so the shared client i18n
+ * script can re-apply `document.title` when the language is switched in the
+ * topbar (the server-rendered text already reflects the request locale).
+ */
+function applyPageTitleKey(html, titleKey) {
+    if (!titleKey)
+        return html;
+    return html.replace(/<title>([\s\S]*?)<\/title>/, (_match, title) => `<title data-i18n-title="${titleKey}">${title}</title>`);
+}
 async function renderBuiltInPage(page, languagePreference) {
     const i18n = (0, i18n_1.createI18nContext)(languagePreference);
     const definition = buildPageDefinition(page, i18n);
@@ -152,7 +162,7 @@ async function renderBuiltInPage(page, languagePreference) {
         .replace(/__PAGE_PANELS__/g, renderPanels(definition))
         .replace(/__PAGE_CONTENT__/g, content)
         .replace(/__PAGE_SCRIPT__/g, script);
-    return applyStaticI18n(injectTopbarChrome(html, i18n), i18n);
+    return applyStaticI18n(injectTopbarChrome(applyPageTitleKey(html, definition.titleKey), i18n), i18n);
 }
 function isBrowserPagePath(pathname) {
     return pathname === '/browser'

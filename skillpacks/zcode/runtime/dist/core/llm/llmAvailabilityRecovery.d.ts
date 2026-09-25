@@ -8,8 +8,9 @@ export interface LlmAvailabilityRecovery {
     /** Run one full cycle over all target stores. Primarily for tests. */
     runCycleOnce: () => Promise<void>;
     /**
-     * Ask for an expedited cycle on one store (spec R5.3), e.g. after a chat
-     * turn found no selectable runtime. Coalesced per store, fire-and-forget.
+     * Ask for an expedited probe pass on one store (spec R5.3), e.g. after a
+     * chat turn found no selectable runtime. Demand-driven, so it bypasses the
+     * background backoff. Coalesced per store, fire-and-forget.
      */
     requestSoon: (homeDir: string) => void;
 }
@@ -25,5 +26,7 @@ export declare function createLlmAvailabilityRecovery(input: {
     baseBackoffMs?: number;
     maxBackoffMs?: number;
     globalConcurrency?: number;
+    /** Whole-cycle probe budget across every target store. */
+    maxProbesPerCycle?: number;
     logger?: (message: string, error?: unknown) => void;
 }): LlmAvailabilityRecovery;

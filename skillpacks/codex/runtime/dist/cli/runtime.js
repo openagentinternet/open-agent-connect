@@ -4869,7 +4869,7 @@ function createDefaultCliDependencies(context) {
                 const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
                 const store = (0, studyJobs_2.createStudyJobStore)(paths);
                 const jobs = await store.listStudyJobs(node_path_1.default.basename(paths.profileRoot));
-                return (0, commandResult_1.commandSuccess)({ jobs });
+                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ jobs }), 'kb', node_path_1.default.basename(paths.profileRoot));
             },
             studyEnqueue: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);

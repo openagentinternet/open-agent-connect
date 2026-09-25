@@ -6,6 +6,7 @@ export function buildKbPageDefinition(i18n: LocalUiI18nContext = createI18nConte
   return {
     page: 'kb',
     title: i18n.t('kb.title'),
+    titleKey: 'kb.title',
     eyebrow: i18n.t('kb.eyebrow'),
     heading: i18n.t('kb.heading'),
     description: i18n.t('kb.description'),

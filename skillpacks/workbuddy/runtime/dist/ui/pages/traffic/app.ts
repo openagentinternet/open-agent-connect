@@ -6,6 +6,7 @@ export function buildTrafficPageDefinition(i18n: LocalUiI18nContext = createI18n
   return {
     page: 'traffic',
     title: i18n.t('traffic.title'),
+    titleKey: 'traffic.title',
     eyebrow: i18n.t('traffic.eyebrow'),
     heading: i18n.t('traffic.heading'),
     description: i18n.t('traffic.description'),

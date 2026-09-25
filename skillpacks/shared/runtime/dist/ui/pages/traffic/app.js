@@ -6,6 +6,7 @@ function buildTrafficPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'traffic',
         title: i18n.t('traffic.title'),
+        titleKey: 'traffic.title',
         eyebrow: i18n.t('traffic.eyebrow'),
         heading: i18n.t('traffic.heading'),
         description: i18n.t('traffic.description'),

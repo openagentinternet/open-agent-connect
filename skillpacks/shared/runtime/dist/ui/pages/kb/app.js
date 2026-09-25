@@ -6,6 +6,7 @@ function buildKbPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'kb',
         title: i18n.t('kb.title'),
+        titleKey: 'kb.title',
         eyebrow: i18n.t('kb.eyebrow'),
         heading: i18n.t('kb.heading'),
         description: i18n.t('kb.description'),
