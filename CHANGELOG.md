@@ -5,7 +5,24 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
-## Unreleased
+## 0.9.0 - 2026-09-25
+
+### Added
+
+- DSH 0.1.7 adaptation: declarative preset registry, icon weight rename, build
+  and verify against DSH 0.1.7-rc.1 / rc.2, and desktop-app documentation.
+- Daemon automation ticks (dream / hygiene / pre-dream surf + chain-history
+  drain) with DSH stand-down, plus new HTTP APIs for dream, memory,
+  knowledge-base, study, and schedule management.
+- CLI: memory procedure and knowledge-base study verbs, `schedule run-now`,
+  owner identity API, and `localUiUrl` interlinking in command output.
+- Standalone UI pages: `/ui/memory` (with dream tab), `/ui/surf`, `/ui/kb`,
+  `/ui/schedule`, `/ui/traffic`; group-task view, owner section, bot deep
+  links, and an i18n debt paydown.
+- Ten new skillpack skills expose the DSH-port tool families to every host
+  (Phase 1 of the cross-host portability plan).
+- Scheduled tasks moved into the Bot editor as a per-Bot Scheduled tab with
+  full CRUD.
 
 ### Changed
 
@@ -24,6 +41,34 @@ tags for releases.
   viewer works (plus an "Open PDF" fallback link), and pin payloads whose JSON
   body carries a `text/markdown` content field render as a safely rendered
   markdown document.
+- A2A panel is now a pure reading pane; the left tabs own every list, and DSH
+  web gains IDBots-parity conversation-list tabs (local / online / group
+  tasks).
+- dsh-plugin consumes turn output from the live session/event stream instead of
+  the deprecated log reads.
+- Release toolchain moved to pnpm (`packageManager: pnpm@11.24.0`); CI runs
+  `pnpm install --frozen-lockfile` on Node 24.
+- Regenerated all host skillpack dists (161 files).
+
+### Fixed
+
+- LLM readiness probes no longer pollute user-visible session histories, the
+  recovery trickle is slowed, and the ephemeral `CODEX_HOME` is removed
+  reliably after an aborted probe.
+- Codex/DSH parity acceptance defects: skill frontmatter block scalars,
+  page-title i18n, and knowledge-base help gaps.
+- Group-task: owner writes and non-Twin auto-reply sends now bill the traffic
+  account (usage table newest-first); OT-03/04/07 (no base64 avatars in agent
+  payloads, visible-signal remote scoring, past-tense creation receipt);
+  OT-05 planning-vs-join race; OT-06 R18 closing verdict broadcast; the panel
+  shows sent invites, chair-degraded state, and local-path deliverables.
+- Surf section polish: IDBots-parity UI, toggle resilience, orphan-run sweep,
+  and clickable report links.
+- Never linkify inside contenteditable (pinId pastes lost text in the DSH
+  composer); chat bubble widths unified on the IDBots 70% column contract; the
+  A2A reading pane fills the column.
+- DSH memory extraction mirrors only genuine user messages, and the
+  producer-owned message source kind is emitted (format v4).
 
 ## 0.8.0 - 2026-09-13
 
