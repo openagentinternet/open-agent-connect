@@ -48,6 +48,10 @@ async function runCommand(homeDir, args) {
     METABOT_TEST_FAKE_SUBSIDY: '1',
     METABOT_TEST_FAKE_PROVIDER_LLM_REPLY: 'Tomorrow weather from {{skill}}: bright with light wind.',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    // The demo fakes host LLM turns, so background discovery must not probe
+    // the machine's real coding-agent CLIs (and its daemons must not be killed
+    // mid-probe when the demo cleans up).
+    METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
   };
 
   const exitCode = await runCli(args, {

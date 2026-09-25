@@ -131,14 +131,14 @@ test('availability recovery backs off exponentially and resets on success', asyn
   };
 
   await attempt(0, 1, 'first cycle probes');
-  await attempt(30_000, 1, 'inside 1-minute backoff: skipped');
-  await attempt(31_000, 2, 'after 1 minute: second probe');
-  await attempt(61_000, 2, 'inside 2-minute backoff: skipped');
-  await attempt(61_000, 3, 'after 2 minutes: third probe');
-  await attempt(4 * 60_000 + 1_000, 4, 'after 4 minutes: fourth probe');
+  await attempt(9 * 60_000, 1, 'inside 10-minute backoff: skipped');
+  await attempt(60_000 + 1_000, 2, 'after 10 minutes: second probe');
+  await attempt(10 * 60_000, 2, 'inside 20-minute backoff: skipped');
+  await attempt(10 * 60_000 + 1_000, 3, 'after 20 minutes: third probe');
+  await attempt(40 * 60_000 + 1_000, 4, 'after 40 minutes: fourth probe');
 
   failProbes = false;
-  await attempt(8 * 60_000 + 1_000, 5, 'after 8 minutes: success probe');
+  await attempt(80 * 60_000 + 1_000, 5, 'after 80 minutes: success probe');
 
   // The reset only matters when the runtime later degrades again: with the
   // backoff cleared, an immediate re-probe is allowed.
@@ -148,7 +148,7 @@ test('availability recovery backs off exponentially and resets on success', asyn
   await attempt(0, 6, 'backoff reset after success: immediate re-probe allowed');
 });
 
-test('availability recovery caps the backoff at 30 minutes', async () => {
+test('availability recovery caps the backoff at 2 hours', async () => {
   const harness = makeHarness();
   harness.addStore('/home/a', [makeRuntime('rt-down', 'detected')]);
   const recovery = harness.create({
@@ -158,21 +158,21 @@ test('availability recovery caps the backoff at 30 minutes', async () => {
     },
   });
 
-  // Fail 6 times so the schedule reaches the cap: 1,2,4,8,16,30.
+  // Fail 6 times so the schedule reaches the cap: 10,20,40,80,120.
   await recovery.runCycleOnce();
-  for (const waitMs of [61_000, 121_000, 241_000, 481_000, 961_000]) {
+  for (const waitMs of [10 * 60_000 + 1_000, 20 * 60_000 + 1_000, 40 * 60_000 + 1_000, 80 * 60_000 + 1_000, 120 * 60_000 + 1_000]) {
     harness.advance(waitMs);
     await recovery.runCycleOnce();
   }
   assert.equal(harness.probeCalls.length, 6);
 
-  harness.advance(29 * 60_000);
+  harness.advance(119 * 60_000);
   await recovery.runCycleOnce();
-  assert.equal(harness.probeCalls.length, 6, 'still inside the 30-minute cap');
+  assert.equal(harness.probeCalls.length, 6, 'still inside the 2-hour cap');
 
-  harness.advance(61_000);
+  harness.advance(2 * 60_000);
   await recovery.runCycleOnce();
-  assert.equal(harness.probeCalls.length, 7, 'past the 30-minute cap: probe again');
+  assert.equal(harness.probeCalls.length, 7, 'past the 2-hour cap: probe again');
 });
 
 test('availability recovery skips a store while a discovery sweep runs on it', async () => {
@@ -207,9 +207,42 @@ test('availability recovery probes at most 2 stores concurrently and 1 runtime p
     },
   });
 
-  await recovery.runCycleOnce();
+  const cycleCounts = [];
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    const before = harness.probeCalls.length;
+    await recovery.runCycleOnce();
+    cycleCounts.push(harness.probeCalls.length - before);
+  }
   assert.equal(maxInFlight, 2, 'global concurrency cap is 2');
-  assert.equal(harness.probeCalls.length, 3, 'one probe per store per cycle');
+  assert.ok(
+    cycleCounts.every((count) => count <= 2),
+    `whole-cycle probe budget exceeded: ${cycleCounts.join(',')}`,
+  );
+  assert.equal(harness.probeCalls.length, 6, 'every stale runtime is reached across cycles');
+});
+
+test('availability recovery requestSoon bypasses the background backoff', async () => {
+  const harness = makeHarness();
+  harness.addStore('/home/a', [makeRuntime('rt-a', 'detected')]);
+  const recovery = harness.create({
+    probe: async (runtime) => {
+      harness.probeCalls.push({ runtimeId: runtime.id });
+      return { ...runtime, health: 'detected', healthReason: 'still broken' };
+    },
+  });
+
+  await recovery.runCycleOnce();
+  assert.equal(harness.probeCalls.length, 1);
+
+  // Freshly failed: the runtime sits inside the 10-minute backoff window.
+  harness.advance(60_000);
+  await recovery.runCycleOnce();
+  assert.equal(harness.probeCalls.length, 1, 'background cycle honors backoff');
+
+  recovery.requestSoon('/home/a');
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.probeCalls.length, 2, 'demand-driven probe ignores backoff');
 });
 
 test('availability recovery honors the kill switch', async () => {

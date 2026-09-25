@@ -1085,10 +1085,44 @@ test('platform registry carries probe hints for slow-start providers', () => {
   const hints = Object.fromEntries(
     PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.runtime?.probeHints]),
   );
-  assert.deepEqual(hints.codex, { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 });
+  assert.deepEqual(hints.codex, {
+    readinessTimeoutMs: 45_000,
+    semanticInactivityTimeoutMs: 45_000,
+    probeHome: {
+      envName: 'CODEX_HOME',
+      defaultSourceHome: '.codex',
+      seedPaths: ['auth.json', 'config.toml'],
+    },
+  });
   assert.deepEqual(hints.cursor, { readinessTimeoutMs: 45_000, versionProbeTimeoutMs: 20_000, semanticInactivityTimeoutMs: 45_000 });
-  assert.deepEqual(hints['claude-code'], { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 });
-  assert.deepEqual(hints.zcode, { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 });
+  assert.deepEqual(hints['claude-code'], {
+    readinessTimeoutMs: 45_000,
+    semanticInactivityTimeoutMs: 45_000,
+    probeHome: {
+      envName: 'CLAUDE_CONFIG_DIR',
+      defaultSourceHome: '.claude',
+      seedPaths: ['.credentials.json', 'settings.json'],
+    },
+  });
+  assert.deepEqual(hints.kimi?.probeHome, {
+    envName: 'HOME',
+    seedPaths: [
+      '.kimi-code/config.toml',
+      '.kimi-code/credentials',
+      '.kimi-code/oauth',
+      '.kimi-code/device_id',
+      '.kimi-code/region',
+      '.kimi-code/server.token',
+    ],
+  });
+  assert.deepEqual(hints.zcode, {
+    readinessTimeoutMs: 45_000,
+    semanticInactivityTimeoutMs: 45_000,
+    probeHome: {
+      envName: 'HOME',
+      seedPaths: ['.zcode/v2/config.json', '.zcode/cli/config.json'],
+    },
+  });
   assert.deepEqual(hints.workbuddy, { readinessTimeoutMs: 45_000, versionProbeTimeoutMs: 20_000, semanticInactivityTimeoutMs: 45_000 });
   assert.equal(hints.opencode, undefined);
 });
