@@ -11,6 +11,7 @@ import {
 import type { RuntimePlatformDefinition } from '../platform/platformRegistry';
 import type { LlmRuntime, LlmProvider, LlmAuthState } from './llmTypes';
 import { createRegistryBackendFactories } from './executor/backends/registry';
+import type { LlmBackendFactory } from './executor/backends/backend';
 import type { LlmExecutionEvent } from './executor/types';
 import { resolveProviderProcessEnv } from './providerProcessEnv';
 
@@ -60,6 +61,8 @@ const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
 const WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS = 1_000;
+const PROBE_HOME_REMOVE_ATTEMPTS = 3;
+const PROBE_HOME_REMOVE_RETRY_DELAY_MS = 50;
 const DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY = 8;
 const DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS = 30 * 60 * 1000;
 const READINESS_PROMPT = 'Reply exactly OK.';
@@ -489,17 +492,48 @@ export function readinessSemanticInactivityTimeoutForProvider(
   return Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
 }
 
-async function defaultRuntimeReadinessProbe(input: {
-  runtime: LlmRuntime;
-  env: NodeJS.ProcessEnv;
-  timeoutMs: number;
-  cwd?: string;
-}): Promise<RuntimeReadinessProbeResult> {
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Removes an ephemeral probe home. A child aborted mid-turn can still be
+ * flushing files into its CODEX_HOME, which makes a single `fs.rm` fail with
+ * ENOTEMPTY or EBUSY; retry briefly so a mid-flush removal cannot leak it.
+ */
+async function removeCodexProbeHome(probeHome: string): Promise<void> {
+  for (let attempt = 0; attempt < PROBE_HOME_REMOVE_ATTEMPTS; attempt += 1) {
+    try {
+      await fs.rm(probeHome, { recursive: true, force: true });
+      return;
+    } catch {
+      await delay(PROBE_HOME_REMOVE_RETRY_DELAY_MS);
+    }
+  }
+  await fs.rm(probeHome, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/**
+ * Test seam: `deps` lets tests substitute provider backends, so the default
+ * probe's CODEX_HOME lifecycle can be exercised without spawning a real CLI.
+ */
+export async function defaultRuntimeReadinessProbe(
+  input: {
+    runtime: LlmRuntime;
+    env: NodeJS.ProcessEnv;
+    timeoutMs: number;
+    cwd?: string;
+  },
+  deps?: { backendFactories?: Record<string, LlmBackendFactory> },
+): Promise<RuntimeReadinessProbeResult> {
   const binaryPath = input.runtime.binaryPath;
   if (!binaryPath) {
     return { ok: false, message: 'Runtime has no binary path.' };
   }
-  const factory = createRegistryBackendFactories()[input.runtime.provider];
+  const backendFactories = deps?.backendFactories ?? createRegistryBackendFactories();
+  const factory = backendFactories[input.runtime.provider];
   if (!factory) {
     return { ok: false, message: `No readiness backend is registered for provider: ${input.runtime.provider}` };
   }
@@ -580,12 +614,33 @@ async function defaultRuntimeReadinessProbe(input: {
     message: error instanceof Error ? error.message : String(error),
   }));
 
+  // The ephemeral CODEX_HOME must not outlive the probe. Removals run through a
+  // single chain, and the home is removed again whenever the backend settles, so
+  // a child that keeps writing into the directory cannot leave it behind.
+  const home = probeHome;
+  let cleanupChain: Promise<void> = Promise.resolve();
+  const disposeProbeHome = (): Promise<void> => {
+    if (!home) return cleanupChain;
+    cleanupChain = cleanupChain.then(() => removeCodexProbeHome(home));
+    return cleanupChain;
+  };
+  if (home) {
+    void probe.then(() => disposeProbeHome()).catch(() => undefined);
+  }
+
   try {
     return await Promise.race([probe, timeout]);
   } finally {
     if (timer) clearTimeout(timer);
     if (fallbackTimer) clearTimeout(fallbackTimer);
-    if (probeHome) await fs.rm(probeHome, { recursive: true, force: true }).catch(() => undefined);
+    if (home) {
+      // On timeout the backend is still in flight: give it the abort grace to
+      // settle before removing, but never block the caller on a hung child.
+      if (timedOut) {
+        await Promise.race([probe, delay(WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS)]);
+      }
+      await disposeProbeHome();
+    }
   }
 }
 
