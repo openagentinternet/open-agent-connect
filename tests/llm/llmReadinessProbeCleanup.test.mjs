@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -9,13 +9,18 @@ import { watchTempRootPrefix } from '../helpers/tempRoots.mjs';
 const require = createRequire(import.meta.url);
 const { defaultRuntimeReadinessProbe } = require('../../dist/core/llm/llmRuntimeDiscovery.js');
 
-const PROBE_HOME_PREFIX = 'oac-codex-probe-';
+const PROBE_HOME_PREFIX = 'oac-probe-home-';
+const PROBE_CWD_PREFIX = 'oac-probe-cwd-';
+const TEST_SCRATCH_PREFIX = 'oac-probe-test-';
 const TIMEOUT_MS = 50;
 const TIMEOUT_MESSAGE = `Readiness probe timed out after ${TIMEOUT_MS}ms.`;
 const ABORT_GRACE_MARGIN_MS = 3_000;
-// The probe creates its ephemeral CODEX_HOME directly under os.tmpdir(); watch
-// that prefix so a deliberately failing assertion cannot leak the directory.
+// The probe creates its ephemeral home and working directory directly under
+// os.tmpdir(); watch those prefixes so a deliberately failing assertion cannot
+// leak them.
 watchTempRootPrefix(PROBE_HOME_PREFIX);
+watchTempRootPrefix(PROBE_CWD_PREFIX);
+watchTempRootPrefix(TEST_SCRATCH_PREFIX);
 // Copy source for the probe home: a missing path keeps the probe from reading
 // the developer's real ~/.codex while leaving the probe home otherwise empty.
 const PROBE_ENV = { CODEX_HOME: path.join(os.tmpdir(), 'nonexistent-codex-probe-source') };
@@ -194,4 +199,90 @@ test('defaultRuntimeReadinessProbe removes the ephemeral CODEX_HOME when the cod
   assert.equal(result.message, 'codex app-server crashed');
   assertProbeRanAgainstEphemeralHome(stub);
   assert.deepEqual(await listProbeHomes(), [...before]);
+});
+
+function stubBackend(provider, execute) {
+  const captured = {};
+  const backendFactories = {
+    [provider]: (binaryPath, env) => {
+      captured.env = env;
+      return {
+        provider,
+        async execute(request) {
+          captured.cwd = request.cwd;
+          return execute({ captured, request });
+        },
+      };
+    },
+  };
+  return { captured, backendFactories };
+}
+
+function runtimeFor(provider, id) {
+  return { ...codexRuntime(), id, provider };
+}
+
+test('defaultRuntimeReadinessProbe isolates the claude-code probe home via CLAUDE_CONFIG_DIR', async () => {
+  const sourceHome = await mkdtemp(path.join(os.tmpdir(), `${TEST_SCRATCH_PREFIX}src-`));
+  await writeFile(path.join(sourceHome, 'settings.json'), '{"model":"sonnet"}');
+  // .credentials.json intentionally absent: seeding is best-effort per file.
+  const stub = stubBackend('claude-code', async ({ captured }) => {
+    captured.settings = await readFile(path.join(captured.env.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8')
+      .catch(() => null);
+    return { status: 'completed', output: 'OK', durationMs: 1 };
+  });
+
+  const result = await defaultRuntimeReadinessProbe(
+    {
+      runtime: runtimeFor('claude-code', 'llm_claude_probe_isolation_test'),
+      env: { CLAUDE_CONFIG_DIR: sourceHome },
+      timeoutMs: 5_000,
+    },
+    { backendFactories: stub.backendFactories },
+  );
+
+  assert.deepEqual(result, { ok: true, output: 'OK' });
+  const probeHome = stub.captured.env.CLAUDE_CONFIG_DIR;
+  assert.ok(probeHome.startsWith(path.join(os.tmpdir(), PROBE_HOME_PREFIX)));
+  assert.notEqual(path.resolve(probeHome), path.resolve(sourceHome));
+  assert.equal(stub.captured.settings, '{"model":"sonnet"}', 'seed files must be copied into the probe home');
+  await assert.rejects(access(probeHome), 'probe home must be removed after the probe');
+});
+
+test('defaultRuntimeReadinessProbe runs the probe turn from an ephemeral cwd when none is given', async () => {
+  const stub = stubBackend('gemini', async () => ({ status: 'completed', output: 'OK', durationMs: 1 }));
+
+  const result = await defaultRuntimeReadinessProbe(
+    {
+      runtime: runtimeFor('gemini', 'llm_gemini_probe_ephemeral_cwd_test'),
+      env: {},
+      timeoutMs: 5_000,
+    },
+    { backendFactories: stub.backendFactories },
+  );
+
+  assert.deepEqual(result, { ok: true, output: 'OK' });
+  const probeCwd = stub.captured.cwd;
+  assert.ok(probeCwd?.startsWith(path.join(os.tmpdir(), PROBE_CWD_PREFIX)), `unexpected probe cwd: ${probeCwd}`);
+  assert.notEqual(path.resolve(probeCwd), process.cwd(), 'the daemon cwd must not host probe sessions');
+  await assert.rejects(access(probeCwd), 'probe cwd must be removed after the probe');
+});
+
+test('defaultRuntimeReadinessProbe keeps an explicit cwd and does not remove it', async () => {
+  const explicitCwd = await mkdtemp(path.join(os.tmpdir(), `${TEST_SCRATCH_PREFIX}explicit-`));
+  const stub = stubBackend('gemini', async () => ({ status: 'completed', output: 'OK', durationMs: 1 }));
+
+  const result = await defaultRuntimeReadinessProbe(
+    {
+      runtime: runtimeFor('gemini', 'llm_gemini_probe_explicit_cwd_test'),
+      env: {},
+      timeoutMs: 5_000,
+      cwd: explicitCwd,
+    },
+    { backendFactories: stub.backendFactories },
+  );
+
+  assert.deepEqual(result, { ok: true, output: 'OK' });
+  assert.equal(path.resolve(stub.captured.cwd), path.resolve(explicitCwd));
+  await access(explicitCwd);
 });

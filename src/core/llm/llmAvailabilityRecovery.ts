@@ -7,12 +7,20 @@ import type { LlmRuntime } from './llmTypes';
 export const LLM_AVAILABILITY_RECOVERY_DISABLED_ENV = 'METABOT_LLM_AVAILABILITY_RECOVERY_DISABLED';
 
 const DEFAULT_INTERVAL_MS = 60_000;
-const DEFAULT_BASE_BACKOFF_MS = 60_000;
-const DEFAULT_MAX_BACKOFF_MS = 30 * 60_000;
+// Every probe is a real CLI turn that can surface in the provider's session
+// history, so the background trickle stays deliberately slow: the first
+// retry waits 10 minutes and the exponential schedule is capped at 2 hours.
+// Interactive recovery does not wait — chat paths that find no selectable
+// runtime call requestSoon, which bypasses backoff.
+const DEFAULT_BASE_BACKOFF_MS = 10 * 60_000;
+const DEFAULT_MAX_BACKOFF_MS = 2 * 60 * 60_000;
 const DEFAULT_GLOBAL_CONCURRENCY = 2;
 // One probe per store per cycle (spec R4.4): availability recovery is a
 // background trickle, never a burst competing with interactive turns.
 const PER_STORE_PROBE_LIMIT = 1;
+// Whole-cycle budget across every target store: a machine with many Bot
+// profiles must not walk all of its stale runtimes in one burst.
+const DEFAULT_MAX_PROBES_PER_CYCLE = 2;
 
 interface BackoffRecord {
   failures: number;
@@ -26,8 +34,9 @@ export interface LlmAvailabilityRecovery {
   /** Run one full cycle over all target stores. Primarily for tests. */
   runCycleOnce: () => Promise<void>;
   /**
-   * Ask for an expedited cycle on one store (spec R5.3), e.g. after a chat
-   * turn found no selectable runtime. Coalesced per store, fire-and-forget.
+   * Ask for an expedited probe pass on one store (spec R5.3), e.g. after a
+   * chat turn found no selectable runtime. Demand-driven, so it bypasses the
+   * background backoff. Coalesced per store, fire-and-forget.
    */
   requestSoon: (homeDir: string) => void;
 }
@@ -62,6 +71,8 @@ export function createLlmAvailabilityRecovery(input: {
   baseBackoffMs?: number;
   maxBackoffMs?: number;
   globalConcurrency?: number;
+  /** Whole-cycle probe budget across every target store. */
+  maxProbesPerCycle?: number;
   logger?: (message: string, error?: unknown) => void;
 }): LlmAvailabilityRecovery {
   const env = input.env ?? process.env;
@@ -72,6 +83,7 @@ export function createLlmAvailabilityRecovery(input: {
   const baseBackoffMs = input.baseBackoffMs ?? DEFAULT_BASE_BACKOFF_MS;
   const maxBackoffMs = input.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
   const globalConcurrency = Math.max(1, Math.floor(input.globalConcurrency ?? DEFAULT_GLOBAL_CONCURRENCY));
+  const maxProbesPerCycle = Math.max(1, Math.floor(input.maxProbesPerCycle ?? DEFAULT_MAX_PROBES_PER_CYCLE));
   const logger = input.logger ?? (() => undefined);
 
   // In-memory per-runtime backoff (spec R4.3): the persisted healthCheckedAt
@@ -101,16 +113,20 @@ export function createLlmAvailabilityRecovery(input: {
     backoffByRuntimeId.set(runtime.id, { failures, nextAttemptAt: failedAt + delay });
   };
 
-  const runCycleForHome = async (homeDir: string): Promise<void> => {
-    if (input.isStoreBusy?.(homeDir)) return;
-    if (inFlightHomes.has(homeDir)) return;
+  const runCycleForHome = async (
+    homeDir: string,
+    options?: { ignoreBackoff?: boolean },
+  ): Promise<boolean> => {
+    if (input.isStoreBusy?.(homeDir)) return false;
+    if (inFlightHomes.has(homeDir)) return false;
     inFlightHomes.add(homeDir);
     try {
       const store = storeForHome(homeDir);
       const state = await store.read();
       const nowMs = now();
       const candidates = state.runtimes
-        .filter((runtime) => isRecoveryCandidate(runtime, nowMs) && backoffAllows(runtime.id, nowMs))
+        .filter((runtime) => isRecoveryCandidate(runtime, nowMs)
+          && (options?.ignoreBackoff || backoffAllows(runtime.id, nowMs)))
         .slice(0, PER_STORE_PROBE_LIMIT);
       for (const candidate of candidates) {
         try {
@@ -122,6 +138,7 @@ export function createLlmAvailabilityRecovery(input: {
           recordProbeOutcome(candidate, false, now());
         }
       }
+      return candidates.length > 0;
     } finally {
       inFlightHomes.delete(homeDir);
     }
@@ -132,15 +149,25 @@ export function createLlmAvailabilityRecovery(input: {
     cycleRunning = true;
     try {
       const homes = await input.listTargetHomes();
+      let probesThisCycle = 0;
       // Small worker pool: at most `globalConcurrency` stores probed at once.
       let nextIndex = 0;
       const workers = Array.from({ length: Math.min(globalConcurrency, homes.length) }, async () => {
         while (nextIndex < homes.length) {
           const homeDir = homes[nextIndex];
           nextIndex += 1;
-          await runCycleForHome(homeDir).catch((error) => {
+          if (probesThisCycle >= maxProbesPerCycle) continue;
+          // Claim the slot before awaiting so concurrent workers cannot
+          // collectively overshoot the budget; release it when the store
+          // turns out to have no probeable candidate.
+          probesThisCycle += 1;
+          let probed = false;
+          try {
+            probed = await runCycleForHome(homeDir);
+          } catch (error) {
             logger(`[llm availability recovery] cycle failed for ${homeDir}`, error);
-          });
+          }
+          if (!probed) probesThisCycle -= 1;
         }
       });
       await Promise.all(workers);
@@ -172,7 +199,7 @@ export function createLlmAvailabilityRecovery(input: {
       pendingSoonHomes.add(homeDir);
       setImmediate(() => {
         pendingSoonHomes.delete(homeDir);
-        void runCycleForHome(homeDir).catch((error) => {
+        void runCycleForHome(homeDir, { ignoreBackoff: true }).catch((error) => {
           logger(`[llm availability recovery] requested cycle failed for ${homeDir}`, error);
         });
       });

@@ -59,6 +59,21 @@ export interface PlatformDefinition {
       readinessTimeoutMs?: number;
       versionProbeTimeoutMs?: number;
       semanticInactivityTimeoutMs?: number;
+      /**
+       * Readiness probes run a real one-shot CLI turn. CLIs that record every
+       * thread in a user-visible session history get their state home
+       * redirected to an ephemeral directory during the probe (the paths in
+       * `seedPaths` are copied in from the real home), so synthetic probe
+       * turns never surface in the user's conversation history.
+       */
+      probeHome?: {
+        /** Env var the CLI honors as its state-home directory override. */
+        envName: string;
+        /** State-home source when the env var is unset; relative to the user's home. */
+        defaultSourceHome?: string;
+        /** Files or directories copied from the source home into the ephemeral home before the probe. */
+        seedPaths?: string[];
+      };
     };
   };
   skills: {
@@ -127,7 +142,15 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       versionArgs: ['--version'],
       authEnv: ['ANTHROPIC_API_KEY'],
       capabilities: DEFAULT_CAPABILITIES,
-      probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
+      probeHints: {
+        readinessTimeoutMs: 45_000,
+        semanticInactivityTimeoutMs: 45_000,
+        probeHome: {
+          envName: 'CLAUDE_CONFIG_DIR',
+          defaultSourceHome: '.claude',
+          seedPaths: ['.credentials.json', 'settings.json'],
+        },
+      },
     },
     skills: {
       roots: [
@@ -151,7 +174,15 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       versionArgs: ['--version'],
       authEnv: ['OPENAI_API_KEY'],
       capabilities: DEFAULT_CAPABILITIES,
-      probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
+      probeHints: {
+        readinessTimeoutMs: 45_000,
+        semanticInactivityTimeoutMs: 45_000,
+        probeHome: {
+          envName: 'CODEX_HOME',
+          defaultSourceHome: '.codex',
+          seedPaths: ['auth.json', 'config.toml'],
+        },
+      },
     },
     skills: {
       roots: [
@@ -335,6 +366,22 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       versionArgs: ['--version'],
       authEnv: ['KIMI_API_KEY'],
       capabilities: DEFAULT_CAPABILITIES,
+      probeHints: {
+        // Kimi Code keeps sessions under $HOME/.kimi-code and lists them in
+        // its session picker; a redirected HOME (seeded with auth/config)
+        // keeps probe turns out of that list.
+        probeHome: {
+          envName: 'HOME',
+          seedPaths: [
+            '.kimi-code/config.toml',
+            '.kimi-code/credentials',
+            '.kimi-code/oauth',
+            '.kimi-code/device_id',
+            '.kimi-code/region',
+            '.kimi-code/server.token',
+          ],
+        },
+      },
     },
     skills: {
       roots: [
@@ -412,7 +459,16 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       capabilities: DEFAULT_CAPABILITIES,
       defaultExecutablePaths: ['/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'],
       nodeRuntime: { minimumVersion: '22.5.0' },
-      probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
+      probeHints: {
+        readinessTimeoutMs: 45_000,
+        semanticInactivityTimeoutMs: 45_000,
+        // ZCode stores rollout/session files under $HOME/.zcode; a redirected
+        // HOME (seeded with the CLI configs) keeps probe turns out of them.
+        probeHome: {
+          envName: 'HOME',
+          seedPaths: ['.zcode/v2/config.json', '.zcode/cli/config.json'],
+        },
+      },
     },
     skills: {
       roots: [
