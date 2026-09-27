@@ -5,6 +5,20 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
+## Unreleased
+
+### Changed
+
+- Integrated Agent Browser Core 0.6.2 across the root package and all skillpack
+  runtimes. Upstream changes verified compatible with OAC: the SSR renderer's
+  html-frame sandbox is now origin-aware (`renderResourceHtml` accepts an
+  optional `pageOrigin`; OAC renders through the Browser client script, whose
+  sandbox decision is unchanged), and the pin inspector wraps long tokens
+  (`overflow-wrap: anywhere`) and no longer autolinks MetaWeb URIs with empty
+  bodies. The MetaApp preview storage persistence rides in the ephemeral
+  preview origin used by adapter hosts; OAC's daemon-routed local previews are
+  unaffected (agent-browser-core itself ships no runtime change in 0.6.2).
+
 ## 0.9.0 - 2026-09-25
 
 ### Added
