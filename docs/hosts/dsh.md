@@ -28,8 +28,8 @@ start the first chat.
 ## Prerequisites
 
 - DeepSeek Harness with a `web` profile (`dsh web` already runs). The plugin
-  supports the 0.1.5, 0.1.6, and 0.1.7 kernel lines (built and verified
-  against 0.1.7-rc.2, the npm `next` dist-tag); it does not load on
+  supports the 0.1.5, 0.1.6, 0.1.7, and 0.2.0 kernel lines (built and verified
+  against 0.2.0-rc.1); it does not load on
   0.1.0-rc-era kernels.
 - Node.js `>=20 <25` for the `metabot` CLI. DSH itself may run on another Node.
   The plugin looks for `OAC_NODE_PATH`, then `process.execPath` when that Node is
@@ -48,7 +48,7 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 Restart `dsh web` and hard-refresh the browser.
 
-**Desktop app.** The DSH desktop app (0.1.7-rc.2+) runs profile `desktop`
+**Desktop app.** The DSH desktop app (0.1.7-rc.2+, including 0.2.0) runs profile `desktop`
 (`~/.dsh/profiles/desktop`) on the same web-app composition, so the same
 plugin build works there. Install it from the app's plugin manager (Settings →
 Plugins) — the app bundles its own pnpm and needs no system Node — or from a
