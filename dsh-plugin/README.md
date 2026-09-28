@@ -9,17 +9,49 @@ dsh plugin --profile web add open-agent-connect-dsh
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
 Host kernel requirement: this plugin is built and verified against the DSH
-**0.1.7-rc.2** client surface (npm `next` dist-tag) and runs on the
-**0.1.5**, **0.1.6**, and **0.1.7** kernel lines — most peer ranges are
-`^0.1.5-alpha.1 || ^0.1.6-alpha.1 || ^0.1.7-alpha.1`, with the wider
-`^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
+**0.2.0-rc.1** client surface and runs on the
+**0.1.5**, **0.1.6**, **0.1.7**, and **0.2.0** kernel lines — most peer ranges are
+`^0.1.5-alpha.1 || ^0.1.6-alpha.1 || ^0.1.7-alpha.1 || ^0.2.0-rc.1`, with the
+wider `^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
 preset/persona surface still shares. The same build serves the DSH **desktop
 app** (Electron, 0.1.7-rc.2+): it runs profile `desktop`
 (`~/.dsh/profiles/desktop`) composed from the same web-app bundle, so
 `webServer`/`webRuntime` are present, the `platform: "web"` client bundle
 loads, and every slot injection behaves as in the browser. Install it from the
 app's plugin manager, or from a shell with `dsh plugin --profile desktop add
-open-agent-connect-dsh`. The 0.1.7 adaptations worth knowing about:
+open-agent-connect-dsh`. The 0.2.0 adaptations worth knowing about:
+
+- **Peer ranges widened for the compatibility gate.** Every
+  `@deepseek-ai/dsh-*` peer range gained `|| ^0.2.0-rc.1`, and the stale
+  optional peer `@deepseek-ai/dsh-agent-presets` was dropped — that package
+  was renamed to `@deepseek-ai/dsh-agent-preset-registry` back in
+  0.1.7-alpha.1, never existed in any 0.1.7/0.2.0 install, and only survived
+  as a manifest entry (the plugin never imported it). Without both changes
+  the 0.1.7-era compatibility gate refuses `dsh plugin add` on a 0.2.0
+  kernel and skips the whole bundle at profile composition.
+- **No API breakage in 0.2.0.** Every host/client package this plugin
+  touches (`dsh-client-*`, `dsh-api-*`, `dsh-llm`, `dsh-host-webserver`,
+  `dsh-agent-preset-registry`) only added optional members between
+  0.1.7-rc.2 and 0.2.0-rc.1 — no export, hook, slot, or settings-section
+  rename — and the `@deepseek-ai/dsh-web-app/presets/standard.patch.yml`
+  artifact the preset registry re-reads on every apply is byte-identical, so
+  the copy-standard/rewrite-persona strategy carries over unchanged. Session
+  format stays v4; the `plugin:oac-dsh` producer kind is untouched.
+- **"Automation tasks" is DSH's own optional schedule bundle, not ours.** In
+  0.2.0 the built-in schedule rows moved out of the default web composition
+  into the optional, off-by-default
+  `@deepseek-ai/dsh-experimental-schedule-bundle` (sidebar "Automation
+  tasks" page, model-created `schedule_*` reminders queued back into the
+  originating session). It shares nothing with the OAC per-Bot scheduled
+  tasks below (Settings → Bots → Scheduled tab, `metabot schedule *`, runs
+  as NEW DSH conversations) — different names, storage, and semantics, and
+  no tool/panel id collisions, so both can coexist; they only sound alike.
+- **Plugin-card polish for the 0.2.0 plugin manager.** The bundle now ships
+  an `icon` (`./icon.svg`) and `locale/{en,zh}.json` `meta`
+  title/description, so the plugin management page renders a localized card
+  instead of the raw package name/description.
+
+The 0.1.7 adaptations worth knowing about:
 
 - Directory presets (`~/.dsh/.agent-presets`, `agentPresets.copy/read/remove`)
   are gone: presets are declarative in-memory `PresetDefinition`s registered
@@ -65,8 +97,10 @@ open-agent-connect-dsh`. The 0.1.7 adaptations worth knowing about:
   `@deepseek-ai/dsh*` peer ranges against the running runtime version
   (prereleases included) and disables an unsatisfied row with an stderr
   diagnostic instead of letting it crash the profile. This plugin's peer
-  ranges already cover 0.1.7-rc.2, so install and boot stay silent — keep
-  every range anchored on a prerelease lower bound (`^0.1.7-alpha.1`, never
+  ranges track every supported kernel (currently through 0.2.0-rc.1), so
+  install and boot stay silent — keep
+  every range anchored on a prerelease lower bound (`^0.1.7-alpha.1`,
+  `^0.2.0-rc.1`, never
   a bare `^0.1.7`, which excludes rc builds). If a future kernel outgrows
   the ranges, `dsh plugin --profile web allow-version
   open-agent-connect-dsh@<version> --dsh-version <exact-runtime>
