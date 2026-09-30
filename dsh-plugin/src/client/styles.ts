@@ -919,18 +919,23 @@ html.oac-conv-tabs-active [data-slot="sidebar.workspaces"] { display: none !impo
 `
 
 export const BOTSPAGE_CSS = `
-/* Bots main panel: the left nav column (the Settings left-nav vocabulary the
-   page replaces) plus the content column hosting the oac.bots.section pages.
-   Section wrappers stay mounted behind the hidden attribute, so only the
-   page chrome itself carries layout rules; every color rides the same
-   --dsw-alias-* token set as the rest of the plugin. */
+/* Bots main panel: the left nav column replicates the Settings modal's left
+   nav one for one (188px column, 40px cells with icon + ellipsized label,
+   --dsw-specific-sidebar-nav-item hover/active fills, only the background
+   marking the active row), and the section content column centers its 720px
+   measure instead of hugging the left edge. Section wrappers stay mounted
+   behind the hidden attribute, so only the page chrome itself carries layout
+   rules; every color rides the same token set as the rest of the plugin. */
 .oac-bots-page { display: flex; align-items: stretch; height: 100%; min-height: 0; }
-.oac-bots-page-nav { flex: none; width: 200px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 20px 12px; border-right: 1px solid var(--dsw-alias-border-l2); overflow-y: auto; }
-.oac-bots-page-nav-title { margin: 0 8px; font-size: 16px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); }
-.oac-bots-page-nav-list { display: flex; flex-direction: column; gap: 2px; }
-.oac-bots-page-nav-item { appearance: none; border: 0; background: none; font: inherit; font-size: 13px; text-align: left; padding: 7px 8px; border-radius: 8px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
-.oac-bots-page-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.oac-bots-page-nav-item[data-active='true'] { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); font-weight: 600; }
+.oac-bots-page-nav { flex: none; width: 188px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px; min-height: 0; padding: 22px 12px 0; }
+.oac-bots-page-nav-title { margin: 0; padding: 0 12px; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--dsw-alias-label-primary); }
+.oac-bots-page-nav-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+.oac-bots-page-nav-item { box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 40px; padding: 9px 16px 9px 12px; border: none; border-radius: var(--dsw-radius-md, 8px); background: none; font-family: inherit; font-size: 14px; font-weight: 400; line-height: 22px; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; }
+.oac-bots-page-nav-item:hover { background: var(--dsw-specific-sidebar-nav-item-hover, var(--dsw-alias-interactive-bg-hover)); }
+.oac-bots-page-nav-item[data-active='true'] { background: var(--dsw-specific-sidebar-nav-item-active, var(--dsw-alias-interactive-bg-active)); }
 .oac-bots-page-nav-item:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
-.oac-bots-page-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 20px 28px; }
+.oac-bots-page-nav-icon { flex: none; }
+.oac-bots-page-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-bots-page-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
+.oac-bots-page-content > [role='tabpanel'] { max-width: 720px; margin-inline: auto; }
 `

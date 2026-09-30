@@ -3,6 +3,7 @@ export const NS = 'settings.oac.bots'
 
 export const en = {
   nav: 'Bots',
+  navSection: 'My Bots',
   pageSections: 'Bots page sections',
   title: 'Bots',
   loading: 'Loading Bots…',
@@ -312,6 +313,7 @@ export const en = {
 
 export const zh = {
   nav: 'Bots',
+  navSection: '我的 Bot',
   pageSections: 'Bots 页面栏目',
   title: 'Bots',
   loading: '正在读取 Bot 列表…',

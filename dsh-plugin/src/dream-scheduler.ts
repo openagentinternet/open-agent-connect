@@ -64,7 +64,7 @@ export async function runDreamSchedulerTick(
   options: DreamSchedulerOptions & { run: RunFn; llm?: LlmStreamLike },
 ): Promise<DreamBotOutcome[]> {
   const outcomes: DreamBotOutcome[] = []
-  // Toggle-off Bots (Bots page → Bots availability switch) run neither dreams
+  // Toggle-off Bots (Bots page → My Bots availability switch) run neither dreams
   // nor memory hygiene — an unavailable Bot is hands-off for every pass.
   const toggleOffSlugs = new Set<string>()
   const list = await options.run(['bot', 'list'], { timeoutMs: LIST_TIMEOUT_MS })

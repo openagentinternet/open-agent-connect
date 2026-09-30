@@ -23,6 +23,9 @@ test('English empty-state copy is the product empty line; zh dictionary is prese
   assert.match(text, /empty: 'No Bots yet/)
   assert.match(text, /empty: '还没有 Bot/)
   assert.match(text, /nav: 'Bots'/)
+  // The Bots page's first nav item reads 我的 Bot / My Bots (the rail row keeps nav: 'Bots').
+  assert.match(text, /navSection: 'My Bots'/)
+  assert.match(text, /navSection: '我的 Bot'/)
 })
 
 test('the listing-head availability filter persists locally and uses the chip availability rule', async () => {

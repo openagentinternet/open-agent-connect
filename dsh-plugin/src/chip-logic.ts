@@ -36,7 +36,7 @@ export type ChipBot = {
   role?: string | null
   /** Profile creation time; local Bots sort oldest-first below the Twin. */
   createdAt?: number
-  /** Bots page → Bots availability toggle (off keeps the Bot out of the chip). */
+  /** Bots page → My Bots availability toggle (off keeps the Bot out of the chip). */
   isAvailable?: boolean
 }
 

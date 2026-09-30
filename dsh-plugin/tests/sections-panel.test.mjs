@@ -96,13 +96,27 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(text, /hidden=\{!selected\}/)
   assert.match(text, /role="tablist"/)
   assert.match(text, /aria-orientation="vertical"/)
+  assert.match(text, /aria-current=\{selected \? 'true' : undefined\}/)
   assert.match(text, /oac-dsh:bots-page-section:v1/)
   assert.match(text, /window\.localStorage/)
-  assert.match(text, /IconAgentPresetOutline16/)
+  // Each nav row carries a per-section icon (Settings left-nav parity).
+  assert.match(text, /'oac-bots': IconAgentPresetOutline16/)
+  assert.match(text, /'oac-memory': IconThinkOutline16/)
+  assert.match(text, /'oac-user': IconUserOutline16/)
+  assert.match(text, /'oac-apps': IconGlobeOutline16/)
+  assert.match(text, /'oac-traffic': IconGaugeOutline16/)
+  assert.match(text, /oac-bots-page-nav-icon/)
+  assert.match(text, /oac-bots-page-nav-label/)
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
-  assert.match(styles, /\.oac-bots-page-nav-item\[data-active='true'\]/)
+  // The nav cells replicate the Settings modal's left-nav tokens, and the
+  // section content column centers its 720px measure.
+  assert.match(styles, /\.oac-bots-page-nav-item\[data-active='true'\] \{ background: var\(--dsw-specific-sidebar-nav-item-active/)
+  assert.match(styles, /\.oac-bots-page-nav-item:hover \{ background: var\(--dsw-specific-sidebar-nav-item-hover/)
+  assert.match(styles, /\.oac-bots-page-content > \[role='tabpanel'\] \{ max-width: 720px; margin-inline: auto; \}/)
   const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(index, /CONVTABS_CSS \+ BOTSPAGE_CSS/)
+  // The first nav item reads 我的 Bot / My Bots; the rail row keeps "Bots".
+  assert.match(index, /label: \(\) => t\('navSection'\)/)
 })
 
 test('services and apps panels keep confirmation gates', async () => {

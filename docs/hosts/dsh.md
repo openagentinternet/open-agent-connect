@@ -68,7 +68,7 @@ failures show on the Bots page. They must not crash the DSH process.
 After install, the left rail gains a **Bots** row directly below 插件. It
 opens the plugin's own Bots page, whose left nav hosts these sections:
 
-- Bots
+- My Bots (我的 Bot)
 - Memory
 - User
 - Apps
@@ -130,7 +130,7 @@ twin` CLI groups expose the whole surface.
 
 ## First Bot
 
-Open the Bots page (left-rail **Bots**, below 插件) → **Bots** → **New**. Pick a name and a DSH provider/model from the
+Open the Bots page (left-rail **Bots**, below 插件) → **My Bots** → **New**. Pick a name and a DSH provider/model from the
 advertised `ctx.llm` directory. That creates the MetaBot identity and a matching
 `oac-<slug>` agent preset (copy of DSH `standard`, `persona` rewritten in place).
 

@@ -4,7 +4,8 @@
  * the `main` panel key (`oac-bots`) — the same mechanism the stock 插件 row
  * uses for the plugin manager. The page hosts every OAC configuration
  * surface that used to be a Settings section (Bots, Memory, User, Apps,
- * Traffic) as one `oac.bots.section` list entry each, so DSH Settings stays
+ * Traffic) as one `oac.bots.section` list entry each — the first labeled
+ * 我的 Bot / My Bots — so DSH Settings stays
  * exactly stock.
  *
  * The chrome mirrors the Plugins settings section's pattern, turned vertical
@@ -22,10 +23,17 @@
  * column (the Bot Browser reveal flow needs the right Sidebar mounted, and
  * the Sidebar's root gates on `activePanelId === null`).
  */
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
 import type { CommonKeyOf, InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import { IconAgentPresetOutline16 } from './icons.ts'
+import {
+  IconAgentPresetOutline16,
+  IconGaugeOutline16,
+  IconGlobeOutline16,
+  IconThinkOutline16,
+  IconUserOutline16,
+  type CompatIconProps,
+} from './icons.ts'
 import type { BotsLocaleKey } from './locale.ts'
 
 /** Owner share of one Bots-page section entry (the page supplies `close`). */
@@ -78,6 +86,15 @@ export type BotsPageProps =
 /** The active-section preference, remembered per browser. */
 const ACTIVE_SECTION_STORAGE_KEY = 'oac-dsh:bots-page-section:v1'
 
+/** Per-section nav icons, keyed by section id (the Settings left nav maps its row icons by id the same way). */
+const SECTION_ICONS: Readonly<Record<string, ComponentType<CompatIconProps>>> = {
+  'oac-bots': IconAgentPresetOutline16,
+  'oac-memory': IconThinkOutline16,
+  'oac-user': IconUserOutline16,
+  'oac-apps': IconGlobeOutline16,
+  'oac-traffic': IconGaugeOutline16,
+}
+
 function readActiveSection(): string | null {
   try { return window.localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY) } catch { return null }
 }
@@ -128,6 +145,7 @@ export function BotsPage({ t, renderSlot, useSections, close }: BotsPageProps): 
         <div className="oac-bots-page-nav-list" role="tablist" aria-orientation="vertical" aria-label={t('pageSections')}>
           {rows.map((row, index) => {
             const selected = row.id === active
+            const Icon = SECTION_ICONS[row.id]
             return (
               <button
                 key={row.id}
@@ -137,13 +155,15 @@ export function BotsPage({ t, renderSlot, useSections, close }: BotsPageProps): 
                 role="tab"
                 className="oac-bots-page-nav-item"
                 aria-selected={selected}
+                aria-current={selected ? 'true' : undefined}
                 aria-controls={panelId(row.id)}
                 data-active={selected ? 'true' : undefined}
                 tabIndex={selected ? 0 : -1}
                 onClick={() => { setActiveId(row.id) }}
                 onKeyDown={(event) => { moveItem(event, index) }}
               >
-                {row.label}
+                {Icon === undefined ? null : <Icon size={16} className="oac-bots-page-nav-icon" />}
+                <span className="oac-bots-page-nav-label">{row.label}</span>
               </button>
             )
           })}
