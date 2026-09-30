@@ -59,10 +59,12 @@ export function shouldRestoreBrowserContent(revision: number, paramsUrl: string 
 
 /**
  * openTab-retry delays: `ctx.sidebarRight.openTab` throws while no Session
- * surface is mounted (e.g. right after `selectPanel(null)` flips back from a
- * global main panel, before the right-Sidebar seat remounts). Three short
- * attempts cover the remount frame; a permanent failure (no Session at all)
- * is surfaced by the caller.
+ * surface is on screen (e.g. right after `selectPanel(null)` flips back from
+ * a global main panel). Since DSH 0.2.0-rc.2 the right Sidebar's `mounted`
+ * session derives from the session selection and is published before React
+ * renders — no longer gated on the seat remount — so the failure window is
+ * smaller; three short attempts still cover the flip-back frame. A permanent
+ * failure (no Session at all) is surfaced by the caller.
  */
 export const OPEN_TAB_RETRY_DELAYS_MS = [0, 50, 150] as const
 

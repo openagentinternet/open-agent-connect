@@ -29,7 +29,7 @@ start the first chat.
 
 - DeepSeek Harness with a `web` profile (`dsh web` already runs). The plugin
   supports the 0.1.5, 0.1.6, 0.1.7, and 0.2.0 kernel lines (built and verified
-  against 0.2.0-rc.1); it does not load on
+  against 0.2.0-rc.2); it does not load on
   0.1.0-rc-era kernels.
 - Node.js `>=20 <25` for the `metabot` CLI. DSH itself may run on another Node.
   The plugin looks for `OAC_NODE_PATH`, then `process.execPath` when that Node is
