@@ -119,7 +119,7 @@ function toolError(tool: string, error: unknown): string {
 
 const NO_SESSION = [
   'could not determine the acting Bot profile: this session is not an OAC Bot conversation and the machine has no Twin Bot.',
-  'Ask the owner to create or designate one (Bots page → Bots, or `metabot bot create --type twin`), then retry.',
+  'Ask the owner to create or designate one (Bots page → My Bots, or `metabot bot create --type twin`), then retry.',
 ].join(' ')
 
 export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps & {

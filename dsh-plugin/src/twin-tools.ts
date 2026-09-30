@@ -347,7 +347,7 @@ export function createTwinOrchestrator(
         dshLlmProvider: typeof workerProfile?.dshLlmProvider === 'string' ? workerProfile.dshLlmProvider : null,
         dshLlmModel: typeof workerProfile?.dshLlmModel === 'string' ? workerProfile.dshLlmModel : null,
       })) {
-        return failure('worker_unavailable', `Worker Bot "${workerSlug}" is unavailable (Bots page → Bots toggle off, or no DSH LLM pair configured). Re-enable it and configure its DSH LLM pair before delegating.`)
+        return failure('worker_unavailable', `Worker Bot "${workerSlug}" is unavailable (Bots page → My Bots toggle off, or no DSH LLM pair configured). Re-enable it and configure its DSH LLM pair before delegating.`)
       }
       const agentsRegistry = agentsRegistryOf(ctx)
       if (!agentsRegistry?.create || !ctx.agentPresets?.mount) {
@@ -358,7 +358,7 @@ export function createTwinOrchestrator(
       // so resolve the pair here (worker Bot pair, then the host default).
       const modelPair = workerModelPair(ctx, workerProfile)
       if (!modelPair) {
-        return failure('delegation_unavailable', 'No LLM model for the worker session: configure the Worker Bot DSH LLM pair (Bots page → Bots) or a host default model.')
+        return failure('delegation_unavailable', 'No LLM model for the worker session: configure the Worker Bot DSH LLM pair (Bots page → My Bots) or a host default model.')
       }
 
       // Resolve or create the task + step.
