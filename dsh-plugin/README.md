@@ -9,7 +9,7 @@ dsh plugin --profile web add open-agent-connect-dsh
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
 Host kernel requirement: this plugin is built and verified against the DSH
-**0.2.0-rc.1** client surface and runs on the
+**0.2.0-rc.2** client surface and runs on the
 **0.1.5**, **0.1.6**, **0.1.7**, and **0.2.0** kernel lines — most peer ranges are
 `^0.1.5-alpha.1 || ^0.1.6-alpha.1 || ^0.1.7-alpha.1 || ^0.2.0-rc.1`, with the
 wider `^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
@@ -36,7 +36,14 @@ open-agent-connect-dsh`. The 0.2.0 adaptations worth knowing about:
   rename — and the `@deepseek-ai/dsh-web-app/presets/standard.patch.yml`
   artifact the preset registry re-reads on every apply is byte-identical, so
   the copy-standard/rewrite-persona strategy carries over unchanged. Session
-  format stays v4; the `plugin:oac-dsh` producer kind is untouched.
+  format stays v4; the `plugin:oac-dsh` producer kind is untouched. rc.2
+  keeps that streak: the only removed symbols anywhere in scope
+  (`SidebarRightBinding`, `SidebarRightInjected.bindService`, and
+  `AgentPresetSectionInjected.developerTools`) are faces this plugin never
+  consumes, `standard.patch.yml` is byte-identical again, and the
+  compatibility gate is unchanged — the existing `^0.2.0-rc.1` peer ranges
+  already admit 0.2.0-rc.2 (and the whole 0.2.x line), so no manifest change
+  was needed beyond re-verifying.
 - **"Automation tasks" is DSH's own optional schedule bundle, not ours.** In
   0.2.0 the built-in schedule rows moved out of the default web composition
   into the optional, off-by-default
@@ -97,7 +104,7 @@ The 0.1.7 adaptations worth knowing about:
   `@deepseek-ai/dsh*` peer ranges against the running runtime version
   (prereleases included) and disables an unsatisfied row with an stderr
   diagnostic instead of letting it crash the profile. This plugin's peer
-  ranges track every supported kernel (currently through 0.2.0-rc.1), so
+  ranges track every supported kernel (currently through 0.2.0-rc.2), so
   install and boot stay silent — keep
   every range anchored on a prerelease lower bound (`^0.1.7-alpha.1`,
   `^0.2.0-rc.1`, never
