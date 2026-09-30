@@ -670,6 +670,18 @@ and hand real commitments to scheduled tasks.
 - **Reports** land in the run store (`reportMarkdown` + parsed JSON stats),
   shown in the Advanced tab and readable by the Bot via `metaweb_surf_status`;
   a run's `notes` ride back into the next surf's prompt.
+- **Failure observability + retry policy**: a failed run row carries a
+  structured `failure` (`{stage, code, stack, context}`) next to the error
+  string — bootstrap module-load failures are classified (missing / denied /
+  build-in-progress, with the dist state attached) and LLM failures carry
+  the host-path + local-runtime health snapshot, so a bad night explains
+  itself in the Advanced tab, the chat tools, and `/ui/surf`. The pre-dream
+  gate reads the same run history: consecutive failures back off
+  exponentially (30 min doubling to 6 h, counted per failure-code class),
+  and five same-code failures in a row open a 24 h circuit breaker — every
+  surface (Advanced tab note, status `formatted`, the dream-scheduler log)
+  shows the deferral and the next attempt, manual surfs always run, and a
+  success resets the breaker.
 - CLI-first for humans and other hosts: `metabot surf
   status|run|enable|disable|budget` (+ daemon `/api/surf/*` routes; `surf
   run` executes inside the daemon, `--wait` polls until settled).
@@ -800,7 +812,11 @@ described in the repo `AGENTS.md`.
 > touches OAC core code (daemon routes, CLI commands, the browser module),
 > you must additionally run `npm run build` from the **repo root** and restart
 > the OAC daemon (`metabot daemon restart`, or the `daemon start` step in the
-> plugin's bootstrap will restart it). The daemon runs independently from
+> plugin's bootstrap will restart it). The root build is atomic
+> (`scripts/build-atomic.mjs` compiles into a sibling temp directory and swaps
+> it in, marking the live tree with `.build-in-progress` while it works), so
+> a running daemon/CLI/scheduled surf never reads a missing or half-written
+> `dist/`. The daemon runs independently from
 > `dsh web`; restarting `dsh web` does not restart the daemon, and vice
 > versa.
 

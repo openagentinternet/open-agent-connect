@@ -19,6 +19,7 @@ import {
   surfEnable,
   surfRunStart,
   surfStatus,
+  type SurfPreDreamDeferral,
   type SurfRun,
 } from './api.js'
 import { markdownLabels } from './markdown-labels.ts'
@@ -68,6 +69,7 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
   const [switchLocked, setSwitchLocked] = useState(true)
   const [running, setRunning] = useState(false)
   const [runs, setRuns] = useState<SurfRun[]>([])
+  const [deferral, setDeferral] = useState<SurfPreDreamDeferral | null>(null)
   const [settingsError, setSettingsError] = useState('')
   const [settingsNotice, setSettingsNotice] = useState('')
   const [nowError, setNowError] = useState('')
@@ -81,6 +83,7 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
       setEnabled(status.surfBeforeDreamEnabled)
       setRunning(status.running)
       setRuns(status.runs)
+      setDeferral(status.preDreamDeferral ?? null)
       setBudget(String(status.interactionBudget))
       return status.running
     } catch {
@@ -180,6 +183,15 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
           <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
         </button>
       </div>
+      {deferral ? (
+        <p className="oac-note error" data-slot="oac-surf-circuit-note">
+          {t('surfCircuitDeferred', {
+            time: deferral.nextAttemptAt ? formatStartedAt(deferral.nextAttemptAt) : '?',
+            count: deferral.consecutiveFailures,
+            code: deferral.code ?? 'UNKNOWN',
+          })}
+        </p>
+      ) : null}
 
       {/* Interaction budget per surf. */}
       <div className="oac-surf-row" data-slot="oac-surf-budget-row">
@@ -235,7 +247,13 @@ export function SurfSection({ bot, t }: { bot: { slug: string }; t: Translate })
             </button>
             <p className="oac-surf-run-stats">{formatRunStats(t, run) || '—'}</p>
             {expandedRun === run.id && run.error ? (
-              <p className="oac-note error">{run.error}</p>
+              <p className="oac-note error">
+                {run.error}
+                {run.failure ? ` [${run.failure.stage}/${run.failure.code}]` : ''}
+              </p>
+            ) : null}
+            {expandedRun === run.id && run.failure?.stack ? (
+              <pre className="oac-surf-run-stack">{run.failure.stack}</pre>
             ) : null}
             {expandedRun === run.id && run.reportMarkdown ? (
               // Markdown (not <pre>): the global browser-links pass wraps

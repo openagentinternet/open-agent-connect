@@ -160,9 +160,13 @@ test('surf status: existing envelope fields are unchanged by the localUiUrl deco
   assert.equal(result.ok, true);
   assert.deepEqual(
     Object.keys(result.data).filter((key) => key !== 'localUiUrl').sort(),
-    ['formatted', 'interactionBudget', 'preDreamDue', 'running', 'runs', 'surfBeforeDreamEnabled'],
+    ['formatted', 'interactionBudget', 'preDreamDeferral', 'preDreamDue', 'running', 'runs', 'surfBeforeDreamEnabled', 'surfCircuit'],
   );
   assert.deepEqual(result.data.runs, []);
+  // Idle breaker: no deferral, and the circuit reports ok with zero strikes.
+  assert.equal(result.data.preDreamDeferral, null);
+  assert.equal(result.data.surfCircuit.reason, 'ok');
+  assert.equal(result.data.surfCircuit.consecutiveFailures, 0);
 });
 
 test('surf run: daemon-proxied envelope carries localUiUrl and keeps run fields', async (t) => {

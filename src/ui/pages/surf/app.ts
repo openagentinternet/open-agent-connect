@@ -130,6 +130,7 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     enabled: false,
     budget: 0,
     preDreamDue: false,
+    preDreamDeferral: null,
     runs: [],
     selectedRunId: '',
     busyRun: false,
@@ -194,9 +195,18 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     const lastRunTitle = lastFinished ? formatDateTime(lastFinished.finishedAt) : '';
     let nextRunLabel = uiText('surf.nextOff', 'Off');
     if (state.enabled) {
-      nextRunLabel = state.preDreamDue
-        ? uiText('surf.nextDueTonight', 'Due tonight, before the dream')
-        : uiText('surf.nextTonight', 'Tonight, before the dream');
+      if (state.preDreamDeferral) {
+        // Failure circuit breaker: the nightly surf is paused — say why.
+        const nextAt = state.preDreamDeferral.nextAttemptAt;
+        nextRunLabel = uiText('surf.nextDeferred', 'Paused until {time} ({count} consecutive failures)', {
+          time: nextAt ? (formatDateTime(nextAt) || String(nextAt)) : '?',
+          count: Number(state.preDreamDeferral.consecutiveFailures) || 0,
+        });
+      } else {
+        nextRunLabel = state.preDreamDue
+          ? uiText('surf.nextDueTonight', 'Due tonight, before the dream')
+          : uiText('surf.nextTonight', 'Tonight, before the dream');
+      }
     }
     const statePill = state.running
       ? statusPill('status-active', uiText('surf.running', 'Running'), true)
@@ -248,6 +258,12 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
   };
   const triggerLabel = (trigger) => uiText('surf.trigger.' + trigger, trigger);
   const runStatusLabel = (status) => uiText('surf.runStatus.' + status, status);
+  // Structured failure tag ([stage/code]) appended to the one-line error.
+  const failureTag = (run) => {
+    const failure = run && run.failure;
+    if (!failure || !failure.code) return '';
+    return ' [' + escapeHtml(String(failure.stage || 'unknown')) + '/' + escapeHtml(String(failure.code)) + ']';
+  };
 
   const safeHref = (rawHref) => {
     const href = String(rawHref || '').trim().replace(/&amp;/g, '&');
@@ -354,7 +370,7 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
         const pulse = run.status === 'running' ? ' data-surf-pulse="true"' : '';
         const startedAt = formatRelative(run.startedAt) || formatDateTime(run.startedAt);
         const errorLine = run.error
-          ? '<div class="surf-run-error">' + escapeHtml(uiText('surf.runError', 'Error: {message}', { message: run.error })) + '</div>'
+          ? '<div class="surf-run-error">' + escapeHtml(uiText('surf.runError', 'Error: {message}', { message: run.error })) + failureTag(run) + '</div>'
           : '';
         return '<tr data-run-id="' + escapeHtml(run.id) + '" data-selected="' + (run.id === state.selectedRunId ? 'true' : 'false') + '">'
           + '<td><span class="status-pill ' + pillKind + '"' + pulse + '><span class="status-dot"></span>' + escapeHtml(runStatusLabel(run.status)) + '</span></td>'
@@ -386,7 +402,10 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     const title = triggerLabel(run.trigger) + ' · ' + (formatDateTime(run.startedAt) || run.startedAt);
     let bodyHtml;
     if (run.error) {
-      bodyHtml = '<p class="status-msg error">' + escapeHtml(uiText('surf.runError', 'Error: {message}', { message: run.error })) + '</p>';
+      bodyHtml = '<p class="status-msg error">' + escapeHtml(uiText('surf.runError', 'Error: {message}', { message: run.error })) + failureTag(run) + '</p>';
+      if (run.failure && run.failure.stack) {
+        bodyHtml += '<pre class="surf-run-stack">' + escapeHtml(String(run.failure.stack)) + '</pre>';
+      }
       if (run.reportMarkdown) bodyHtml += '<div class="report-body">' + renderMarkdown(run.reportMarkdown) + '</div>';
     } else {
       bodyHtml = '<div class="report-body">' + renderMarkdown(run.reportMarkdown) + '</div>';
@@ -417,6 +436,9 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
       state.enabled = data.surfBeforeDreamEnabled === true;
       state.budget = Number(data.interactionBudget) || 0;
       state.preDreamDue = data.preDreamDue === true;
+      state.preDreamDeferral = data.preDreamDeferral && typeof data.preDreamDeferral === 'object'
+        ? data.preDreamDeferral
+        : null;
       state.runs = Array.isArray(data.runs) ? data.runs : [];
       if (!state.selectedRunId && state.runs.length) {
         state.selectedRunId = state.runs[0].id;

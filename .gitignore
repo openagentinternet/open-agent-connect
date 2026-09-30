@@ -1,5 +1,8 @@
 node_modules/
 dist/
+.dist-build-*
+.dist-old-*
+.dist-build.lock
 dsh-plugin/node_modules/
 dsh-plugin/lib/
 release/packs/

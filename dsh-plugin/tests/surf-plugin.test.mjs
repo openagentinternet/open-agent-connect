@@ -136,6 +136,26 @@ test('dream scheduler: pre-dream surf runs before the dream when due, never bloc
   assert.equal(outcomes3[0].surfRan, undefined)
   assert.match(outcomes3[0].surfSkipped ?? '', /not due/)
 
+  // Failure circuit breaker → the skip reason names the breaker, not a routine skip.
+  const runDeferred = async (args) => {
+    const verb = args.slice(0, 2).join(' ')
+    if (verb === 'surf status') {
+      return resultOf(true, {
+        preDreamDue: false,
+        preDreamDeferral: {
+          reason: 'open',
+          consecutiveFailures: 5,
+          code: 'LLM_RUNTIME_UNAVAILABLE',
+          nextAttemptAt: '2026-10-02T03:21:00.000Z',
+        },
+      })
+    }
+    return run(args)
+  }
+  const outcomes5 = await plugin.runDreamSchedulerTick({ run: runDeferred, llm })
+  assert.match(outcomes5[0].surfSkipped ?? '', /circuit breaker open/)
+  assert.match(outcomes5[0].surfSkipped ?? '', /LLM_RUNTIME_UNAVAILABLE/)
+
   // Hook disabled → no surf calls at all.
   const outcomes4 = await plugin.runDreamSchedulerTick({ run, llm, surfBeforeDream: false })
   assert.equal(outcomes4[0].surfRan, undefined)

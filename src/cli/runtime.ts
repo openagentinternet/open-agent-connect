@@ -215,6 +215,17 @@ import { getMetabotProfile, listMetabotProfiles } from '../core/bot/metabotProfi
 import { createMetawebSurfStore } from '../core/surf/store';
 import { createSurfSettingsStore } from '../core/surf/settings';
 import { formatSurfRunList } from '../core/surf/format';
+import {
+  classifySurfLlmFailureCode,
+  computeSurfCircuitState,
+  formatSurfCircuitNotice,
+  surfPreDreamDeferral,
+  tagSurfBootstrapError,
+  toSurfRunFailure,
+  trimSurfFailureStack,
+  SURF_CIRCUIT_HISTORY_LIMIT,
+  type SurfRunFailure,
+} from '../core/surf/failure';
 import { retireQaSurfJobsForSurf } from '../core/knowledgebase/studyJobs';
 import {
   createKnowledgeBaseService,
@@ -288,8 +299,10 @@ import {
   createDshPairHostLlmGenerate,
   createHostFirstCompletion,
   createHostLlmExecutorBridge,
+  getActiveHostLlmExecutorBridge,
   setActiveHostLlmExecutorBridge,
 } from '../core/llm/hostLlmExecutorBridge';
+import { readDshLlmBinding } from '../core/bot/dshLlm';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import {
   LlmExecutor,
@@ -5832,9 +5845,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         ]);
         const running = runs.some((run) => run.status === 'running');
         const finishedMs = latest?.finishedAt ? Date.parse(latest.finishedAt) : NaN;
+        // Same breaker the daemon-side gate applies: consecutive failures
+        // back off, a same-code streak pauses the nightly surf for a day.
+        const circuit = computeSurfCircuitState(
+          await createMetawebSurfStore(paths).listRuns(SURF_CIRCUIT_HISTORY_LIMIT),
+          Date.now(),
+        );
+        const circuitNotice = formatSurfCircuitNotice(circuit);
         const preDreamDue = settings.surfBeforeDreamEnabled
           && !running
           && memoryEnabled
+          && circuit.reason === 'ok'
           && (!Number.isFinite(finishedMs) || Date.now() - finishedMs >= 20 * 60 * 60 * 1000);
         return withStandalonePageLocalUiUrl(
           commandSuccess({
@@ -5843,7 +5864,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
             interactionBudget: settings.interactionBudget,
             preDreamDue,
-            formatted: formatSurfRunList(runs),
+            preDreamDeferral: surfPreDreamDeferral(circuit),
+            surfCircuit: circuit,
+            formatted: circuitNotice ? `${circuitNotice}\n\n${formatSurfRunList(runs)}` : formatSurfRunList(runs),
           }),
           'surf',
           path.basename(paths.profileRoot),
@@ -5892,6 +5915,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
                 status: run.status,
                 stats: run.stats,
                 error: run.error,
+                failure: run.failure,
                 reportMarkdown: run.reportMarkdown,
               }),
               'surf',
@@ -6261,31 +6285,41 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   type SurfSessionWriteState = import('../core/surf/guard.js').SurfSessionWriteState;
   let surfChainWriteRef: ((input: Record<string, unknown>) => Promise<{ ok: boolean; message?: string; data?: unknown }>) | null = null;
   const runSurfSessionExecutor = async (surfContext: import('../core/surf/service.js').SurfSessionContext): Promise<import('../core/surf/service.js').SurfSessionResult> => {
-    const {
-      buildSurfSessionPrompt, parseSurfRunReport,
-    } = await import('../core/surf/prompt.js');
-    const {
-      runSurfTurnWithTools, withSurfToolLoopContract,
-    } = await import('../core/surf/turn.js');
+    // Bootstrap: these dynamic imports are the first place a missing,
+    // half-built, or OS-denied dist shows up — classify the failure
+    // (missing / denied / build-in-progress) instead of recording a bare
+    // EPERM/ENOENT string. createMetawebSurfStore rides the static import.
+    let surfModules;
+    try {
+      surfModules = {
+        prompt: await import('../core/surf/prompt.js'),
+        turn: await import('../core/surf/turn.js'),
+        guard: await import('../core/surf/guard.js'),
+        surfReads: await import('../core/surf/surfReads.js'),
+        socialRecall: await import('../core/surf/socialRecall.js'),
+        omniRead: await import('../core/surf/omniRead.js'),
+        writes: await import('../core/surf/writes.js'),
+        surfFormat: await import('../core/surf/format.js'),
+        chainHistory: await import('../core/chainhistory/store.js'),
+      };
+    } catch (error) {
+      throw await tagSurfBootstrapError(error, { distDir: path.resolve(__dirname, '..') });
+    }
+    const { buildSurfSessionPrompt, parseSurfRunReport, SURF_KB_ADD_BUDGET } = surfModules.prompt;
+    const { runSurfTurnWithTools, withSurfToolLoopContract } = surfModules.turn;
     const {
       createSurfChainWriteGuard, foldSurfReceiptsIntoSeenActions,
       recordSurfDeepRead, surfSessionPartialStats, surfReceiptSeenActions,
-    } = await import('../core/surf/guard.js');
-    const { createMetawebSurfStore } = await import('../core/surf/store.js');
-    const { SURF_KB_ADD_BUDGET } = await import('../core/surf/prompt.js');
-    const {
-      metawebPinsBatch, metawebPinVersions, metawebProtocols,
-    } = await import('../core/surf/surfReads.js');
-    const {
-      getSocialFeed, getSocialPost, getSocialPostComments,
-    } = await import('../core/surf/socialRecall.js');
-    const { runOmniReadAction } = await import('../core/surf/omniRead.js');
-    const { surfSignerWrite, formatSurfWriteReceipt } = await import('../core/surf/writes.js');
+    } = surfModules.guard;
+    const { metawebPinsBatch, metawebPinVersions, metawebProtocols } = surfModules.surfReads;
+    const { getSocialFeed, getSocialPost, getSocialPostComments } = surfModules.socialRecall;
+    const { runOmniReadAction } = surfModules.omniRead;
+    const { surfSignerWrite, formatSurfWriteReceipt } = surfModules.writes;
     const {
       formatSurfBatchPins, formatSurfPinVersions, formatSurfProtocolRegistry,
       formatSurfSocialPosts, formatSurfSocialPostDetail, formatSurfSocialComments,
-    } = await import('../core/surf/format.js');
-    const { createChainHistoryStore } = await import('../core/chainhistory/store.js');
+    } = surfModules.surfFormat;
+    const { createChainHistoryStore } = surfModules.chainHistory;
 
     const profile = await getMetabotProfile(systemHomeDir, surfContext.botSlug);
     const homeDir = profile?.homeDir ?? '';
@@ -6345,6 +6379,43 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       },
     });
     const deadlineMs = Date.now() + (surfContext.trigger === 'pre-dream' ? 35 : 60) * 60_000;
+    // Host-path + local-runtime diagnostics, captured so a "no healthy LLM"
+    // failure records WHY (executor lease state, DSH pair presence, and the
+    // health/reason of every local candidate) instead of one bare line.
+    const hostLlmNotes: string[] = [];
+    const hostCompletion = createHostFirstCompletion({
+      dshLlmPath: profilePaths.dshLlmPath,
+      logWarning: (_scope, message) => {
+        if (hostLlmNotes.length < 8) hostLlmNotes.push(String(message).slice(0, 300));
+      },
+    });
+    const collectSurfLlmDiagnostics = async (): Promise<Record<string, unknown>> => {
+      const diagnostics: Record<string, unknown> = {};
+      try {
+        const bridge = getActiveHostLlmExecutorBridge();
+        const binding = await readDshLlmBinding(profilePaths.dshLlmPath).catch(() => null);
+        diagnostics.hostPath = {
+          connectedExecutors: bridge ? bridge.connectedExecutors() : 0,
+          dshPairConfigured: Boolean(binding?.dshLlmProvider?.trim() && binding?.dshLlmModel?.trim()),
+          notes: hostLlmNotes,
+        };
+      } catch {
+        // Best-effort diagnostics never mask the real failure.
+      }
+      try {
+        const state = await createLlmRuntimeStore(profilePaths).read();
+        diagnostics.localRuntimes = state.runtimes.slice(0, 12).map((runtime) => ({
+          id: runtime.id,
+          provider: runtime.provider,
+          health: runtime.health,
+          ...(runtime.healthReason ? { healthReason: String(runtime.healthReason).slice(0, 200) } : {}),
+          ...(runtime.unavailableUntil ? { unavailableUntil: runtime.unavailableUntil } : {}),
+        }));
+      } catch {
+        // Best-effort diagnostics never mask the real failure.
+      }
+      return diagnostics;
+    };
     const llm = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
       if (Date.now() > deadlineMs) {
         throw new Error('Surf watchdog: wall-clock budget exhausted — write the final report now.');
@@ -6353,9 +6424,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
         .join('\n\n---\n\n');
       const surfSystemPrompt = 'You are a MetaBot running an unattended MetaWeb surf session. Reply with exactly one ```json fence per turn.';
-      const hostText = await createHostFirstCompletion({
-        dshLlmPath: profilePaths.dshLlmPath,
-      })({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
+      const hostText = await hostCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
       if (hostText !== null) return hostText;
       const result = await runLlmPromptWithRuntimeFallback({
         runtimeResolver,
@@ -6367,7 +6436,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         pollIntervalMs: 5_000,
       });
       if (result.status !== 'completed') {
-        throw new Error(result.error || `Surf turn ended with status ${result.status}`);
+        const message = result.error || `Surf turn ended with status ${result.status}`;
+        const err = new Error(message);
+        (err as Error & { surfFailure?: SurfRunFailure }).surfFailure = {
+          stage: 'session',
+          code: classifySurfLlmFailureCode(message),
+          message,
+          ...(err.stack ? { stack: trimSurfFailureStack(err.stack) } : {}),
+          context: { llm: await collectSurfLlmDiagnostics() },
+        };
+        throw err;
       }
       return result.output;
     };
@@ -6597,6 +6675,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       (err as Error & { surfPartialStats?: unknown }).surfPartialStats = surfSessionPartialStats(writeState);
+      // A turn that died without an inner tag (prompt build, report parse,
+      // receipt folding) still records a classified session-stage failure.
+      const tagged = err as Error & { surfFailure?: SurfRunFailure };
+      if (!tagged.surfFailure) tagged.surfFailure = toSurfRunFailure(err, 'session');
       throw err;
     }
   };

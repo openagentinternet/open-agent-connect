@@ -7,8 +7,28 @@ tags for releases.
 
 ## Unreleased
 
+### Fixed
+
+- MetaWeb surf pre-dream reliability: failed surf runs now record a
+  structured `failure` (`stage`/`code`/`stack`/`context`) next to the error
+  string — bootstrap module-load errors are classified (missing / denied /
+  build-in-progress, with the dist state attached) and LLM failures carry
+  the host-path + local-runtime health snapshot, so a failed night explains
+  itself in the Advanced tab, the chat tools, and `/ui/surf`. The pre-dream
+  gate reads the same run history: consecutive failures back off
+  exponentially per failure-code class (30 min doubling to 6 h), and five
+  same-code failures in a row open a 24 h circuit breaker (every surface
+  shows the deferral and next attempt; manual surfs always run, and a
+  success resets the breaker) instead of re-colliding with a deterministic
+  environment failure every dream tick.
+
 ### Changed
 
+- The root build is atomic: `scripts/build-atomic.mjs` compiles into a
+  sibling temp directory and swaps it in (marking the live tree with
+  `.build-in-progress` while it works), replacing `rimraf dist && tsc`, so a
+  running daemon/CLI/scheduled surf never reads a missing or half-written
+  `dist/`.
 - Integrated Agent Browser Core 0.6.2 across the root package and all skillpack
   runtimes. Upstream changes verified compatible with OAC: the SSR renderer's
   html-frame sandbox is now origin-aware (`renderResourceHtml` accepts an

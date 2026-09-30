@@ -1961,6 +1961,20 @@ export async function scheduleDelete(from: string, id: string): Promise<void> {
 
 export type SurfRunStatus = 'running' | 'done' | 'failed'
 
+export interface SurfRunFailure {
+  stage: string
+  code: string
+  message: string
+  stack?: string
+}
+
+export interface SurfPreDreamDeferral {
+  reason: 'backoff' | 'open'
+  consecutiveFailures: number
+  code: string | null
+  nextAttemptAt: string | null
+}
+
 export interface SurfRun {
   id: string
   trigger: string
@@ -1980,6 +1994,7 @@ export interface SurfRun {
   }
   reportMarkdown: string | null
   error: string | null
+  failure: SurfRunFailure | null
   startedAt: string
   finishedAt: string | null
 }
@@ -1990,11 +2005,15 @@ export interface SurfStatus {
   surfBeforeDreamEnabled: boolean
   interactionBudget: number
   preDreamDue?: boolean
+  preDreamDeferral?: SurfPreDreamDeferral | null
 }
 
 function surfRunOf(row: Record<string, unknown>): SurfRun {
   const stats = (row.stats && typeof row.stats === 'object' ? row.stats : {}) as Record<string, unknown>
   const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 0)
+  const failureRaw = row.failure && typeof row.failure === 'object' && !Array.isArray(row.failure)
+    ? row.failure as Record<string, unknown>
+    : null
   return {
     id: String(row.id ?? ''),
     trigger: String(row.trigger ?? 'manual-ui'),
@@ -2014,8 +2033,29 @@ function surfRunOf(row: Record<string, unknown>): SurfRun {
     },
     reportMarkdown: typeof row.reportMarkdown === 'string' ? row.reportMarkdown : null,
     error: typeof row.error === 'string' ? row.error : null,
+    failure: failureRaw
+      ? {
+        stage: String(failureRaw.stage ?? 'unknown'),
+        code: String(failureRaw.code ?? 'UNKNOWN'),
+        message: String(failureRaw.message ?? ''),
+        ...(typeof failureRaw.stack === 'string' ? { stack: failureRaw.stack } : {}),
+      }
+      : null,
     startedAt: String(row.startedAt ?? ''),
     finishedAt: typeof row.finishedAt === 'string' ? row.finishedAt : null,
+  }
+}
+
+function surfPreDreamDeferralOf(value: unknown): SurfPreDreamDeferral | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const reason = record.reason === 'open' ? 'open' : record.reason === 'backoff' ? 'backoff' : null
+  if (!reason) return null
+  return {
+    reason,
+    consecutiveFailures: typeof record.consecutiveFailures === 'number' ? Math.floor(record.consecutiveFailures) : 0,
+    code: typeof record.code === 'string' ? record.code : null,
+    nextAttemptAt: typeof record.nextAttemptAt === 'string' ? record.nextAttemptAt : null,
   }
 }
 
@@ -2028,6 +2068,7 @@ export async function surfStatus(from: string, limit = 5): Promise<SurfStatus> {
     surfBeforeDreamEnabled: data.surfBeforeDreamEnabled === true,
     interactionBudget: typeof data.interactionBudget === 'number' ? data.interactionBudget : 20,
     preDreamDue: data.preDreamDue === true,
+    preDreamDeferral: surfPreDreamDeferralOf(data.preDreamDeferral),
   }
 }
 

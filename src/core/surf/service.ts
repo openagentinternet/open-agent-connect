@@ -23,6 +23,14 @@ import { buildSurfBriefing, renderSurfBriefingMarkdown, type SurfBriefing, type 
 import { extractSurfNotesFromReportJson } from './prompt.js';
 import { surfReceiptsFromChainWriteRecord } from './guard.js';
 import { DEFAULT_SURF_PROTOCOLS, type SurfProtocolDescriptor } from './protocols.js';
+import {
+  attachedSurfFailure,
+  computeSurfCircuitState,
+  toSurfRunFailure,
+  SURF_CIRCUIT_HISTORY_LIMIT,
+  type SurfCircuitState,
+  type SurfFailureStage,
+} from './failure.js';
 import type { MetawebSurfSettingsStore } from './settings.js';
 
 /** A finished surf younger than this makes the pre-dream surf redundant. */
@@ -200,7 +208,10 @@ export class SurfService {
    * Pre-dream gate: the bot's surf-before-dream toggle is explicitly enabled
    * (default OFF — opt-in, since every surf spends LLM tokens and gas) and it
    * has not finished a surf within the recency window (a manual evening surf
-   * makes the nightly one redundant).
+   * makes the nightly one redundant). The failure circuit breaker also holds
+   * the gate: consecutive failures back off exponentially and a same-code
+   * streak pauses the nightly surf for a day instead of re-colliding with a
+   * deterministic environment failure every dream tick.
    */
   async shouldPreDreamSurf(): Promise<boolean> {
     const settings = await this.settings.read();
@@ -213,11 +224,19 @@ export class SurfService {
     } catch {
       return false;
     }
+    const circuit = await this.getSurfCircuit();
+    if (circuit.reason !== 'ok') return false;
     const latest = await this.store.getLatestFinishedRun();
     if (!latest?.finishedAt) return true;
     const finishedMs = Date.parse(latest.finishedAt);
     if (!Number.isFinite(finishedMs)) return true;
     return this.nowMs() - finishedMs >= PRE_DREAM_SURF_RECENCY_MS;
+  }
+
+  /** The pre-dream failure breaker, computed from the recent run history. */
+  async getSurfCircuit(): Promise<SurfCircuitState> {
+    const runs = await this.store.listRuns(SURF_CIRCUIT_HISTORY_LIMIT);
+    return computeSurfCircuitState(runs, this.nowMs());
   }
 
   /**
@@ -267,12 +286,17 @@ export class SurfService {
       if (this.runningRunId === runId) this.runningRunId = null;
     };
     let fetchedCount = 0;
+    // Failure-stage tracking: which pipeline stage was active when the run
+    // died, recorded on the run row so a failure explains itself (a richer
+    // tag attached by the session executor wins over this coarse stage).
+    let stage: SurfFailureStage = 'reconcile';
     try {
       // Reconcile the seen ledger against the local chain-writes ledger
       // first: receipts lost to a crash/kill mid-run are re-derived locally —
       // the duplicate-interaction guard must never work off a stale ledger.
       // Idempotent (strongest-wins batching).
       await this.reconcileSeenLedger();
+      stage = 'briefing';
       const settings = await this.settings.read();
       const budget = settings.interactionBudget;
       // Inbox/radar baseline: the START of the latest finished run (its
@@ -305,6 +329,7 @@ export class SurfService {
       let reportJson: string | null = null;
       const sessionSeenActions: Array<{ pinId: string; action: MetawebSurfSeenAction }> = [];
       if (this.runSurfSession) {
+        stage = 'session';
         const session = await this.runSurfSession({
           runId,
           botSlug: this.botSlug,
@@ -327,6 +352,7 @@ export class SurfService {
       // A run that fails before this point leaves the ledger untouched, so
       // the next surf re-presents the same window — one bad night (LLM
       // timeout, outage) never silently drops that content.
+      stage = 'commit';
       const nowIso = new Date(this.nowMs()).toISOString();
       await this.store.markSeenBatch([
         ...briefing.items.map((item) => ({ pinId: item.pinId, action: 'presented' as const })),
@@ -379,10 +405,15 @@ export class SurfService {
       // attached to the session error by the turn loop) instead of the
       // historical all-zero stats.
       const partial = (error as { surfPartialStats?: Partial<MetawebSurfRunStats> } | null)?.surfPartialStats;
+      // Structured failure: the session executor attaches a richer tag
+      // (bootstrap classification, LLM health diagnostics); otherwise the
+      // coarse pipeline stage + message classification applies.
+      const failure = attachedSurfFailure(error) ?? toSurfRunFailure(error, stage);
       await this.store.finishRun(runId, {
         status: 'failed',
         stats: { ...emptySurfRunStats(), fetched: fetchedCount, ...(partial ?? {}) },
         error: message,
+        failure,
         finishedAtIso: new Date(this.nowMs()).toISOString(),
       });
       await finish('failed', message);
