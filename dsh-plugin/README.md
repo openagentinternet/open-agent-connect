@@ -50,7 +50,7 @@ open-agent-connect-dsh`. The 0.2.0 adaptations worth knowing about:
   `@deepseek-ai/dsh-experimental-schedule-bundle` (sidebar "Automation
   tasks" page, model-created `schedule_*` reminders queued back into the
   originating session). It shares nothing with the OAC per-Bot scheduled
-  tasks below (Settings → Bots → Scheduled tab, `metabot schedule *`, runs
+  tasks below (Bots page → Bots → Scheduled tab, `metabot schedule *`, runs
   as NEW DSH conversations) — different names, storage, and semantics, and
   no tool/panel id collisions, so both can coexist; they only sound alike.
 - **Plugin-card polish for the 0.2.0 plugin manager.** The bundle now ships
@@ -157,7 +157,7 @@ only. It will not
 load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
 until their kernel is upgraded.
 
-After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a center-column overlay panel, and the Bot Browser is a right-Sidebar page tab). The left-rail A2A Chat panellist row is currently hidden (`SHOW_A2A_PANELLIST_ROW = false`); 线上对话 / 群任务 tabs open the overlay. New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). Each private-chat/group-task row carries unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
+After a DSH restart, the left rail gains a **Bots** row directly below 插件 (the same `sidebar.panellist` + `main` panel pair the stock 插件 row uses for the plugin manager). Clicking it opens the plugin's dedicated **Bots page**: its left nav hosts the five configuration sections that used to occupy Settings — **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section stays hidden until the service plugin matures). Visited sections stay mounted, and the page remembers the last-open section across visits. DSH Settings itself is back to stock — the plugin registers no `settings.section` entries. (**A2A Chat** is a center-column overlay panel, and the Bot Browser is a right-Sidebar page tab). The left-rail A2A Chat panellist row is currently hidden (`SHOW_A2A_PANELLIST_ROW = false`); 线上对话 / 群任务 tabs open the overlay. New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). Each private-chat/group-task row carries unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
 
 **A2A Chat panel shape.** A2A Chat is a `shell.overlay` entry (id `oac-a2a`),
 not a kernel global main panel: it covers the center conversation column
@@ -222,8 +222,8 @@ region exactly as DSH shipped it.
 **Chip order and unavailable Bots.** The chip lists the available Twin Bot
 first, then every other row in roster order, with local Bots sorted among
 themselves by profile creation time (oldest first — the newest Bot lands at
-the bottom of the Bot block). A Bot is **unavailable** when its Settings →
-Bots availability toggle is off OR no DSH LLM pair is configured (the same
+the bottom of the Bot block). A Bot is **unavailable** when its Bots page
+availability toggle is off OR no DSH LLM pair is configured (the same
 rule the daemon's group-task seat search applies). Unavailable Bots are
 hidden from the chip, excluded from the Twin's `local_workers_list` roster
 and refused by `local_worker_delegate`, skipped by the dream/hygiene and
@@ -244,7 +244,7 @@ setting pointing at it heals to `standard`.
 Two LLM chains coexist, and every generation site uses exactly one of them:
 
 - **DSH host chain** — the Bot's DSH LLM pair (`dshLlmProvider`/`dshLlmModel`
-  plus optional fallback pair, set in Settings → Bots or via
+  plus optional fallback pair, set on the Bots page → Bots section or via
   `metabot bot create/update --dsh-llm-*`), executed by the DSH host's
   `ctx.llm`. Used for DSH `oac-*` conversations, dreams, chain-history
   summaries, scheduled tasks while DSH runs, and twin worker sub-sessions.
@@ -348,7 +348,7 @@ Prerequisites (surfaced by the health banner above the task list, and by
 `metabot grouptask health`):
 
 - **Twin Bot** — the chair defaults to the machine Twin; create one via
-  Settings → Bots (or `metabot bot create --type twin`).
+  Bots page → Bots (or `metabot bot create --type twin`).
 - **Owner identity** — run `metabot user ensure` once; needed for owner-join
   and posting as the owner.
 - **LLM runtime** — the chair/worker profiles need a configured LLM runtime
@@ -431,12 +431,12 @@ data under `~/.metabot/profiles/<slug>/`):
   decay, tombstone purge, knowledge-revision keep-N, dream-run retention); the
   LLM deep-consolidation step runs only when the Bot has an LLM runtime bound
   and is skipped, not failed, otherwise.
-- **Settings → Memory** — policy card, self-identity card, and the
+- **Bots page → Memory** — policy card, self-identity card, and the
   Knowledge/Contacts/Facts/Dream tabs (incl. manual run-dream). The Dream
   tab lists all recent runs (completed/failed/running, incl. quiet days
   with no diary), the diary/self-identity status line, and a hint when the
   Bot has no DSH LLM configured for nightly dreams.
-- **Settings → User** — Twin Bot identity + per-Bot owner bindings.
+- **Bots page → User** — Twin Bot identity + per-Bot owner bindings.
 - **Twin/Worker** — one Bot marked `botType: twin` gets the local
   orchestration toolset (the IDBots seven, slug-addressed: `local_workers_list`,
   `local_worker_delegate`, `twin_task_status`, `twin_task_reassign`,
@@ -466,7 +466,7 @@ Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 
 ## Scheduled tasks (定时任务)
 
-The Bot editor (Settings → Bots → edit) gains a **Scheduled tab** — every
+The Bot editor (Bots page → Bots → edit) gains a **Scheduled tab** — every
 scheduled task of THIS Bot, fully manageable: create (name, self-contained
 prompt, one-shot `at` / `interval` / 5-field `cron` schedule, execution
 channel), inline edit, enable/disable, delete, Run now, and an expandable
@@ -656,7 +656,7 @@ and hand real commitments to scheduled tasks.
   pins presented and advances watermarks; failure leaves both untouched so
   the next surf re-presents the same window (catch-up semantics).
 - **Triggers**: chat tools `metaweb_surf_start` / `metaweb_surf_status`; the
-  Settings → Bots editor **Advanced** tab (the AI Surf block sits above chain
+  Bots page Bot editor **Advanced** tab (the AI Surf block sits above chain
   & wallet: surf-before-dream toggle — opt-in, default OFF — interaction
   budget, "Surf now", and the surf report list; reports render as markdown
   whose pin ids / `pin://` URIs are clickable links opening the right-sidebar
@@ -785,7 +785,7 @@ npm run build    # always: (re)build the served lib/ artifacts
 
 Then reload the DSH env:
 
-- **Client-only changes** (Settings UI, the sidebar, CSS, locales, …) → hard
+- **Client-only changes** (the Bots page, the sidebar, CSS, locales, …) → hard
   refresh the DSH page (`Cmd+Shift+R`). The web host stat-polls
   `lib/client.js` and serves the new revision, so no restart is needed.
 - **Host-half changes** (new `/oac/api/*` routes, the browser-event hub, any
@@ -815,8 +815,8 @@ capsule that opens an empty tab.
 
 Entry points:
 
-- **Settings → Bots** header gains a **Bot Browser** button (closes Settings as the Browser home opens).
-- Each Bot card gains a **Bot Page** button that closes Settings as that Bot's
+- The **Bots page → Bots** header gains a **Bot Browser** button (leaves the page for the conversation column as the Browser home opens).
+- Each Bot card gains a **Bot Page** button that leaves the page as that Bot's
   page (`metaid://<globalMetaId>`) opens in the tab.
 - In **A2A Chat** and **Group Tasks**, clicking any sender avatar (or the
   thread-header participant avatars), or any Agent Internet URI in a
@@ -890,6 +890,6 @@ page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
 - Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`, `tools`, `systemPrompt`
 - Client: `dsh.client` bundle, no second `cordis.patch.yml` row; inject `slots`, `locale`, `remote`, `remote.agentPresets`, `remote.session`, `layout`, `sidebarRight`, `sidebarRightTabs`
-- Client surfaces: the Settings sections (`oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic`), the A2A Chat `shell.overlay` panel (id `oac-a2a`, center column only; its `sidebar.panellist` row is hidden), and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule)
+- Client surfaces: the Bots main panel (left-rail `sidebar.panellist` row id `oac-bots` + `main` panel key `oac-bots` declaring the `oac.bots.section` child slot; the five section entries `oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic` register into it), the A2A Chat `shell.overlay` panel (id `oac-a2a`, center column only; its `sidebar.panellist` row is hidden), and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule). No `settings.section` entries — DSH Settings stays stock.
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
 - `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).

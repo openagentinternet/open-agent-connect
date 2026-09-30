@@ -1,5 +1,5 @@
 /**
- * Ordering for Bot rows in the Settings → Bots panel.
+ * Ordering for Bot rows in the Bots page's Bots section.
  */
 
 export type BotOrderFields = {

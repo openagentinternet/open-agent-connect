@@ -1,6 +1,6 @@
 /**
  * Knowledge-base / study routes — the host surface for the bot editor's
- * Knowledge tab (Settings → Bots), mirroring IDBots' knowledgeBase:* IPC
+ * Knowledge tab (Bots page → Bots), mirroring IDBots' knowledgeBase:* IPC
  * surface. Reads (kb/list, study/list) run in-process against the OAC core
  * stores; writes forward to the `metabot knowledge-base` CLI verbs so the CLI
  * stays the single management surface. `kb/import` is a raw-byte upload (like

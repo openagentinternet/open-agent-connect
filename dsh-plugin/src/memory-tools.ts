@@ -383,7 +383,7 @@ export interface GlobalKnowledgeToolDeps {
 
 const NO_PROFILE = [
   'could not determine the acting Bot profile: this session is not an OAC Bot conversation and the machine has no Twin Bot.',
-  'Ask the owner to create or designate one (Settings → Bots, or `metabot bot create --type twin`), then retry.',
+  'Ask the owner to create or designate one (Bots page → Bots, or `metabot bot create --type twin`), then retry.',
 ].join(' ')
 
 /**

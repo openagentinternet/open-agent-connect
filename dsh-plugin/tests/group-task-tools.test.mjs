@@ -161,7 +161,7 @@ test('create reports skipped unavailable seats', async () => {
   assert.match(output, /task 8, group group-pin-9/)
   assert.match(output, /Skipped unavailable local seats \(1\)/)
   assert.match(output, /Carol \(slug=carol\): Bot is unavailable/)
-  assert.match(output, /Settings → Bots/)
+  assert.match(output, /Bots page → Bots/)
 })
 
 test('propose forwards the plan, wish, language, and the source session id', async () => {
