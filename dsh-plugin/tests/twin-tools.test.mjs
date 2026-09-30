@@ -484,7 +484,8 @@ test('stopLiveSession cancels a live interactive session', async () => {
   plugin.liveOacAgents.set('bob', { ctx: {}, cancel: (reason) => cancelled.push(reason) })
   const result = await orchestrator.stopLiveSession('bob')
   assert.equal(result.ok, true)
-  assert.equal(cancelled[0].kind, 'orchestrator_stop')
+  assert.equal(cancelled[0].kind, 'hook')
+  assert.equal(cancelled[0].reason, 'Twin requested stop via worker_session_stop')
   plugin.liveOacAgents.delete('bob')
   assert.equal((await orchestrator.stopLiveSession('nobody')).code, 'session_not_live')
   assert.equal((await orchestrator.stopLiveSession('alice')).code, 'same_session')
@@ -536,7 +537,7 @@ test('stopAttempt cancels the in-flight attempt through the agent and keeps the 
   assert.equal(attempt.status, 'cancelled')
   assert.equal(attempt.error, 'STOPPED_BY_TWIN')
   // the running turn was cancelled through the agent (creation signal alone is detached)
-  assert.ok(dsh.cancelled.some((reason) => reason?.kind === 'orchestrator_stop'))
+  assert.ok(dsh.cancelled.some((cause) => cause?.kind === 'hook' && cause?.reason === 'Twin requested stop via worker_session_stop'))
   assert.equal(dsh.disposed.length, 0)
 })
 
