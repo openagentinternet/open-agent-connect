@@ -55,6 +55,16 @@ test('client shadows the hero chip at priority -1 and does not duplicate Agent p
   assert.match(text, /id: 'oac-bots'/)
 })
 
+test('stock Agent presets roster hides the oac-* Bot preset cards', async () => {
+  // Bots are created and edited on the Bots page, so their stock management
+  // cards in Settings → Agent presets are duplicates; the presets stay
+  // registered (chip, composition, default untouched). The roster card is the
+  // only DSH surface carrying data-agent-preset-id, so the prefix rule hides
+  // exactly the oac-* cards while user-authored custom presets still show.
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /li\[data-agent-preset-id\^='oac-'\] \{ display: none; \}/)
+})
+
 test('chip lists stock DSH rows beside oac-* Bot names', async () => {
   const seat = await readFile(join(root, 'src/client/BotPresetSeat.tsx'), 'utf8')
   assert.match(seat, /optionLabel/)
