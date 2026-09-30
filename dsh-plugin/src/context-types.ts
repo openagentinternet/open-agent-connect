@@ -167,6 +167,19 @@ export interface HostApproval {
   overrideOf?(session: unknown): 'ask' | 'never' | undefined
 }
 
+/**
+ * Why an active agent driver was cancelled — mirrors DSH's closed
+ * `AgentCancelCause` union (`packages/core/session`). The host copies the
+ * cause into durable `turn/end` records through a switch whose default branch
+ * is `assertNever`, so a kind outside this union throws inside the turn
+ * finalizer and corrupts the record; keep every `cancel()` call in-union.
+ */
+export type HostAgentCancelCause =
+  | { readonly kind: 'user' }
+  | { readonly kind: 'parent' }
+  | { readonly kind: 'hook'; readonly reason: string }
+  | { readonly kind: 'disposed' }
+
 export interface HostAgentLike {
   id?: string
   ctx: {
@@ -182,7 +195,7 @@ export interface HostAgentLike {
   followup?(message: HostUserMessage): void
   inject?(message: HostUserMessage): void
   whenIdle?(): Promise<unknown>
-  cancel?(reason: unknown): void
+  cancel?(cause: HostAgentCancelCause): void
 }
 
 export interface HostAgentsRegistryLike {

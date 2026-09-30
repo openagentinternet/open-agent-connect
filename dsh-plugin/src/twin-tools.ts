@@ -549,7 +549,7 @@ export function createTwinOrchestrator(
       // cancellation; the Worker session itself stays live (stop ≠ delete).
       flight.settleOverride = { attemptStatus: 'cancelled', error: 'STOPPED_BY_TWIN' }
       try {
-        flight.agent?.cancel?.({ kind: 'orchestrator_stop', reason: 'Twin requested stop via worker_session_stop' })
+        flight.agent?.cancel?.({ kind: 'hook', reason: 'Twin requested stop via worker_session_stop' })
       } catch {
         // worker may already be gone
       }
@@ -628,7 +628,7 @@ export function createTwinOrchestrator(
         // The creation signal alone cannot stop an already-created run; cancel
         // the agent's turn. The Worker session stays live (stop ≠ delete).
         try {
-          flight.agent?.cancel?.({ kind: 'orchestrator_stop', reason: 'reassigned to another worker' })
+          flight.agent?.cancel?.({ kind: 'hook', reason: 'reassigned to another worker' })
         } catch {
           // worker may already be gone
         }
@@ -691,7 +691,7 @@ export function createTwinOrchestrator(
         )
       }
       try {
-        resolved.agent.cancel?.({ kind: 'orchestrator_stop', reason: 'Twin requested stop via worker_session_stop' })
+        resolved.agent.cancel?.({ kind: 'hook', reason: 'Twin requested stop via worker_session_stop' })
       } catch (error) {
         return failure('stop_failed', error instanceof Error ? error.message : String(error))
       }
