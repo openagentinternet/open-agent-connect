@@ -114,9 +114,33 @@ test('failed run keeps real partial stats; ledger and watermark untouched (catch
   assert.equal(run.stats.fetched, 1);
   assert.equal(run.stats.deepRead, 3);
   assert.equal(run.stats.liked, 1);
+  // The run row carries the classified failure (stage + code + stack).
+  assert.equal(run.failure.stage, 'session');
+  assert.equal(run.failure.code, 'SESSION_FAILED');
+  assert.match(run.failure.stack, /LLM transport died/);
   // Catch-up semantics: nothing marked seen, watermark not advanced.
   assert.equal(await store.getSeenAction('p-1'), null);
   assert.equal(await store.getProtocolState('simplebuzz'), null);
+});
+
+test('a richer surfFailure tag attached by the session executor wins over the coarse stage', async () => {
+  const paths = await createTempProfileHome('tagged-failure');
+  const { service } = makeService(paths, {
+    runSurfSession: async () => {
+      const error = new Error('No healthy LLM runtime is available for MetaBot test-slug.');
+      error.surfFailure = {
+        stage: 'session',
+        code: 'LLM_RUNTIME_UNAVAILABLE',
+        message: error.message,
+        context: { llm: { hostPath: { connectedExecutors: 0 } } },
+      };
+      throw error;
+    },
+  });
+  const run = await service.runSurfAndWait('pre-dream');
+  assert.equal(run.status, 'failed');
+  assert.equal(run.failure.code, 'LLM_RUNTIME_UNAVAILABLE');
+  assert.equal(run.failure.context.llm.hostPath.connectedExecutors, 0);
 });
 
 test('pre-dream gate: opt-in default OFF, memory gate, 20h recency window', async () => {
@@ -151,6 +175,61 @@ test('pre-dream gate: opt-in default OFF, memory gate, 20h recency window', asyn
     /requires memory enabled/,
   );
   void store;
+});
+
+test('pre-dream gate: failure circuit breaker backs off, opens on a same-code streak, resets on success', async () => {
+  const paths = await createTempProfileHome('circuit');
+  const settings = createSurfSettingsStore(paths);
+  await settings.update({ surfBeforeDreamEnabled: true });
+  let nowMs = Date.parse('2026-09-15T22:00:00Z');
+  let failSession = true;
+  const { service } = makeService(paths, {
+    nowMs: () => nowMs,
+    isMemoryEnabled: () => true,
+    runSurfSession: async () => {
+      if (failSession) throw new Error('No healthy LLM runtime is available for MetaBot test-slug.');
+      return {};
+    },
+  });
+
+  // First failure: the gate holds for the 30-minute backoff, then clears.
+  const first = await service.runSurfAndWait('pre-dream');
+  assert.equal(first.status, 'failed');
+  assert.equal(first.failure.code, 'LLM_RUNTIME_UNAVAILABLE');
+  assert.equal(await service.shouldPreDreamSurf(), false);
+  nowMs += 31 * 60_000;
+  assert.equal(await service.shouldPreDreamSurf(), true);
+
+  // Drive the streak to the open threshold, stepping past each growing backoff.
+  for (let strike = 2; strike <= 5; strike += 1) {
+    const attempt = await service.runSurfAndWait('pre-dream');
+    assert.equal(attempt.status, 'failed');
+    const circuit = await service.getSurfCircuit();
+    assert.equal(circuit.consecutiveFailures, strike);
+    if (strike < 5) {
+      assert.equal(circuit.reason, 'backoff');
+      nowMs = circuit.backoffUntilMs + 60_000;
+      assert.equal(await service.shouldPreDreamSurf(), true);
+    }
+  }
+
+  // Five same-code failures: the breaker opens and pauses the nightly surf
+  // for a day (an hour later it must still be closed).
+  const opened = await service.getSurfCircuit();
+  assert.equal(opened.reason, 'open');
+  assert.equal(await service.shouldPreDreamSurf(), false);
+  nowMs += 60 * 60_000;
+  assert.equal(await service.shouldPreDreamSurf(), false);
+
+  // A manual success resets the breaker; only the 20h recency gate remains.
+  failSession = false;
+  const manual = await service.runSurfAndWait('manual-ui');
+  assert.equal(manual.status, 'done');
+  const reset = await service.getSurfCircuit();
+  assert.equal(reset.reason, 'ok');
+  assert.equal(reset.consecutiveFailures, 0);
+  nowMs += 21 * 60 * 60_000;
+  assert.equal(await service.shouldPreDreamSurf(), true);
 });
 
 test('pre-run reconciliation folds chain-write receipts into the ledger', async () => {
@@ -220,4 +299,5 @@ test('concurrent runs refuse; crash recovery fails stale running rows', async ()
   assert.equal(recovered, 1);
   const after = await createMetawebSurfStore(paths).getRun('stale-run');
   assert.equal(after.status, 'failed');
+  assert.equal(after.failure.code, 'STALE_RUNNING_SWEPT');
 });

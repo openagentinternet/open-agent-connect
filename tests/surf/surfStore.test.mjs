@@ -40,6 +40,12 @@ test('run lifecycle: create → finish → list newest first, stale sweep', asyn
   await store.createRun({ id: 'run-0', trigger: 'manual-ui', nowIso: '2026-09-15T09:00:00.000Z' });
   // Sweeping without the exclusion clears BOTH stale running rows.
   assert.equal(await store.failStaleRunningRuns({ error: 'restart', nowIso: now }), 2);
+  // Swept rows carry the lifecycle failure classification.
+  const swept = await store.getRun('run-0');
+  assert.equal(swept.status, 'failed');
+  assert.equal(swept.failure.stage, 'lifecycle');
+  assert.equal(swept.failure.code, 'STALE_RUNNING_SWEPT');
+  assert.equal(swept.failure.message, 'restart');
 
   await store.finishRun('run-1', {
     status: 'done',
@@ -51,6 +57,8 @@ test('run lifecycle: create → finish → list newest first, stale sweep', asyn
   const finished = await store.getRun('run-1');
   assert.equal(finished.status, 'done');
   assert.ok(finished.reportMarkdown.length <= 20_000);
+  // A done run clears the sweep's failure classification.
+  assert.equal(finished.failure, null);
   // Missing fields in stats normalize to 0.
   assert.equal(finished.stats.fetched, 10);
   assert.equal(finished.stats.commented, 0);
@@ -60,6 +68,34 @@ test('run lifecycle: create → finish → list newest first, stale sweep', asyn
   const latest = await store.getLatestFinishedRun();
   assert.ok(latest);
   assert.equal(latest.id, 'run-1');
+});
+
+test('failed runs persist the structured failure object; junk normalizes away', async () => {
+  const paths = await createTempProfileHome('failure');
+  const store = createMetawebSurfStore(paths);
+  const now = '2026-09-15T10:00:00.000Z';
+  await store.createRun({ id: 'run-f', trigger: 'pre-dream', nowIso: now });
+  await store.finishRun('run-f', {
+    status: 'failed',
+    stats: { fetched: 3 },
+    error: 'boom',
+    failure: {
+      stage: 'session',
+      code: 'LLM_RUNTIME_UNAVAILABLE',
+      message: 'boom',
+      stack: 'Error: boom\n  at somewhere',
+      context: { llm: { connectedExecutors: 0 } },
+    },
+    finishedAtIso: now,
+  });
+  const failed = await store.getRun('run-f');
+  assert.equal(failed.failure.stage, 'session');
+  assert.equal(failed.failure.code, 'LLM_RUNTIME_UNAVAILABLE');
+  assert.equal(failed.failure.context.llm.connectedExecutors, 0);
+  // Records written before the taxonomy existed read back with failure: null.
+  await store.createRun({ id: 'run-g', trigger: 'manual-ui', nowIso: now });
+  await store.finishRun('run-g', { status: 'failed', stats: {}, error: 'legacy', finishedAtIso: now });
+  assert.equal((await store.getRun('run-g')).failure, null);
 });
 
 test('protocol watermark never rewinds; backlog cursor store/clear/preserve', async () => {

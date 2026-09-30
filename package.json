@@ -59,7 +59,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "pnpm exec rimraf dist && tsc -p tsconfig.json",
+    "build": "node scripts/build-atomic.mjs",
     "closeout:eric": "bash scripts/closeout-eric.sh",
     "dev:daemon": "bash scripts/dev-daemon.sh",
     "dev:mode": "bash scripts/oac-dev-mode.sh",

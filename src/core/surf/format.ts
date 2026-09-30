@@ -22,7 +22,7 @@ export function formatSurfRunList(runs: MetawebSurfRunRecord[]): string {
     return [
       `- [${run.status}] ${run.startedAt.slice(0, 16).replace('T', ' ')} (${run.trigger})`,
       `  fetched ${stats.fetched} new · deep-read ${stats.deepRead}${acted ? ` · ${acted}` : ''}`,
-      run.error ? `  error: ${run.error}` : null,
+      run.error ? `  error: ${run.error}${run.failure ? ` [${run.failure.stage}/${run.failure.code}]` : ''}` : null,
       headline ? `  ${headline.slice(0, 140)}` : null,
     ].filter(Boolean).join('\n');
   });

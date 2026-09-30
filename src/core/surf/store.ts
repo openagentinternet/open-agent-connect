@@ -23,6 +23,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import type { MetabotPaths } from '../state/paths.js';
+import { normalizeSurfRunFailure, type SurfRunFailure } from './failure.js';
 
 export type MetawebSurfTrigger = 'manual-chat' | 'manual-ui' | 'pre-dream';
 export type MetawebSurfRunStatus = 'running' | 'done' | 'failed';
@@ -103,6 +104,11 @@ export interface MetawebSurfRunRecord {
   reportMarkdown: string | null;
   reportJson: string | null;
   error: string | null;
+  /**
+   * Structured failure (stage/code/stack/context) for failed runs; null on
+   * running/done rows and on records written before the taxonomy existed.
+   */
+  failure: SurfRunFailure | null;
   startedAt: string;
   finishedAt: string | null;
   createdAt: string;
@@ -187,6 +193,7 @@ function normalizeRun(value: unknown): MetawebSurfRunRecord | null {
     reportMarkdown: typeof record.reportMarkdown === 'string' && record.reportMarkdown ? record.reportMarkdown : null,
     reportJson: typeof record.reportJson === 'string' && record.reportJson ? record.reportJson : null,
     error: typeof record.error === 'string' && record.error ? record.error : null,
+    failure: normalizeSurfRunFailure(record.failure),
     startedAt,
     finishedAt: typeof record.finishedAt === 'string' && record.finishedAt ? record.finishedAt : null,
     createdAt: typeof record.createdAt === 'string' && record.createdAt ? record.createdAt : startedAt,
@@ -242,6 +249,7 @@ export interface MetawebSurfStore {
       reportMarkdown?: string | null;
       reportJson?: string | null;
       error?: string | null;
+      failure?: SurfRunFailure | null;
       finishedAtIso: string;
     },
   ): Promise<boolean>;
@@ -384,6 +392,7 @@ export function createMetawebSurfStore(paths: MetabotPaths): MetawebSurfStore {
         reportMarkdown: null,
         reportJson: null,
         error: null,
+        failure: null,
         startedAt: input.nowIso,
         finishedAt: null,
         createdAt: input.nowIso,
@@ -412,6 +421,7 @@ export function createMetawebSurfStore(paths: MetabotPaths): MetawebSurfStore {
           ? outcome.reportJson.slice(0, MAX_REPORT_JSON_CHARS)
           : null;
         run.error = outcome.error ?? null;
+        run.failure = normalizeSurfRunFailure(outcome.failure);
         run.finishedAt = outcome.finishedAtIso;
         run.updatedAt = outcome.finishedAtIso;
         await writeJsonAtomic(runsPath, file);
@@ -454,6 +464,7 @@ export function createMetawebSurfStore(paths: MetabotPaths): MetawebSurfStore {
           if (input.excludeId && run.id === input.excludeId) continue;
           run.status = 'failed';
           run.error = input.error;
+          run.failure = { stage: 'lifecycle', code: 'STALE_RUNNING_SWEPT', message: input.error };
           run.finishedAt = input.nowIso;
           run.updatedAt = input.nowIso;
           changed += 1;

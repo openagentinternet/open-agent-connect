@@ -27,6 +27,7 @@ import {
 import { createMetawebSurfStore } from '../core/surf/store';
 import { createSurfSettingsStore } from '../core/surf/settings';
 import { formatSurfRunList } from '../core/surf/format';
+import { formatSurfCircuitNotice, surfPreDreamDeferral } from '../core/surf/failure';
 import { metawebInteractions, metawebProtocols } from '../core/surf/surfReads';
 
 export interface SurfBotRef {
@@ -178,10 +179,14 @@ export function createSurfDaemonHandlers(input: CreateSurfDaemonHandlersInput) {
         createMetawebSurfStore(paths).listRuns(limit),
         createSurfSettingsStore(paths).read(),
       ]);
-      // Pre-dream gate (opt-in + 20h recency + memory + not running) — the
-      // dream scheduler reads this to decide whether tonight's dream gets a
-      // fresh surf first.
+      // Pre-dream gate (opt-in + 20h recency + memory + not running + the
+      // failure circuit breaker) — the dream scheduler reads this to decide
+      // whether tonight's dream gets a fresh surf first. The breaker state
+      // rides along so every surface (panel, chat tool, scheduler log) can
+      // say WHY the nightly surf is paused instead of silently skipping.
       const preDreamDue = await serviceFor(bot).shouldPreDreamSurf().catch(() => false);
+      const circuit = await serviceFor(bot).getSurfCircuit().catch(() => null);
+      const circuitNotice = formatSurfCircuitNotice(circuit);
       return commandSuccess({
         botSlug: bot.slug,
         runs,
@@ -189,7 +194,9 @@ export function createSurfDaemonHandlers(input: CreateSurfDaemonHandlersInput) {
         surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
         interactionBudget: settings.interactionBudget,
         preDreamDue,
-        formatted: formatSurfRunList(runs),
+        preDreamDeferral: surfPreDreamDeferral(circuit),
+        surfCircuit: circuit,
+        formatted: circuitNotice ? `${circuitNotice}\n\n${formatSurfRunList(runs)}` : formatSurfRunList(runs),
       });
     },
 
@@ -213,6 +220,7 @@ export function createSurfDaemonHandlers(input: CreateSurfDaemonHandlersInput) {
             status: run.status,
             stats: run.stats,
             error: run.error,
+            failure: run.failure,
             reportMarkdown: run.reportMarkdown,
           });
         }

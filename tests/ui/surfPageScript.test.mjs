@@ -91,6 +91,7 @@ const statusPayload = {
         reportMarkdown: '# Morning surf\n\n- saw a protocol\n- saved a wiki',
         reportJson: null,
         error: null,
+        failure: null,
         startedAt: new Date(Date.now() - 3600_000).toISOString(),
         finishedAt: new Date(Date.now() - 3500_000).toISOString(),
         createdAt: new Date(Date.now() - 3600_000).toISOString(),
@@ -104,6 +105,12 @@ const statusPayload = {
         reportMarkdown: null,
         reportJson: null,
         error: 'metaweb unreachable',
+        failure: {
+          stage: 'bootstrap',
+          code: 'MODULE_LOAD_DENIED',
+          message: 'metaweb unreachable',
+          stack: 'Error: metaweb unreachable\n    at loadSurfSessionModules (runtime.js:1:1)',
+        },
         startedAt: new Date(Date.now() - 86_400_000).toISOString(),
         finishedAt: new Date(Date.now() - 86_400_000 + 60_000).toISOString(),
         createdAt: new Date(Date.now() - 86_400_000).toISOString(),
@@ -135,6 +142,39 @@ test('surf page renders status card, reports table, and markdown report viewer',
   // Newest run auto-selected; markdown report rendered into the viewer.
   assert.match(elements['[data-surf-report-viewer]'].innerHTML, /<h1>Morning surf<\/h1>/);
   assert.match(elements['[data-surf-report-viewer]'].innerHTML, /<li>saw a protocol<\/li>/);
+});
+
+test('surf page renders the failure tag/stack and the circuit-breaker deferral', async () => {
+  const deferredPayload = {
+    ok: true,
+    state: 'success',
+    data: {
+      ...statusPayload.data,
+      // Failed run FIRST so it is the auto-selected row in the viewer.
+      runs: [...statusPayload.data.runs].reverse(),
+      preDreamDeferral: {
+        reason: 'open',
+        consecutiveFailures: 5,
+        code: 'LLM_RUNTIME_UNAVAILABLE',
+        nextAttemptAt: new Date(Date.now() + 3600_000).toISOString(),
+      },
+    },
+  };
+  const harness = createHarness(async (url) => {
+    assert.equal(url, '/api/surf/status');
+    return jsonResponse(deferredPayload);
+  });
+  vm.runInNewContext(buildSurfPageDefinition().script, harness.context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const { elements } = harness;
+  // Status card explains the pause (count + time), not the routine nightly label.
+  assert.match(elements['[data-surf-status-list]'].innerHTML, /Paused until .* \(5 consecutive failures\)/);
+  // The failed run's error line carries the [stage/code] tag.
+  assert.match(elements['[data-surf-reports-table]'].innerHTML, /Error: metaweb unreachable \[bootstrap\/MODULE_LOAD_DENIED\]/);
+  // The auto-selected failed run shows the stack trace in the viewer.
+  assert.match(elements['[data-surf-report-viewer]'].innerHTML, /surf-run-stack/);
+  assert.match(elements['[data-surf-report-viewer]'].innerHTML, /at loadSurfSessionModules/);
 });
 
 test('surf page validates the budget before saving and posts budget updates', async () => {

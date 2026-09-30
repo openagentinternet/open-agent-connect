@@ -125,9 +125,11 @@ export async function runDreamSchedulerTick(
       if (options.surfBeforeDream !== false) {
         try {
           const surfStatus = await options.run(['surf', 'status', '--from', slug], { timeoutMs: LIST_TIMEOUT_MS })
-          const preDreamDue = surfStatus.ok
-            ? (surfStatus.data as { preDreamDue?: boolean } | null)?.preDreamDue === true
-            : false
+          const surfStatusData = surfStatus.ok ? surfStatus.data as {
+            preDreamDue?: boolean
+            preDreamDeferral?: { reason?: string; consecutiveFailures?: number; code?: string | null; nextAttemptAt?: string | null } | null
+          } | null : null
+          const preDreamDue = surfStatusData?.preDreamDue === true
           if (preDreamDue) {
             const surfRun = await options.run(
               ['surf', 'run', '--from', slug, '--trigger', 'pre-dream', '--wait'],
@@ -144,7 +146,13 @@ export async function runDreamSchedulerTick(
               outcome.surfError = surfRun.message ?? surfRun.code ?? 'pre-dream surf failed'
             }
           } else {
-            outcome.surfSkipped = 'not due (off / recent / memory off / running)'
+            // The failure circuit breaker says WHY it paused the nightly surf
+            // (consecutive failures / next attempt) — that reason must reach
+            // the owner-facing log instead of reading as a routine skip.
+            const deferral = surfStatusData?.preDreamDeferral
+            outcome.surfSkipped = deferral && (deferral.reason === 'backoff' || deferral.reason === 'open')
+              ? `circuit breaker ${deferral.reason}: ${deferral.consecutiveFailures ?? 0} consecutive failures (${deferral.code ?? 'UNKNOWN'}), next attempt ${deferral.nextAttemptAt ?? 'unknown'}`
+              : 'not due (off / recent / memory off / running)'
           }
         } catch (error) {
           outcome.surfError = error instanceof Error ? error.message : String(error)
@@ -196,6 +204,9 @@ export function reportDreamSchedulerOutcomes(ctx: HostContext, outcomes: DreamBo
       ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} pre-dream surf ran`)
     } else if (outcome.surfError) {
       ctx.logger?.warn?.(`[oac-dsh] dream scheduler: ${outcome.slug} pre-dream surf: ${outcome.surfError} (dream proceeds)`)
+    } else if (outcome.surfSkipped?.startsWith('circuit breaker')) {
+      // Owner notification: the nightly surf is paused by the failure breaker.
+      ctx.logger?.warn?.(`[oac-dsh] dream scheduler: ${outcome.slug} pre-dream surf deferred — ${outcome.surfSkipped}`)
     }
     if (outcome.hygieneRan) {
       ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} hygiene ran`)
