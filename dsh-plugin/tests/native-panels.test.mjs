@@ -159,7 +159,9 @@ test('client registers the A2A overlay panel and its panellist glyph, not a glob
   assert.match(text, /name: 'sidebar\.panellist'/)
   assert.match(row, /SHOW_A2A_PANELLIST_ROW = false/)
   assert.match(text, /if \(SHOW_A2A_PANELLIST_ROW\)/)
-  assert.doesNotMatch(text, /name: 'main'/)
+  // The only `main` registration is the Bots page (key 'oac-bots'); the A2A
+  // surface stays a center-column shell.overlay with no main key of its own.
+  assert.match(text, /key: 'oac-bots'/)
   assert.doesNotMatch(text, /key: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /unreadController\.start\(\)/)

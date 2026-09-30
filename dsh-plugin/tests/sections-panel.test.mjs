@@ -47,25 +47,62 @@ test('en and zh dictionaries stay in sync for Memory and User', async () => {
   assert.match(user, /nav: '用户'/)
 })
 
-test('client registers four settings sections and the A2A overlay panel with its panellist glyph', async () => {
+test('client registers the Bots main panel with its panellist row and the five page sections, leaving Settings stock', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  // The five sections moved out of Settings onto the Bots page: not one
+  // settings.section registration remains, so DSH Settings renders stock.
+  assert.doesNotMatch(text, /name: 'settings\.section'/)
+  assert.match(text, /name: 'oac\.bots\.section'/)
+  assert.match(text, /children: \{ 'oac\.bots\.section': \{ kind: 'list', scope: 'root' \} \}/)
+  // The left-rail row and the main panel share the 'oac-bots' id/key, the
+  // same mechanism the stock 插件 row uses for the plugin manager.
+  assert.match(text, /name: 'sidebar\.panellist'/)
+  assert.match(text, /name: 'main'/)
+  assert.match(text, /key: 'oac-bots'/)
+  assert.match(text, /\}, BotsPageGlyph\)/)
+  assert.match(text, /\}, BotsPage\)/)
+  // The nav's section-ledger projection feeds the page through the inject hooks face.
+  assert.match(text, /ctx\.slots\.entries\('oac\.bots\.section'\)/)
+  assert.match(text, /resolveSlotLabel\(entry\.options\.label\)/)
+  assert.match(text, /hooks: \{ sections: botsPageSections \}/)
+  // Sections keep their Settings-era ids/orders.
   assert.match(text, /id: 'oac-bots'/)
   assert.doesNotMatch(text, /id: 'oac-services'/)
   assert.match(text, /id: 'oac-apps'/)
   assert.doesNotMatch(text, /id: 'oac-conversations'/)
   assert.match(text, /id: 'oac-memory'/)
   assert.match(text, /id: 'oac-user'/)
+  assert.match(text, /id: 'oac-traffic'/)
   assert.match(text, /name: 'shell\.overlay'/)
-  assert.doesNotMatch(text, /name: 'main'/)
-  assert.match(text, /name: 'sidebar\.panellist'/)
   assert.match(text, /if \(SHOW_A2A_PANELLIST_ROW\)/)
   assert.match(text, /id: 'oac-a2a'/)
+  assert.doesNotMatch(text, /key: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /order: 20/)
   assert.match(text, /order: 21/)
   assert.match(text, /order: 22/)
   assert.match(text, /order: 23/)
+  assert.match(text, /order: 24/)
   assert.doesNotMatch(text, /id: 'oac'/)
+})
+
+test('the Bots page projects the section ledger into a keep-alive vertical nav', async () => {
+  const text = await readFile(join(root, 'src/client/bots-page.tsx'), 'utf8')
+  assert.match(text, /'oac\.bots\.section': \{/)
+  assert.match(text, /kind: 'list'/)
+  assert.match(text, /owner: OacBotsSectionOwnerProps/)
+  assert.match(text, /renderSlot\('oac\.bots\.section', \{ close \}, \{ only: row\.id \}\)/)
+  assert.match(text, /visitedIds/)
+  assert.match(text, /hidden=\{!selected\}/)
+  assert.match(text, /role="tablist"/)
+  assert.match(text, /aria-orientation="vertical"/)
+  assert.match(text, /oac-dsh:bots-page-section:v1/)
+  assert.match(text, /window\.localStorage/)
+  assert.match(text, /IconAgentPresetOutline16/)
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /\.oac-bots-page-nav-item\[data-active='true'\]/)
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /CONVTABS_CSS \+ BOTSPAGE_CSS/)
 })
 
 test('services and apps panels keep confirmation gates', async () => {

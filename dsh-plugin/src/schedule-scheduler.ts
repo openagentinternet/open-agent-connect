@@ -238,7 +238,7 @@ async function runScheduledSession(
   if (!modelPair) {
     return {
       ok: false,
-      error: 'No LLM model for the scheduled task: configure the Bot DSH LLM pair (Settings → Bots) or a host default model.',
+      error: 'No LLM model for the scheduled task: configure the Bot DSH LLM pair (Bots page → Bots) or a host default model.',
     }
   }
   const sessionId = randomUUID()

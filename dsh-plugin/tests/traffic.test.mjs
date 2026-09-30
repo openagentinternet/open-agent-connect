@@ -47,7 +47,7 @@ test('traffic locale en and zh dictionaries stay in sync', async () => {
 
 // --- client registration ---------------------------------------------------
 
-test('client registers the traffic settings section right after apps', async () => {
+test('client registers the traffic Bots-page section right after apps', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(text, /id: 'oac-traffic'/)
   assert.match(text, /order: 24/)

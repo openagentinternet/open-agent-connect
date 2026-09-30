@@ -1,9 +1,11 @@
 /**
- * Browser half of open-agent-connect-dsh: locale dictionaries, the Settings
- * sections, the new-session preset chip, the right-Sidebar `bot-browser` tab
- * type, and the A2A Chat `shell.overlay` panel. The left-rail
- * `sidebar.panellist` glyph is currently hidden (`SHOW_A2A_PANELLIST_ROW`).
- * Does not shadow Settings → Agent presets.
+ * Browser half of open-agent-connect-dsh: locale dictionaries, the Bots main
+ * panel (a left-rail `sidebar.panellist` row + `main` page hosting the five
+ * `oac.bots.section` pages — Bots, Memory, User, Apps, Traffic — the surfaces
+ * that used to be Settings sections; DSH Settings itself stays stock), the
+ * new-session preset chip, the right-Sidebar `bot-browser` tab type, and the
+ * A2A Chat `shell.overlay` panel. The left-rail A2A glyph is currently hidden
+ * (`SHOW_A2A_PANELLIST_ROW`). Does not shadow Settings → Agent presets.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
@@ -17,6 +19,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
+import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import { IconBrowseOutline16 } from './icons.ts'
 import { api } from './api.ts'
 import { A2AOverlay, type A2AOverlayInjected } from './A2AOverlay.tsx'
@@ -24,6 +28,7 @@ import { A2APanelGlyph, type A2APanelGlyphInjected } from './A2APanelGlyph.tsx'
 import { AppsPanel } from './AppsPanel.tsx'
 import { BotBrowserTab, BotBrowserTabTitle, type BotBrowserTabInjected } from './BotBrowserTab.tsx'
 import { BotPanel } from './BotPanel.tsx'
+import { BotsPage, BotsPageGlyph, type BotsPageInjected, type BotsPageSectionRow } from './bots-page.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
@@ -57,7 +62,7 @@ import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { startHeroIdentityMount } from './hero-identity.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BOTSPAGE_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -87,7 +92,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS + BOTSPAGE_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -308,8 +313,67 @@ export function apply(ctx: ClientContext): void {
     return () => { delete (layout as { selectPanel?: unknown }).selectPanel }
   })
 
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
+  // The Bots page: one left-rail row whose id matches the `main` panel key,
+  // exactly like the stock 插件 row → plugin manager pair (row order 1 sits
+  // directly below 插件's order 0). The `main` registration declares the
+  // `oac.bots.section` child slot; the five sections below register into it
+  // with the same ids/orders/labels/inject faces they carried as Settings
+  // sections, and the page chrome projects them into its left nav. Settings
+  // itself registers nothing from us anymore.
+  let sectionsVersion = -1
+  let sectionsRevision = -1
+  let sectionsSnapshot: BotsPageSectionRow[] = []
+  // The nav's section-ledger projection, memoized on (slot version, locale
+  // revision) so label thunks follow the active locale — the same snapshot
+  // shape the Plugins settings section builds for its tabs.
+  const botsPageSections: ObservableSnapshot<BotsPageSectionRow[]> = {
+    getSnapshot: () => {
+      const version = ctx.slots.getVersion('oac.bots.section')
+      const revision = ctx.locale.getSnapshot().revision
+      if (version !== sectionsVersion || revision !== sectionsRevision) {
+        sectionsVersion = version
+        sectionsRevision = revision
+        sectionsSnapshot = ctx.slots.entries('oac.bots.section')
+          .map((entry) => ({
+            id: entry.options.id ?? '',
+            order: entry.options.order ?? 0,
+            label: resolveSlotLabel(entry.options.label) ?? '',
+          }))
+          .sort((a, b) => a.order - b.order)
+      }
+      return sectionsSnapshot
+    },
+    subscribe: (listener: () => void) => {
+      const offSlots = ctx.slots.subscribe('oac.bots.section', listener)
+      const offLocale = ctx.locale.subscribe(listener)
+      return () => {
+        offSlots()
+        offLocale()
+      }
+    },
+  }
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: 'oac-bots',
+    order: 1,
+    label: () => t('nav'),
+  }, BotsPageGlyph))
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main',
+    key: 'oac-bots',
+    locale: NS,
+    inject: (): BotsPageInjected => ({
+      hooks: { sections: botsPageSections },
+      // The sections' settings-era `close` contract ("leave this surface"):
+      // for a main panel that is the conversation column — and the Bot
+      // Browser reveal needs the right Sidebar mounted, which gates on
+      // activePanelId === null.
+      close: () => { ctx.layout.selectPanel(null) },
+    }),
+    children: { 'oac.bots.section': { kind: 'list', scope: 'root' } },
+  }, BotsPage))
+  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+    name: 'oac.bots.section',
     id: 'oac-bots',
     order: 20,
     label: () => t('nav'),
@@ -335,10 +399,10 @@ export function apply(ctx: ClientContext): void {
       metaappList: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
     }),
   }, BotPanel))
-  // Services settings section hidden until the service plugin matures; the
+  // Services Bots-page section hidden until the service plugin matures; the
   // ServicesPanel, its locale dictionary, and the host routes stay in tree.
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
+  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+    name: 'oac.bots.section',
     id: 'oac-memory',
     order: 21,
     label: () => tMemory('nav'),
@@ -370,8 +434,8 @@ export function apply(ctx: ClientContext): void {
       dreamRun: (from: string, date: string) => api.dreamRun(from, date),
     }),
   }, MemoryPanel))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
+  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+    name: 'oac.bots.section',
     id: 'oac-user',
     order: 22,
     label: () => tUser('nav'),
@@ -385,8 +449,8 @@ export function apply(ctx: ClientContext): void {
       deleteIdentity: () => api.userDelete(),
     }),
   }, UserPanel))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
+  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+    name: 'oac.bots.section',
     id: 'oac-apps',
     order: 23,
     label: () => tApps('nav'),
@@ -403,8 +467,8 @@ export function apply(ctx: ClientContext): void {
       upload: (from: string, file: File) => api.metaappUpload(from, file),
     }),
   }, AppsPanel))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
+  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+    name: 'oac.bots.section',
     id: 'oac-traffic',
     order: 24,
     label: () => tTraffic('nav'),

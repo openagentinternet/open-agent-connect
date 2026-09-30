@@ -63,17 +63,20 @@ Restart the app afterwards; its window reloads with the new plugin.
 On apply the plugin starts the OAC daemon and binds `metabot-*` into
 `${DSH_HOME:-$HOME/.dsh}/skills`. It prefers `oac install --host dsh`; if only
 `metabot` is available it runs `metabot host bind-skills --host dsh`. Bind or CLI
-failures show in Settings → Bots. They must not crash the DSH process.
+failures show on the Bots page. They must not crash the DSH process.
 
-After install, Settings left nav gains these OAC sections:
+After install, the left rail gains a **Bots** row directly below 插件. It
+opens the plugin's own Bots page, whose left nav hosts these sections:
 
 - Bots
 - Memory
 - User
 - Apps
+- Traffic (流量)
 
-(Services stays hidden until the service plugin matures; A2A Chat lives in
-the sidebar footer, not in Settings.) There is no nested OAC hub.
+(Services stays hidden until the service plugin matures; A2A Chat opens from
+the conversation-list 线上对话 / 群任务 tabs, not from the Bots page.) DSH
+Settings stays stock — there is no OAC footprint in it.
 
 ## Memory, dreams, and the Twin Bot
 
@@ -96,12 +99,12 @@ Every Bot gets the ported IDBots memory system automatically:
   profile), dream memories, knowledge points, person impressions, and the
   evolving self-identity. Requires the Bot's DSH provider/model on its
   profile (set at creation).
-- **Settings → Memory**: per-Bot policy card, the read-only self-identity,
+- **Bots page → Memory**: per-Bot policy card, the read-only self-identity,
   and the Knowledge/Contacts/Facts/Dream tabs (with a manual "run dream"
   date picker). Facts can be added/edited by hand with a usage-class
   (personal fact / preference / operational preference / work review / value
   boundary).
-- **Settings → User**: the local human **owner** identity — the person who
+- **Bots page → User**: the local human **owner** identity — the person who
   talks to the Bots, not a Bot. Create a new identity (fresh mnemonic) or
   import one from a BIP39 mnemonic, back up the mnemonic, and rename it. It
   is stored once per machine at `~/.metabot/owner/identity.json` (mode 0600)
@@ -127,7 +130,7 @@ twin` CLI groups expose the whole surface.
 
 ## First Bot
 
-Open Settings → Bots → New. Pick a name and a DSH provider/model from the
+Open the Bots page (left-rail **Bots**, below 插件) → **Bots** → **New**. Pick a name and a DSH provider/model from the
 advertised `ctx.llm` directory. That creates the MetaBot identity and a matching
 `oac-<slug>` agent preset (copy of DSH `standard`, `persona` rewritten in place).
 
@@ -180,7 +183,7 @@ per-run interaction budget), handles the on-chain replies addressed to it
 (the deterministic inbox), hands real commitments to scheduled tasks
 (`create_scheduled_task`, cap 2/run), and emits a readable surf report.
 Three triggers: the chat tools `metaweb_surf_start` / `metaweb_surf_status`,
-the Settings → Bots editor **Advanced** tab (surf-before-dream toggle —
+the Bots page Bot editor **Advanced** tab (surf-before-dream toggle —
 opt-in, default OFF — interaction budget 0–100, "Surf now", and the surf
 report list), and the nightly **pre-dream** pass (one surf before each dream
 when the toggle is on and the last one is >20 h old; the report feeds the

@@ -1,8 +1,9 @@
-/** Locale namespace for the Bots settings section. */
+/** Locale namespace for the Bots section of the OAC Bots page. */
 export const NS = 'settings.oac.bots'
 
 export const en = {
   nav: 'Bots',
+  pageSections: 'Bots page sections',
   title: 'Bots',
   loading: 'Loading Bots…',
   error: 'Could not load Bots.',
@@ -311,6 +312,7 @@ export const en = {
 
 export const zh = {
   nav: 'Bots',
+  pageSections: 'Bots 页面栏目',
   title: 'Bots',
   loading: '正在读取 Bot 列表…',
   error: '暂时无法读取 Bot 列表。',
