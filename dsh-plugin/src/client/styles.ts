@@ -726,6 +726,16 @@ export const PRESETS_CSS = `
 .oac-preset-seat-item-desc { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: normal; }
 .oac-preset-seat-item-icon { flex: none; }
 .oac-preset-avatar.oac-preset-seat-icon, .oac-preset-avatar.oac-preset-seat-item-icon { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
+
+/* Settings → Agent presets keeps its stock roster, but the oac-* Bot presets
+   no longer show in its 自定义 group: every local Bot is created and edited
+   on the Bots page, so those stock management cards were pure duplicates.
+   The presets themselves stay registered — the hero chip, session
+   composition, and any default selection are untouched. The roster card li
+   carries the stable data-agent-preset-id attribute (the only DSH surface
+   that uses it), so one attribute-prefix rule hides exactly the oac-* cards
+   while user-authored custom presets still show. */
+li[data-agent-preset-id^='oac-'] { display: none; }
 `
 
 export const HERO_CSS = `
