@@ -878,6 +878,78 @@ test('auto-reply backfill loop backs off on quiet passes and stops cleanly', asy
   assert.equal(fetches, afterStop);
 });
 
+test('auto-reply backfill loop does not fetch after stop() interrupts a parked pass', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1parkedbot000000000000000000000000';
+  const peerGlobalMetaId = 'idq1parkedpeer00000000000000000000000';
+  let fetches = 0;
+  let releaseGate;
+  let markGateEntered;
+  const gateEntered = new Promise((resolve) => {
+    markGateEntered = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    releaseGate = resolve;
+  });
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => {
+      markGateEntered();
+      await gate;
+      return 'peer-chat-public-key';
+    },
+    handleInboundMessage: async () => undefined,
+    listPeerGlobalMetaIds: async () => [peerGlobalMetaId],
+    historyClient: {
+      async fetchRecent() {
+        fetches += 1;
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 0,
+          serverTime: 1_770_008_000_000,
+          messages: [],
+        };
+      },
+      async fetchAfter() {
+        fetches += 1;
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 0,
+          serverTime: 1_770_008_000_000,
+          messages: [],
+        };
+      },
+    },
+    now: () => 1_770_008_000_000,
+  }, {
+    intervalMs: 20,
+  });
+
+  loop.start();
+  // Park the in-flight pass inside the peer worker, just before its history
+  // fetch, then stop the loop. Releasing the gate must not let the stopped
+  // pass proceed to the chain request.
+  await gateEntered;
+  loop.stop();
+  releaseGate();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(loop.isRunning(), false);
+  assert.equal(fetches, 0);
+});
+
 test('auto-reply backfill caps peers per pass and rotates through the full set', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
