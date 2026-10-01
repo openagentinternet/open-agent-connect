@@ -1025,11 +1025,39 @@ function renderStats(){
   state.stats=state.stats||{};
 }
 
+function profileCreatedAt(profile){
+  var value=Number(profile&&profile.createdAt);
+  return Number.isFinite(value)?value:0;
+}
+function profileIsAvailableForList(profile){
+  if(!profile||profile.isAvailable===false)return false;
+  if(profile.setup&&profile.setup.state&&profile.setup.state!=='ready')return false;
+  return profileHasUsableLlm(profile);
+}
+function compareProfilesByCreatedAt(left,right){
+  var createdDelta=profileCreatedAt(left)-profileCreatedAt(right);
+  if(createdDelta)return createdDelta;
+  var nameDelta=String(left&&left.name||left&&left.slug||'').localeCompare(String(right&&right.name||right&&right.slug||''));
+  if(nameDelta)return nameDelta;
+  return String(left&&left.slug||'').localeCompare(String(right&&right.slug||''));
+}
+function orderedMetabotProfiles(){
+  return state.profiles.slice().sort(function(left,right){
+    var leftTwin=left&&(left.isActive===true||left.botType==='twin');
+    var rightTwin=right&&(right.isActive===true||right.botType==='twin');
+    if(leftTwin!==rightTwin)return leftTwin?-1:1;
+    var leftAvailable=profileIsAvailableForList(left);
+    var rightAvailable=profileIsAvailableForList(right);
+    if(leftAvailable!==rightAvailable)return leftAvailable?-1:1;
+    return compareProfilesByCreatedAt(left,right);
+  });
+}
+
 function renderMetabotList(){
   var list=q('[data-metabot-list]');var count=q('[data-metabot-count]');if(!list)return;
   if(count)count.textContent=String(state.profiles.length);
   if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>'+esc(uiText('bot.noBotsYet','No Bots yet'))+'</p></div>';return}
-  list.innerHTML=state.profiles.map(function(p){
+  list.innerHTML=orderedMetabotProfiles().map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
     return'<div class="metabot-item'+selected+'" role="button" tabindex="0" data-slug="'+esc(p.slug)+'">'+
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
