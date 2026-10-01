@@ -159,9 +159,10 @@ test('client registers the A2A overlay panel and its panellist glyph, not a glob
   assert.match(text, /name: 'sidebar\.panellist'/)
   assert.match(row, /SHOW_A2A_PANELLIST_ROW = false/)
   assert.match(text, /if \(SHOW_A2A_PANELLIST_ROW\)/)
-  // The only `main` registration is the Bots page (key 'oac-bots'); the A2A
-  // surface stays a center-column shell.overlay with no main key of its own.
-  assert.match(text, /key: 'oac-bots'/)
+  // No kernel `main` registrations at all: both OAC surfaces (A2A Chat, the
+  // Bots page) are center-column shell.overlays so the right Sidebar stays
+  // mounted everywhere.
+  assert.doesNotMatch(text, /name: 'main'/)
   assert.doesNotMatch(text, /key: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /unreadController\.start\(\)/)
@@ -208,11 +209,14 @@ test('every transcript URI click reveals the right-Sidebar Bot Browser (no in-pa
 })
 
 test('the A2A overlay mirrors the frame columns and the panellist row is capture-intercepted', async () => {
+  // The frame chrome (grid mirroring, main-panel gating) is the shared
+  // CenterOverlayFrame; A2AOverlay renders through it.
+  const frame = await readFile(join(root, 'src/client/overlay-frame.tsx'), 'utf8')
+  assert.match(frame, /closest\('\[data-shell-overlay\]'\)/)
+  assert.match(frame, /MutationObserver/)
+  assert.match(frame, /gridTemplateColumns/)
   const overlay = await readFile(join(root, 'src/client/A2AOverlay.tsx'), 'utf8')
-  assert.match(overlay, /closest\('\[data-shell-overlay\]'\)/)
-  assert.match(overlay, /MutationObserver/)
-  assert.match(overlay, /gridTemplateColumns/)
-  assert.match(overlay, /usePanelInfo/)
+  assert.match(overlay, /<CenterOverlayFrame open=\{open\} usePanelInfo=\{usePanelInfo\}>/)
   const row = await readFile(join(root, 'src/client/a2a-panel-row.ts'), 'utf8')
   assert.match(row, /document\.addEventListener\('click', onClick, true\)/)
   assert.match(row, /event\.stopPropagation\(\)/)
@@ -260,8 +264,8 @@ test('list-row navigation exits an active main panel before opening the overlay'
   assert.match(index, /openPrivate: \(from, peer\) => openA2A\(\{ mode: 'private', from, peer \}\)/)
   assert.match(index, /openGroupTask: \(taskKey\) => openA2A\(\{ mode: 'grouptask', taskKey \}\)/)
   assert.match(index, /openCollab: \(slug, groupId\) => openA2A\(\{ mode: 'collab', slug, groupId \}\)/)
-  const overlay = await readFile(join(root, 'src/client/A2AOverlay.tsx'), 'utf8')
-  assert.match(overlay, /if \(!open \|\| activePanel !== null\) return null/)
+  const frame = await readFile(join(root, 'src/client/overlay-frame.tsx'), 'utf8')
+  assert.match(frame, /if \(!open \|\| activePanel !== null\) return null/)
 })
 
 test('the A2A panellist row carries a selected style while the overlay is open', async () => {
@@ -275,7 +279,7 @@ test('the A2A panellist row carries a selected style while the overlay is open',
   assert.match(glyph, /setAttribute\('aria-current', 'page'\)/)
   assert.match(glyph, /removeAttribute\('aria-current'\)/)
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
-  assert.match(styles, /button\.oac-a2a-row-active \{[^}]*--dsw-alias-interactive-bg-active/)
+  assert.match(styles, /button\.oac-a2a-row-active[, {][^}]*--dsw-alias-interactive-bg-active/)
   // the glyph itself tints brand-primary instead of drawing its own pill
   assert.match(styles, /\.oac-a2a-glyph\[data-open='true'\] \{ color: var\(--dsw-alias-brand-primary\); \}/)
   assert.doesNotMatch(styles, /\.oac-a2a-glyph\[data-open='true'\] \{[^}]*background/)

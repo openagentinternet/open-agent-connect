@@ -104,7 +104,7 @@ export function BotPanel({
   botHomepageUpload,
   metaappList,
   t,
-}: BotPanelInjected & { openBotPage: (uri: string | null, title: string) => void; t: Translate }): ReactNode {
+}: BotPanelInjected & { openBotPage: (uri: string | null) => void; t: Translate }): ReactNode {
   const [bots, setBots] = useState<BotRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [availableOnly, setAvailableOnly] = useState<boolean>(readAvailableOnly)
@@ -398,7 +398,7 @@ export function BotPanel({
         <h2>{t('title')}</h2>
         <div className="oac-actions">
           <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
-          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => { openBotPage(null, t('browserOpen')) }}>
+          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => { openBotPage(null) }}>
             {t('browserOpen')}
           </Button>
           <Button
@@ -471,7 +471,7 @@ export function BotPanel({
                         title={t('botPage')}
                         onClick={(event) => {
                           event.stopPropagation()
-                          openBotPage(`metaid://${bot.globalMetaId}`, bot.name)
+                          openBotPage(`metaid://${bot.globalMetaId}`)
                         }}
                       >
                         <BotAvatar name={bot.name} src={bot.avatarDataUrl} />

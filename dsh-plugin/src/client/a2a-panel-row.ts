@@ -21,18 +21,29 @@ export const SHOW_A2A_PANELLIST_ROW = false
 /** DOM marker the A2APanelGlyph carries so the interceptor can name its row. */
 export const A2A_PANEL_ROW_MARK = 'data-oac-a2a-panellist'
 
-/** Intercept clicks on the A2A panellist row; returns the stop function. */
-export function startA2APanelRowInterceptor(toggle: () => void): () => void {
+/** DOM marker the BotsPageGlyph carries so the interceptor can name its row. */
+export const BOTS_PANEL_ROW_MARK = 'data-oac-bots-panellist'
+
+/**
+ * Intercept clicks on one panellist row (capture phase, so PanelRow's own
+ * `layout.selectPanel(id)` never fires); returns the stop function.
+ */
+export function startPanelRowInterceptor(mark: string, toggle: () => void): () => void {
   const onClick = (event: MouseEvent): void => {
     const target = event.target
     if (!(target instanceof Element)) return
     const button = target.closest('button')
     if (button === null) return
-    if (button.querySelector(`[${A2A_PANEL_ROW_MARK}]`) === null) return
+    if (button.querySelector(`[${mark}]`) === null) return
     event.preventDefault()
     event.stopPropagation()
     toggle()
   }
   document.addEventListener('click', onClick, true)
   return () => { document.removeEventListener('click', onClick, true) }
+}
+
+/** Intercept clicks on the A2A panellist row; returns the stop function. */
+export function startA2APanelRowInterceptor(toggle: () => void): () => void {
+  return startPanelRowInterceptor(A2A_PANEL_ROW_MARK, toggle)
 }

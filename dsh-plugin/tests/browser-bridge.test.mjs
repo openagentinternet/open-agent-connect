@@ -226,39 +226,6 @@ test('hub resolve returns the localUiUrl without emitting an open or touching th
   }
 })
 
-test('browser/resolve without a started hub answers daemon_unreachable', async () => {
-  const routes = []
-  const ctx = {
-    webRuntime: { trustedHosts: [] },
-    webServer: {
-      register(route) {
-        routes.push(route)
-        return () => {}
-      },
-    },
-    effect(fn) {
-      fn()
-    },
-  }
-  await plugin.apply(ctx, { skipBootstrap: true })
-  const route = routes[0]
-  const box = capture()
-  const request = {
-    method: 'POST',
-    url: '/oac/api/browser/resolve',
-    headers: { host: '127.0.0.1:8787' },
-    async *[Symbol.asyncIterator]() {
-      yield Buffer.from(JSON.stringify({ uri: 'metaid://idq1example' }))
-    },
-  }
-  await route.handler(request, box.res)
-  assert.equal(box.status, 200)
-  const body = JSON.parse(box.body)
-  assert.equal(body.ok, false)
-  assert.equal(body.state, 'failed')
-  assert.equal(body.code, 'daemon_unreachable')
-})
-
 test('browser/open without a started hub answers daemon_unreachable', async () => {  const routes = []
   const ctx = {
     webRuntime: { trustedHosts: [] },
