@@ -288,3 +288,14 @@ test('the A2A overlay styles keep the side columns click-through and hide under 
   assert.match(styles, /\[data-rightbar-fullscreen\] \.oac-a2a-overlay \{ display: none/)
   assert.doesNotMatch(styles, /oac-a2a-dock/)
 })
+
+test('the local A2A bubble reuses the stock user-message bubble token', async () => {
+  // The own-message bubble rides --dsw-specific-bubble (the stock 本地对话
+  // user bubble: light deepseek-50 / dark neutral-bluish-850) with the
+  // primary label color — never the black primary-button fill — so it
+  // follows the active theme exactly like a local-conversation bubble.
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /\.oac-a2a-bubble-local \{ background: var\(--dsw-specific-bubble/)
+  assert.doesNotMatch(styles, /oac-a2a-bubble-local[^}]*button-primary-fill/)
+  assert.doesNotMatch(styles, /oac-a2a-bubble-local[^}]*label-primary-foreground/)
+})
