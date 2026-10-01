@@ -239,6 +239,11 @@ button.oac-a2a-row-active, button.oac-bots-row-active { background: var(--dsw-al
    track rides its own class so the reading pane owns the full column
    everywhere else. */
 .oac-a2a-body-with-list { grid-template-columns: 320px minmax(0, 1fr); }
+.oac-gt-body-with-drawer { grid-template-columns: minmax(0, 1fr) minmax(260px, 300px); }
+.oac-a2a-body-with-list.oac-gt-body-with-drawer { grid-template-columns: 320px minmax(0, 1fr) minmax(260px, 300px); }
+.oac-gt-body-with-drawer > .oac-a2a-thread { min-width: 0; }
+.oac-gt-body-with-drawer > .oac-gt-drawer { position: static; grid-column: 2; grid-row: 1; width: auto; min-width: 0; box-shadow: none; animation: none; }
+.oac-a2a-body-with-list.oac-gt-body-with-drawer > .oac-gt-drawer { grid-column: 3; }
 /* Row wrapper below the header: the private-chat / group-task body. */
 .oac-a2a-main { flex: 1; min-height: 0; display: flex; }
 .oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
@@ -668,9 +673,9 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-guide-when-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .oac-gt-guide-manual { font-size: 13px; font-weight: 600; }
 /* Task drawer: the IDBots group-task right rail (members / status history /
-   transitions / integrity events / deliverables) ported as a floating drawer —
-   absolutely positioned over the thread's right edge, never taking layout
-   space. Toggled from the thread head; closed by its own header button. */
+   transitions / integrity events / deliverables) occupies a dedicated layout
+   column while open. Toggled from the thread head; closed by its own header
+   button. */
 .oac-gt-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; width: min(300px, 88%); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-2); border-left: 1px solid var(--dsw-alias-border-l2); box-shadow: var(--dsw-shadow-lv3); animation: oac-gt-drawer-in .18s cubic-bezier(.4, 0, .2, 1); }
 .oac-gt-drawer-degraded { display: flex; flex-direction: column; gap: 4px; margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: rgba(245, 158, 11, .12); border: 1px solid rgba(245, 158, 11, .35); }
 .oac-gt-badge.oac-gt-degraded { background: #f59e0b; color: #fff; }
@@ -684,6 +689,7 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-drawer-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .oac-gt-drawer-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .oac-gt-drawer-body { flex: 1; min-height: 0; overflow-y: auto; }
+.oac-gt-drawer-placeholder { display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center; }
 .oac-gt-drawer-section { padding: 10px 14px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-gt-drawer-heading { margin: 0 0 8px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
 summary.oac-gt-drawer-heading { cursor: pointer; }

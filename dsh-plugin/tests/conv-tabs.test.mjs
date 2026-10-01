@@ -107,6 +107,17 @@ test('GroupTaskView hides its list and shows the pick-left hint in detail-only m
   assert.match(view, /openCollabSignal\?: \{ slug: string; groupId: string; seq: number \} \| null/)
 })
 
+test('the group-task detail rail is open by default and occupies a layout column', async () => {
+  const view = await readFile(join(root, 'src/client/GroupTaskView.tsx'), 'utf8')
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(view, /const \[drawerOpen, setDrawerOpen\] = useState\(true\)/)
+  assert.match(view, /GroupTaskDrawerPlaceholder/)
+  assert.match(view, /oac-gt-body-with-drawer/)
+  assert.match(styles, /\.oac-gt-body-with-drawer \{ grid-template-columns: minmax\(0, 1fr\) minmax\(260px, 300px\); \}/)
+  assert.match(styles, /\.oac-gt-body-with-drawer > \.oac-gt-drawer \{[^}]*position: static[^}]*grid-column: 2/)
+  assert.match(styles, /\.oac-a2a-body-with-list\.oac-gt-body-with-drawer > \.oac-gt-drawer \{ grid-column: 3; \}/)
+})
+
 test('the left lists carry the row menus, staffing slate, collabs, and the create button', async () => {
   const tabs = await readFile(join(root, 'src/client/ConvTabs.tsx'), 'utf8')
   // IDBots hover menu on both lists (rename/pin/archive ride it).
