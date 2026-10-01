@@ -243,6 +243,10 @@ test('the MetaApps section hosts the on-chain feed tab with author rows into the
 test('Bot pickers share the available-only twin-first BotPicker; app cards pin a fixed foot', async () => {
   const picker = await readFile(join(root, 'src/client/BotPicker.tsx'), 'utf8')
   assert.match(picker, /sortAvailableBotsTwinFirst/)
+  assert.match(picker, /BotAvatar name=\{selected\.name\}/)
+  assert.match(picker, /BotAvatar name=\{bot\.name\}/)
+  assert.match(picker, /role=\"listbox\"/)
+  assert.match(picker, /role=\"option\"/)
   for (const file of ['AppsPanel.tsx', 'MemoryPanel.tsx', 'ConvTabs.tsx']) {
     const text = await readFile(join(root, 'src/client', file), 'utf8')
     assert.match(text, /<BotPicker/, `${file} renders the shared BotPicker`)
