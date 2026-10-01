@@ -307,8 +307,12 @@ button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); 
 .oac-copy-action:hover { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-interactive-bg-hover); }
 .oac-copy-copied { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); padding: 2px 6px; border-radius: 4px; background: rgba(16, 24, 40, .94); color: #fff; font-size: 10px; line-height: 14px; white-space: nowrap; pointer-events: none; z-index: 20; }
 .oac-a2a-bubble { min-width: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
-.oac-a2a-bubble-local { background: var(--dsw-alias-button-primary-fill, #2e6fed); color: var(--dsw-alias-label-primary-foreground, #fff); border-radius: 16px 16px 4px 16px; padding: 8px 12px; }
-.oac-a2a-bubble-local a { color: inherit; text-decoration: underline; }
+/* The local (own) bubble reuses the stock conversation's user-message style:
+   --dsw-specific-bubble (light deepseek-50 #edf3fe / dark neutral-bluish-850
+   #2c2c2e) with the primary label color, so it follows the active theme
+   exactly like a 本地对话 bubble instead of pinning the black
+   primary-button fill. */
+.oac-a2a-bubble-local { background: var(--dsw-specific-bubble, #edf3fe); border-radius: 16px 16px 4px 16px; padding: 8px 12px; }
 .oac-a2a-bubble-peer { background: var(--dsw-alias-bg-layer-3); border: 1px solid var(--dsw-alias-border-l2); border-radius: 16px 16px 16px 4px; padding: 8px 12px; }
 .oac-a2a-msg-text { white-space: pre-wrap; }
 .oac-a2a-msg-image { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; object-fit: contain; }
