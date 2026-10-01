@@ -7,8 +7,22 @@ tags for releases.
 
 ## Unreleased
 
+### Added
+
+- DSH Bots page: the Apps section is now **MetaApps** (元应用) with two tabs —
+  **链上元应用** lists the global on-chain MetaApp feed (the metaso
+  aggregation API via `metabot metaapp search`, cursor-paged) on the shared
+  app card minus its edit/details actions, with the author's avatar+name at
+  the card's bottom left opening that Bot's page in the in-page dock;
+  **本机元应用** keeps the per-Bot published-apps manager unchanged. The
+  MetaApp search item projection now carries `icon`/`coverImg` so chain cards
+  render covers like local ones.
+
 ### Fixed
 
+- DSH Bots page: the `main` panel registration now injects `resolveBotPage`
+  (the face `BotsPage` requires), unbreaking the in-page Bot Page dock and
+  the avatar-click flow.
 - MetaWeb surf pre-dream reliability: failed surf runs now record a
   structured `failure` (`stage`/`code`/`stack`/`context`) next to the error
   string — bootstrap module-load errors are classified (missing / denied /

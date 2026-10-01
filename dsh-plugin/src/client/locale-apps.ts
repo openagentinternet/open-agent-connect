@@ -2,8 +2,8 @@
 export const APP_NS = 'settings.oac.apps'
 
 export const appEn = {
-  nav: 'Apps',
-  title: 'Apps',
+  nav: 'MetaApps',
+  title: 'MetaApps',
   loading: 'Loading MetaApps…',
   error: 'Could not load MetaApps: {message}',
   refresh: 'Refresh',
@@ -13,6 +13,14 @@ export const appEn = {
   emptyTitle: 'No MetaApps yet',
   emptyMessage: 'Publish your first MetaApp to put your site on Agent Internet.',
   galleryTitle: 'Published MetaApps',
+  tabChain: 'On-chain MetaApps',
+  tabLocal: 'Local MetaApps',
+  chainGalleryTitle: 'On-chain MetaApps',
+  chainEmptyTitle: 'No on-chain MetaApps found',
+  chainEmptyMessage: 'Refresh to retry — the MetaWeb index may be unreachable.',
+  pageInfo: 'Page {page}',
+  openAuthorPage: 'Open author Bot page: {name}',
+  authorUnknown: 'Unknown author',
   runnable: 'Runnable',
   disabledLabel: 'Disabled',
   untitled: 'Untitled MetaApp',
@@ -140,8 +148,8 @@ export const appEn = {
 }
 
 export const appZh = {
-  nav: '应用',
-  title: '应用',
+  nav: '元应用',
+  title: '元应用',
   loading: '正在读取 MetaApp…',
   error: '暂时无法读取 MetaApp：{message}',
   refresh: '刷新',
@@ -151,6 +159,14 @@ export const appZh = {
   emptyTitle: '还没有 MetaApp',
   emptyMessage: '发布第一个 MetaApp，即可把你的站点发布到 Agent Internet。',
   galleryTitle: '已发布的 MetaApp',
+  tabChain: '链上元应用',
+  tabLocal: '本机元应用',
+  chainGalleryTitle: '链上元应用',
+  chainEmptyTitle: '没有找到链上元应用',
+  chainEmptyMessage: '刷新重试——MetaWeb 索引可能暂时不可用。',
+  pageInfo: '第 {page} 页',
+  openAuthorPage: '打开作者 Bot 页：{name}',
+  authorUnknown: '未知作者',
   runnable: '可运行',
   disabledLabel: '已禁用',
   untitled: '未命名 MetaApp',

@@ -223,6 +223,16 @@ export async function dispatchSection(
     if (cursor) args.push('--cursor', cursor)
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
   }
+  if (method === 'metaapp/search') {
+    // Global on-chain feed (the metaso aggregation API via the CLI), NOT
+    // bot-scoped — backs the Apps section's 链上元应用 tab. The CLI caps
+    // --limit at 20, so clamp here instead of failing the page on it.
+    const size = Math.min(20, readPositiveInteger(payload && (payload as { size?: unknown }).size, 12))
+    const cursor = readTrimmed(payload, 'cursor')
+    const args = ['metaapp', 'search', '--limit', String(size)]
+    if (cursor) args.push('--cursor', cursor)
+    return run(args, { timeoutMs: LIST_TIMEOUT_MS })
+  }
   if (method === 'metaapp/publish') return handleMetaappPublish(payload, run)
   if (method === 'metaapp/update') return handleMetaappUpdate(payload, run)
   if (method === 'metaapp/delete') return handleMetaappDelete(payload, run)

@@ -3,7 +3,7 @@
  * frame, reached from the left-rail `sidebar.panellist` row whose id matches
  * the `main` panel key (`oac-bots`) — the same mechanism the stock 插件 row
  * uses for the plugin manager. The page hosts every OAC configuration
- * surface that used to be a Settings section (Bots, Memory, User, Apps,
+ * surface that used to be a Settings section (Bots, Memory, User, MetaApps,
  * Traffic) as one `oac.bots.section` list entry each — the first labeled
  * 我的 Bot / My Bots — so DSH Settings stays
  * exactly stock.

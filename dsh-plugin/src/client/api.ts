@@ -1,4 +1,4 @@
-import type { MetaAppListPayload, MetaAppRecord } from '../apps.ts'
+import type { MetaAppChainRow, MetaAppChainSearchPayload, MetaAppListPayload, MetaAppRecord } from '../apps.ts'
 import type {
   TrafficApiBasePayload,
   TrafficBalancePayload,
@@ -964,6 +964,19 @@ export const api = {
     postEnvelope('metaapp/delete', { from, targetPinId, confirm: true }),
   metaappFork: async (from: string, pinId: string, title?: string): Promise<CommandEnvelope> =>
     postEnvelope('metaapp/fork', { from, pinId, ...(title ? { title } : {}) }),
+  /** Global on-chain MetaApp feed (metaso aggregation), not bot-scoped — the 链上元应用 tab. */
+  metaappSearch: async (size = 12, cursor = ''): Promise<MetaAppChainSearchPayload> => {
+    const data = await post<{ items?: unknown; hasMore?: unknown; nextCursor?: unknown }>(
+      'metaapp/search',
+      { size, cursor },
+    )
+    const items = Array.isArray(data.items) ? data.items.map((row) => normalizeChainMetaAppRow(row)) : []
+    return {
+      items,
+      hasMore: data.hasMore === true,
+      nextCursor: typeof data.nextCursor === 'string' ? data.nextCursor.trim() : '',
+    }
+  },
   /** Raw file upload → metafile reference. The browser sends the file bytes directly. */
   metaappUpload: async (from: string, file: File): Promise<{ metafileUri?: string; pinId?: string }> => {
     const response = await fetch('/oac/api/file/upload', {
@@ -1091,6 +1104,30 @@ export function timestampLabel(value: number): string {
     pad(date.getMonth() + 1),
     pad(date.getDate()),
   ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes())].join(':')
+}
+
+/** Tolerant read of one on-chain MetaApp search row (the CLI's trimmed projection + link decoration). */
+function normalizeChainMetaAppRow(value: unknown): MetaAppChainRow {
+  const record = recordOf(value)
+  return {
+    pinId: textOf(record.pinId),
+    title: textOf(record.title),
+    appName: textOf(record.appName),
+    intro: textOf(record.intro),
+    icon: textOf(record.icon),
+    coverImg: textOf(record.coverImg),
+    tags: Array.isArray(record.tags) ? record.tags.map((item) => textOf(item)).filter(Boolean) : [],
+    runtime: textOf(record.runtime),
+    version: textOf(record.version),
+    updatedAt: toNumber(record.updatedAt),
+    publisherGlobalMetaId: textOf(record.publisherGlobalMetaId),
+    publisherName: textOf(record.publisherName),
+    publisherAvatarId: textOf(record.publisherAvatarId),
+    forkedFrom: textOf(record.forkedFrom),
+    isOwn: record.isOwn === true,
+    localUiUrl: textOf(record.localUiUrl),
+    publisherLocalUiUrl: textOf(record.publisherLocalUiUrl),
+  }
 }
 
 function normalizeMetaAppRecord(value: unknown): MetaAppRecord {

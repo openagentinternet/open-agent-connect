@@ -390,6 +390,16 @@ export const APPS_CSS = `
 .oac-apps-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .oac-apps-tag { height: 18px; padding: 0 8px; border-radius: 9px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 18px; }
 .oac-apps-card-foot { display: flex; justify-content: flex-end; gap: 2px; padding: 4px 8px 6px; border-top: 1px solid var(--dsw-alias-border-l2); }
+/* Chain card foot: author identity on the left, actions keep right. */
+.oac-apps-card-foot-chain { justify-content: flex-end; align-items: center; }
+.oac-apps-card-foot-chain .oac-apps-author { margin-right: auto; }
+.oac-apps-author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: transparent; padding: 2px 4px; font: inherit; cursor: pointer; border-radius: 6px; }
+.oac-apps-author:hover { background: var(--dsw-alias-bg-layer-2); }
+.oac-apps-author:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.oac-apps-author-static { cursor: default; }
+.oac-apps-author-static:hover { background: transparent; }
+.oac-apps-author-avatar { width: 20px; height: 20px; font-size: 10px; }
+.oac-apps-author-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .oac-apps-empty { display: flex; flex-direction: column; gap: 2px; padding: 28px 16px; text-align: center; border: 1px dashed var(--dsw-alias-border-l2); border-radius: 12px; }
 .oac-apps-empty strong { font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary); }
 .oac-apps-empty p { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }

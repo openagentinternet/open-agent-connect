@@ -309,6 +309,8 @@ test('trimMetaAppSearchItems projects the CLI fields and marks own publishers ca
     'title',
     'appName',
     'intro',
+    'icon',
+    'coverImg',
     'tags',
     'runtime',
     'version',
