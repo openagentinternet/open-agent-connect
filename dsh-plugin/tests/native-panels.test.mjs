@@ -289,6 +289,8 @@ test('the A2A overlay styles keep the side columns click-through and hide under 
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
   assert.match(styles, /\.oac-a2a-overlay\[class\] \{[^}]*pointer-events: none/)
   assert.match(styles, /\.oac-a2a-overlay-center \{[^}]*pointer-events: auto/)
+  assert.match(styles, /\.oac-a2a-overlay-center \{[^}]*background: var\(--dsw-alias-bg-base\)/)
+  assert.match(styles, /\.oac-a2a-panel \{[^}]*background: var\(--dsw-alias-bg-base\)/)
   assert.match(styles, /\[data-rightbar-fullscreen\] \.oac-a2a-overlay \{ display: none/)
   assert.doesNotMatch(styles, /oac-a2a-dock/)
 })
