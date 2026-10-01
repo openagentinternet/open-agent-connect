@@ -50,7 +50,7 @@ test('traffic locale en and zh dictionaries stay in sync', async () => {
 test('client registers the traffic Bots-page section right after apps', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(text, /id: 'oac-traffic'/)
-  assert.match(text, /order: 24/)
+  assert.match(text, /order: 25/)
   assert.match(text, /'settings\.oac\.traffic': TrafficLocaleKey/)
   assert.match(text, /ctx\.locale\.register\(TRAFFIC_NS, \{ zh: trafficZh, en: trafficEn \}\)/)
   assert.match(text, /ctx\.locale\.bind\(TRAFFIC_NS\)/)

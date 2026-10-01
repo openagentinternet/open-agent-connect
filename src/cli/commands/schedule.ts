@@ -83,13 +83,10 @@ export async function runScheduleCommand(
   if (subcommand === 'list' || subcommand === 'due') {
     const handler = requireScheduleHandler(context, subcommand);
     if (isFailure(handler)) return handler;
-    if (subcommand === 'due') {
-      if (from !== undefined && hasFlag(args, '--all')) {
-        return commandFailed('invalid_flag', '--from and --all cannot be combined; --all covers every local profile.');
-      }
-      return handler({ from, ...(hasFlag(args, '--all') ? { all: true } : {}) });
+    if (from !== undefined && hasFlag(args, '--all')) {
+      return commandFailed('invalid_flag', '--from and --all cannot be combined; --all covers every local profile.');
     }
-    return handler({ from });
+    return handler({ from, ...(hasFlag(args, '--all') ? { all: true } : {}) });
   }
 
   if (subcommand === 'show' || subcommand === 'delete' || subcommand === 'enable'

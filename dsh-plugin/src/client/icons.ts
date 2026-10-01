@@ -32,6 +32,7 @@ function compatIcon(legacyName: string, modernName: string, legacySize: number):
 }
 
 export const IconAgentPresetOutline16 = compatIcon('IconAgentPresetOutline16', 'IconAgentPresetOutlineRegular', 16)
+export const IconAlarmClockOutline16 = compatIcon('IconAlarmClockOutline16', 'IconAlarmClockOutlineRegular', 16)
 export const IconArchiveOutline20 = compatIcon('IconArchiveOutline20', 'IconArchiveOutlineRegular', 20)
 export const IconBranchOutline16 = compatIcon('IconBranchOutline16', 'IconBranchOutlineRegular', 16)
 export const IconBrowseOutline16 = compatIcon('IconBrowseOutline16', 'IconBrowseOutlineRegular', 16)

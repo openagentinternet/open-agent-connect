@@ -3434,11 +3434,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['schedule', 'list'],
-    summary: 'List scheduled tasks for one Bot (or the Twin default).',
-    usage: 'metabot schedule list [--from <bot-slug>]',
-    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    successFields: ['tasks', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
-    examples: ['metabot schedule list --from alice'],
+    summary: 'List scheduled tasks for one Bot (or the Twin default); --all groups every local Bot\'s tasks.',
+    usage: 'metabot schedule list [--from <bot-slug> | --all]',
+    optionalFlags: [FROM_BOT_FLAG, { flag: '--all', description: 'List every local Bot\'s tasks, grouped by Bot slug.' }, HELP_JSON_FLAG],
+    successFields: ['tasks', 'groups (with --all)', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
+    examples: ['metabot schedule list --from alice', 'metabot schedule list --all'],
   },
   {
     commandPath: ['schedule', 'show'],

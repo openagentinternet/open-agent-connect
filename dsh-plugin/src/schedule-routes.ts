@@ -63,6 +63,9 @@ export async function dispatchScheduleRoutes(
   switch (method) {
     case 'schedule/list': {
       const from = textArg(body, 'from')
+      if (body.all === true) {
+        return run(['schedule', 'list', '--all'], { timeoutMs: CLI_TIMEOUT_MS })
+      }
       return run(['schedule', 'list', ...withFrom(from)], { timeoutMs: CLI_TIMEOUT_MS })
     }
     case 'schedule/runs': {

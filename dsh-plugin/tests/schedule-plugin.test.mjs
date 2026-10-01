@@ -1,5 +1,5 @@
-// Scheduled-task host routes — CLI forwarding shapes for the A2A panel's
-// "Scheduled" tab.
+// Scheduled-task host routes — CLI forwarding shapes for the Bots page's
+// 定时任务 section.
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -22,14 +22,18 @@ test('schedule routes forward to the metabot schedule CLI verbs', async () => {
   assert.equal(list.ok, true)
   assert.deepEqual(calls[0], ['schedule', 'list', '--from', 'alice'])
 
+  // The unified Bots-page list: schedule/list with all:true → schedule list --all.
+  await dispatchScheduleRoutes('schedule/list', { all: true }, { run })
+  assert.deepEqual(calls[1], ['schedule', 'list', '--all'])
+
   await dispatchScheduleRoutes('schedule/runs', { from: 'alice', id: 't1', limit: 10 }, { run })
-  assert.deepEqual(calls[1], ['schedule', 'runs', '--from', 'alice', '--id', 't1', '--limit', '10'])
+  assert.deepEqual(calls[2], ['schedule', 'runs', '--from', 'alice', '--id', 't1', '--limit', '10'])
 
   await dispatchScheduleRoutes('schedule/enable', { from: 'alice', id: 't1' }, { run })
-  assert.deepEqual(calls[2], ['schedule', 'enable', '--from', 'alice', '--id', 't1'])
+  assert.deepEqual(calls[3], ['schedule', 'enable', '--from', 'alice', '--id', 't1'])
 
   await dispatchScheduleRoutes('schedule/disable', { from: 'alice', id: 't1' }, { run })
-  assert.deepEqual(calls[3], ['schedule', 'disable', '--from', 'alice', '--id', 't1'])
+  assert.deepEqual(calls[4], ['schedule', 'disable', '--from', 'alice', '--id', 't1'])
 })
 
 test('schedule routes reject missing ids before any CLI call; run never spawns without id', async () => {
