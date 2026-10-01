@@ -79,6 +79,58 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
+function ExpandableTaskField({
+  label,
+  value,
+  expandLabel,
+  collapseLabel,
+}: {
+  label: string
+  value: string
+  expandLabel: string
+  collapseLabel: string
+}): ReactNode {
+  const [expanded, setExpanded] = useState(false)
+  const [canExpand, setCanExpand] = useState(false)
+  const textRef = useRef<HTMLParagraphElement | null>(null)
+
+  useEffect(() => {
+    setExpanded(false)
+  }, [value])
+
+  useEffect(() => {
+    const node = textRef.current
+    if (!node) return
+    const measure = (): void => {
+      if (!expanded) setCanExpand(node.scrollHeight > node.clientHeight + 1)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [expanded, value])
+
+  return (
+    <div className="oac-gt-field">
+      <div className="oac-gt-field-label-row">
+        <span className="oac-gt-field-label">{label}</span>
+        {canExpand ? (
+          <button
+            type="button"
+            className="oac-a2a-guidance-toggle oac-gt-goal-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {expanded ? collapseLabel : expandLabel}
+          </button>
+        ) : null}
+      </div>
+      <p ref={textRef} className={`oac-gt-field-value oac-gt-goal-value${expanded ? ' is-expanded' : ''}`}>{value}</p>
+    </div>
+  )
+}
+
 function taskLabel(task: { displayName: string | null; title: string }): string {
   return task.displayName?.trim() || task.title
 }
@@ -711,7 +763,6 @@ export function GroupTaskView({
   // Task drawer (the IDBots right-rail port): open by default as a layout
   // column, with the close button still allowing the user to hide it.
   const [drawerOpen, setDrawerOpen] = useState(true)
-  const [goalExpanded, setGoalExpanded] = useState(false)
   const mdLabels = useMemo(() => markdownLabels(t), [t])
 
   // Composer — the owner speaks as the owner (IDBots parity: no sender select).
@@ -768,10 +819,6 @@ export function GroupTaskView({
   const lastCreateSignal = useRef(createSignal)
 
   const reload = useCallback((): void => setTick((value) => value + 1), [])
-
-  useEffect(() => {
-    setGoalExpanded(false)
-  }, [selected?.chair, selected?.taskId])
 
   useEffect(() => {
     if (createSignal !== lastCreateSignal.current) {
@@ -1483,54 +1530,20 @@ export function GroupTaskView({
               {actionNote ? <p className="oac-note error">{actionNote}</p> : null}
               {infoNote ? <p className="oac-note">{infoNote}</p> : null}
               <section className="oac-gt-section">
-                <div className="oac-gt-field">
-                  <div className="oac-gt-field-label-row">
-                    <span className="oac-gt-field-label">{t('gtGoal')}</span>
-                    <button
-                      type="button"
-                      className="oac-a2a-guidance-toggle oac-gt-goal-toggle"
-                      aria-expanded={goalExpanded}
-                      onClick={() => setGoalExpanded((value) => !value)}
-                    >
-                      {goalExpanded ? t('gtCollapseGoal') : t('gtExpandGoal')}
-                    </button>
-                  </div>
-                  <p className={`oac-gt-field-value oac-gt-goal-value${goalExpanded ? ' is-expanded' : ''}`}>{detail.goal}</p>
-                </div>
+                <ExpandableTaskField
+                  label={t('gtGoal')}
+                  value={detail.goal}
+                  expandLabel={t('gtExpandGoal')}
+                  collapseLabel={t('gtCollapseGoal')}
+                />
                 {detail.acceptanceCriteria ? (
-                  <div className="oac-gt-field">
-                    <span className="oac-gt-field-label">{t('gtAcceptance')}</span>
-                    <p className="oac-gt-field-value">{detail.acceptanceCriteria}</p>
-                  </div>
+                  <ExpandableTaskField
+                    label={t('gtAcceptance')}
+                    value={detail.acceptanceCriteria}
+                    expandLabel={t('gtExpandAcceptance')}
+                    collapseLabel={t('gtCollapseAcceptance')}
+                  />
                 ) : null}
-                <div className="oac-gt-local-actions">
-                  <button
-                    type="button"
-                    className="oac-a2a-guidance-toggle"
-                    onClick={() => {
-                      setRenameDraft(detail.displayName ?? '')
-                      setRenameTarget({ chair: detail.chairSlug, taskId: detail.id })
-                    }}
-                  >
-                    {t('gtRename')}
-                  </button>
-                  <button
-                    type="button"
-                    className="oac-a2a-guidance-toggle"
-                    disabled={busy}
-                    onClick={() => { void runAction(() => gt.pin(detail.chairSlug, detail.id, !detail.pinned)) }}
-                  >
-                    {detail.pinned ? t('gtUnpin') : t('gtPin')}
-                  </button>
-                  <button
-                    type="button"
-                    className="oac-a2a-guidance-toggle"
-                    disabled={busy}
-                    onClick={() => { void runAction(() => gt.archive(detail.chairSlug, detail.id, detail.archivedAt == null)) }}
-                  >
-                    {detail.archivedAt == null ? t('gtArchive') : t('gtUnarchive')}
-                  </button>
-                </div>
               </section>
               {detail.openCheckpointSummary && !terminal ? (
                 <section className="oac-gt-checkpoint">
