@@ -711,6 +711,7 @@ export function GroupTaskView({
   // Task drawer (the IDBots right-rail port): open by default as a layout
   // column, with the close button still allowing the user to hide it.
   const [drawerOpen, setDrawerOpen] = useState(true)
+  const [goalExpanded, setGoalExpanded] = useState(false)
   const mdLabels = useMemo(() => markdownLabels(t), [t])
 
   // Composer — the owner speaks as the owner (IDBots parity: no sender select).
@@ -767,6 +768,10 @@ export function GroupTaskView({
   const lastCreateSignal = useRef(createSignal)
 
   const reload = useCallback((): void => setTick((value) => value + 1), [])
+
+  useEffect(() => {
+    setGoalExpanded(false)
+  }, [selected?.chair, selected?.taskId])
 
   useEffect(() => {
     if (createSignal !== lastCreateSignal.current) {
@@ -1437,6 +1442,18 @@ export function GroupTaskView({
                     >
                       {t('gtCancelTask')}
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        setInviteError(null)
+                        setInviteOpen(true)
+                      }}
+                    >
+                      {t('gtInviteRemote')}
+                    </Button>
                   </>
                 ) : null}
                 {detail.status === 'review' ? (
@@ -1467,8 +1484,18 @@ export function GroupTaskView({
               {infoNote ? <p className="oac-note">{infoNote}</p> : null}
               <section className="oac-gt-section">
                 <div className="oac-gt-field">
-                  <span className="oac-gt-field-label">{t('gtGoal')}</span>
-                  <p className="oac-gt-field-value">{detail.goal}</p>
+                  <div className="oac-gt-field-label-row">
+                    <span className="oac-gt-field-label">{t('gtGoal')}</span>
+                    <button
+                      type="button"
+                      className="oac-a2a-guidance-toggle oac-gt-goal-toggle"
+                      aria-expanded={goalExpanded}
+                      onClick={() => setGoalExpanded((value) => !value)}
+                    >
+                      {goalExpanded ? t('gtCollapseGoal') : t('gtExpandGoal')}
+                    </button>
+                  </div>
+                  <p className={`oac-gt-field-value oac-gt-goal-value${goalExpanded ? ' is-expanded' : ''}`}>{detail.goal}</p>
                 </div>
                 {detail.acceptanceCriteria ? (
                   <div className="oac-gt-field">
@@ -1505,72 +1532,6 @@ export function GroupTaskView({
                   </button>
                 </div>
               </section>
-              <section className="oac-gt-section">
-                <span className="oac-gt-field-label">
-                  {t('gtMembers')}
-                  {!terminal ? (
-                    <button
-                      type="button"
-                      className="oac-a2a-guidance-toggle oac-gt-invite-toggle"
-                      disabled={busy}
-                      onClick={() => {
-                        setInviteError(null)
-                        setInviteOpen(true)
-                      }}
-                    >
-                      {t('gtInviteRemote')}
-                    </button>
-                  ) : null}
-                </span>
-                <ul className="oac-gt-members">
-                  {detail.members.map((member) => {
-                    const bot = member.slug ? bots.find((row) => row.slug === member.slug) : undefined
-                    const name = member.displayName ?? bot?.name ?? member.slug ?? member.globalMetaId ?? '?'
-                    return (
-                      <li key={member.id} className="oac-gt-member">
-                        <BotAvatar name={name} src={member.avatar ?? bot?.avatarDataUrl} className="oac-gt-member-avatar" />
-                        <span className="oac-gt-member-main">
-                          <span className="oac-gt-member-name">
-                            {name}
-                            {member.role === 'chair' ? <span className="oac-gt-badge oac-gt-chair">{t('gtChair')}</span> : null}
-                            {member.slug == null ? <span className="oac-gt-badge oac-gt-openteam">{t('gtRemote')}</span> : null}
-                          </span>
-                          <span className={`oac-gt-member-work oac-gt-work-${member.workStatus}`}>
-                            {t(workStatusKey(member.workStatus))}
-                          </span>
-                        </span>
-                        {member.role !== 'chair' && !terminal ? (
-                          <button
-                            type="button"
-                            className="oac-gt-member-kick"
-                            disabled={busy}
-                            onClick={() => setKickTarget(member)}
-                          >
-                            {t('gtKick')}
-                          </button>
-                        ) : null}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </section>
-              {detail.deliverables.length > 0 ? (
-                <section className="oac-gt-section">
-                  <span className="oac-gt-field-label">{t('gtDeliverables')}</span>
-                  <ul className="oac-gt-deliverables">
-                    {detail.deliverables.map((row) => (
-                      <li key={row.id} className="oac-gt-deliverable">
-                        <span className={`oac-gt-badge oac-gt-deliverable-${row.status}`}>{row.status}</span>
-                        {row.kind ? <span className="oac-gt-deliverable-kind">{row.kind}</span> : null}
-                        {row.uri ? <code className="oac-gt-deliverable-uri">{row.uri}</code> : null}
-                        <span className="oac-a2a-row-time" title={timestampLabel(row.createdAt)}>
-                          {relativeTimeLabel(row.createdAt)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
               {detail.openCheckpointSummary && !terminal ? (
                 <section className="oac-gt-checkpoint">
                   <span className="oac-gt-checkpoint-title">
