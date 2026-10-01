@@ -634,11 +634,34 @@ function GroupTaskDrawer({
   )
 }
 
+/** The task rail stays mounted as a layout column even before a task is picked. */
+function GroupTaskDrawerPlaceholder({
+  t,
+  onClose,
+}: {
+  t: Translate
+  onClose: () => void
+}): ReactNode {
+  return (
+    <div className="oac-gt-drawer">
+      <div className="oac-gt-drawer-head">
+        <span className="oac-gt-drawer-title">{t('gtDrawerToggle')}</span>
+        <button type="button" className="oac-gt-drawer-close" aria-label={t('close')} onClick={onClose}>
+          <IconCloseOutline16 size={14} />
+        </button>
+      </div>
+      <div className="oac-gt-drawer-body oac-gt-drawer-placeholder">
+        <span className="oac-note">{t('gtSelectTask')}</span>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Group Task surface inside the A2A panel: task list on the left, task detail
  * (info, members, deliverables, checkpoint banner, transcript, composer) on
- * the right, plus the floating task drawer (the IDBots right-rail port)
- * toggled from the thread head.
+ * the right, plus the task drawer (the IDBots right-rail port) in a dedicated
+ * layout column toggled from the thread head.
  * `createSignal` increments when the panel header's New button is pressed.
  */
 export function GroupTaskView({
@@ -685,9 +708,9 @@ export function GroupTaskView({
   const [infoNote, setInfoNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
-  // Task drawer (the IDBots right-rail port): hidden by default, floats above
-  // the thread when toggled from the thread head.
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  // Task drawer (the IDBots right-rail port): open by default as a layout
+  // column, with the close button still allowing the user to hide it.
+  const [drawerOpen, setDrawerOpen] = useState(true)
   const mdLabels = useMemo(() => markdownLabels(t), [t])
 
   // Composer — the owner speaks as the owner (IDBots parity: no sender select).
@@ -1076,7 +1099,11 @@ export function GroupTaskView({
     && (row.status === 'pending' || row.status === 'confirmed' || row.status === 'skip_authorized')) ?? null
 
   return (
-    <div className={hideList === true ? 'oac-a2a-body' : 'oac-a2a-body oac-a2a-body-with-list'}>
+    <div className={[
+      'oac-a2a-body',
+      hideList === true ? '' : 'oac-a2a-body-with-list',
+      drawerOpen ? 'oac-gt-body-with-drawer' : '',
+    ].filter(Boolean).join(' ')}>
       {hideList === true ? null : (
       <div className="oac-a2a-list">
         <div className="oac-a2a-list-head">
@@ -1647,22 +1674,27 @@ export function GroupTaskView({
                 </div>
               </div>
             ) : null}
-            {drawerOpen ? (
-              <GroupTaskDrawer
-                detail={detail}
-                invites={sentInvites}
-                bots={bots}
-                t={t}
-                onClose={() => setDrawerOpen(false)}
-                onJumpToMessage={jumpToMessage}
-                onOpenUri={onOpenUri}
-              />
-            ) : null}
           </>
         ) : null}
           </>
         )}
       </div>
+
+      {drawerOpen
+        ? detail !== null
+          ? (
+            <GroupTaskDrawer
+              detail={detail}
+              invites={sentInvites}
+              bots={bots}
+              t={t}
+              onClose={() => setDrawerOpen(false)}
+              onJumpToMessage={jumpToMessage}
+              onOpenUri={onOpenUri}
+            />
+          )
+          : <GroupTaskDrawerPlaceholder t={t} onClose={() => setDrawerOpen(false)} />
+        : null}
 
       <Modal
         closeLabel={t('close')}
