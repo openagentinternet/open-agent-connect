@@ -32,7 +32,7 @@ import { BotsPage, BotsPageGlyph, type BotsPageInjected, type BotsPageSectionRow
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
-import { A2APanelStore } from './a2a-panel-store.ts'
+import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
 import { ConvTabStore } from './conv-tab-store.ts'
 import { startConvTabMount } from './conv-tab-mount.ts'
 import { currentMainViewSessionId } from '../current-session.ts'
@@ -260,15 +260,29 @@ export function apply(ctx: ClientContext): void {
   // (the pending-target path above). Started after the unread feed so the
   // dots have data from the first paint.
   const convTabs = new ConvTabStore()
+  // Row clicks must also work while a kernel main panel (插件 / Bots) is
+  // active: the overlay renders nothing until activePanelId returns to null,
+  // so exit to the conversation column first — the same destination a local
+  // conversation's click reaches through kernel session navigation. The
+  // selectPanel(null) wrap below closes the overlay and forces the tabs back
+  // to 本地对话, but that wrap exists for SESSION navigation; a list-row
+  // click is not one, so the row's own tab is restored before the target
+  // opens.
+  const openA2A = (target: A2APanelTarget): void => {
+    const tab = convTabs.getSnapshot().tab
+    ctx.layout.selectPanel(null)
+    convTabs.setTab(tab)
+    a2aPanel.openOn(target)
+  }
   ctx.effect(() => startConvTabMount(convTabs, {
     bots: () => api.list(),
     list: (from: string) => api.conversations(from),
     grouptaskList: () => api.grouptaskList('all', false),
     grouptask: grouptaskApi,
     meta: (from, peer, patch) => api.conversationMeta(from, peer, patch),
-    openPrivate: (from, peer) => a2aPanel.openOn({ mode: 'private', from, peer }),
-    openGroupTask: (taskKey) => a2aPanel.openOn({ mode: 'grouptask', taskKey }),
-    openCollab: (slug, groupId) => a2aPanel.openOn({ mode: 'collab', slug, groupId }),
+    openPrivate: (from, peer) => openA2A({ mode: 'private', from, peer }),
+    openGroupTask: (taskKey) => openA2A({ mode: 'grouptask', taskKey }),
+    openCollab: (slug, groupId) => openA2A({ mode: 'collab', slug, groupId }),
     hooks: { unread: unreadController.source },
     t: tConv,
   }), 'oac-dsh: conversation tabs mount')

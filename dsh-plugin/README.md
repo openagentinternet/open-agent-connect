@@ -210,7 +210,13 @@ reading pane): rows carry the IDBots hover menu (Copy Session ID / Rename /
 Pin / Archive — group-task archive asks first), and clicking one opens the
 A2A Chat overlay pre-positioned on that conversation, task, or OpenTeam
 collaboration through a one-shot target on the panel store (applied and
-consumed on arrival; `close` drops stale targets). The 群任务 tab also owns
+consumed on arrival; `close` drops stale targets). A row click while a
+kernel main panel (插件 / Bots) is active first exits to the conversation
+column (`layout.selectPanel(null)`) — the overlay renders only with no main
+panel active — then opens pre-positioned, the same destination a
+local-conversation click reaches through kernel session navigation; the
+selectPanel wrap's overlay close is re-armed by the target, and its tab
+reset exists for session navigation, so the row's own tab is restored. The 群任务 tab also owns
 the engine-health note, the pending staffing slate (the owner's
 confirm/revise/skip surface), the OpenTeam guest collaborations list, and
 the + button that opens the panel's create-task modal. Session navigation —
