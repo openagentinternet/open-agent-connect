@@ -26,8 +26,12 @@ export const BOTS_CSS = `
    Every color resolves through a --dsw-alias-* token so the tiles follow the
    active theme (the bare --dsh-border fallbacks above stay light-mode gray). */
 .oac-bot-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); grid-auto-rows: 1fr; gap: 12px; }
-.oac-bot-card { border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-3); display: flex; flex-direction: column; transition: border-color .16s, background .16s; }
+.oac-bot-card { border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-3); display: flex; flex-direction: column; transition: border-color .16s, background .16s; cursor: pointer; }
 .oac-bot-card:hover { border-color: var(--dsw-alias-label-dimmed); }
+/* The whole card opens the editor (keyboard focus gets the same ring the
+   icon buttons use); inner controls (avatar Bot Page, copy, availability,
+   resync) stop the click from reaching the card. */
+.oac-bot-card:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .oac-bot-main { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 14px 16px 12px; }
 .oac-bot-avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
 .oac-bot-avatar-sm { width: 28px; height: 28px; font-size: 11px; }
@@ -938,4 +942,14 @@ export const BOTSPAGE_CSS = `
 .oac-bots-page-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-bots-page-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
 .oac-bots-page-content > [role='tabpanel'] { max-width: 720px; margin-inline: auto; }
+
+/* The Bot Page dock: the kernel hides the right Sidebar while any main panel
+   is active, so from this page a Bot's page (or the Browser home) opens in
+   this in-page dock instead — the Bots page stays put. The dock is a pure
+   viewer over the shared BrowserStage (theme-baked src, keyed remount). */
+.oac-bots-page-dock { flex: none; width: min(520px, 44%); min-width: 340px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
+.oac-bots-page-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-bots-page-dock-title { flex: 1; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-bots-page-dock-state { padding: 24px 16px; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }
+.oac-bots-page-dock .oac-browser-frame { flex: 1; min-height: 0; height: auto; }
 `

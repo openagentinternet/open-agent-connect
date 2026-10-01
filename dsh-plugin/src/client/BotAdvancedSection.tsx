@@ -98,7 +98,7 @@ export function BotAdvancedSection({
   bot,
   t,
   busy,
-  browserOpen,
+  openBotPage,
   botWallet,
   botBackup,
   botHomepageUpload,
@@ -109,7 +109,8 @@ export function BotAdvancedSection({
   bot: BotRow
   t: Translate
   busy: boolean
-  browserOpen: (uri?: string) => Promise<void>
+  /** Open one Bot page / MetaApp preview (or the Browser home on null) in the Bots page's own dock. */
+  openBotPage: (uri: string | null, title: string) => void
   botWallet: (slug: string) => Promise<BotWalletPayload>
   botBackup: (slug: string) => Promise<BotBackupPayload>
   botHomepageUpload: (
@@ -277,7 +278,7 @@ export function BotAdvancedSection({
               variant="outline"
               size="sm"
               icon={<IconRightUpOutline16 />}
-              onClick={() => { void browserOpen(`metaid://${bot.globalMetaId}`) }}
+              onClick={() => { openBotPage(`metaid://${bot.globalMetaId}`, bot.name) }}
             >
               {t('homepageView')}
             </Button>
@@ -329,7 +330,7 @@ export function BotAdvancedSection({
                 size="sm"
                 icon={<IconRightUpOutline16 />}
                 disabled={!draft.metaappPin.trim()}
-                onClick={() => { void browserOpen(`metaapp://${stripUriPrefix(draft.metaappPin, 'metaapp://')}`) }}
+                onClick={() => { openBotPage(`metaapp://${stripUriPrefix(draft.metaappPin, 'metaapp://')}`, t('homepageMetaappPreview')) }}
               >
                 {t('homepageMetaappPreview')}
               </Button>

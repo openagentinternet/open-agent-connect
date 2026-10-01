@@ -196,8 +196,70 @@ test('hub forwards agent-browser:open-tab events to web listeners', async () => 
   }
 })
 
-test('browser/open without a started hub answers daemon_unreachable', async () => {
+test('hub resolve returns the localUiUrl without emitting an open or touching the snapshot', async () => {
+  const server = createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.write('retry: 3000\n\n')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  const baseUrl = `http://127.0.0.1:${address.port}`
+  const hub = new BrowserEventHub({ METABOT_DAEMON_BASE_URL: baseUrl })
+  const received = []
+  const off = hub.addListener((event) => received.push(event))
+  hub.start()
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    assert.deepEqual(hub.resolve('metaid://idq1example'), {
+      uri: 'metaid://idq1example',
+      localUiUrl: `${baseUrl}/browser/metaid/idq1example`,
+    })
+    assert.deepEqual(hub.resolve(null), { uri: null, localUiUrl: `${baseUrl}/browser` })
+    // Resolve is side-effect-free: no open event, no snapshot mutation.
+    assert.deepEqual(received, [])
+    assert.equal(hub.getSnapshot().open, false)
+    assert.equal(hub.getLastOpenAt(), 0)
+  } finally {
+    off()
+    hub.stop()
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('browser/resolve without a started hub answers daemon_unreachable', async () => {
   const routes = []
+  const ctx = {
+    webRuntime: { trustedHosts: [] },
+    webServer: {
+      register(route) {
+        routes.push(route)
+        return () => {}
+      },
+    },
+    effect(fn) {
+      fn()
+    },
+  }
+  await plugin.apply(ctx, { skipBootstrap: true })
+  const route = routes[0]
+  const box = capture()
+  const request = {
+    method: 'POST',
+    url: '/oac/api/browser/resolve',
+    headers: { host: '127.0.0.1:8787' },
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from(JSON.stringify({ uri: 'metaid://idq1example' }))
+    },
+  }
+  await route.handler(request, box.res)
+  assert.equal(box.status, 200)
+  const body = JSON.parse(box.body)
+  assert.equal(body.ok, false)
+  assert.equal(body.state, 'failed')
+  assert.equal(body.code, 'daemon_unreachable')
+})
+
+test('browser/open without a started hub answers daemon_unreachable', async () => {  const routes = []
   const ctx = {
     webRuntime: { trustedHosts: [] },
     webServer: {

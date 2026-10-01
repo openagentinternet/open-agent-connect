@@ -330,18 +330,28 @@ export class BrowserEventHub {
   }
 
   /**
+   * Resolve one URI to its localUiUrl without emitting anything. The Bots
+   * page's in-page dock loads the returned URL itself — no right-Sidebar
+   * reveal, no snapshot mutation.
+   */
+  resolve(uri: string | null): { uri: string | null; localUiUrl: string } | null {
+    const baseUrl = this.baseUrl
+    if (baseUrl === null) return null
+    const resolved = uri && uri.trim() ? (normalizeBotBrowserUri(uri) ?? uri.trim()) : null
+    return {
+      uri: resolved,
+      localUiUrl: resolved ? `${baseUrl}${resolveBrowserPath(resolved)}` : `${baseUrl}/browser`,
+    }
+  }
+
+  /**
    * Resolve and broadcast one open (agent-driven event or UI-initiated call).
    * Returns the event when the daemon base URL is known, else null.
    */
   open(uri: string | null, source: BrowserOpenSource = 'host'): BrowserOpenEvent | null {
-    const baseUrl = this.baseUrl
-    if (baseUrl === null) return null
-    const resolved = uri && uri.trim() ? (normalizeBotBrowserUri(uri) ?? uri.trim()) : null
-    const event: BrowserOpenEvent = {
-      uri: resolved,
-      localUiUrl: resolved ? `${baseUrl}${resolveBrowserPath(resolved)}` : `${baseUrl}/browser`,
-      source,
-    }
+    const resolved = this.resolve(uri)
+    if (resolved === null) return null
+    const event: BrowserOpenEvent = { ...resolved, source }
     this.lastOpenTabAt = Date.now()
     this.snapshot = {
       ...this.snapshot,
