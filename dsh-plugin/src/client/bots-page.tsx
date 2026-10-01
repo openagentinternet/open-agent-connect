@@ -1,13 +1,22 @@
 /**
- * Bots main panel (client half): the plugin's dedicated page in the DSH
- * frame, reached from the left-rail `sidebar.panellist` row whose id matches
- * the `main` panel key (`oac-bots`) — the same mechanism the stock 插件 row
- * uses for the plugin manager. The page hosts every OAC configuration
- * surface that used to be a Settings section (Bots, Memory, User, MetaApps,
- * Traffic) as one `oac.bots.section` list entry each — the first labeled
- * 我的 Bot / My Bots — plus the unified 定时任务 (Scheduled) list extracted
- * from the Bot editor — so DSH Settings stays
+ * Bots page (client half): the plugin's dedicated surface in the DSH frame,
+ * reached from the left-rail `sidebar.panellist` row (id `oac-bots`). The
+ * page hosts the OAC surfaces that used to be Settings sections (Bots,
+ * Memory, User, MetaApps, Traffic) as one `oac.bots.section` list entry each
+ * — the first labeled 我的 Bot / My Bots — plus the unified 定时任务
+ * (Scheduled) list extracted from the Bot editor, so DSH Settings stays
  * exactly stock.
+ *
+ * The page is a `shell.overlay` entry (the A2A Chat pattern), NOT a kernel
+ * `main` panel: the overlay covers the center column only, so the official
+ * right Sidebar stays mounted and opening a Bot page lands in the real
+ * right-Sidebar Bot Browser (drag-resize, fullscreen, native tab chrome)
+ * while the page stays put. The row's click is capture-intercepted into a
+ * toggle of the apply-scope BotsPagePanelStore (a panellist click is
+ * hardwired to `layout.selectPanel`, which would need a `main` key and would
+ * unmount the right Sidebar); the glyph syncs the kernel's selected look
+ * onto the row while the page is open. Session navigation, 新会话, and the
+ * A2A overlay opening all close the page.
  *
  * The chrome mirrors the Plugins settings section's pattern, turned vertical
  * like the Settings left nav it replaces: a nav column projects the
@@ -18,30 +27,21 @@
  * survives a tab switch. The active section id persists in localStorage, so
  * reopening the page returns to the section that was open last.
  *
- * Sections receive `{ close }` as owner props, the same contract
- * `settings.section` gave them: `close` means "leave this surface", which
- * for a main panel is `layout.selectPanel(null)` — back to the conversation
- * column (the Bot Browser reveal flow needs the right Sidebar mounted, and
- * the Sidebar's root gates on `activePanelId === null`).
- *
- * The page also owns a right-side **Bot Page dock**: the kernel hides the
- * right Sidebar while any main panel is active (`RightbarRoot` gates on
- * `activePanelId === null`), so from this page a Bot's page (or the Browser
- * home) opens in an in-page dock iframe instead of the right-Sidebar tab —
- * the page the user is managing never disappears under them. The dock loads
- * the same daemon-resolved `localUiUrl` through the side-effect-free
- * `browser/resolve` host route and renders the shared `BrowserStage`; it is
- * a pure viewer — the iframe bridge and the `<browser_context>` reporting
- * keep tracking only the right-Sidebar tab.
+ * Sections receive `{ close, openBotPage }` as owner props. `close` is the
+ * settings-era "leave this surface" contract — on the overlay it closes the
+ * page. `openBotPage` reveals a resource in the right-Sidebar Bot Browser
+ * (the overlay never blocks that Sidebar).
  */
-import { useCallback, useEffect, useId, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
 import type { CommonKeyOf, InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import { BrowserStage } from './browser-stage.tsx'
+import type { ObservableSnapshot, SnapshotSelectorHook, SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { UsePanelInfo } from '@deepseek-ai/dsh-client-ui-layout/client'
+import { CenterOverlayFrame } from './overlay-frame.tsx'
+import { BOTS_PANEL_ROW_MARK } from './a2a-panel-row.ts'
+import type { BotsPagePanelState } from './bots-page-store.ts'
 import {
   IconAgentPresetOutline16,
   IconAlarmClockOutline16,
-  IconCloseOutline16,
   IconGaugeOutline16,
   IconGlobeOutline16,
   IconThinkOutline16,
@@ -50,24 +50,24 @@ import {
 } from './icons.ts'
 import type { BotsLocaleKey } from './locale.ts'
 
-/** Owner share of one Bots-page section entry (the page supplies `close`). */
+/** Owner share of one Bots-page section entry. */
 export interface OacBotsSectionOwnerProps {
-  /** Leave the Bots page and return to the conversation column. */
+  /** Close the Bots page (the settings-era "leave this surface" contract). */
   close: () => void
   /**
-   * Open one Bot's page (or the Browser home on null) in the page's own
-   * right-side dock — the Bots page stays put (see the file header).
+   * Open one Bot's page (or the Browser home on null) in the official
+   * right-Sidebar Bot Browser — the overlay never blocks that Sidebar.
    */
-  openBotPage: (uri: string | null, title: string) => void
+  openBotPage: (uri: string | null) => void
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /**
-     * One page inside the Bots main panel. Registrant options carry the nav
+     * One page inside the Bots overlay. Registrant options carry the nav
      * identity: `id` (section key, drives `only` filtering), `order` (nav
      * position), `label` (registrant-localized display text). Declared at
-     * runtime by the panel's own `main` registration.
+     * runtime by the overlay's own registration.
      */
     'oac.bots.section': {
       kind: 'list'
@@ -84,25 +84,28 @@ export interface BotsPageSectionRow {
   label: string
 }
 
-export interface BotsPageInjected {
+export interface BotsPageOverlayInjected {
   hooks: {
     /** The section ledger projection behind the nav (slots version + locale revision memoized). */
     sections: ObservableSnapshot<BotsPageSectionRow[]>
+    /** The apply-scope overlay open state. */
+    panel: SnapshotStore<BotsPagePanelState>
   }
-  /** Owner-prop face handed to every rendered section (see the file header). */
+  /** Close the page (the sections' owner-prop face). */
   close: () => void
-  /** Resolve one Agent Internet URI (null = the Browser home) to its localUiUrl, without opening the right Sidebar. */
-  resolveBotPage: (uri: string | null) => Promise<string>
+  /** Reveal one resource in the right-Sidebar Bot Browser (the sections' owner-prop face). */
+  openBotPage: (uri: string | null) => void
 }
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
-export type BotsPageProps =
-  InjectFace<BotsPageInjected>
-  & {
-    renderSlot: PropsRenderSlots<'oac.bots.section'>['renderSlot']
-    t: Translate
-  }
+export type BotsPageProps = {
+  t: Translate
+  renderSlot: PropsRenderSlots<'oac.bots.section'>['renderSlot']
+  useSections: SnapshotSelectorHook<BotsPageSectionRow[]>
+  close: () => void
+  openBotPage: (uri: string | null) => void
+}
 
 /** The active-section preference, remembered per browser. */
 const ACTIVE_SECTION_STORAGE_KEY = 'oac-dsh:bots-page-section:v1'
@@ -125,39 +128,13 @@ function writeActiveSection(id: string): void {
   try { window.localStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, id) } catch { /* storage may be disabled */ }
 }
 
-/** One open dock request: the Bot page (or Browser home) being shown. */
-interface DockState {
-  title: string
-  url: string | null
-  error: string | null
-}
-
-export function BotsPage({ t, renderSlot, useSections, close, resolveBotPage }: BotsPageProps): ReactNode {
+export function BotsPage({ t, renderSlot, useSections, close, openBotPage }: BotsPageProps): ReactNode {
   const navId = useId()
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const rows = useSections((value) => value)
   const [activeId, setActiveId] = useState<string | null>(readActiveSection)
   const [visitedIds, setVisitedIds] = useState<ReadonlySet<string>>(() => new Set())
   const active = rows.find((row) => row.id === activeId)?.id ?? rows[0]?.id
-
-  const [dock, setDock] = useState<DockState | null>(null)
-  const dockRequestRef = useRef(0)
-  const openDock = useCallback((uri: string | null, title: string): void => {
-    const request = dockRequestRef.current + 1
-    dockRequestRef.current = request
-    setDock({ title, url: null, error: null })
-    resolveBotPage(uri).then((url) => {
-      if (dockRequestRef.current === request) setDock({ title, url, error: null })
-    }).catch((cause: unknown) => {
-      if (dockRequestRef.current === request) {
-        setDock({ title, url: null, error: cause instanceof Error ? cause.message : String(cause) })
-      }
-    })
-  }, [resolveBotPage])
-  const closeDock = useCallback((): void => {
-    dockRequestRef.current += 1
-    setDock(null)
-  }, [])
 
   useEffect(() => {
     if (active === undefined) return
@@ -228,44 +205,65 @@ export function BotsPage({ t, renderSlot, useSections, close, resolveBotPage }: 
               aria-labelledby={tabId(row.id)}
               hidden={!selected}
             >
-              {renderSlot('oac.bots.section', { close, openBotPage: openDock }, { only: row.id })}
+              {renderSlot('oac.bots.section', { close, openBotPage }, { only: row.id })}
             </div>
           )
         })}
       </div>
-      {dock === null ? null : (
-        <aside className="oac-bots-page-dock" aria-label={dock.title}>
-          <div className="oac-bots-page-dock-head">
-            <span className="oac-bots-page-dock-title">{dock.title}</span>
-            <button
-              type="button"
-              className="oac-icon-btn"
-              aria-label={t('close')}
-              title={t('close')}
-              onClick={closeDock}
-            >
-              <IconCloseOutline16 />
-            </button>
-          </div>
-          {dock.error !== null ? (
-            <div className="oac-bots-page-dock-state" role="alert">{dock.error}</div>
-          ) : dock.url === null ? (
-            <div className="oac-bots-page-dock-state">{t('dockLoading')}</div>
-          ) : (
-            <BrowserStage url={dock.url} title={dock.title} onIframe={() => undefined} />
-          )}
-        </aside>
-      )}
     </div>
   )
 }
 
+export type BotsPageOverlayProps =
+  InjectFace<BotsPageOverlayInjected>
+  & {
+    renderSlot: PropsRenderSlots<'oac.bots.section'>['renderSlot']
+    t: Translate
+    usePanelInfo: UsePanelInfo
+  }
+
+/** The registered `shell.overlay` entry: the shared frame gating + the page. */
+export function BotsPageOverlay(props: BotsPageOverlayProps): ReactNode {
+  const { usePanel, usePanelInfo } = props
+  const open = usePanel((state) => state.open)
+  return (
+    <CenterOverlayFrame open={open} usePanelInfo={usePanelInfo}>
+      <BotsPage {...props} />
+    </CenterOverlayFrame>
+  )
+}
+
+export interface BotsPageGlyphInjected {
+  hooks: {
+    /** The apply-scope overlay open state (glyph selected styling). */
+    panel: SnapshotStore<BotsPagePanelState>
+  }
+}
+
 /**
  * The left-rail `sidebar.panellist` glyph for the Bots page. The sidebar owns
- * the row (button, label, tooltip, kernel active highlight — this is a real
- * main panel, so `panelActive` fires normally); the registration renders only
- * the glyph inside it.
+ * the row (button, label, tooltip), but the kernel's `active` highlight never
+ * fires for an overlay — the glyph syncs the selected look onto the row from
+ * the overlay store (`.oac-bots-row-active`, the kernel panelActive
+ * vocabulary) plus `aria-current`, and clears both when the page closes.
  */
-export function BotsPageGlyph({ size }: { size: number }): ReactNode {
-  return <IconAgentPresetOutline16 size={size} />
+export function BotsPageGlyph({ size, usePanel }: InjectFace<BotsPageGlyphInjected> & { size: number }): ReactNode {
+  const open = usePanel((state) => state.open)
+  const markRef = useRef<HTMLSpanElement | null>(null)
+  useLayoutEffect(() => {
+    const row = markRef.current?.closest('button')
+    if (!(row instanceof HTMLElement)) return
+    row.classList.toggle('oac-bots-row-active', open)
+    if (open) row.setAttribute('aria-current', 'page')
+    else row.removeAttribute('aria-current')
+    return () => {
+      row.classList.remove('oac-bots-row-active')
+      row.removeAttribute('aria-current')
+    }
+  }, [open])
+  return (
+    <span ref={markRef} {...{ [BOTS_PANEL_ROW_MARK]: '' }} data-open={open || undefined}>
+      <IconAgentPresetOutline16 size={size} />
+    </span>
+  )
 }

@@ -1,6 +1,7 @@
 /**
- * Browser half of open-agent-connect-dsh: locale dictionaries, the Bots main
- * panel (a left-rail `sidebar.panellist` row + `main` page hosting the six
+ * Browser half of open-agent-connect-dsh: locale dictionaries, the Bots page
+ * (a left-rail `sidebar.panellist` row + `shell.overlay` entry — the A2A Chat
+ * pattern, so the official right Sidebar stays mounted — hosting the six
  * `oac.bots.section` pages — My Bots, 定时任务, Memory, User, MetaApps, Traffic — the
  * surfaces that used to be Settings sections, plus the unified scheduled-task
  * list extracted from the Bot editor; DSH Settings itself stays stock), the
@@ -29,7 +30,8 @@ import { A2APanelGlyph, type A2APanelGlyphInjected } from './A2APanelGlyph.tsx'
 import { AppsPanel } from './AppsPanel.tsx'
 import { BotBrowserTab, BotBrowserTabTitle, type BotBrowserTabInjected } from './BotBrowserTab.tsx'
 import { BotPanel } from './BotPanel.tsx'
-import { BotsPage, BotsPageGlyph, type BotsPageInjected, type BotsPageSectionRow } from './bots-page.tsx'
+import { BotsPageGlyph, BotsPageOverlay, type BotsPageGlyphInjected, type BotsPageOverlayInjected, type BotsPageSectionRow } from './bots-page.tsx'
+import { BotsPagePanelStore } from './bots-page-store.ts'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SchedulePanel } from './SchedulePanel.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
@@ -38,7 +40,7 @@ import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
 import { ConvTabStore } from './conv-tab-store.ts'
 import { startConvTabMount } from './conv-tab-mount.ts'
 import { currentMainViewSessionId } from '../current-session.ts'
-import { SHOW_A2A_PANELLIST_ROW, startA2APanelRowInterceptor } from './a2a-panel-row.ts'
+import { BOTS_PANEL_ROW_MARK, SHOW_A2A_PANELLIST_ROW, startA2APanelRowInterceptor, startPanelRowInterceptor } from './a2a-panel-row.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
@@ -141,6 +143,9 @@ export function apply(ctx: ClientContext): void {
   // column — session switch or 新会话 — closes it again (the two watchers
   // below).
   const a2aPanel = new A2APanelStore()
+  // The Bots page is an overlay like A2A Chat: the right Sidebar stays
+  // mounted, so the Bot Browser opens natively beside the page.
+  const botsPagePanel = new BotsPagePanelStore()
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: BOT_BROWSER_TAB_ID,
     kind: BOT_BROWSER_TAB_KIND,
@@ -177,6 +182,11 @@ export function apply(ctx: ClientContext): void {
     const stopPanelRow = SHOW_A2A_PANELLIST_ROW
       ? startA2APanelRowInterceptor(() => a2aPanel.toggle())
       : () => {}
+    // The Bots row is always live: one center-column overlay at a time.
+    const stopBotsPanelRow = startPanelRowInterceptor(BOTS_PANEL_ROW_MARK, () => {
+      a2aPanel.close()
+      botsPagePanel.toggle()
+    })
     // Every Agent Internet URI click (any surface) reveals the right-Sidebar
     // Bot Browser — the A2A overlay keeps that Sidebar mounted, so one path
     // serves transcripts, avatars, and group-task links alike.
@@ -185,6 +195,7 @@ export function apply(ctx: ClientContext): void {
       stopEvents()
       stopLinks()
       stopPanelRow()
+      stopBotsPanelRow()
       stopBridge()
     }
   }, 'oac-dsh: bot browser wiring')
@@ -274,6 +285,7 @@ export function apply(ctx: ClientContext): void {
     const tab = convTabs.getSnapshot().tab
     ctx.layout.selectPanel(null)
     convTabs.setTab(tab)
+    botsPagePanel.close()
     a2aPanel.openOn(target)
   }
   ctx.effect(() => startConvTabMount(convTabs, {
@@ -303,6 +315,7 @@ export function apply(ctx: ClientContext): void {
       previous = current
       if (navigated) {
         a2aPanel.close()
+        botsPagePanel.close()
         convTabs.setTab('local')
       }
     }), 'oac-dsh: a2a overlay session watch')
@@ -322,6 +335,7 @@ export function apply(ctx: ClientContext): void {
     layout.selectPanel = (panelId: Parameters<typeof original>[0]): void => {
       if (panelId === null) {
         a2aPanel.close()
+        botsPagePanel.close()
         convTabs.setTab('local')
       }
       original(panelId)
@@ -329,11 +343,13 @@ export function apply(ctx: ClientContext): void {
     return () => { delete (layout as { selectPanel?: unknown }).selectPanel }
   })
 
-  // The Bots page: one left-rail row whose id matches the `main` panel key,
-  // exactly like the stock 插件 row → plugin manager pair (row order 1 sits
-  // directly below 插件's order 0). The `main` registration declares the
-  // `oac.bots.section` child slot; the five sections below register into it
-  // with the same ids/orders/labels/inject faces they carried as Settings
+  // The Bots page: one left-rail row (order 1, directly below 插件's order 0)
+  // whose click is capture-intercepted into toggling the `shell.overlay` entry
+  // — NOT a kernel `main` panel, so the official right Sidebar stays mounted
+  // and the Bot Browser opens natively beside the page (drag-resize,
+  // fullscreen, native tabs). The overlay registration declares the
+  // `oac.bots.section` child slot; the sections below register into it with
+  // the same ids/orders/labels/inject faces they carried as Settings
   // sections, and the page chrome projects them into its left nav. Settings
   // itself registers nothing from us anymore.
   let sectionsVersion = -1
@@ -373,23 +389,23 @@ export function apply(ctx: ClientContext): void {
     id: 'oac-bots',
     order: 1,
     label: () => t('nav'),
+    inject: (): BotsPageGlyphInjected => ({ hooks: { panel: botsPagePanel } }),
   }, BotsPageGlyph))
-  ctx.slots.inject('main', () => ctx.slots.register({
-    name: 'main',
-    key: 'oac-bots',
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'oac-bots',
+    order: 1,
     locale: NS,
-    inject: (): BotsPageInjected => ({
-      hooks: { sections: botsPageSections },
-      // The sections' settings-era `close` contract ("leave this surface"):
-      // for a main panel that is the conversation column — and the Bot
-      // Browser reveal needs the right Sidebar mounted, which gates on
-      // activePanelId === null.
-      close: () => { ctx.layout.selectPanel(null) },
-      // The page's own Bot Page dock resolves without opening the Sidebar.
-      resolveBotPage: (uri: string | null) => api.browserResolve(uri),
+    inject: (): BotsPageOverlayInjected => ({
+      hooks: { sections: botsPageSections, panel: botsPagePanel },
+      // The sections' settings-era `close` contract ("leave this surface")
+      // closes the overlay; opening a Bot page goes to the right-Sidebar Bot
+      // Browser, which stays mounted because the page is not a main panel.
+      close: () => { botsPagePanel.close() },
+      openBotPage: (uri: string | null) => { void openBrowserNow(uri) },
     }),
     children: { 'oac.bots.section': { kind: 'list', scope: 'root' } },
-  }, BotsPage))
+  }, BotsPageOverlay))
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
     id: 'oac-bots',

@@ -51,24 +51,26 @@ test('en and zh dictionaries stay in sync for Memory and User', async () => {
   assert.match(user, /nav: '用户'/)
 })
 
-test('client registers the Bots main panel with its panellist row and the six page sections, leaving Settings stock', async () => {
+test('client registers the Bots overlay with its panellist row and the six page sections, leaving Settings stock', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   // The six sections moved out of Settings onto the Bots page: not one
   // settings.section registration remains, so DSH Settings renders stock.
   assert.doesNotMatch(text, /name: 'settings\.section'/)
   assert.match(text, /name: 'oac\.bots\.section'/)
   assert.match(text, /children: \{ 'oac\.bots\.section': \{ kind: 'list', scope: 'root' \} \}/)
-  // The left-rail row and the main panel share the 'oac-bots' id/key, the
-  // same mechanism the stock 插件 row uses for the plugin manager.
+  // The page is a shell.overlay (the A2A pattern — the official right Sidebar
+  // stays mounted), never a kernel main panel; the left-rail row's click is
+  // capture-intercepted into the overlay store toggle.
+  assert.doesNotMatch(text, /name: 'main'/)
   assert.match(text, /name: 'sidebar\.panellist'/)
-  assert.match(text, /name: 'main'/)
-  assert.match(text, /key: 'oac-bots'/)
+  assert.match(text, /startPanelRowInterceptor\(BOTS_PANEL_ROW_MARK/)
+  assert.match(text, /botsPagePanel\.toggle\(\)/)
   assert.match(text, /\}, BotsPageGlyph\)/)
-  assert.match(text, /\}, BotsPage\)/)
+  assert.match(text, /\}, BotsPageOverlay\)/)
   // The nav's section-ledger projection feeds the page through the inject hooks face.
   assert.match(text, /ctx\.slots\.entries\('oac\.bots\.section'\)/)
   assert.match(text, /resolveSlotLabel\(entry\.options\.label\)/)
-  assert.match(text, /hooks: \{ sections: botsPageSections \}/)
+  assert.match(text, /hooks: \{ sections: botsPageSections, panel: botsPagePanel \}/)
   // Section ids and orders: My Bots, 定时任务, Memory, User, Apps, Traffic.
   assert.match(text, /id: 'oac-bots'/)
   assert.doesNotMatch(text, /id: 'oac-services'/)
@@ -99,7 +101,7 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(text, /'oac\.bots\.section': \{/)
   assert.match(text, /kind: 'list'/)
   assert.match(text, /owner: OacBotsSectionOwnerProps/)
-  assert.match(text, /renderSlot\('oac\.bots\.section', \{ close, openBotPage: openDock \}, \{ only: row\.id \}\)/)
+  assert.match(text, /renderSlot\('oac\.bots\.section', \{ close, openBotPage \}, \{ only: row\.id \}\)/)
   assert.match(text, /visitedIds/)
   assert.match(text, /hidden=\{!selected\}/)
   assert.match(text, /role="tablist"/)
@@ -128,7 +130,7 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(index, /label: \(\) => t\('navSection'\)/)
 })
 
-test('the Bot card opens the editor as a whole; the avatar opens the in-page Bot Page dock', async () => {
+test('the Bot card opens the editor as a whole; the avatar opens the right-Sidebar Bot Page', async () => {
   const panel = await readFile(join(root, 'src/client/BotPanel.tsx'), 'utf8')
   // The whole card opens the editor…
   assert.match(panel, /role="button"/)
@@ -137,19 +139,19 @@ test('the Bot card opens the editor as a whole; the avatar opens the in-page Bot
   // …while the inner controls keep their own actions and never reach the card.
   assert.match(panel, /event\.stopPropagation\(\); void toggleAvailability\(bot\)/)
   assert.match(panel, /event\.stopPropagation\(\); void onCardResync\(bot\)/)
-  // The avatar opens the Bot Page in the page's own dock; the card-foot
-  // Bot-Page and edit icon buttons are gone, and nothing on the panel still
-  // drives the right-Sidebar reveal (that surface unmounts under a main panel).
-  assert.match(panel, /event\.stopPropagation\(\)\s*\n\s*openBotPage\(`metaid:\/\/\$\{bot\.globalMetaId\}`, bot\.name\)/)
+  // The avatar opens the Bot Page through the owner-prop face (the page is an
+  // overlay, so the official right Sidebar stays mounted); the card-foot
+  // Bot-Page and edit icon buttons are gone.
+  assert.match(panel, /event\.stopPropagation\(\)\s*\n\s*openBotPage\(`metaid:\/\/\$\{bot\.globalMetaId\}`\)/)
   assert.doesNotMatch(panel, /IconRightUpOutline16|IconEditOutline16|oac-bot-foot-right/)
-  // The panel no longer drives the right-Sidebar reveal (that surface
-  // unmounts under a main panel) — the t('browserOpen') locale KEY stays.
+  // The panel no longer drives the reveal directly — the t('browserOpen')
+  // locale KEY stays.
   assert.doesNotMatch(panel, /browserOpen[=:(]|browserOpen,/)
   const editor = await readFile(join(root, 'src/client/BotEditor.tsx'), 'utf8')
   assert.match(editor, /openBotPage=\{openBotPage\}/)
   assert.doesNotMatch(editor, /browserOpen/)
   const advanced = await readFile(join(root, 'src/client/BotAdvancedSection.tsx'), 'utf8')
-  assert.match(advanced, /openBotPage\(`metaid:\/\/\$\{bot\.globalMetaId\}`, bot\.name\)/)
+  assert.match(advanced, /openBotPage\(`metaid:\/\/\$\{bot\.globalMetaId\}`\)/)
   assert.doesNotMatch(advanced, /browserOpen/)
 })
 
@@ -182,23 +184,32 @@ test('the Scheduled section lists every local Bot in one IDBots-style table', as
   assert.match(styles, /\.oac-sch-tr:hover \{ background: var\(--dsw-alias-interactive-bg-hover\)/)
 })
 
-test('the Bots page dock resolves URIs side-effect-free and renders the shared BrowserStage', async () => {  const page = await readFile(join(root, 'src/client/bots-page.tsx'), 'utf8')
-  assert.match(page, /oac-bots-page-dock/)
-  assert.match(page, /resolveBotPage/)
-  assert.match(page, /<BrowserStage url=\{dock\.url\} title=\{dock\.title\} onIframe=\{\(\) => undefined\} \/>/)
-  const api = await readFile(join(root, 'src/client/api.ts'), 'utf8')
-  assert.match(api, /browserResolve/)
-  assert.match(api, /post<\{ localUiUrl\?: unknown \}>\('browser\/resolve', \{ uri: uri \?\? '' \}\)/)
+test('the Bots page is a center-column overlay on the shared frame, so the right-Sidebar Bot Browser stays mounted', async () => {
+  const page = await readFile(join(root, 'src/client/bots-page.tsx'), 'utf8')
+  assert.match(page, /<CenterOverlayFrame open=\{open\} usePanelInfo=\{usePanelInfo\}>/)
+  assert.match(page, /usePanel\(\(state\) => state\.open\)/)
+  assert.match(page, /BotsPagePanelState/)
+  // The glyph syncs the kernel's selected look onto the row (overlays never
+  // get the kernel's panelActive class).
+  assert.match(page, /classList\.toggle\('oac-bots-row-active', open\)/)
+  assert.match(page, /BOTS_PANEL_ROW_MARK/)
+  // Opening a Bot page goes to the right-Sidebar Bot Browser; `close` closes
+  // the overlay. No in-page dock, no main panel.
+  assert.doesNotMatch(page, /oac-bots-page-dock|BrowserStage|resolveBotPage/)
   const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
-  assert.match(index, /resolveBotPage: \(uri: string \| null\) => api\.browserResolve\(uri\)/)
+  assert.match(index, /openBotPage: \(uri: string \| null\) => \{ void openBrowserNow\(uri\) \}/)
+  assert.match(index, /close: \(\) => \{ botsPagePanel\.close\(\) \}/)
+  assert.doesNotMatch(index, /browserResolve|resolveBotPage/)
   const host = await readFile(join(root, 'src/index.ts'), 'utf8')
-  assert.match(host, /method === 'browser\/resolve'/)
-  const bridge = await readFile(join(root, 'src/browser-bridge.ts'), 'utf8')
-  assert.match(bridge, /resolve\(uri: string \| null\): \{ uri: string \| null; localUiUrl: string \} \| null/)
+  assert.doesNotMatch(host, /browser\/resolve/)
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /button\.oac-bots-row-active/)
   assert.match(styles, /\.oac-bot-card \{[^}]*cursor: pointer/)
   assert.match(styles, /\.oac-bot-card:focus-visible/)
-  assert.match(styles, /\.oac-bots-page-dock \{/)
+  const frame = await readFile(join(root, 'src/client/overlay-frame.tsx'), 'utf8')
+  assert.match(frame, /closest\('\[data-shell-overlay\]'\)/)
+  assert.match(frame, /MutationObserver/)
+  assert.match(frame, /gridTemplateColumns/)
 })
 
 test('services and apps panels keep confirmation gates', async () => {

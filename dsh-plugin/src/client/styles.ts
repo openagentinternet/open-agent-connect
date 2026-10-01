@@ -229,7 +229,7 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3); }
 .oac-a2a-glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; }
 .oac-a2a-glyph[data-open='true'] { color: var(--dsw-alias-brand-primary); }
-button.oac-a2a-row-active { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); font-weight: 500; }
+button.oac-a2a-row-active, button.oac-bots-row-active { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); font-weight: 500; }
 .oac-a2a-glyph .oac-unread-dot { position: absolute; top: -3px; right: -4px; box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-2); }
 .oac-a2a-panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-layer-2); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
@@ -983,14 +983,4 @@ export const BOTSPAGE_CSS = `
 .oac-bots-page-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-bots-page-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
 .oac-bots-page-content > [role='tabpanel'] { max-width: 720px; margin-inline: auto; }
-
-/* The Bot Page dock: the kernel hides the right Sidebar while any main panel
-   is active, so from this page a Bot's page (or the Browser home) opens in
-   this in-page dock instead — the Bots page stays put. The dock is a pure
-   viewer over the shared BrowserStage (theme-baked src, keyed remount). */
-.oac-bots-page-dock { flex: none; width: min(520px, 44%); min-width: 340px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
-.oac-bots-page-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-.oac-bots-page-dock-title { flex: 1; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oac-bots-page-dock-state { padding: 24px 16px; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }
-.oac-bots-page-dock .oac-browser-frame { flex: 1; min-height: 0; height: auto; }
 `

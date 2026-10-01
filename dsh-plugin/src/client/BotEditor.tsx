@@ -91,8 +91,8 @@ export function BotEditor({
     from: string,
     patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
   ) => Promise<AutoReplyConfig>
-  /** Open one Bot page (or the Browser home on null) in the Bots page's own dock — the page stays put. */
-  openBotPage: (uri: string | null, title: string) => void
+  /** Open one Bot page (or the Browser home on null) in the right-Sidebar Bot Browser — the page stays put. */
+  openBotPage: (uri: string | null) => void
   botWallet: (slug: string) => Promise<BotWalletPayload>
   botBackup: (slug: string) => Promise<BotBackupPayload>
   botHomepageUpload: (
