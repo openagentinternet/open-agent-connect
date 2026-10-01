@@ -51,7 +51,7 @@ test('en and zh dictionaries stay in sync for Memory and User', async () => {
   assert.match(user, /nav: '用户'/)
 })
 
-test('client registers the Bots overlay with its panellist row and the six page sections, leaving Settings stock', async () => {
+test('client registers the Bots overlay with its panellist row and the remaining page sections, leaving Settings stock', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   // The six sections moved out of Settings onto the Bots page: not one
   // settings.section registration remains, so DSH Settings renders stock.
@@ -72,15 +72,15 @@ test('client registers the Bots overlay with its panellist row and the six page 
   assert.match(text, /ctx\.slots\.entries\('oac\.bots\.section'\)/)
   assert.match(text, /resolveSlotLabel\(entry\.options\.label\)/)
   assert.match(text, /hooks: \{ sections: botsPageSections, panel: botsPagePanel \}/)
-  // Section ids and orders: My Bots, 定时任务, Memory, User, Apps, Traffic.
+  // Section ids and orders: My Bots, User, Apps, Traffic. Scheduled tasks and
+  // Memory now live inside the selected Bot editor.
   assert.match(text, /id: 'oac-bots'/)
   assert.doesNotMatch(text, /id: 'oac-services'/)
-  assert.match(text, /id: 'oac-schedule'/)
-  assert.match(text, /\}, SchedulePanel\)\)/)
-  assert.match(text, /label: \(\) => t\('tabScheduled'\)/)
+  assert.doesNotMatch(text, /id: 'oac-schedule'/)
+  assert.doesNotMatch(text, /SchedulePanel/)
   assert.match(text, /id: 'oac-apps'/)
   assert.doesNotMatch(text, /id: 'oac-conversations'/)
-  assert.match(text, /id: 'oac-memory'/)
+  assert.doesNotMatch(text, /id: 'oac-memory'/)
   assert.match(text, /id: 'oac-user'/)
   assert.match(text, /id: 'oac-traffic'/)
   assert.match(text, /name: 'shell\.overlay'/)
@@ -89,8 +89,6 @@ test('client registers the Bots overlay with its panellist row and the six page 
   assert.doesNotMatch(text, /key: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /order: 20/)
-  assert.match(text, /order: 21/)
-  assert.match(text, /order: 22/)
   assert.match(text, /order: 23/)
   assert.match(text, /order: 24/)
   assert.match(text, /order: 25/)
@@ -112,8 +110,8 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(text, /window\.localStorage/)
   // Each nav row carries a per-section icon (Settings left-nav parity).
   assert.match(text, /'oac-bots': IconAgentPresetOutline16/)
-  assert.match(text, /'oac-schedule': IconAlarmClockOutline16/)
-  assert.match(text, /'oac-memory': IconThinkOutline16/)
+  assert.doesNotMatch(text, /'oac-schedule': IconAlarmClockOutline16/)
+  assert.doesNotMatch(text, /'oac-memory': IconThinkOutline16/)
   assert.match(text, /'oac-user': IconUserOutline16/)
   assert.match(text, /'oac-apps': IconGlobeOutline16/)
   assert.match(text, /'oac-traffic': IconGaugeOutline16/)
@@ -156,33 +154,17 @@ test('the Bot card opens the editor as a whole; the avatar opens the right-Sideb
   assert.doesNotMatch(advanced, /browserOpen/)
 })
 
-test('the Scheduled section lists every local Bot in one IDBots-style table', async () => {
+test('scheduled tasks are no longer a Bots-page section and Surf/Memory are Bot editor tabs', async () => {
   const panel = await readFile(join(root, 'src/client/SchedulePanel.tsx'), 'utf8')
-  // The unified list comes from schedule list --all, flattened; row-level
-  // keys prefix the Bot slug because task ids are only unique per Bot store.
   assert.match(panel, /scheduleListAll\(\)/)
-  assert.match(panel, /`\$\{task\.botSlug\}:\$\{task\.id\}`/)
-  // IDBots 跟踪任务 > 定时任务 parity: grid table with header, enable switch +
-  // running spinner in Status, overflow menu (Run now / Edit / danger Delete),
-  // whole-row click expands the detail, and a Modal confirms the delete.
-  assert.match(panel, /oac-sch-table/)
-  assert.match(panel, /schColTitle/)
-  assert.match(panel, /schColBot/)
-  assert.match(panel, /schColSchedule/)
-  assert.match(panel, /schColStatus/)
-  assert.match(panel, /schColMore/)
-  assert.match(panel, /role="switch"/)
-  assert.match(panel, /\{ id: 'run', label: t\('schRunNow'\), disabled: running \|\| busy \}/)
-  assert.match(panel, /\{ id: 'delete', label: t\('schDelete'\), danger: true \}/)
-  assert.match(panel, /event\.stopPropagation\(\); handleToggle\(task\)/)
-  assert.match(panel, /<Modal/)
-  assert.match(panel, /schDeleteText/)
-  // The Bot editor no longer carries the per-Bot Scheduled tab.
   const editor = await readFile(join(root, 'src/client/BotEditor.tsx'), 'utf8')
   assert.doesNotMatch(editor, /ScheduledTab|tabScheduled|'scheduled'/)
+  assert.match(editor, /id: 'surf', label: 'tabSurf'/)
+  assert.match(editor, /id: 'memory', label: 'tabMemory'/)
+  assert.match(editor, /<SurfSection bot=\{bot\} t=\{t\} \/>/)
+  assert.match(editor, /<MemoryPanel \{\.\.\.memory\} botSlug=\{bot\.slug\}/)
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
   assert.match(styles, /\.oac-sch-table \{/)
-  assert.match(styles, /\.oac-sch-tr:hover \{ background: var\(--dsw-alias-interactive-bg-hover\)/)
 })
 
 test('the Bots page is a center-column overlay on the shared frame, so the right-Sidebar Bot Browser stays mounted', async () => {

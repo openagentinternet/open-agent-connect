@@ -41,10 +41,8 @@ import { BOTS_PANEL_ROW_MARK } from './a2a-panel-row.ts'
 import type { BotsPagePanelState } from './bots-page-store.ts'
 import {
   IconAgentPresetOutline16,
-  IconAlarmClockOutline16,
   IconGaugeOutline16,
   IconGlobeOutline16,
-  IconThinkOutline16,
   IconUserOutline16,
   type CompatIconProps,
 } from './icons.ts'
@@ -113,8 +111,6 @@ const ACTIVE_SECTION_STORAGE_KEY = 'oac-dsh:bots-page-section:v1'
 /** Per-section nav icons, keyed by section id (the Settings left nav maps its row icons by id the same way). */
 const SECTION_ICONS: Readonly<Record<string, ComponentType<CompatIconProps>>> = {
   'oac-bots': IconAgentPresetOutline16,
-  'oac-schedule': IconAlarmClockOutline16,
-  'oac-memory': IconThinkOutline16,
   'oac-user': IconUserOutline16,
   'oac-apps': IconGlobeOutline16,
   'oac-traffic': IconGaugeOutline16,

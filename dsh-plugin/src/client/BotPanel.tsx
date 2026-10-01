@@ -27,6 +27,8 @@ import { BotEditor } from './BotEditor.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
 import type { BotsLocaleKey } from './locale.ts'
+import type { MemoryLocaleKey } from './locale-memory.ts'
+import type { MemoryPanelInjected } from './MemoryPanel.tsx'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
@@ -52,7 +54,8 @@ type CreatePhase =
   | { kind: 'setup-pending'; bot: BotRow; resumed: boolean }
   | { kind: 'error'; message: string }
 
-export interface BotPanelInjected {
+export interface BotPanelInjected extends MemoryPanelInjected {
+  memoryT: (key: MemoryLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
   list: () => Promise<BotRow[]>
   create: (input: CreateBotInput) => Promise<BotRow>
   update: (slug: string, patch: Record<string, unknown>) => Promise<BotUpdateResult>
@@ -104,6 +107,7 @@ export function BotPanel({
   botHomepageUpload,
   metaappList,
   t,
+  memoryT,
 }: BotPanelInjected & { openBotPage: (uri: string | null) => void; t: Translate }): ReactNode {
   const [bots, setBots] = useState<BotRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -348,6 +352,32 @@ export function BotPanel({
         otherTwinName={otherTwin?.name ?? ''}
         directory={directory}
         t={t}
+        memoryT={memoryT}
+        memory={{
+          bots: list,
+          memoryList,
+          memoryAdd,
+          memoryUpdate,
+          memoryDelete,
+          memoryUnarchive,
+          memoryStats,
+          memoryPolicyGet,
+          memoryPolicySet,
+          memoryPolicyDelete,
+          hygieneStatus,
+          hygieneRun,
+          hygieneConfigSet,
+          knowledgeList,
+          knowledgeUpdate,
+          knowledgeArchive,
+          knowledgeDelete,
+          impressionsList,
+          impressionsShow,
+          dreamSummaries,
+          dreamStatus,
+          dreamSelfIdentity,
+          dreamRun,
+        }}
         busy={busy}
         error={error}
         chatSkills={chatSkills}

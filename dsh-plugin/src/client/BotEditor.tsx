@@ -21,11 +21,13 @@ import { BotAdvancedSection } from './BotAdvancedSection.tsx'
 import { BotAvatar } from './BotAvatar.tsx'
 import { LlmPicker } from './LlmPicker.tsx'
 import type { BotsLocaleKey } from './locale.ts'
+import type { MemoryLocaleKey } from './locale-memory.ts'
 import { KnowledgeTab } from './KnowledgeTab.tsx'
+import { MemoryPanel, type MemoryPanelInjected } from './MemoryPanel.tsx'
 import { SurfSection } from './SurfSection.tsx'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
-type TabKey = 'basic' | 'behavior' | 'chat' | 'knowledge' | 'advanced'
+type TabKey = 'basic' | 'behavior' | 'chat' | 'knowledge' | 'surf' | 'memory' | 'advanced'
 type NoteTone = 'saving' | 'success' | 'warn' | 'error'
 
 const DELETE_CONFIRM_COUNTDOWN_SECONDS = 5
@@ -35,6 +37,8 @@ const TABS: Array<{ id: TabKey; label: BotsLocaleKey }> = [
   { id: 'behavior', label: 'tabBehavior' },
   { id: 'chat', label: 'tabChat' },
   { id: 'knowledge', label: 'tabKnowledge' },
+  { id: 'surf', label: 'tabSurf' },
+  { id: 'memory', label: 'tabMemory' },
   { id: 'advanced', label: 'tabAdvanced' },
 ]
 
@@ -64,6 +68,8 @@ export function BotEditor({
   otherTwinName,
   directory,
   t,
+  memoryT,
+  memory,
   busy,
   error,
   chatSkills,
@@ -83,6 +89,8 @@ export function BotEditor({
   otherTwinName: string
   directory: LlmDirectory | null
   t: Translate
+  memoryT: (key: MemoryLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
+  memory: MemoryPanelInjected
   busy: boolean
   error: string | null
   chatSkills: (from: string) => Promise<ChatSkillsPayload>
@@ -753,6 +761,16 @@ export function BotEditor({
       {tab === 'knowledge' ? (
         <KnowledgeTab bot={bot} t={t} />
       ) : null}
+      {tab === 'surf' ? (
+        <div id={tabPanelId('surf')} role="tabpanel" aria-labelledby={tabId('surf')} className="oac-tab-panel">
+          <SurfSection bot={bot} t={t} />
+        </div>
+      ) : null}
+      {tab === 'memory' ? (
+        <div id={tabPanelId('memory')} role="tabpanel" aria-labelledby={tabId('memory')} className="oac-tab-panel">
+          <MemoryPanel {...memory} botSlug={bot.slug} close={onBack} t={memoryT} />
+        </div>
+      ) : null}
       {tab === 'advanced' ? (
         <div id={tabPanelId('advanced')} role="tabpanel" aria-labelledby={tabId('advanced')} className="oac-tab-panel">
           <div className="oac-form">
@@ -771,7 +789,6 @@ export function BotEditor({
                 <code className="oac-info-value">{bot.mvcAddress ?? ''}</code>
               </div>
             </div>
-            <SurfSection bot={bot} t={t} />
             <BotAdvancedSection
               bot={bot}
               t={t}
