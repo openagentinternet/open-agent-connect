@@ -243,6 +243,27 @@ test('new-session and same-session navigation close the overlay via the selectPa
   assert.match(index, /delete \(layout as \{ selectPanel\?: unknown \}\)\.selectPanel/)
 })
 
+test('list-row navigation exits an active main panel before opening the overlay', async () => {
+  // The overlay renders nothing while a kernel main panel is active
+  // (A2AOverlay gates on activePanelId === null), so a 线上对话 / 群任务 row
+  // click from the 插件 or Bots page must exit to the conversation column
+  // first — the same destination a local-conversation click reaches through
+  // kernel session navigation. The selectPanel(null) wrap closes the overlay
+  // and forces the tabs back to 本地对话 for SESSION navigation; a list-row
+  // click is not one, so the row's own tab is restored before the target
+  // opens.
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /const tab = convTabs\.getSnapshot\(\)\.tab/)
+  assert.match(index, /ctx\.layout\.selectPanel\(null\)/)
+  assert.match(index, /convTabs\.setTab\(tab\)/)
+  assert.match(index, /a2aPanel\.openOn\(target\)/)
+  assert.match(index, /openPrivate: \(from, peer\) => openA2A\(\{ mode: 'private', from, peer \}\)/)
+  assert.match(index, /openGroupTask: \(taskKey\) => openA2A\(\{ mode: 'grouptask', taskKey \}\)/)
+  assert.match(index, /openCollab: \(slug, groupId\) => openA2A\(\{ mode: 'collab', slug, groupId \}\)/)
+  const overlay = await readFile(join(root, 'src/client/A2AOverlay.tsx'), 'utf8')
+  assert.match(overlay, /if \(!open \|\| activePanel !== null\) return null/)
+})
+
 test('the A2A panellist row carries a selected style while the overlay is open', async () => {
   // The kernel panelActive highlight never fires for an overlay, so the
   // glyph syncs the row's selected look (kernel vocabulary) + aria-current
