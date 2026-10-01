@@ -184,8 +184,17 @@ export function apply(ctx: ClientContext): void {
       : () => {}
     // The Bots row is always live: one center-column overlay at a time.
     const stopBotsPanelRow = startPanelRowInterceptor(BOTS_PANEL_ROW_MARK, () => {
+      if (botsPagePanel.getSnapshot().open) {
+        botsPagePanel.close()
+        return
+      }
       a2aPanel.close()
-      botsPagePanel.toggle()
+      // A stock DSH panel (including the optional Automation tasks bundle)
+      // owns the center column while selected. Return to the conversation
+      // column before opening this overlay; otherwise CenterOverlayFrame
+      // correctly keeps rendering it hidden behind the active main panel.
+      ctx.layout.selectPanel(null)
+      botsPagePanel.set({ open: true })
     })
     // Every Agent Internet URI click (any surface) reveals the right-Sidebar
     // Bot Browser — the A2A overlay keeps that Sidebar mounted, so one path
@@ -333,6 +342,10 @@ export function apply(ctx: ClientContext): void {
     const layout = scope.layout
     const original = layout.selectPanel.bind(layout)
     layout.selectPanel = (panelId: Parameters<typeof original>[0]): void => {
+      if (panelId !== null) {
+        a2aPanel.close()
+        botsPagePanel.close()
+      }
       if (panelId === null) {
         a2aPanel.close()
         botsPagePanel.close()
