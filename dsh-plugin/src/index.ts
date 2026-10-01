@@ -22,7 +22,7 @@ import { bindQaToolInstall } from './qa-tools.js'
 import { bindMetaprotocolToolInstall } from './metaprotocol-tools.js'
 import { bindSurfToolInstall } from './surf-tools.js'
 import { dispatchSurfRoutes } from './surf-routes.js'
-import { dispatchScheduleRoutes } from './schedule-routes.js'
+import { dispatchScheduleRoutes, migrateLegacyScheduleTasks } from './schedule-routes.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
 import { bindMediaDescriptionTools } from './vision-tools.js'
 import { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
@@ -598,6 +598,9 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       health.presets = { ok: false, message: 'agentPresets not available' }
     }
   }
+  if (!config.skipBootstrap && ctx.get?.('schedule')) {
+    void migrateLegacyScheduleTasks(ctx)
+  }
   ctx.effect(() => registerApi(ctx, () => health, browserHub), 'oac-dsh: /oac/api routes')
 
   // Memory system: per-turn injection, post-turn extraction, and per-agent
@@ -822,7 +825,7 @@ export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 export { dispatchSurfRoutes } from './surf-routes.js'
-export { dispatchScheduleRoutes } from './schedule-routes.js'
+export { dispatchScheduleRoutes, migrateLegacyScheduleTasks } from './schedule-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick, runHygieneTail } from './dream-scheduler.js'
 export {

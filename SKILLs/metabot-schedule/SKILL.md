@@ -16,6 +16,13 @@ profile.
 
 {{SYSTEM_ROUTING}}
 
+When this skill runs inside a DSH conversation, prefer the official Automation
+tools `schedule_create`, `schedule_list`, `schedule_update`, and
+`schedule_delete`. They bind the reminder to the current Session and make it
+visible in the official Automation panel. Use the local CLI below only when
+those tools are unavailable, such as a headless Bot or a host without the
+official Automation bundle.
+
 ## Actor Selection
 
 Schedule commands accept optional `--from <bot-slug>`.
