@@ -753,6 +753,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |
 | POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner` |
 | POST | `/oac/api/browser/open` | resolve a resource URI (or the Browser home) to its `localUiUrl` and open it in the right-sidebar Bot Browser |
+| POST | `/oac/api/browser/resolve` | resolve-only sibling: returns the `localUiUrl` without opening anything (the Bots page's in-page Bot Page dock loads it itself) |
 | POST | `/oac/api/browser/state` | DSH web client reports the live ABC tab snapshot used for per-turn `<browser_context>` |
 | POST | `/oac/api/browser/command-result` | DSH web client returns one iframe tab-command result |
 | GET | `/oac/api/browser/events` | SSE: `browser-open` (daemon or host) plus `browser-command` (tab control for native tools) |
@@ -831,14 +832,13 @@ capsule that opens an empty tab.
 
 Entry points:
 
-- The **Bots page → My Bots** header gains a **Bot Browser** button (leaves the page for the conversation column as the Browser home opens).
-- Each Bot card gains a **Bot Page** button that leaves the page as that Bot's
-  page (`metaid://<globalMetaId>`) opens in the tab.
+- The **Bots page → My Bots** header's **Bot Browser** button, each Bot card's **avatar**, and the Bot editor's homepage/MetaApp preview buttons open their target in the Bots page's own right-side **Bot Page dock** — the kernel hides the right Sidebar while any main panel is active, so from the Bots page the browser lives in-page (resolved side-effect-free through `/oac/api/browser/resolve`, rendered by the shared `BrowserStage`) and the page never disappears. Clicking anywhere else on a Bot card opens that Bot's editor.
 - In **A2A Chat** and **Group Tasks**, clicking any sender avatar (or the
   thread-header participant avatars), or any Agent Internet URI in a
   transcript, opens the page in this right-Sidebar tab — the A2A surface is a
-  center-column overlay, so the Sidebar it lives in stays mounted (there is
-  no in-panel browser dock; one reveal path serves every surface).
+  center-column overlay, so the Sidebar it lives in stays mounted (the Bots
+  page's own dock is the sole in-page exception; every other surface reveals
+  this tab).
 
 Native tab semantics: switching to another right-Sidebar tab unmounts the
 body, so the iframe reloads on return and ABC reconstructs its page state
@@ -906,6 +906,6 @@ page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
 - Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`, `tools`, `systemPrompt`
 - Client: `dsh.client` bundle, no second `cordis.patch.yml` row; inject `slots`, `locale`, `remote`, `remote.agentPresets`, `remote.session`, `layout`, `sidebarRight`, `sidebarRightTabs`
-- Client surfaces: the Bots main panel (left-rail `sidebar.panellist` row id `oac-bots` + `main` panel key `oac-bots` declaring the `oac.bots.section` child slot; the five section entries `oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic` register into it), the A2A Chat `shell.overlay` panel (id `oac-a2a`, center column only; its `sidebar.panellist` row is hidden), and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule). No `settings.section` entries — DSH Settings stays stock.
+- Client surfaces: the Bots main panel (left-rail `sidebar.panellist` row id `oac-bots` + `main` panel key `oac-bots` declaring the `oac.bots.section` child slot; the five section entries `oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic` register into it; an in-page right-side Bot Page dock hosts the browser while the panel is active), the A2A Chat `shell.overlay` panel (id `oac-a2a`, center column only; its `sidebar.panellist` row is hidden), and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule). No `settings.section` entries — DSH Settings stays stock.
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
 - `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).

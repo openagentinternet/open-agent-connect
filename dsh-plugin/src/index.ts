@@ -121,6 +121,21 @@ async function dispatchPost(
     }
     return { ok: true, state: 'success', data: event }
   }
+  if (method === 'browser/resolve') {
+    const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
+      ? (payload as { uri: string }).uri.trim()
+      : ''
+    const resolved = browserHub.resolve(uri || null)
+    if (resolved === null) {
+      return {
+        ok: false,
+        state: 'failed',
+        code: 'daemon_unreachable',
+        message: 'OAC daemon is not reachable; start it with "metabot daemon start".',
+      }
+    }
+    return { ok: true, state: 'success', data: resolved }
+  }
   if (method === 'browser/state') {
     const snapshot = parseBrowserSnapshot(payload)
     if (!snapshot) {

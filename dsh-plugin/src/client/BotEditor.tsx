@@ -71,7 +71,7 @@ export function BotEditor({
   chatSkills,
   loadAutoReplyStatus,
   autoReplyConfig,
-  browserOpen,
+  openBotPage,
   botWallet,
   botBackup,
   botHomepageUpload,
@@ -93,7 +93,8 @@ export function BotEditor({
     from: string,
     patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
   ) => Promise<AutoReplyConfig>
-  browserOpen: (uri?: string) => Promise<void>
+  /** Open one Bot page (or the Browser home on null) in the Bots page's own dock — the page stays put. */
+  openBotPage: (uri: string | null, title: string) => void
   botWallet: (slug: string) => Promise<BotWalletPayload>
   botBackup: (slug: string) => Promise<BotBackupPayload>
   botHomepageUpload: (
@@ -782,7 +783,7 @@ export function BotEditor({
               bot={bot}
               t={t}
               busy={busy}
-              browserOpen={browserOpen}
+              openBotPage={openBotPage}
               botWallet={botWallet}
               botBackup={botBackup}
               botHomepageUpload={botHomepageUpload}

@@ -91,7 +91,7 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(text, /'oac\.bots\.section': \{/)
   assert.match(text, /kind: 'list'/)
   assert.match(text, /owner: OacBotsSectionOwnerProps/)
-  assert.match(text, /renderSlot\('oac\.bots\.section', \{ close \}, \{ only: row\.id \}\)/)
+  assert.match(text, /renderSlot\('oac\.bots\.section', \{ close, openBotPage: openDock \}, \{ only: row\.id \}\)/)
   assert.match(text, /visitedIds/)
   assert.match(text, /hidden=\{!selected\}/)
   assert.match(text, /role="tablist"/)
@@ -117,6 +117,51 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(index, /CONVTABS_CSS \+ BOTSPAGE_CSS/)
   // The first nav item reads 我的 Bot / My Bots; the rail row keeps "Bots".
   assert.match(index, /label: \(\) => t\('navSection'\)/)
+})
+
+test('the Bot card opens the editor as a whole; the avatar opens the in-page Bot Page dock', async () => {
+  const panel = await readFile(join(root, 'src/client/BotPanel.tsx'), 'utf8')
+  // The whole card opens the editor…
+  assert.match(panel, /role="button"/)
+  assert.match(panel, /tabIndex=\{0\}/)
+  assert.match(panel, /onClick=\{\(\) => \{ setEditing\(bot\); setError\(null\) \}\}/)
+  // …while the inner controls keep their own actions and never reach the card.
+  assert.match(panel, /event\.stopPropagation\(\); void toggleAvailability\(bot\)/)
+  assert.match(panel, /event\.stopPropagation\(\); void onCardResync\(bot\)/)
+  // The avatar opens the Bot Page in the page's own dock; the card-foot
+  // Bot-Page and edit icon buttons are gone, and nothing on the panel still
+  // drives the right-Sidebar reveal (that surface unmounts under a main panel).
+  assert.match(panel, /event\.stopPropagation\(\)\s*\n\s*openBotPage\(`metaid:\/\/\$\{bot\.globalMetaId\}`, bot\.name\)/)
+  assert.doesNotMatch(panel, /IconRightUpOutline16|IconEditOutline16|oac-bot-foot-right/)
+  // The panel no longer drives the right-Sidebar reveal (that surface
+  // unmounts under a main panel) — the t('browserOpen') locale KEY stays.
+  assert.doesNotMatch(panel, /browserOpen[=:(]|browserOpen,/)
+  const editor = await readFile(join(root, 'src/client/BotEditor.tsx'), 'utf8')
+  assert.match(editor, /openBotPage=\{openBotPage\}/)
+  assert.doesNotMatch(editor, /browserOpen/)
+  const advanced = await readFile(join(root, 'src/client/BotAdvancedSection.tsx'), 'utf8')
+  assert.match(advanced, /openBotPage\(`metaid:\/\/\$\{bot\.globalMetaId\}`, bot\.name\)/)
+  assert.doesNotMatch(advanced, /browserOpen/)
+})
+
+test('the Bots page dock resolves URIs side-effect-free and renders the shared BrowserStage', async () => {
+  const page = await readFile(join(root, 'src/client/bots-page.tsx'), 'utf8')
+  assert.match(page, /oac-bots-page-dock/)
+  assert.match(page, /resolveBotPage/)
+  assert.match(page, /<BrowserStage url=\{dock\.url\} title=\{dock\.title\} onIframe=\{\(\) => undefined\} \/>/)
+  const api = await readFile(join(root, 'src/client/api.ts'), 'utf8')
+  assert.match(api, /browserResolve/)
+  assert.match(api, /post<\{ localUiUrl\?: unknown \}>\('browser\/resolve', \{ uri: uri \?\? '' \}\)/)
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /resolveBotPage: \(uri: string \| null\) => api\.browserResolve\(uri\)/)
+  const host = await readFile(join(root, 'src/index.ts'), 'utf8')
+  assert.match(host, /method === 'browser\/resolve'/)
+  const bridge = await readFile(join(root, 'src/browser-bridge.ts'), 'utf8')
+  assert.match(bridge, /resolve\(uri: string \| null\): \{ uri: string \| null; localUiUrl: string \} \| null/)
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /\.oac-bot-card \{[^}]*cursor: pointer/)
+  assert.match(styles, /\.oac-bot-card:focus-visible/)
+  assert.match(styles, /\.oac-bots-page-dock \{/)
 })
 
 test('services and apps panels keep confirmation gates', async () => {

@@ -2,11 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   IconBrowseOutline16,
-  IconEditOutline16,
   IconLoadingOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
-  IconRightUpOutline16,
   IconWarningOutline16,
 } from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
@@ -66,8 +64,6 @@ export interface BotPanelInjected {
     from: string,
     patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
   ) => Promise<AutoReplyConfig>
-  /** Open the right-sidebar Bot Browser; no URI opens its home. Resolves once the sidebar has visibly reacted; never rejects. */
-  browserOpen: (uri?: string) => Promise<void>
   botWallet: (slug: string) => Promise<BotWalletPayload>
   botBackup: (slug: string) => Promise<BotBackupPayload>
   botSetupRetry: (slug: string) => Promise<BotRow>
@@ -101,15 +97,14 @@ export function BotPanel({
   chatSkills,
   loadAutoReplyStatus,
   autoReplyConfig,
-  browserOpen,
+  openBotPage,
   botWallet,
   botBackup,
   botSetupRetry,
   botHomepageUpload,
   metaappList,
-  close,
   t,
-}: BotPanelInjected & { close: () => void; t: Translate }): ReactNode {
+}: BotPanelInjected & { openBotPage: (uri: string | null, title: string) => void; t: Translate }): ReactNode {
   const [bots, setBots] = useState<BotRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [availableOnly, setAvailableOnly] = useState<boolean>(readAvailableOnly)
@@ -358,7 +353,7 @@ export function BotPanel({
         chatSkills={chatSkills}
         loadAutoReplyStatus={loadAutoReplyStatus}
         autoReplyConfig={autoReplyConfig}
-        browserOpen={browserOpen}
+        openBotPage={openBotPage}
         botWallet={botWallet}
         botBackup={botBackup}
         botHomepageUpload={botHomepageUpload}
@@ -403,7 +398,7 @@ export function BotPanel({
         <h2>{t('title')}</h2>
         <div className="oac-actions">
           <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
-          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => { void browserOpen().then(close) }}>
+          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => { openBotPage(null, t('browserOpen')) }}>
             {t('browserOpen')}
           </Button>
           <Button
@@ -448,9 +443,42 @@ export function BotPanel({
               const setupPending = bot.setup != null && bot.setup.state !== 'ready'
               const llmUnset = !bot.dshLlmProvider?.trim() || !bot.dshLlmModel?.trim()
               return (
-                <li className="oac-bot-card" key={bot.slug}>
+                <li
+                  className="oac-bot-card"
+                  key={bot.slug}
+                  // The whole card opens the editor; the interactive children
+                  // (avatar Bot Page, copy, availability, resync) stop the
+                  // event from reaching this handler.
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${t('edit')}: ${bot.name}`}
+                  onClick={() => { setEditing(bot); setError(null) }}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    setEditing(bot)
+                    setError(null)
+                  }}
+                >
                   <div className="oac-bot-main">
-                    <BotAvatar name={bot.name} src={bot.avatarDataUrl} />
+                    {bot.globalMetaId ? (
+                      <button
+                        type="button"
+                        className="oac-avatar-btn"
+                        data-tip={t('botPage')}
+                        aria-label={`${t('botPage')}: ${bot.name}`}
+                        title={t('botPage')}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          openBotPage(`metaid://${bot.globalMetaId}`, bot.name)
+                        }}
+                      >
+                        <BotAvatar name={bot.name} src={bot.avatarDataUrl} />
+                      </button>
+                    ) : (
+                      <BotAvatar name={bot.name} src={bot.avatarDataUrl} />
+                    )}
                     <div className="oac-bot-identity">
                       <span className="oac-bot-name">{bot.name}</span>
                       {bot.role?.trim() ? <span className="oac-bot-role" title={bot.role}>{bot.role}</span> : null}
@@ -487,24 +515,11 @@ export function BotPanel({
                           title={t('cardResyncHint')}
                           aria-label={`${t('cardResyncNow')}: ${bot.name}`}
                           disabled={resyncingSlug === bot.slug}
-                          onClick={() => { void onCardResync(bot) }}
+                          onClick={(event) => { event.stopPropagation(); void onCardResync(bot) }}
                         >
                           {resyncingSlug === bot.slug
                             ? <IconLoadingOutline16 className="oac-spin" />
                             : <IconRefreshOutline16 />}
-                        </button>
-                      ) : null}
-                      {bot.globalMetaId ? (
-                        <button
-                          type="button"
-                          className="oac-icon-btn"
-                          data-tip={t('botPage')}
-                          aria-label={`${t('botPage')}: ${bot.name}`}
-                          onClick={() => {
-                            void browserOpen(`metaid://${bot.globalMetaId}`).then(close)
-                          }}
-                        >
-                          <IconRightUpOutline16 />
                         </button>
                       ) : null}
                       <button
@@ -515,20 +530,9 @@ export function BotPanel({
                         className={bot.isAvailable !== false ? 'oac-switch on oac-card-availability' : 'oac-switch oac-card-availability'}
                         title={t('availabilityToggle')}
                         disabled={availabilitySavingSlug === bot.slug}
-                        onClick={() => { void toggleAvailability(bot) }}
+                        onClick={(event) => { event.stopPropagation(); void toggleAvailability(bot) }}
                       >
                         <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
-                      </button>
-                    </div>
-                    <div className="oac-bot-foot-right">
-                      <button
-                        type="button"
-                        className="oac-icon-btn"
-                        data-tip={t('edit')}
-                        aria-label={`${t('edit')}: ${bot.name}`}
-                        onClick={() => { setEditing(bot); setError(null) }}
-                      >
-                        <IconEditOutline16 />
                       </button>
                     </div>
                   </div>

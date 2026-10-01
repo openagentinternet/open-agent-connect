@@ -22,12 +22,24 @@
  * for a main panel is `layout.selectPanel(null)` — back to the conversation
  * column (the Bot Browser reveal flow needs the right Sidebar mounted, and
  * the Sidebar's root gates on `activePanelId === null`).
+ *
+ * The page also owns a right-side **Bot Page dock**: the kernel hides the
+ * right Sidebar while any main panel is active (`RightbarRoot` gates on
+ * `activePanelId === null`), so from this page a Bot's page (or the Browser
+ * home) opens in an in-page dock iframe instead of the right-Sidebar tab —
+ * the page the user is managing never disappears under them. The dock loads
+ * the same daemon-resolved `localUiUrl` through the side-effect-free
+ * `browser/resolve` host route and renders the shared `BrowserStage`; it is
+ * a pure viewer — the iframe bridge and the `<browser_context>` reporting
+ * keep tracking only the right-Sidebar tab.
  */
-import { useEffect, useId, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
 import type { CommonKeyOf, InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import { BrowserStage } from './browser-stage.tsx'
 import {
   IconAgentPresetOutline16,
+  IconCloseOutline16,
   IconGaugeOutline16,
   IconGlobeOutline16,
   IconThinkOutline16,
@@ -40,6 +52,11 @@ import type { BotsLocaleKey } from './locale.ts'
 export interface OacBotsSectionOwnerProps {
   /** Leave the Bots page and return to the conversation column. */
   close: () => void
+  /**
+   * Open one Bot's page (or the Browser home on null) in the page's own
+   * right-side dock — the Bots page stays put (see the file header).
+   */
+  openBotPage: (uri: string | null, title: string) => void
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -72,6 +89,8 @@ export interface BotsPageInjected {
   }
   /** Owner-prop face handed to every rendered section (see the file header). */
   close: () => void
+  /** Resolve one Agent Internet URI (null = the Browser home) to its localUiUrl, without opening the right Sidebar. */
+  resolveBotPage: (uri: string | null) => Promise<string>
 }
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
@@ -103,13 +122,39 @@ function writeActiveSection(id: string): void {
   try { window.localStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, id) } catch { /* storage may be disabled */ }
 }
 
-export function BotsPage({ t, renderSlot, useSections, close }: BotsPageProps): ReactNode {
+/** One open dock request: the Bot page (or Browser home) being shown. */
+interface DockState {
+  title: string
+  url: string | null
+  error: string | null
+}
+
+export function BotsPage({ t, renderSlot, useSections, close, resolveBotPage }: BotsPageProps): ReactNode {
   const navId = useId()
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const rows = useSections((value) => value)
   const [activeId, setActiveId] = useState<string | null>(readActiveSection)
   const [visitedIds, setVisitedIds] = useState<ReadonlySet<string>>(() => new Set())
   const active = rows.find((row) => row.id === activeId)?.id ?? rows[0]?.id
+
+  const [dock, setDock] = useState<DockState | null>(null)
+  const dockRequestRef = useRef(0)
+  const openDock = useCallback((uri: string | null, title: string): void => {
+    const request = dockRequestRef.current + 1
+    dockRequestRef.current = request
+    setDock({ title, url: null, error: null })
+    resolveBotPage(uri).then((url) => {
+      if (dockRequestRef.current === request) setDock({ title, url, error: null })
+    }).catch((cause: unknown) => {
+      if (dockRequestRef.current === request) {
+        setDock({ title, url: null, error: cause instanceof Error ? cause.message : String(cause) })
+      }
+    })
+  }, [resolveBotPage])
+  const closeDock = useCallback((): void => {
+    dockRequestRef.current += 1
+    setDock(null)
+  }, [])
 
   useEffect(() => {
     if (active === undefined) return
@@ -180,11 +225,34 @@ export function BotsPage({ t, renderSlot, useSections, close }: BotsPageProps): 
               aria-labelledby={tabId(row.id)}
               hidden={!selected}
             >
-              {renderSlot('oac.bots.section', { close }, { only: row.id })}
+              {renderSlot('oac.bots.section', { close, openBotPage: openDock }, { only: row.id })}
             </div>
           )
         })}
       </div>
+      {dock === null ? null : (
+        <aside className="oac-bots-page-dock" aria-label={dock.title}>
+          <div className="oac-bots-page-dock-head">
+            <span className="oac-bots-page-dock-title">{dock.title}</span>
+            <button
+              type="button"
+              className="oac-icon-btn"
+              aria-label={t('close')}
+              title={t('close')}
+              onClick={closeDock}
+            >
+              <IconCloseOutline16 />
+            </button>
+          </div>
+          {dock.error !== null ? (
+            <div className="oac-bots-page-dock-state" role="alert">{dock.error}</div>
+          ) : dock.url === null ? (
+            <div className="oac-bots-page-dock-state">{t('dockLoading')}</div>
+          ) : (
+            <BrowserStage url={dock.url} title={dock.title} onIframe={() => undefined} />
+          )}
+        </aside>
+      )}
     </div>
   )
 }

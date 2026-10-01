@@ -994,6 +994,19 @@ export const api = {
     }
     return url
   },
+  /**
+   * Resolve one resource URI (or the Browser home when null/empty) to its
+   * `localUiUrl` WITHOUT opening the right-Sidebar Bot Browser — the Bots
+   * page's in-page dock loads the returned URL itself.
+   */
+  browserResolve: async (uri?: string | null): Promise<string> => {
+    const data = await post<{ localUiUrl?: unknown }>('browser/resolve', { uri: uri ?? '' })
+    const url = typeof data.localUiUrl === 'string' ? data.localUiUrl : ''
+    if (url === '') {
+      throw new OacApiError('no_local_ui_url', 'OAC daemon returned no Browser URL')
+    }
+    return url
+  },
   browserState: async (snapshot: {
     open: boolean
     tabs: Array<{ id: number; uri: string | null; title: string | null; isActive: boolean }>
