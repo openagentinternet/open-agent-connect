@@ -112,6 +112,23 @@ test('GET /ui/bot embeds Knowledge, Surf, and Memory in the Bot tabs', async (t)
   assert.doesNotMatch(html, /data-tab-link="schedule"/);
 });
 
+test('GET /ui/bot carries the Twin, availability, and creation-time ordering rules', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/bot`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /function orderedMetabotProfiles\(\)/);
+  assert.match(html, /left\.isActive===true\|\|left\.botType==='twin'/);
+  assert.match(html, /profile\.isAvailable===false/);
+  assert.match(html, /profile\.setup\.state&&profile\.setup\.state!==\'ready\'/);
+  assert.match(html, /return profileHasUsableLlm\(profile\)/);
+  assert.match(html, /profileCreatedAt\(left\)-profileCreatedAt\(right\)/);
+  assert.match(html, /list\.innerHTML=orderedMetabotProfiles\(\)\.map/);
+});
+
 test('GET /ui/bot localizes the Knowledge, Surf, and Memory entries to Simplified Chinese', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
