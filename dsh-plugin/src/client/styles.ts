@@ -76,6 +76,20 @@ export const BOTS_CSS = `
 .oac-input:disabled { opacity: 0.6; cursor: default; }
 textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-input-select { appearance: none; width: auto; max-width: 100%; padding-right: 32px; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px; }
+.oac-bot-picker { position: relative; min-width: 0; }
+.oac-bot-picker-trigger { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 6px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }
+.oac-bot-picker-trigger:hover:not(:disabled), .oac-bot-picker-trigger[aria-expanded='true'] { border-color: var(--dsw-alias-label-dimmed); }
+.oac-bot-picker-trigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.oac-bot-picker-trigger:disabled { opacity: 0.6; cursor: default; }
+.oac-bot-picker-avatar { width: 24px; height: 24px; font-size: 10px; }
+.oac-bot-picker-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-bot-picker-trigger .oac-bot-picker-label { flex: 1; }
+.oac-bot-picker-chevron { flex: none; color: var(--dsw-alias-label-tertiary); transition: transform .12s ease; }
+.oac-bot-picker-chevron-open { transform: rotate(180deg); }
+.oac-bot-picker-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 35; display: flex; flex-direction: column; width: max-content; min-width: 100%; max-width: min(420px, calc(100vw - 32px)); max-height: 320px; overflow-y: auto; padding: 4px; border-radius: 12px; background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2)); box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3)); color: var(--dsw-alias-label-primary); }
+.oac-bot-picker-option { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 6px 8px; border: none; border-radius: 10px; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }
+.oac-bot-picker-option:hover, .oac-bot-picker-option:focus-visible, .oac-bot-picker-option[aria-selected='true'] { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-bot-picker-option:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
 .oac-hint { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
 /* LLM picker (the DSH composer ModelSelect port): a full-width trigger chip
    plus a two-level menu — Model / Effort root cells drilling into the
@@ -953,7 +967,7 @@ html.oac-conv-tabs-active [data-slot="sidebar.workspaces"] { display: none !impo
 .oac-conv-tab-dot { position: absolute; top: 3px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); }
 .oac-conv-list-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 4px 8px; overflow: hidden; --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-conv-list-head { flex: none; display: flex; }
-.oac-conv-list-head .oac-input-select { flex: 1; min-width: 0; }
+.oac-conv-list-head .oac-input-select, .oac-conv-list-head .oac-bot-picker { flex: 1; min-width: 0; }
 .oac-conv-list-rows { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 2px; }
 .oac-conv-row { padding: 6px 8px; }
 .oac-conv-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
