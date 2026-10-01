@@ -42,6 +42,8 @@ type OfficialScheduleService = {
   update(request: Record<string, unknown>): Promise<unknown>
 }
 
+let legacyMigrationStarted = false
+
 function officialScheduleOf(ctx?: HostContext): OfficialScheduleService | undefined {
   return ctx?.get?.('schedule') as OfficialScheduleService | undefined
 }
@@ -100,6 +102,44 @@ function officialTiming(body: Record<string, unknown>): Record<string, unknown> 
   if (everyMs !== null) return { every_seconds: Math.floor(everyMs / 1000) }
   if (cron) return { cron: { expression: cron, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone } }
   return undefined
+}
+
+/** Copy active legacy Bot tasks into the official catalog once per host boot. */
+export async function migrateLegacyScheduleTasks(ctx: HostContext): Promise<void> {
+  const official = officialScheduleOf(ctx)
+  if (!official || legacyMigrationStarted) return
+  legacyMigrationStarted = true
+  const controller = sessionControllerOf(ctx)
+  if (!controller) return
+  try {
+    const legacy = await runMetabot(['schedule', 'list', '--all'], { timeoutMs: CLI_TIMEOUT_MS })
+    if (!legacy.ok) return
+    const groups = Array.isArray((legacy.data as { groups?: unknown[] } | undefined)?.groups)
+      ? (legacy.data as { groups: unknown[] }).groups : []
+    const catalog = await official.catalog()
+    for (const group of groups) {
+      if (group === null || typeof group !== 'object') continue
+      const record = group as { slug?: unknown; tasks?: unknown[] }
+      const slug = typeof record.slug === 'string' ? record.slug.trim() : ''
+      if (!slug || !Array.isArray(record.tasks)) continue
+      const sessionId = await ensureOfficialSession(ctx, slug)
+      for (const value of record.tasks) {
+        if (value === null || typeof value !== 'object') continue
+        const task = value as { name?: unknown; prompt?: unknown; enabled?: unknown; schedule?: Record<string, unknown> }
+        if (task.enabled === false || typeof task.name !== 'string' || typeof task.prompt !== 'string') continue
+        if (catalog.some((row) => row.sessionId === sessionId && row.title === task.name && row.prompt === task.prompt)) continue
+        const schedule = task.schedule ?? {}
+        const timing = schedule.type === 'interval'
+          ? { every_seconds: Math.max(60, Math.floor(Number(schedule.intervalMs ?? 0) / 1000)) }
+          : schedule.type === 'cron'
+            ? { cron: { expression: String(schedule.expression ?? ''), time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone } }
+            : { at: String(schedule.datetime ?? '') }
+        await official.create(sessionId, { title: task.name, prompt: task.prompt, ...timing })
+      }
+    }
+  } catch (error) {
+    ctx.logger?.warn?.(`[oac-dsh] official schedule migration skipped: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 function failure(code: string, message: string): MetabotCommandResult {
