@@ -369,6 +369,8 @@ export function apply(ctx: ClientContext): void {
       // Browser reveal needs the right Sidebar mounted, which gates on
       // activePanelId === null.
       close: () => { ctx.layout.selectPanel(null) },
+      // The page's own Bot Page dock resolves without opening the Sidebar.
+      resolveBotPage: (uri: string | null) => api.browserResolve(uri),
     }),
     children: { 'oac.bots.section': { kind: 'list', scope: 'root' } },
   }, BotsPage))
@@ -390,7 +392,6 @@ export function apply(ctx: ClientContext): void {
         from: string,
         patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
       ) => api.autoReplyConfig(from, patch),
-      browserOpen: (uri?: string) => openBrowserNow(uri ?? null),
       botWallet: (slug: string) => api.botWallet(slug),
       botBackup: (slug: string) => api.botBackup(slug),
       botSetupRetry: (slug: string) => api.botSetupRetry(slug),
