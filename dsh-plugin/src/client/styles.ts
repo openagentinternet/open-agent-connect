@@ -622,8 +622,12 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-detail { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
 .oac-gt-section { display: flex; flex-direction: column; gap: 8px; }
 .oac-gt-field { display: flex; flex-direction: column; gap: 3px; }
+.oac-gt-field-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .oac-gt-field-label { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .02em; color: var(--dsw-alias-label-tertiary); text-transform: uppercase; }
 .oac-gt-field-value { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.oac-gt-goal-value { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.oac-gt-goal-value.is-expanded { display: block; overflow: visible; }
+.oac-gt-goal-toggle { flex: none; }
 .oac-gt-local-actions { display: flex; align-items: center; gap: 14px; }
 .oac-gt-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .oac-gt-member { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; }

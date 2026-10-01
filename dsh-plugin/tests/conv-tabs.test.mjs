@@ -118,6 +118,20 @@ test('the group-task detail rail is open by default and occupies a layout column
   assert.match(styles, /\.oac-a2a-body-with-list\.oac-gt-body-with-drawer > \.oac-gt-drawer \{ grid-column: 3; \}/)
 })
 
+test('group-task goals clamp to four lines and the main detail omits rail-owned sections', async () => {
+  const view = await readFile(join(root, 'src/client/GroupTaskView.tsx'), 'utf8')
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  const locale = await readFile(join(root, 'src/client/locale-conversations.ts'), 'utf8')
+  assert.match(view, /goalExpanded/)
+  assert.match(view, /gtExpandGoal/)
+  assert.equal((view.match(/t\('gtMembers'\)/g) ?? []).length, 1)
+  assert.equal((view.match(/t\('gtDeliverables'\)/g) ?? []).length, 1)
+  assert.match(styles, /\.oac-gt-goal-value \{[^}]*-webkit-line-clamp: 4/)
+  assert.match(styles, /\.oac-gt-goal-value\.is-expanded \{[^}]*display: block/)
+  assert.equal((locale.match(/gtExpandGoal:/g) ?? []).length, 2)
+  assert.equal((locale.match(/gtCollapseGoal:/g) ?? []).length, 2)
+})
+
 test('the left lists carry the row menus, staffing slate, collabs, and the create button', async () => {
   const tabs = await readFile(join(root, 'src/client/ConvTabs.tsx'), 'utf8')
   // IDBots hover menu on both lists (rename/pin/archive ride it).
