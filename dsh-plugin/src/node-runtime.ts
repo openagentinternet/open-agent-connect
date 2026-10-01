@@ -45,6 +45,27 @@ function nvmNodeBinaries(nvmDir: string): string[] {
 }
 
 /**
+ * Node candidate binaries in probe order: `OAC_NODE_PATH`, `process.execPath`
+ * (plain-Node hosts only — see the Electron note), then nvm-installed nodes.
+ */
+export function nodeCandidates(
+  env: NodeJS.ProcessEnv,
+  nvmDir: string,
+  execPath: string,
+  electronHost: boolean,
+): string[] {
+  const candidates: string[] = []
+  if (env.OAC_NODE_PATH) candidates.push(env.OAC_NODE_PATH)
+  // Inside Electron (desktop host) process.execPath is the Electron binary:
+  // its process.version is the embedded Node's, but spawning it cannot run a
+  // plain Node script (it would boot a second Electron app instance). Skip it
+  // there and let OAC_NODE_PATH / nvm provide a real node binary.
+  if (!electronHost) candidates.push(execPath)
+  candidates.push(...nvmNodeBinaries(nvmDir))
+  return candidates
+}
+
+/**
  * Pick a Node binary in OAC's supported range.
  * Override: `OAC_NODE_PATH`.
  */
@@ -53,10 +74,8 @@ export function resolveNodeBinary(
   readVersion: (nodePath: string) => string | undefined = readNodeVersion,
 ): NodeResolution {
   const nvmDir = env.NVM_DIR ?? join(homedir(), '.nvm')
-  const candidates: string[] = []
-  if (env.OAC_NODE_PATH) candidates.push(env.OAC_NODE_PATH)
-  candidates.push(process.execPath)
-  candidates.push(...nvmNodeBinaries(nvmDir))
+  const electronHost = (process.versions as NodeJS.ProcessVersions).electron !== undefined
+  const candidates = nodeCandidates(env, nvmDir, process.execPath, electronHost)
 
   const seen = new Set<string>()
   for (const candidate of candidates) {
