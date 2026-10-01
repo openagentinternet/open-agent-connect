@@ -412,19 +412,21 @@ export function AppsPanel({
       >
         <div className="oac-apps-card-cover">
           <AssetImage value={coverSrc} className="oac-apps-cover-img" alt="" />
-          <AssetImage
-            value={iconSrc}
-            className="oac-apps-card-icon"
-            fallback={<span className="oac-apps-card-icon oac-apps-icon-fallback" aria-hidden="true">{initialsOf(name)}</span>}
-          />
           <span className={`oac-apps-state-pill${record.disabled === true ? ' disabled' : ''}`}>
             {record.disabled === true ? t('disabledLabel') : t('runnable')}
           </span>
         </div>
         <div className="oac-apps-card-body">
           <div className="oac-apps-card-title">
-            <h3>{name}</h3>
-            {subtitle ? <p>{subtitle}</p> : null}
+            <AssetImage
+              value={iconSrc}
+              className="oac-apps-card-icon"
+              fallback={<span className="oac-apps-card-icon oac-apps-icon-fallback" aria-hidden="true">{initialsOf(name)}</span>}
+            />
+            <div className="oac-apps-card-title-copy">
+              <h3>{name}</h3>
+              {subtitle ? <p>{subtitle}</p> : null}
+            </div>
           </div>
           <div className="oac-apps-pin-line">
             <code>{pinId}</code>

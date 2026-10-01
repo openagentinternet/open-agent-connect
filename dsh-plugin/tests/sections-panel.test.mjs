@@ -238,6 +238,11 @@ test('the MetaApps section hosts the on-chain feed tab with author rows into the
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
   assert.match(styles, /\.oac-apps-author \{/)
   assert.match(styles, /\.oac-apps-card-foot-chain \.oac-apps-author \{ margin-right: auto/)
+  // Both local and chain cards use the same title row: icon at left, then
+  // the name with its version/runtime subtitle stacked on the right.
+  assert.match(panel, /<div className="oac-apps-card-title">\s*<AssetImage[\s\S]*<div className="oac-apps-card-title-copy">/)
+  assert.match(styles, /\.oac-apps-card-title \{[^}]*align-items: center;[^}]*min-height: 40px/)
+  assert.match(styles, /\.oac-apps-card-title-copy \{[^}]*flex: 1;/)
 })
 
 test('Bot pickers share the available-only twin-first BotPicker; app cards pin a fixed foot', async () => {
