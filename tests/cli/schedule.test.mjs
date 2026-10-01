@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import { cleanupTempRoot, mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
+const { createDefaultCliDependencies } = require('../../dist/cli/runtime.js');
+const { createScheduleStore } = require('../../dist/core/schedule/store.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 function makeContext(dependencies, payload = {}) {
   return {
@@ -138,4 +144,39 @@ test('runCli rejects malformed schedule invocations', async () => {
   assert.equal(await run(['schedule', 'list', '--from', 'alice', '--all']), 1);
   // unknown subcommand
   assert.equal(await run(['schedule', 'frobnicate']), 1);
+});
+
+test('default schedule list --all reads every local profile store', async (t) => {
+  const systemHome = await mkdtempTempRoot('oac-cli-schedule-all-');
+  t.after(async () => cleanupTempRoot(systemHome));
+  const profilesRoot = path.join(systemHome, '.metabot', 'profiles');
+  const managerRoot = path.join(systemHome, '.metabot', 'manager');
+  const aliceHome = path.join(profilesRoot, 'alice');
+  const bobHome = path.join(profilesRoot, 'bob');
+  await fs.mkdir(aliceHome, { recursive: true });
+  await fs.mkdir(bobHome, { recursive: true });
+  await fs.mkdir(managerRoot, { recursive: true });
+  await fs.writeFile(path.join(managerRoot, 'identity-profiles.json'), JSON.stringify({ profiles: [
+    { name: 'Alice', slug: 'alice', aliases: [], homeDir: aliceHome, globalMetaId: 'id-alice', mvcAddress: 'mvc-alice', createdAt: 1, updatedAt: 1 },
+    { name: 'Bob', slug: 'bob', aliases: [], homeDir: bobHome, globalMetaId: 'id-bob', mvcAddress: 'mvc-bob', createdAt: 2, updatedAt: 2 },
+  ] }));
+  await createScheduleStore(resolveMetabotPaths(aliceHome)).createTask({
+    name: 'Alice task', prompt: 'do alice', schedule: { type: 'interval', intervalMs: 60_000 },
+  });
+  await createScheduleStore(resolveMetabotPaths(bobHome)).createTask({
+    name: 'Bob task', prompt: 'do bob', schedule: { type: 'cron', expression: '0 9 * * *' },
+  });
+
+  const dependencies = createDefaultCliDependencies({
+    cwd: aliceHome,
+    env: { HOME: systemHome, METABOT_HOME: aliceHome, METABOT_ALLOW_UNINDEXED_HOME: '1' },
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+  });
+  const result = await dependencies.schedule.list({ all: true });
+  assert.equal(result.ok, true);
+  const bySlug = new Map(result.data.groups.map((group) => [group.slug, group.tasks]));
+  assert.deepEqual([...bySlug.keys()].sort(), ['alice', 'bob']);
+  assert.equal(bySlug.get('alice')[0].name, 'Alice task');
+  assert.equal(bySlug.get('bob')[0].name, 'Bob task');
 });
