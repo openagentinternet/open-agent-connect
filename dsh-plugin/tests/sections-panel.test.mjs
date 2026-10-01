@@ -154,6 +154,22 @@ test('the Bot card opens the editor as a whole; the avatar opens the right-Sideb
   assert.doesNotMatch(advanced, /browserOpen/)
 })
 
+test('BotPanel passes the memory and dream services into the editor before rendering it', async () => {
+  const panel = await readFile(join(root, 'src/client/BotPanel.tsx'), 'utf8')
+  const params = panel.match(/export function BotPanel\(\{([\s\S]*?)\}: BotPanelInjected/u)?.[1] ?? ''
+  for (const name of [
+    'memoryList', 'memoryAdd', 'memoryUpdate', 'memoryDelete', 'memoryUnarchive',
+    'memoryStats', 'memoryPolicyGet', 'memoryPolicySet', 'memoryPolicyDelete',
+    'hygieneStatus', 'hygieneRun', 'hygieneConfigSet',
+    'knowledgeList', 'knowledgeUpdate', 'knowledgeArchive', 'knowledgeDelete',
+    'impressionsList', 'impressionsShow', 'dreamSummaries', 'dreamStatus',
+    'dreamSelfIdentity', 'dreamRun',
+  ]) {
+    assert.match(params, new RegExp(`\\b${name}\\b`), `${name} must be destructured by BotPanel`)
+  }
+  assert.match(panel, /memory=\{\{[\s\S]*memoryList,[\s\S]*dreamRun,[\s\S]*\}\}/)
+})
+
 test('scheduled tasks are no longer a Bots-page section and Surf/Memory are Bot editor tabs', async () => {
   const panel = await readFile(join(root, 'src/client/SchedulePanel.tsx'), 'utf8')
   assert.match(panel, /scheduleListAll\(\)/)
