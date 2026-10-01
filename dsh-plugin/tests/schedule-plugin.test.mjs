@@ -110,3 +110,43 @@ test('unknown methods keep dispatching', async () => {
   assert.equal(await dispatchScheduleRoutes('schedule/nope', {}, { run }), undefined)
   assert.equal(await dispatchScheduleRoutes('surf/status', {}, { run }), undefined)
 })
+
+test('official DSH schedule service is the canonical route when composed', async () => {
+  const records = []
+  const calls = []
+  const official = {
+    async catalog() { return records },
+    async create(sessionId, request) {
+      calls.push(['create', sessionId, request])
+      const record = {
+        id: 'official-1', kind: 'every', title: request.title, prompt: request.prompt,
+        everySeconds: request.every_seconds, scheduledAt: '2099-01-01T00:00:00.000Z',
+        sessionId, status: 'active',
+      }
+      records.push(record)
+      return record
+    },
+    async update(request) {
+      calls.push(['update', request])
+      return { record: { ...records[0], title: request.title ?? records[0].title } }
+    },
+    async delete(request) { calls.push(['delete', request]); return { id: request.id, deleted: true } },
+  }
+  const ctx = {
+    get(name) {
+      if (name === 'schedule') return official
+      if (name === 'sessionController') return { create: async (request) => calls.push(['session', request]) }
+      return undefined
+    },
+  }
+  const created = await dispatchScheduleRoutes('schedule/create', {
+    from: 'alice', name: 'Official task', prompt: 'remember this', everyMs: 60_000,
+  }, { ctx })
+  assert.equal(created.ok, true)
+  assert.deepEqual(calls[0], ['session', { sessionId: 'oac-schedule-alice', agentPreset: 'oac-alice', cwd: process.cwd() }])
+  assert.deepEqual(calls[1], ['create', 'oac-schedule-alice', { title: 'Official task', prompt: 'remember this', every_seconds: 60 }])
+  const listed = await dispatchScheduleRoutes('schedule/list', { all: true }, { ctx })
+  assert.equal(listed.data.groups[0].tasks[0].enabled, true)
+  await dispatchScheduleRoutes('schedule/delete', { from: 'alice', id: 'official-1' }, { ctx })
+  assert.deepEqual(calls.at(-1), ['delete', { sessionId: 'oac-schedule-alice', id: 'official-1' }])
+})

@@ -287,7 +287,7 @@ async function dispatchPost(
   if (kb !== undefined) return kb
   const surf = await dispatchSurfRoutes(method, payload)
   if (surf !== undefined) return surf
-  const scheduleRoutes = await dispatchScheduleRoutes(method, payload)
+  const scheduleRoutes = await dispatchScheduleRoutes(method, payload, { ctx })
   if (scheduleRoutes !== undefined) return scheduleRoutes
   const section = await dispatchSection(method, payload)
   if (section !== undefined) return section

@@ -459,6 +459,11 @@ export interface ScheduleSchedulerOptions {
 
 /** Mount the scheduler; disposed with the plugin effect. */
 export function applyScheduleScheduler(ctx: HostContext, options: ScheduleSchedulerOptions = {}): void {
+  // The official DSH Schedule service owns delivery when the Automation
+  // bundle is installed. Running the legacy OAC claimant beside it would
+  // deliver the same reminder twice, so the compatibility scheduler stands
+  // down entirely in that composition.
+  if (ctx.get?.('schedule')) return
   const agents = options.agents ?? agentsRegistryOf(ctx)
   const agentPresets = options.agentPresets ?? ctx.agentPresets
   if (!agents?.create || !agentPresets?.mount) return // the host cannot spawn sessions
