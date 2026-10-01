@@ -103,7 +103,7 @@ test('GET /ui/memory localizes to Simplified Chinese with lang=zh-CN', async (t)
   assert.match(html, /记忆整理/);
 });
 
-test('console navigation includes Memory after Surf', async (t) => {
+test('console navigation omits Memory and Surf', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -116,7 +116,6 @@ test('console navigation includes Memory after Surf', async (t) => {
     '/ui/bot',
     '/ui/conversations',
     '/ui/apps',
-    '/ui/kb',
     '/ui/schedule',
   ];
   let lastIndex = -1;

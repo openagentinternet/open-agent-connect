@@ -119,7 +119,6 @@ test('console navigation includes Schedule after Memory and leaves Traffic to th
     '/ui/bot',
     '/ui/conversations',
     '/ui/apps',
-    '/ui/kb',
     '/ui/schedule',
   ];
   let lastIndex = -1;
