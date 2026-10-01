@@ -13,7 +13,7 @@ import {
 } from './api.ts'
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
-import { pickDefaultBotSlug } from '../bot-order.ts'
+import { pickDefaultAvailableBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import type { UnreadState } from '../unread-logic.ts'
 import type { A2AUnreadView } from './a2a-unread-store.ts'
@@ -261,7 +261,7 @@ export function A2AConversation({
       setProfiles(rows)
       setFrom((currentFrom) => {
         if (currentFrom && rows.some((row) => row.slug === currentFrom)) return currentFrom
-        return pickDefaultBotSlug(rows)
+        return pickDefaultAvailableBotSlug(rows)
       })
     }).catch((cause: unknown) => {
       if (current) setListError(errorText(cause))

@@ -19,12 +19,12 @@ import type {
   MemoryPolicyPayload,
 } from './api.ts'
 import type { MemoryLocaleKey } from './locale-memory.ts'
+import { BotPicker, pickDefaultAvailableBotSlug } from './BotPicker.tsx'
 
 type Translate = (key: MemoryLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export interface MemoryPanelInjected {
   bots: () => Promise<BotRow[]>
-  twinCurrent: () => Promise<{ twinSlug?: string | null }>
   memoryList: (from: string, options?: Record<string, unknown>) => Promise<{ entries?: MemoryEntryRow[] }>
   memoryAdd: (from: string, entry: Record<string, unknown>) => Promise<unknown>
   memoryUpdate: (from: string, entry: Record<string, unknown>) => Promise<unknown>
@@ -121,13 +121,14 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
 
   useEffect(() => {
     let current = true
-    void Promise.all([injected.bots(), injected.twinCurrent().catch(() => ({ twinSlug: null }))]).then(
-      ([rows, twin]) => {
+    void injected.bots().then(
+      (rows) => {
         if (!current) return
         setBots(rows)
         if (!slug) {
-          const twinRow = rows.find((row) => row.slug === twin.twinSlug)
-          setSlug((twinRow ?? rows[0])?.slug ?? '')
+          // Shared picker default: the Twin Bot (first of the twin-first,
+          // available-only order), else the first available Bot.
+          setSlug(pickDefaultAvailableBotSlug(rows))
         }
       },
       (cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : String(cause)) },
@@ -142,18 +143,13 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
       <div className="oac-row">
         <h2>{t('title')}</h2>
         <div className="oac-actions">
-          <select
-            className="oac-input oac-input-select oac-memory-bot-select"
+          <BotPicker
+            bots={bots ?? []}
             value={slug}
-            onChange={(event) => setSlug(event.target.value)}
-            aria-label={t('botSelector')}
-          >
-            {(bots ?? []).map((bot) => (
-              <option key={bot.slug} value={bot.slug}>
-                {bot.name}{bot.botType === 'twin' ? ' · Twin' : ''}
-              </option>
-            ))}
-          </select>
+            onChange={setSlug}
+            ariaLabel={t('botSelector')}
+            className="oac-input oac-input-select oac-memory-bot-select"
+          />
           <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
         </div>
       </div>

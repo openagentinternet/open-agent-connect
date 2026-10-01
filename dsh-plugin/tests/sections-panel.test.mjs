@@ -203,3 +203,27 @@ test('the MetaApps section hosts the on-chain feed tab with author rows into the
   assert.match(styles, /\.oac-apps-author \{/)
   assert.match(styles, /\.oac-apps-card-foot-chain \.oac-apps-author \{ margin-right: auto/)
 })
+
+test('Bot pickers share the available-only twin-first BotPicker; app cards pin a fixed foot', async () => {
+  const picker = await readFile(join(root, 'src/client/BotPicker.tsx'), 'utf8')
+  assert.match(picker, /sortAvailableBotsTwinFirst/)
+  for (const file of ['AppsPanel.tsx', 'MemoryPanel.tsx', 'ConvTabs.tsx']) {
+    const text = await readFile(join(root, 'src/client', file), 'utf8')
+    assert.match(text, /<BotPicker/, `${file} renders the shared BotPicker`)
+  }
+  // Default selection everywhere is the available Twin.
+  const apps = await readFile(join(root, 'src/client/AppsPanel.tsx'), 'utf8')
+  assert.match(apps, /pickDefaultAvailableBotSlug\(rows\)/)
+  const memory = await readFile(join(root, 'src/client/MemoryPanel.tsx'), 'utf8')
+  assert.match(memory, /pickDefaultAvailableBotSlug\(rows\)/)
+  const conv = await readFile(join(root, 'src/client/ConvTabs.tsx'), 'utf8')
+  assert.match(conv, /pickDefaultAvailableBotSlug\(rows\)/)
+  const a2a = await readFile(join(root, 'src/client/A2AConversation.tsx'), 'utf8')
+  assert.match(a2a, /pickDefaultAvailableBotSlug\(rows\)/)
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  // The cover grew ~25% and the foot is fixed-height, pinned to the bottom
+  // (the body stretches), so short-content cards never grow a tall foot.
+  assert.match(styles, /\.oac-apps-card-cover \{[^}]*height: 120px/)
+  assert.match(styles, /\.oac-apps-card-body \{[^}]*flex: 1 1 auto/)
+  assert.match(styles, /\.oac-apps-card-foot \{[^}]*height: 38px/)
+})

@@ -787,7 +787,7 @@ export { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfi
 export { HostLlmExecutor } from './host-llm-executor.js'
 export { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 export { validateCreatePayload } from './bots-input.js'
-export { sortBotsTwinFirst, pickDefaultBotSlug, type BotOrderFields } from './bot-order.js'
+export { sortBotsTwinFirst, sortAvailableBotsTwinFirst, pickDefaultAvailableBotSlug, type BotOrderFields, type BotAvailabilityFields } from './bot-order.js'
 export {
   isConvTab,
   parseGroupTaskKey,

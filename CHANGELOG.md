@@ -17,6 +17,11 @@ tags for releases.
   **本机元应用** keeps the per-Bot published-apps manager unchanged. The
   MetaApp search item projection now carries `icon`/`coverImg` so chain cards
   render covers like local ones.
+- Every Bot picker in the DSH plugin (MetaApps' 本机元应用, Memory, 线上对话,
+  and the A2A composer default) is now one shared `BotPicker`: available Bots
+  only (availability toggle on + a DSH LLM pair — the preset-chip rule), the
+  Twin Bot first, the rest by profile creation time (oldest first), and the
+  Twin as the default selection.
 
 ### Fixed
 
@@ -38,6 +43,10 @@ tags for releases.
 
 ### Changed
 
+- DSH MetaApp cards: the cover area is ~25% taller (96px → 120px) and the
+  card foot (run/share buttons and the chain cards' author row) is a fixed
+  38px bar pinned to the card bottom — the body above stretches instead, so
+  cards with short content no longer grow a tall empty foot.
 - The root build is atomic: `scripts/build-atomic.mjs` compiles into a
   sibling temp directory and swaps it in (marking the live tree with
   `.build-in-progress` while it works), replacing `rimraf dist && tsc`, so a

@@ -2,6 +2,8 @@
  * Ordering for Bot rows in the Bots page's Bots section.
  */
 
+import { isChipBotAvailable } from './chip-logic.js'
+
 export type BotOrderFields = {
   createdAt?: number
   botType?: 'twin' | 'worker' | null
@@ -21,15 +23,31 @@ export function sortBotsTwinFirst<T extends BotOrderFields>(rows: readonly T[]):
   })
 }
 
+/** Fields the availability rule reads (the preset chip's `isChipBotAvailable`). */
+export type BotAvailabilityFields = {
+  isAvailable?: boolean
+  dshLlmProvider?: string | null
+  dshLlmModel?: string | null
+}
+
 /**
- * Default Bot for pickers (A2A Chat, …): the Twin Bot wins, then the active
- * Bot, then the first row. Returns '' for an empty list.
+ * Bot-picker rows (the shared BotPicker): available Bots only — availability
+ * toggle on AND a DSH LLM pair, the preset-chip rule — then twin-first,
+ * oldest-first. Returns a new array; the input is not mutated.
  */
-export function pickDefaultBotSlug(
-  rows: readonly { slug: string; botType?: 'twin' | 'worker' | null; isActive?: boolean }[],
+export function sortAvailableBotsTwinFirst<T extends BotOrderFields & BotAvailabilityFields>(
+  rows: readonly T[],
+): T[] {
+  return sortBotsTwinFirst(rows.filter((row) => isChipBotAvailable(row)))
+}
+
+/**
+ * Default Bot for pickers that show available Bots only (the shared
+ * BotPicker): the available Twin, else the first available Bot. Returns ''
+ * when no Bot is available.
+ */
+export function pickDefaultAvailableBotSlug(
+  rows: readonly ({ slug: string } & BotOrderFields & BotAvailabilityFields)[],
 ): string {
-  const twin = rows.find((row) => row.botType === 'twin')
-  if (twin) return twin.slug
-  const active = rows.find((row) => row.isActive === true)
-  return (active ?? rows[0])?.slug ?? ''
+  return sortAvailableBotsTwinFirst(rows)[0]?.slug ?? ''
 }

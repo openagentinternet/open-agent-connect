@@ -41,6 +41,7 @@ import {
 } from '../apps.ts'
 import { AssetImage } from './AssetImage.tsx'
 import { BotAvatar } from './BotAvatar.tsx'
+import { BotPicker, pickDefaultAvailableBotSlug } from './BotPicker.tsx'
 import type { AppsLocaleKey } from './locale-apps.ts'
 import { interpolate } from './parse.ts'
 import { MetaAppForm } from './MetaAppForm.tsx'
@@ -157,9 +158,9 @@ export function AppsPanel({
       (rows) => {
         if (!current) return
         setProfiles(rows)
-        // Default to the Bot that is currently active in OAC, else the first.
-        const active = rows.find((bot) => bot.isActive === true)
-        setFrom((value) => value || active?.slug || rows[0]?.slug || '')
+        // Default to the machine Twin Bot (first row of the shared picker's
+        // twin-first, available-only order), else the first available Bot.
+        setFrom((value) => value || pickDefaultAvailableBotSlug(rows))
       },
       (cause: unknown) => { if (current) setError(`Bots: ${errorText(cause)}`) },
     )
@@ -972,17 +973,14 @@ export function AppsPanel({
           {error ? <div className="oac-error" role="alert">{error}</div> : null}
           <label className="oac-field">
             <span className="oac-field-label">{t('fieldBot')}</span>
-            <select
-              className="oac-input oac-input-select"
+            <BotPicker
+              bots={profiles}
               value={from}
-              disabled={profiles.length === 0}
-              onChange={(event) => setFrom(event.target.value)}
-            >
-              <option value="">{t('pickBot')}</option>
-              {profiles.map((bot) => (
-                <option key={bot.slug} value={bot.slug}>{bot.name} ({bot.slug})</option>
-              ))}
-            </select>
+              onChange={setFrom}
+              ariaLabel={t('fieldBot')}
+              placeholder={t('pickBot')}
+              formatLabel={(bot) => `${bot.name} (${bot.slug})`}
+            />
           </label>
           {from ? (
             <section>

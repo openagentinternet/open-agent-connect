@@ -411,7 +411,6 @@ export function apply(ctx: ClientContext): void {
     locale: MEMORY_NS,
     inject: () => ({
       bots: () => api.list(),
-      twinCurrent: () => api.twinCurrent(),
       memoryList: (from: string, options?: Record<string, unknown>) => api.memoryList(from, options),
       memoryAdd: (from: string, entry: Record<string, unknown>) => api.memoryAdd(from, entry),
       memoryUpdate: (from: string, entry: Record<string, unknown>) => api.memoryUpdate(from, entry),
