@@ -27,16 +27,36 @@ test('sortBotsTwinFirst orders workers oldest-first and treats a missing botType
   )
 })
 
-test('pickDefaultBotSlug prefers the Twin Bot, then the active Bot, then the first row', () => {
+test('sortAvailableBotsTwinFirst drops unavailable Bots, Twin first, then oldest-first', () => {
+  const llm = { dshLlmProvider: 'p', dshLlmModel: 'm' }
   const rows = [
-    { slug: 'worker-old', createdAt: 100, botType: 'worker' },
-    { slug: 'worker-active', createdAt: 200, botType: 'worker', isActive: true },
-    { slug: 'twin', createdAt: 300, botType: 'twin' },
+    { slug: 'worker-new', createdAt: 300, botType: 'worker', ...llm },
+    { slug: 'twin', createdAt: 200, botType: 'twin', ...llm },
+    { slug: 'worker-off', createdAt: 50, botType: 'worker', isAvailable: false, ...llm },
+    { slug: 'worker-nollm', createdAt: 100, botType: 'worker' },
+    { slug: 'worker-old', createdAt: 150, botType: 'worker', ...llm },
   ]
-  assert.equal(plugin.pickDefaultBotSlug(rows), 'twin')
-  assert.equal(plugin.pickDefaultBotSlug(rows.filter((row) => row.botType !== 'twin')), 'worker-active')
-  assert.equal(plugin.pickDefaultBotSlug([{ slug: 'only' }]), 'only')
-  assert.equal(plugin.pickDefaultBotSlug([]), '')
+  assert.deepEqual(
+    plugin.sortAvailableBotsTwinFirst(rows).map((row) => row.slug),
+    ['twin', 'worker-old', 'worker-new'],
+  )
+  // Input not mutated.
+  assert.equal(rows.length, 5)
+})
+
+test('pickDefaultAvailableBotSlug picks the available Twin, then the first available', () => {
+  const llm = { dshLlmProvider: 'p', dshLlmModel: 'm' }
+  assert.equal(plugin.pickDefaultAvailableBotSlug([
+    { slug: 'w1', ...llm },
+    { slug: 'twin', botType: 'twin', ...llm },
+  ]), 'twin')
+  // An unavailable Twin is skipped.
+  assert.equal(plugin.pickDefaultAvailableBotSlug([
+    { slug: 'twin-off', botType: 'twin', isAvailable: false, ...llm },
+    { slug: 'w1', ...llm },
+  ]), 'w1')
+  assert.equal(plugin.pickDefaultAvailableBotSlug([{ slug: 'w1', isAvailable: false, ...llm }]), '')
+  assert.equal(plugin.pickDefaultAvailableBotSlug([]), '')
 })
 
 test('sortBotsTwinFirst does not mutate the input array', () => {

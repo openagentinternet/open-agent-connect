@@ -41,6 +41,7 @@ import {
 } from '../apps.ts'
 import { AssetImage } from './AssetImage.tsx'
 import { BotAvatar } from './BotAvatar.tsx'
+import { BotPicker, pickDefaultAvailableBotSlug } from './BotPicker.tsx'
 import type { AppsLocaleKey } from './locale-apps.ts'
 import { interpolate } from './parse.ts'
 import { MetaAppForm } from './MetaAppForm.tsx'
@@ -115,8 +116,8 @@ export function AppsPanel({
   t,
 }: AppsPanelInjected & {
   t: Translate
-  /** Owner prop from the Bots page: opens a URI in the in-page dock (the right Sidebar unmounts under a main panel). */
-  openBotPage: (uri: string | null, title: string) => void
+  /** Owner prop from the Bots page: reveals a resource in the right-Sidebar Bot Browser. */
+  openBotPage: (uri: string | null) => void
 }): ReactNode {
   const [tab, setTab] = useState<'chain' | 'local'>('chain')
   const [profiles, setProfiles] = useState<BotRow[]>([])
@@ -157,9 +158,9 @@ export function AppsPanel({
       (rows) => {
         if (!current) return
         setProfiles(rows)
-        // Default to the Bot that is currently active in OAC, else the first.
-        const active = rows.find((bot) => bot.isActive === true)
-        setFrom((value) => value || active?.slug || rows[0]?.slug || '')
+        // Default to the machine Twin Bot (first row of the shared picker's
+        // twin-first, available-only order), else the first available Bot.
+        setFrom((value) => value || pickDefaultAvailableBotSlug(rows))
       },
       (cause: unknown) => { if (current) setError(`Bots: ${errorText(cause)}`) },
     )
@@ -353,8 +354,8 @@ export function AppsPanel({
 
   // One card serves both tabs: the local (owner) variant keeps edit/details
   // and opens the detail modal on click; the chain variant drops edit/details,
-  // runs the app in the in-page dock on click, and carries the author row at
-  // the foot's left (avatar + name → the author's Bot page in the dock).
+  // runs the app in the right-Sidebar Bot Browser on click, and carries the
+  // author row at the foot's left (avatar + name → the author's Bot page).
   const renderTile = (record: MetaAppRecord, chainRow?: MetaAppChainRow): ReactNode => {
     const isChain = chainRow !== undefined
     const name = recordName(record, t('untitled'))
@@ -366,9 +367,9 @@ export function AppsPanel({
     const coverSrc = recordImage(record, ['coverImg', 'coverImage', 'cover'])
     const iconSrc = recordImage(record, ['icon', 'iconImg', 'iconImage'])
     const copyKey = `pin-${pinId}`
-    const openInDock = (): void => {
+    const openInBrowser = (): void => {
       if (record.disabled === true || !viewPin) return
-      openBotPage(`metaapp://${viewPin}`, name)
+      openBotPage(`metaapp://${viewPin}`)
     }
     const authorName = chainRow
       ? chainRow.publisherName || chainRow.publisherGlobalMetaId || t('authorUnknown')
@@ -382,7 +383,7 @@ export function AppsPanel({
           aria-label={interpolate(t('openAuthorPage'), { name: authorName })}
           onClick={(event) => {
             event.stopPropagation()
-            openBotPage(`metaid://${chainRow.publisherGlobalMetaId}`, authorName)
+            openBotPage(`metaid://${chainRow.publisherGlobalMetaId}`)
           }}
         >
           <BotAvatar name={authorName} src={chainRow.publisherAvatarId || undefined} className="oac-apps-author-avatar" />
@@ -400,11 +401,11 @@ export function AppsPanel({
         className="oac-apps-card"
         key={pinId || name}
         tabIndex={0}
-        onClick={() => (isChain ? openInDock() : setModal({ kind: 'detail', record }))}
+        onClick={() => (isChain ? openInBrowser() : setModal({ kind: 'detail', record }))}
         onKeyDown={(event: KeyboardEvent<HTMLLIElement>) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
-            if (isChain) openInDock()
+            if (isChain) openInBrowser()
             else setModal({ kind: 'detail', record })
           }
         }}
@@ -452,7 +453,7 @@ export function AppsPanel({
             data-tip={t('run')}
             aria-label={`${t('run')}: ${name}`}
             disabled={record.disabled === true}
-            onClick={(event) => { event.stopPropagation(); if (isChain) openInDock(); else runApp(record) }}
+            onClick={(event) => { event.stopPropagation(); if (isChain) openInBrowser(); else runApp(record) }}
           >
             <IconPlayOutline16 />
           </button>
@@ -972,17 +973,14 @@ export function AppsPanel({
           {error ? <div className="oac-error" role="alert">{error}</div> : null}
           <label className="oac-field">
             <span className="oac-field-label">{t('fieldBot')}</span>
-            <select
-              className="oac-input oac-input-select"
+            <BotPicker
+              bots={profiles}
               value={from}
-              disabled={profiles.length === 0}
-              onChange={(event) => setFrom(event.target.value)}
-            >
-              <option value="">{t('pickBot')}</option>
-              {profiles.map((bot) => (
-                <option key={bot.slug} value={bot.slug}>{bot.name} ({bot.slug})</option>
-              ))}
-            </select>
+              onChange={setFrom}
+              ariaLabel={t('fieldBot')}
+              placeholder={t('pickBot')}
+              formatLabel={(bot) => `${bot.name} (${bot.slug})`}
+            />
           </label>
           {from ? (
             <section>

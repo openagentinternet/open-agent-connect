@@ -36,9 +36,10 @@ import type {
 import { resolveAvatarUrl } from '../avatar-url.ts'
 import { prefetchAvatars } from './avatar-cache.ts'
 import { BotAvatar } from './BotAvatar.tsx'
+import { BotPicker } from './BotPicker.tsx'
 import { ConversationRowMenu } from './ConversationRowMenu.tsx'
 import { guestInviteStatusKey, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
-import { pickDefaultBotSlug } from '../bot-order.ts'
+import { pickDefaultAvailableBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import { timestampLabel } from './api.ts'
 import type { UnreadState } from '../unread-logic.ts'
@@ -161,7 +162,7 @@ function OnlineList({
       setProfiles(rows)
       setFrom((currentFrom) => {
         if (currentFrom && rows.some((row) => row.slug === currentFrom)) return currentFrom
-        return pickDefaultBotSlug(rows)
+        return pickDefaultAvailableBotSlug(rows)
       })
     }).catch((cause: unknown) => {
       if (current) setListError(errorText(cause))
@@ -260,22 +261,16 @@ function OnlineList({
   return (
     <div className="oac-conv-list-body">
       <div className="oac-conv-list-head">
-        <select
-          className="oac-input oac-input-select"
+        <BotPicker
+          bots={profiles}
           value={from}
-          disabled={profiles.length === 0}
-          aria-label={t('fieldBot')}
-          onChange={(event) => {
-            const slug = event.target.value
+          ariaLabel={t('fieldBot')}
+          onChange={(slug) => {
             saveConvFrom(window.localStorage, slug)
             setFrom(slug)
             setSummaries(null)
           }}
-        >
-          {profiles.map((bot) => (
-            <option key={bot.slug} value={bot.slug}>{bot.name}</option>
-          ))}
-        </select>
+        />
       </div>
       {listError ? <p className="oac-note error">{listError}</p> : null}
       <div className="oac-conv-list-rows">
