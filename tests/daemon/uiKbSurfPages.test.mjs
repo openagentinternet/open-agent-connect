@@ -42,7 +42,7 @@ test('GET /ui/kb serves the Knowledge page with console chrome', async (t) => {
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);
   assert.match(html, /data-settings-modal/);
-  assert.match(html, /href="\/ui\/kb"[^>]*class="active"|class="active"[^>]*href="\/ui\/kb"/);
+  assert.doesNotMatch(html, /href="\/ui\/kb"[^>]*class="active"|class="active"[^>]*href="\/ui\/kb"/);
   // The client i18n script re-applies the tab title from this key.
   assert.match(html, /<title data-i18n-title="kb\.title">Knowledge — Open Agent Connect<\/title>/);
 });
@@ -86,7 +86,7 @@ test('GET /ui/kb and /ui/surf localize to Simplified Chinese with lang=zh-CN', a
   assert.match(surfHtml, /立即冲浪/);
 });
 
-test('console navigation includes Knowledge and Surf between Apps and the trailing controls', async (t) => {
+test('console navigation omits Knowledge, Surf, and Memory from the topbar', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -99,7 +99,7 @@ test('console navigation includes Knowledge and Surf between Apps and the traili
     '/ui/bot',
     '/ui/conversations',
     '/ui/apps',
-    '/ui/kb',
+    '/ui/schedule',
   ];
   let lastIndex = -1;
   for (const href of order) {
@@ -108,7 +108,7 @@ test('console navigation includes Knowledge and Surf between Apps and the traili
     assert.ok(index > lastIndex, `${href} should follow the previous nav item`);
     lastIndex = index;
   }
-  assert.match(nav, /data-i18n-key="nav.knowledge"/);
+  assert.doesNotMatch(nav, /data-i18n-key="nav.knowledge"/);
   assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/surf"/);
   assert.doesNotMatch(nav, /href="\/ui\/memory"/);

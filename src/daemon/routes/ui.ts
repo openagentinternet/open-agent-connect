@@ -70,7 +70,6 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'bot', labelKey: 'nav.botPage' },
   { page: 'conversations', labelKey: 'nav.conversations' },
   { page: 'apps', labelKey: 'nav.apps' },
-  { page: 'kb', labelKey: 'nav.knowledge' },
   { page: 'schedule', labelKey: 'nav.schedule' },
 ];
 

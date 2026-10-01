@@ -92,7 +92,7 @@ test('GET /ui/conversations localizes the group-task section to Simplified Chine
   assert.match(html, /选择一个群组任务/);
 });
 
-test('GET /ui/bot links Knowledge, Surf, and Memory entries to the standalone pages', async (t) => {
+test('GET /ui/bot embeds Knowledge, Surf, and Memory in the Bot tabs', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -100,9 +100,12 @@ test('GET /ui/bot links Knowledge, Surf, and Memory entries to the standalone pa
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /data-tab-link="kb"[^>]*href="\/ui\/kb"/);
-  assert.match(html, /data-tab-link="surf"[^>]*href="\/ui\/surf"/);
-  assert.match(html, /data-tab-link="memory"[^>]*href="\/ui\/memory"/);
+  assert.match(html, /data-tab="knowledge"/);
+  assert.match(html, /data-tab="surf"/);
+  assert.match(html, /data-tab="memory"/);
+  assert.match(html, /data-kb-shell/);
+  assert.match(html, /data-surf-shell/);
+  assert.match(html, /data-memory-shell/);
   assert.match(html, /data-i18n-key="bot\.knowledgeTab"/);
   assert.match(html, /data-i18n-key="bot\.surfTab"/);
   assert.match(html, /data-i18n-key="bot\.memoryTab"/);
@@ -117,9 +120,9 @@ test('GET /ui/bot localizes the Knowledge, Surf, and Memory entries to Simplifie
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /data-tab-link="kb"/);
-  assert.match(html, /data-tab-link="surf"/);
-  assert.match(html, /data-tab-link="memory"/);
+  assert.match(html, /data-tab="knowledge"/);
+  assert.match(html, /data-tab="surf"/);
+  assert.match(html, /data-tab="memory"/);
   assert.match(html, /知识库/);
   assert.match(html, /冲浪/);
   assert.match(html, /记忆/);

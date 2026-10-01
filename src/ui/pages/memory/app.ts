@@ -32,7 +32,7 @@ export function buildMemoryPageDefinition(i18n: LocalUiI18nContext = createI18nC
     panel: document.querySelector('[data-memory-panel]'),
   };
   const query = new URLSearchParams(window.location.search);
-  const fromBot = (query.get('from') || '').trim();
+  const fromBot = (query.get('from') || document.querySelector('[data-memory-shell]')?.getAttribute('data-bot-slug') || '').trim();
   const withFrom = (body) => {
     const payload = body || {};
     return fromBot ? Object.assign({}, payload, { from: fromBot }) : payload;

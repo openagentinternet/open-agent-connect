@@ -75,7 +75,7 @@ export function buildSurfPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     reportViewer: document.querySelector('[data-surf-report-viewer]'),
   };
   const query = new URLSearchParams(window.location.search);
-  const fromBot = (query.get('from') || '').trim();
+  const fromBot = (query.get('from') || document.querySelector('[data-surf-shell]')?.getAttribute('data-bot-slug') || '').trim();
   const withFrom = (body) => {
     const payload = body || {};
     return fromBot ? Object.assign({}, payload, { from: fromBot }) : payload;
