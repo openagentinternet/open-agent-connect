@@ -111,15 +111,20 @@ function untilLabel(target: number, now = Date.now()): string {
   return `${Math.floor(hours / 24)}d`
 }
 
-export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void; t: Translate }): ReactNode {
+export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void; t: Translate; botSlug?: string }): ReactNode {
   const { t } = injected
+  const botSlug = injected.botSlug
   const [bots, setBots] = useState<BotRow[] | null>(null)
-  const [slug, setSlug] = useState('')
+  const [slug, setSlug] = useState(botSlug ?? '')
   const [tab, setTab] = useState<TabKey>('facts')
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
+    if (botSlug) {
+      setSlug(botSlug)
+      return
+    }
     let current = true
     void injected.bots().then(
       (rows) => {
@@ -134,7 +139,7 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
       (cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : String(cause)) },
     )
     return () => { current = false }
-  }, [injected, slug])
+  }, [injected, botSlug])
 
   const reload = (): void => setTick((value) => value + 1)
 
@@ -143,13 +148,15 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
       <div className="oac-row">
         <h2>{t('title')}</h2>
         <div className="oac-actions">
-          <BotPicker
-            bots={bots ?? []}
-            value={slug}
-            onChange={setSlug}
-            ariaLabel={t('botSelector')}
-            className="oac-input oac-input-select oac-memory-bot-select"
-          />
+          {botSlug ? null : (
+            <BotPicker
+              bots={bots ?? []}
+              value={slug}
+              onChange={setSlug}
+              ariaLabel={t('botSelector')}
+              className="oac-input oac-input-select oac-memory-bot-select"
+            />
+          )}
           <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
         </div>
       </div>

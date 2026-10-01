@@ -33,7 +33,6 @@ import { BotPanel } from './BotPanel.tsx'
 import { BotsPageGlyph, BotsPageOverlay, type BotsPageGlyphInjected, type BotsPageOverlayInjected, type BotsPageSectionRow } from './bots-page.tsx'
 import { BotsPagePanelStore } from './bots-page-store.ts'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
-import { SchedulePanel } from './SchedulePanel.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
@@ -59,7 +58,6 @@ import { memoryEn, MEMORY_NS, memoryZh, type MemoryLocaleKey } from './locale-me
 import { userEn, USER_NS, userZh, type UserLocaleKey } from './locale-user.ts'
 import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
 import { trafficEn, TRAFFIC_NS, trafficZh, type TrafficLocaleKey } from './locale-traffic.ts'
-import { MemoryPanel } from './MemoryPanel.tsx'
 import { TrafficPanel } from './TrafficPanel.tsx'
 import { UserPanel } from './UserPanel.tsx'
 import type { SeatSessionSummary } from './preset-seat-store.ts'
@@ -426,6 +424,7 @@ export function apply(ctx: ClientContext): void {
     label: () => t('navSection'),
     locale: NS,
     inject: () => ({
+      memoryT: tMemory,
       list: () => api.list(),
       create: (input: Parameters<typeof api.create>[0]) => api.create(input),
       update: (slug: string, patch: Record<string, unknown>) => api.update(slug, patch),
@@ -443,27 +442,6 @@ export function apply(ctx: ClientContext): void {
       botHomepageUpload: (slug: string, fileName: string, contentType: string, base64: string) =>
         api.botHomepageUpload(slug, fileName, contentType, base64),
       metaappList: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
-    }),
-  }, BotPanel))
-  // 定时任务: every local Bot's scheduled tasks in one table (the per-Bot tab
-  // left the Bot editor for this unified section). The panel reads/writes
-  // through api.ts directly (the schedule surface's established pattern).
-  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
-    name: 'oac.bots.section',
-    id: 'oac-schedule',
-    order: 21,
-    label: () => t('tabScheduled'),
-    locale: NS,
-  }, SchedulePanel))
-  // Services Bots-page section hidden until the service plugin matures; the
-  // ServicesPanel, its locale dictionary, and the host routes stay in tree.
-  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
-    name: 'oac.bots.section',
-    id: 'oac-memory',
-    order: 22,
-    label: () => tMemory('nav'),
-    locale: MEMORY_NS,
-    inject: () => ({
       bots: () => api.list(),
       memoryList: (from: string, options?: Record<string, unknown>) => api.memoryList(from, options),
       memoryAdd: (from: string, entry: Record<string, unknown>) => api.memoryAdd(from, entry),
@@ -488,7 +466,7 @@ export function apply(ctx: ClientContext): void {
       dreamSelfIdentity: (from: string) => api.dreamSelfIdentity(from),
       dreamRun: (from: string, date: string) => api.dreamRun(from, date),
     }),
-  }, MemoryPanel))
+  }, BotPanel))
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
     id: 'oac-user',
