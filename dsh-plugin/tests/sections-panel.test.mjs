@@ -60,11 +60,12 @@ test('client registers the Bots overlay with its panellist row and the six page 
   assert.match(text, /children: \{ 'oac\.bots\.section': \{ kind: 'list', scope: 'root' \} \}/)
   // The page is a shell.overlay (the A2A pattern — the official right Sidebar
   // stays mounted), never a kernel main panel; the left-rail row's click is
-  // capture-intercepted into the overlay store toggle.
+  // capture-intercepted into the overlay store.
   assert.doesNotMatch(text, /name: 'main'/)
   assert.match(text, /name: 'sidebar\.panellist'/)
   assert.match(text, /startPanelRowInterceptor\(BOTS_PANEL_ROW_MARK/)
-  assert.match(text, /botsPagePanel\.toggle\(\)/)
+  assert.match(text, /ctx\.layout\.selectPanel\(null\)/)
+  assert.match(text, /botsPagePanel\.set\(\{ open: true \}\)/)
   assert.match(text, /\}, BotsPageGlyph\)/)
   assert.match(text, /\}, BotsPageOverlay\)/)
   // The nav's section-ledger projection feeds the page through the inject hooks face.
@@ -210,6 +211,15 @@ test('the Bots page is a center-column overlay on the shared frame, so the right
   assert.match(frame, /closest\('\[data-shell-overlay\]'\)/)
   assert.match(frame, /MutationObserver/)
   assert.match(frame, /gridTemplateColumns/)
+})
+
+test('the Bots row exits stock main panels before opening the overlay', async () => {
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /if \(botsPagePanel\.getSnapshot\(\)\.open\) \{[\s\S]*?botsPagePanel\.close\(\)[\s\S]*?return\n\s*\}/)
+  assert.match(index, /ctx\.layout\.selectPanel\(null\)\n\s*botsPagePanel\.set\(\{ open: true \}\)/)
+  // Selecting any stock main panel must close overlays too, including the
+  // optional DSH Automation tasks bundle.
+  assert.match(index, /if \(panelId !== null\) \{[\s\S]*?a2aPanel\.close\(\)[\s\S]*?botsPagePanel\.close\(\)[\s\S]*?\}/)
 })
 
 test('services and apps panels keep confirmation gates', async () => {
