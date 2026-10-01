@@ -1,8 +1,9 @@
 /**
  * Browser half of open-agent-connect-dsh: locale dictionaries, the Bots main
- * panel (a left-rail `sidebar.panellist` row + `main` page hosting the five
- * `oac.bots.section` pages — My Bots, Memory, User, MetaApps, Traffic — the surfaces
- * that used to be Settings sections; DSH Settings itself stays stock), the
+ * panel (a left-rail `sidebar.panellist` row + `main` page hosting the six
+ * `oac.bots.section` pages — My Bots, 定时任务, Memory, User, MetaApps, Traffic — the
+ * surfaces that used to be Settings sections, plus the unified scheduled-task
+ * list extracted from the Bot editor; DSH Settings itself stays stock), the
  * new-session preset chip, the right-Sidebar `bot-browser` tab type, and the
  * A2A Chat `shell.overlay` panel. The left-rail A2A glyph is currently hidden
  * (`SHOW_A2A_PANELLIST_ROW`). Does not shadow Settings → Agent presets.
@@ -30,6 +31,7 @@ import { BotBrowserTab, BotBrowserTabTitle, type BotBrowserTabInjected } from '.
 import { BotPanel } from './BotPanel.tsx'
 import { BotsPage, BotsPageGlyph, type BotsPageInjected, type BotsPageSectionRow } from './bots-page.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
+import { SchedulePanel } from './SchedulePanel.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
@@ -414,12 +416,22 @@ export function apply(ctx: ClientContext): void {
       metaappList: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
     }),
   }, BotPanel))
+  // 定时任务: every local Bot's scheduled tasks in one table (the per-Bot tab
+  // left the Bot editor for this unified section). The panel reads/writes
+  // through api.ts directly (the schedule surface's established pattern).
+  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+    name: 'oac.bots.section',
+    id: 'oac-schedule',
+    order: 21,
+    label: () => t('tabScheduled'),
+    locale: NS,
+  }, SchedulePanel))
   // Services Bots-page section hidden until the service plugin matures; the
   // ServicesPanel, its locale dictionary, and the host routes stay in tree.
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
     id: 'oac-memory',
-    order: 21,
+    order: 22,
     label: () => tMemory('nav'),
     locale: MEMORY_NS,
     inject: () => ({
@@ -452,7 +464,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
     id: 'oac-user',
-    order: 22,
+    order: 23,
     label: () => tUser('nav'),
     locale: USER_NS,
     inject: () => ({
@@ -467,7 +479,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
     id: 'oac-apps',
-    order: 23,
+    order: 24,
     label: () => tApps('nav'),
     locale: APP_NS,
     inject: () => ({
@@ -486,7 +498,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
     id: 'oac-traffic',
-    order: 24,
+    order: 25,
     label: () => tTraffic('nav'),
     locale: TRAFFIC_NS,
     inject: () => ({

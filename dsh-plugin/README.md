@@ -50,7 +50,7 @@ open-agent-connect-dsh`. The 0.2.0 adaptations worth knowing about:
   `@deepseek-ai/dsh-experimental-schedule-bundle` (sidebar "Automation
   tasks" page, model-created `schedule_*` reminders queued back into the
   originating session). It shares nothing with the OAC per-Bot scheduled
-  tasks below (Bots page → My Bots → Scheduled tab, `metabot schedule *`, runs
+  tasks below (Bots page → 定时任务, `metabot schedule *`, runs
   as NEW DSH conversations) — different names, storage, and semantics, and
   no tool/panel id collisions, so both can coexist; they only sound alike.
 - **Plugin-card polish for the 0.2.0 plugin manager.** The bundle now ships
@@ -157,7 +157,7 @@ only. It will not
 load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
 until their kernel is upgraded.
 
-After a DSH restart, the left rail gains a **Bots** row directly below 插件 (the same `sidebar.panellist` + `main` panel pair the stock 插件 row uses for the plugin manager). Clicking it opens the plugin's dedicated **Bots page**: its left nav — styled after the Settings modal's own left nav, one icon per row — hosts the five configuration sections that used to occupy Settings: **My Bots** (我的 Bot), **Memory**, **User**, **MetaApps** (元应用 — two tabs: **链上元应用**, the global on-chain feed paged through the metaso aggregation API with the author's avatar+name on each card opening that Bot's page in the in-page dock, and **本机元应用**, the per-Bot published-apps manager), and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section stays hidden until the service plugin matures). Section content renders centered in the column. Visited sections stay mounted, and the page remembers the last-open section across visits. DSH Settings itself is back to stock — the plugin registers no `settings.section` entries. (**A2A Chat** is a center-column overlay panel, and the Bot Browser is a right-Sidebar page tab). The left-rail A2A Chat panellist row is currently hidden (`SHOW_A2A_PANELLIST_ROW = false`); 线上对话 / 群任务 tabs open the overlay. New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The stock Settings → Agent presets roster does NOT list the `oac-*` Bot presets: Bots are created and edited on the Bots page, so the stock management cards would be duplicates — one CSS rule hides exactly the `li[data-agent-preset-id^='oac-']` cards while the presets stay registered (chip, session composition, and any default selection untouched) and user-authored custom presets still show. Each private-chat/group-task row carries unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
+After a DSH restart, the left rail gains a **Bots** row directly below 插件 (the same `sidebar.panellist` + `main` panel pair the stock 插件 row uses for the plugin manager). Clicking it opens the plugin's dedicated **Bots page**: its left nav — styled after the Settings modal's own left nav, one icon per row — hosts six sections: **My Bots** (我的 Bot), **定时任务** (Scheduled — every local Bot's tasks in one unified list, extracted from the Bot editor's per-Bot tab), **Memory**, **User**, **MetaApps** (元应用 — two tabs: **链上元应用**, the global on-chain feed paged through the metaso aggregation API with the author's avatar+name on each card opening that Bot's page in the in-page dock, and **本机元应用**, the per-Bot published-apps manager), and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section stays hidden until the service plugin matures). Section content renders centered in the column. Visited sections stay mounted, and the page remembers the last-open section across visits. DSH Settings itself is back to stock — the plugin registers no `settings.section` entries. (**A2A Chat** is a center-column overlay panel, and the Bot Browser is a right-Sidebar page tab). The left-rail A2A Chat panellist row is currently hidden (`SHOW_A2A_PANELLIST_ROW = false`); 线上对话 / 群任务 tabs open the overlay. New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible), and while a Bot is selected the blank-session hero shows that Bot's 100px avatar and name centered directly above the whale-logo/slogan headline (a DOM mount above the headline — DSH has no slot there; stock presets keep the stock hero). The stock Settings → Agent presets roster does NOT list the `oac-*` Bot presets: Bots are created and edited on the Bots page, so the stock management cards would be duplicates — one CSS rule hides exactly the `li[data-agent-preset-id^='oac-']` cards while the presets stay registered (chip, session composition, and any default selection untouched) and user-authored custom presets still show. Each private-chat/group-task row carries unread dots: new incoming activity marks, opening the conversation clears, and the feed is push-only (see `chat/events/all` below).
 
 **A2A Chat panel shape.** A2A Chat is a `shell.overlay` entry (id `oac-a2a`),
 not a kernel global main panel: it covers the center conversation column
@@ -472,14 +472,17 @@ Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 
 ## Scheduled tasks (定时任务)
 
-The Bot editor (Bots page → My Bots → edit) gains a **Scheduled tab** — every
-scheduled task of THIS Bot, fully manageable: create (name, self-contained
-prompt, one-shot `at` / `interval` / 5-field `cron` schedule, execution
-channel), inline edit, enable/disable, delete, Run now, and an expandable
-prompt + run-history view. Tasks the Bot handed off during a MetaWeb surf
-(`create_scheduled_task`, cap 2 per surf) carry a "surf handoff" pill. The
-tab reads and writes through `/oac/api/schedule/*` → the `metabot schedule`
-CLI verbs, so the CLI stays the single management surface.
+The Bots page gains a **定时任务** (Scheduled) section right below My Bots —
+every local Bot's scheduled tasks in ONE unified list (no per-Bot filtering;
+the list comes from `metabot schedule list --all`), fully manageable: create
+(with a Bot picker), inline edit, enable/disable switch, delete (modal
+confirm), Run now, and an in-place expanding prompt + run-history view. The
+table follows the IDBots 跟踪任务 > 定时任务 layout (Title / Bot / Scheduled
+For / Status / More columns, hairline grid rows, overflow-menu actions).
+Tasks a Bot handed off during a MetaWeb surf (`create_scheduled_task`, cap 2
+per surf) carry a "surf handoff" pill. The section reads and writes through
+`/oac/api/schedule/*` → the `metabot schedule` CLI verbs, so the CLI stays
+the single management surface.
 
 CLI-first like everything else here: `metabot schedule *` owns the data model,
 due math, and run ledger (`create --name --prompt --at|--every|--cron`,
@@ -754,7 +757,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/surf/status` | `metabot surf status` — runs (newest first), running flag, pre-dream toggle, interaction budget, `preDreamDue` gate |
 | POST | `/oac/api/surf/run` | `metabot surf run` — start one unattended surf run (fire-and-forget; the daemon owns execution) |
 | POST | `/oac/api/surf/enable` / `disable` / `budget` | pre-dream toggle + interaction budget (enable also retires legacy qa-surf study jobs) |
-| POST | `/oac/api/schedule/list` / `runs` / `create` / `update` / `enable` / `disable` / `delete` / `run` | `metabot schedule *` verbs backing the Bot editor's Scheduled tab (`run` spawns the CLI detached — a manual run is a whole LLM turn) |
+| POST | `/oac/api/schedule/list` / `runs` / `create` / `update` / `enable` / `disable` / `delete` / `run` | `metabot schedule *` verbs backing the Bots page 定时任务 section (`list` accepts `all: true` for the unified every-Bot list; `run` spawns the CLI detached — a manual run is a whole LLM turn) |
 | POST | `/oac/api/dream/*` | `metabot dream` verbs; `dream/run` orchestrates plan → `ctx.llm` → commit in-process |
 | POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |
 | POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner` |
@@ -912,6 +915,6 @@ page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
 - Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`, `tools`, `systemPrompt`
 - Client: `dsh.client` bundle, no second `cordis.patch.yml` row; inject `slots`, `locale`, `remote`, `remote.agentPresets`, `remote.session`, `layout`, `sidebarRight`, `sidebarRightTabs`
-- Client surfaces: the Bots main panel (left-rail `sidebar.panellist` row id `oac-bots` + `main` panel key `oac-bots` declaring the `oac.bots.section` child slot; the five section entries `oac-bots`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic` register into it; an in-page right-side Bot Page dock hosts the browser while the panel is active), the A2A Chat `shell.overlay` panel (id `oac-a2a`, center column only; its `sidebar.panellist` row is hidden), and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule). No `settings.section` entries — DSH Settings stays stock.
+- Client surfaces: the Bots main panel (left-rail `sidebar.panellist` row id `oac-bots` + `main` panel key `oac-bots` declaring the `oac.bots.section` child slot; the six section entries `oac-bots`, `oac-schedule`, `oac-memory`, `oac-user`, `oac-apps`, `oac-traffic` register into it; an in-page right-side Bot Page dock hosts the browser while the panel is active), the A2A Chat `shell.overlay` panel (id `oac-a2a`, center column only; its `sidebar.panellist` row is hidden), and the right-Sidebar `bot-browser` page tab kind (type + keyed `sidebar.right.pane.tab` body + `.title` chip, plus a guide-page capsule). No `settings.section` entries — DSH Settings stays stock.
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
 - `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).

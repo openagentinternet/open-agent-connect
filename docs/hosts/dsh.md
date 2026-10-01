@@ -69,6 +69,7 @@ After install, the left rail gains a **Bots** row directly below 插件. It
 opens the plugin's own Bots page, whose left nav hosts these sections:
 
 - My Bots (我的 Bot)
+- 定时任务 (Scheduled — every local Bot's tasks in one list)
 - Memory
 - User
 - MetaApps (元应用 — two tabs: 链上元应用, the global on-chain feed with author

@@ -539,6 +539,33 @@ export const GROUPTASK_CSS = `
 .oac-sch-run { display: flex; align-items: baseline; gap: 8px; font-size: 12px; flex-wrap: wrap; }
 .oac-sch-run-meta { color: var(--dsw-alias-label-tertiary); }
 @keyframes oac-sch-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Bots page "Scheduled" section (定时任务): the all-Bots table — IDBots
+   跟踪任务 > 定时任务 parity. Grid rows with hairline separators, the enable
+   switch + running spinner in Status, an overflow menu in More, and the
+   in-place expanding detail under a row. */
+.oac-sch-table { border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; }
+.oac-sch-th, .oac-sch-tr { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.9fr) minmax(0, 1fr) 76px 40px; align-items: center; gap: 12px; padding-left: 16px; padding-right: 16px; }
+.oac-sch-th { padding-top: 8px; padding-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-tertiary); border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-sch-th-more { text-align: center; }
+.oac-sch-item + .oac-sch-item { border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-sch-tr { padding-top: 10px; padding-bottom: 10px; cursor: pointer; transition: background .16s; }
+.oac-sch-tr:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-sch-tr:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: -2px; }
+.oac-sch-cell-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.oac-sch-cell-name .oac-sch-name { flex: 0 1 auto; }
+.oac-sch-name.off { color: var(--dsw-alias-label-tertiary); font-weight: 400; }
+.oac-sch-cell-bot { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+.oac-sch-bot-avatar { flex: none; width: 20px; height: 20px; font-size: 10px; }
+.oac-sch-bot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-sch-cell-schedule { font-size: 13px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-sch-cell-status { display: flex; align-items: center; gap: 6px; }
+.oac-sch-running { color: var(--dsw-alias-state-business-primary); }
+.oac-sch-cell-more { display: flex; justify-content: center; }
+.oac-sch-row-detail { padding: 0 16px 12px; }
+.oac-sch-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 24px; text-align: center; }
+.oac-sch-empty-title { margin: 0; font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
+.oac-sch-empty-hint { margin: 0; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
 .oac-gt-badge { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 11px; line-height: 18px; white-space: nowrap; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
 /* Status badges mirror the IDBots group-task palette (Tailwind colors, light
    + body[data-ds-dark-theme] variants); the DSH --dsw-alias-state-*-secondary

@@ -47,6 +47,7 @@ test('runCli dispatches schedule subcommands to the schedule dependency group', 
   assert.equal(await run(['schedule', 'create', '--at', '2026-09-06T08:00:00', '--name', 'x', '--prompt', 'y', '--channel', 'daemon', '--expires-at', '2026-12-31', '--disabled']), 0);
   assert.equal(await run(['schedule', 'create', '--cron', '0 9 * * 1', '--name', 'x', '--prompt', 'y', '--working-directory', '/tmp']), 0);
   assert.equal(await run(['schedule', 'list', '--from', 'alice']), 0);
+  assert.equal(await run(['schedule', 'list', '--all']), 0);
   assert.equal(await run(['schedule', 'show', '--id', 'task-1', '--from', 'alice']), 0);
   assert.equal(await run(['schedule', 'update', '--id', 'task-1', '--from', 'alice', '--payload-file', 'p.json']), 0);
   assert.equal(await run(['schedule', 'delete', '--id', 'task-1', '--confirm']), 0);
@@ -61,7 +62,7 @@ test('runCli dispatches schedule subcommands to the schedule dependency group', 
   assert.equal(await run(['schedule', 'complete', '--run-id', 'run-1', '--duration-ms', '5000']), 0);
 
   assert.deepEqual(calls.map(([name]) => name), [
-    'create', 'create', 'create', 'list', 'show', 'update', 'delete', 'enable',
+    'create', 'create', 'create', 'list', 'list', 'show', 'update', 'delete', 'enable',
     'disable', 'run', 'runs', 'due', 'due', 'claim', 'complete', 'complete',
   ]);
 
@@ -77,21 +78,25 @@ test('runCli dispatches schedule subcommands to the schedule dependency group', 
   assert.equal(calls[2][1].workingDirectory, '/tmp');
 
   // update passes the parsed payload through.
-  assert.equal(calls[5][1].id, 'task-1');
-  assert.equal(calls[5][1].payload.name, 'renamed');
-  assert.deepEqual(calls[5][1].payload.schedule, { type: 'cron', expression: '0 9 * * 1' });
+  assert.equal(calls[6][1].id, 'task-1');
+  assert.equal(calls[6][1].payload.name, 'renamed');
+  assert.deepEqual(calls[6][1].payload.schedule, { type: 'cron', expression: '0 9 * * 1' });
+
+  // list --from vs --all.
+  assert.equal(calls[3][1].all, undefined);
+  assert.equal(calls[4][1].all, true);
 
   // runs parses the limit.
-  assert.equal(calls[10][1].limit, 7);
+  assert.equal(calls[11][1].limit, 7);
 
   // due --all vs --from.
-  assert.equal(calls[11][1].all, undefined);
-  assert.equal(calls[12][1].all, true);
+  assert.equal(calls[12][1].all, undefined);
+  assert.equal(calls[13][1].all, true);
 
   // claim default executor and complete flags.
-  assert.equal(calls[13][1].executor, 'host');
-  assert.equal(calls[14][1].error, 'llm down');
-  assert.equal(calls[15][1].durationMs, 5000);
+  assert.equal(calls[14][1].executor, 'host');
+  assert.equal(calls[15][1].error, 'llm down');
+  assert.equal(calls[16][1].durationMs, 5000);
 });
 
 test('runCli rejects malformed schedule invocations', async () => {
@@ -129,6 +134,8 @@ test('runCli rejects malformed schedule invocations', async () => {
   assert.equal(await run(['schedule', 'runs', '--limit', 'zero']), 1);
   // due cannot combine --from with --all
   assert.equal(await run(['schedule', 'due', '--from', 'alice', '--all']), 1);
+  // list cannot combine --from with --all either
+  assert.equal(await run(['schedule', 'list', '--from', 'alice', '--all']), 1);
   // unknown subcommand
   assert.equal(await run(['schedule', 'frobnicate']), 1);
 });

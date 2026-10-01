@@ -184,6 +184,17 @@ export function createScheduleDaemonHandlers(input: ScheduleDaemonHandlersInput)
     },
 
     list: async (rawInput) => {
+      const all = rawInput?.all === true || rawInput?.all === 'true';
+      if (all) {
+        const profiles = await listMetabotProfiles(systemHomeDir).catch(() => [] as MetabotProfileFull[]);
+        const groups = [];
+        for (const profile of profiles) {
+          if (typeof profile.homeDir !== 'string' || !profile.homeDir) continue;
+          const tasks = await storeFor(path.resolve(profile.homeDir)).listTasks();
+          if (tasks.length > 0) groups.push({ slug: profile.slug, tasks });
+        }
+        return commandSuccess({ groups });
+      }
       const resolved = await resolveProfileHomeDir(rawInput?.from);
       if (resolved.failure) return resolved.failure;
       const tasks = await storeFor(resolved.homeDir).listTasks();

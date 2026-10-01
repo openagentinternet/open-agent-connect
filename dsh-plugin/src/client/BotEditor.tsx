@@ -22,11 +22,10 @@ import { BotAvatar } from './BotAvatar.tsx'
 import { LlmPicker } from './LlmPicker.tsx'
 import type { BotsLocaleKey } from './locale.ts'
 import { KnowledgeTab } from './KnowledgeTab.tsx'
-import { ScheduledTab } from './ScheduledTab.tsx'
 import { SurfSection } from './SurfSection.tsx'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
-type TabKey = 'basic' | 'behavior' | 'chat' | 'knowledge' | 'scheduled' | 'advanced'
+type TabKey = 'basic' | 'behavior' | 'chat' | 'knowledge' | 'advanced'
 type NoteTone = 'saving' | 'success' | 'warn' | 'error'
 
 const DELETE_CONFIRM_COUNTDOWN_SECONDS = 5
@@ -36,7 +35,6 @@ const TABS: Array<{ id: TabKey; label: BotsLocaleKey }> = [
   { id: 'behavior', label: 'tabBehavior' },
   { id: 'chat', label: 'tabChat' },
   { id: 'knowledge', label: 'tabKnowledge' },
-  { id: 'scheduled', label: 'tabScheduled' },
   { id: 'advanced', label: 'tabAdvanced' },
 ]
 
@@ -754,11 +752,6 @@ export function BotEditor({
       ) : null}
       {tab === 'knowledge' ? (
         <KnowledgeTab bot={bot} t={t} />
-      ) : null}
-      {tab === 'scheduled' ? (
-        <div id={tabPanelId('scheduled')} role="tabpanel" aria-labelledby={tabId('scheduled')} className="oac-tab-panel">
-          <ScheduledTab bot={bot} t={t} />
-        </div>
       ) : null}
       {tab === 'advanced' ? (
         <div id={tabPanelId('advanced')} role="tabpanel" aria-labelledby={tabId('advanced')} className="oac-tab-panel">

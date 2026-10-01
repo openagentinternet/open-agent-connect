@@ -1950,6 +1950,20 @@ export async function scheduleList(from: string): Promise<ScheduledTaskRow[]> {
   return rows.map((row) => scheduledTaskOf(row, from))
 }
 
+/** Every local Bot's tasks, flattened (the daemon's `schedule list --all` groups). */
+export async function scheduleListAll(): Promise<ScheduledTaskRow[]> {
+  const data = recordOf(await post<unknown>('schedule/list', { all: true }))
+  const groups = Array.isArray(data.groups) ? data.groups : []
+  const rows: ScheduledTaskRow[] = []
+  for (const group of groups) {
+    const record_ = record(group)
+    const slug = String(record_.slug ?? '')
+    const tasks = Array.isArray(record_.tasks) ? record_.tasks : []
+    for (const task of tasks) rows.push(scheduledTaskOf(task, slug))
+  }
+  return rows
+}
+
 export async function scheduleRuns(from: string, id: string, limit = 10): Promise<ScheduledRunRow[]> {
   const data = recordOf(await post<unknown>('schedule/runs', { from, id, limit }))
   const rows = Array.isArray(data.runs) ? data.runs : []

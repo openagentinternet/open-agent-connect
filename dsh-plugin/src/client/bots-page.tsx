@@ -5,7 +5,8 @@
  * uses for the plugin manager. The page hosts every OAC configuration
  * surface that used to be a Settings section (Bots, Memory, User, MetaApps,
  * Traffic) as one `oac.bots.section` list entry each — the first labeled
- * 我的 Bot / My Bots — so DSH Settings stays
+ * 我的 Bot / My Bots — plus the unified 定时任务 (Scheduled) list extracted
+ * from the Bot editor — so DSH Settings stays
  * exactly stock.
  *
  * The chrome mirrors the Plugins settings section's pattern, turned vertical
@@ -39,6 +40,7 @@ import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import { BrowserStage } from './browser-stage.tsx'
 import {
   IconAgentPresetOutline16,
+  IconAlarmClockOutline16,
   IconCloseOutline16,
   IconGaugeOutline16,
   IconGlobeOutline16,
@@ -108,6 +110,7 @@ const ACTIVE_SECTION_STORAGE_KEY = 'oac-dsh:bots-page-section:v1'
 /** Per-section nav icons, keyed by section id (the Settings left nav maps its row icons by id the same way). */
 const SECTION_ICONS: Readonly<Record<string, ComponentType<CompatIconProps>>> = {
   'oac-bots': IconAgentPresetOutline16,
+  'oac-schedule': IconAlarmClockOutline16,
   'oac-memory': IconThinkOutline16,
   'oac-user': IconUserOutline16,
   'oac-apps': IconGlobeOutline16,
