@@ -90,6 +90,59 @@ export interface MetaAppListPayload {
   total: number
 }
 
+/**
+ * One row of the GLOBAL on-chain MetaApp feed (`metabot metaapp search`,
+ * metaso aggregation API): the CLI's trimmed projection plus the
+ * localUiUrl/publisherLocalUiUrl link decoration when a daemon is reachable.
+ * No total count exists upstream — the chain tab pages by cursor.
+ */
+export interface MetaAppChainRow {
+  pinId: string
+  title: string
+  appName: string
+  intro: string
+  icon: string
+  coverImg: string
+  tags: string[]
+  runtime: string
+  version: string
+  updatedAt: number
+  publisherGlobalMetaId: string
+  publisherName: string
+  publisherAvatarId: string
+  forkedFrom: string
+  isOwn: boolean
+  localUiUrl: string
+  publisherLocalUiUrl: string
+}
+
+export interface MetaAppChainSearchPayload {
+  items: MetaAppChainRow[]
+  hasMore: boolean
+  nextCursor: string
+}
+
+/**
+ * Map an on-chain search row onto the shared app card's MetaAppRecord shape
+ * (the full row stays on `raw` for anything the card doesn't project).
+ */
+export function metaAppChainRowToRecord(row: MetaAppChainRow): MetaAppRecord {
+  return {
+    pinId: row.pinId,
+    title: row.title || undefined,
+    appName: row.appName || undefined,
+    intro: row.intro || undefined,
+    icon: row.icon || undefined,
+    coverImg: row.coverImg || undefined,
+    tags: row.tags.length > 0 ? row.tags : undefined,
+    runtime: row.runtime || undefined,
+    version: row.version || undefined,
+    timestamp: row.updatedAt > 0 ? row.updatedAt : null,
+    runUrl: row.localUiUrl || undefined,
+    raw: row as unknown as Record<string, unknown>,
+  }
+}
+
 export function textOf(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }

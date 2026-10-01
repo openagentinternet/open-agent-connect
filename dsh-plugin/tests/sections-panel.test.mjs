@@ -33,8 +33,12 @@ test('en and zh dictionaries stay in sync for Conversations, Services, and Apps'
   assert.match(services, /confirmPaid/)
   assert.match(services, /revokeConfirm/)
   const apps = await assertLocalePair('locale-apps.ts', 'appEn', 'appZh', 'AppsLocaleKey')
-  assert.match(apps, /nav: 'Apps'/)
-  assert.match(apps, /nav: '应用'/)
+  assert.match(apps, /nav: 'MetaApps'/)
+  assert.match(apps, /nav: '元应用'/)
+  assert.match(apps, /tabChain: 'On-chain MetaApps'/)
+  assert.match(apps, /tabChain: '链上元应用'/)
+  assert.match(apps, /tabLocal: 'Local MetaApps'/)
+  assert.match(apps, /tabLocal: '本机元应用'/)
   assert.match(apps, /metaapp delete --confirm/)
 })
 
@@ -175,4 +179,27 @@ test('services and apps panels keep confirmation gates', async () => {
   assert.match(apps, /publishOnChain/)
   assert.match(apps, /saveChanges/)
   assert.match(apps, /confirmDelete/)
+})
+
+test('the MetaApps section hosts the on-chain feed tab with author rows into the Bot Page dock', async () => {
+  const panel = await readFile(join(root, 'src/client/AppsPanel.tsx'), 'utf8')
+  // Two tabs, chain first by default (IDBots 链上 MetaApps parity).
+  assert.match(panel, /useState<'chain' \| 'local'>\('chain'\)/)
+  assert.match(panel, /oac-tablist/)
+  // Chain cards drop edit/details and open the app in the in-page dock.
+  assert.match(panel, /openBotPage\(`metaapp:\/\/\$\{viewPin\}`, name\)/)
+  // The author row opens the author's Bot page in the same dock.
+  assert.match(panel, /openBotPage\(`metaid:\/\/\$\{chainRow\.publisherGlobalMetaId\}`, authorName\)/)
+  assert.match(panel, /oac-apps-author/)
+  assert.match(panel, /BotAvatar/)
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /search: \(size\?: number, cursor\?: string\) => api\.metaappSearch\(size, cursor\)/)
+  const api = await readFile(join(root, 'src/client/api.ts'), 'utf8')
+  assert.match(api, /post<\{ items\?: unknown; hasMore\?: unknown; nextCursor\?: unknown \}>\(\s*'metaapp\/search'/)
+  const sections = await readFile(join(root, 'src/sections.ts'), 'utf8')
+  assert.match(sections, /method === 'metaapp\/search'/)
+  assert.match(sections, /\['metaapp', 'search', '--limit', String\(size\)\]/)
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /\.oac-apps-author \{/)
+  assert.match(styles, /\.oac-apps-card-foot-chain \.oac-apps-author \{ margin-right: auto/)
 })

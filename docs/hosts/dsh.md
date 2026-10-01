@@ -71,7 +71,8 @@ opens the plugin's own Bots page, whose left nav hosts these sections:
 - My Bots (我的 Bot)
 - Memory
 - User
-- Apps
+- MetaApps (元应用 — two tabs: 链上元应用, the global on-chain feed with author
+  cards, and 本机元应用, the per-Bot published apps)
 - Traffic (流量)
 
 (Services stays hidden until the service plugin matures; A2A Chat opens from

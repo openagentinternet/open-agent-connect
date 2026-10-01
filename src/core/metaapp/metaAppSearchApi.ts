@@ -34,6 +34,10 @@ export type MetaAppSearchItem = {
   title: string;
   appName: string;
   intro: string;
+  /** Icon metafile reference (pin id / metafile:// URI), when indexed. */
+  icon: string;
+  /** Cover image metafile reference, when indexed. */
+  coverImg: string;
   tags: string[];
   runtime: string;
   version: string;
@@ -106,6 +110,8 @@ function normalizeItem(raw: unknown): MetaAppSearchItem {
     title: text(record.title),
     appName: text(record.appName),
     intro: text(record.intro),
+    icon: text(record.icon),
+    coverImg: text(record.coverImg),
     tags: textList(record.tags),
     runtime: text(record.runtime),
     version: text(record.version),
@@ -291,6 +297,8 @@ export type TrimmedMetaAppSearchItem = {
   title: string;
   appName: string;
   intro: string;
+  icon: string;
+  coverImg: string;
   tags: string[];
   runtime: string;
   version: string;
@@ -316,6 +324,8 @@ export function trimMetaAppSearchItems(
       title: item.title,
       appName: item.appName,
       intro: item.intro,
+      icon: item.icon,
+      coverImg: item.coverImg,
       tags: item.tags,
       runtime: item.runtime,
       version: item.version,

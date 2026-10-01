@@ -282,7 +282,9 @@ test('runCli default `metabot metaapp search` handler trims items and marks own 
     const own = envelope.data.items[0];
     assert.deepEqual(Object.keys(own).sort(), [
       'appName',
+      'coverImg',
       'forkedFrom',
+      'icon',
       'intro',
       'isOwn',
       'pinId',

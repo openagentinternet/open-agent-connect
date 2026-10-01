@@ -19,6 +19,56 @@ test('record helpers name, subtitle, and view pin id like the OAC page', () => {
   assert.equal(apps.recordName({}, 'untitled'), 'untitled')
 })
 
+test('metaAppChainRowToRecord maps the on-chain feed row onto the shared card record', () => {
+  const row = {
+    pinId: 'c'.repeat(64) + 'i0',
+    title: 'Desk',
+    appName: 'desk',
+    intro: 'A desk.',
+    icon: 'metafile://' + 'd'.repeat(64) + 'i0',
+    coverImg: 'e'.repeat(64) + 'i0',
+    tags: ['tool', 'desk'],
+    runtime: 'browser',
+    version: 'v1.2.0',
+    updatedAt: 1_700_000_000,
+    publisherGlobalMetaId: 'gmid-1',
+    publisherName: 'Alice',
+    publisherAvatarId: 'f'.repeat(64) + 'i0',
+    forkedFrom: '',
+    isOwn: false,
+    localUiUrl: 'http://127.0.0.1:10001/browser?uri=metaapp://x',
+    publisherLocalUiUrl: 'http://127.0.0.1:10001/browser?uri=metaid://gmid-1',
+  }
+  const record = apps.metaAppChainRowToRecord(row)
+  assert.equal(record.pinId, row.pinId)
+  assert.equal(record.title, 'Desk')
+  assert.equal(record.icon, row.icon)
+  assert.equal(record.coverImg, row.coverImg)
+  assert.deepEqual(record.tags, ['tool', 'desk'])
+  assert.equal(record.version, 'v1.2.0')
+  assert.equal(record.timestamp, 1_700_000_000)
+  assert.equal(record.runUrl, row.localUiUrl)
+  // The full row rides on raw for fields the record does not project.
+  assert.equal(record.raw.publisherGlobalMetaId, 'gmid-1')
+  // Empty fields degrade to undefined so the card's fallbacks kick in.
+  const empty = apps.metaAppChainRowToRecord({
+    ...row,
+    title: '',
+    appName: '',
+    coverImg: '',
+    tags: [],
+    updatedAt: 0,
+    localUiUrl: '',
+  })
+  assert.equal(empty.title, undefined)
+  assert.equal(empty.coverImg, undefined)
+  assert.equal(empty.tags, undefined)
+  assert.equal(empty.timestamp, null)
+  assert.equal(empty.runUrl, undefined)
+  assert.equal(apps.recordName(empty, 'Untitled'), empty.pinId)
+})
+
+
 test('splitList and recordTags split on newlines and commas', () => {
   assert.deepEqual(apps.splitList('a, b\nc'), ['a', 'b', 'c'])
   assert.deepEqual(apps.recordTags({ tags: ['a', 'b', '', 'c'] }, 2), ['a', 'b'])

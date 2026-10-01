@@ -96,6 +96,13 @@ test('metaapp list passes --size and --cursor when provided', async () => {
   assert.deepEqual(badSize.calls[0], ['metaapp', 'list', '--from', 'alice', '--size', '12'])
 })
 
+test('metaapp search is global (no --from), clamps size to the CLI cap, passes --cursor', async () => {
+  const plain = await capture('metaapp/search', {})
+  assert.deepEqual(plain.calls[0], ['metaapp', 'search', '--limit', '12'])
+  const paged = await capture('metaapp/search', { size: 30, cursor: 'cursor-9' })
+  assert.deepEqual(paged.calls[0], ['metaapp', 'search', '--limit', '20', '--cursor', 'cursor-9'])
+})
+
 test('metaapp update requires confirm and targetPinId, then writes the payload file', async () => {
   const unconfirmed = await capture('metaapp/update', {
     from: 'alice',

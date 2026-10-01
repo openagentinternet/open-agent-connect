@@ -1,7 +1,7 @@
 /**
  * Browser half of open-agent-connect-dsh: locale dictionaries, the Bots main
  * panel (a left-rail `sidebar.panellist` row + `main` page hosting the five
- * `oac.bots.section` pages — My Bots, Memory, User, Apps, Traffic — the surfaces
+ * `oac.bots.section` pages — My Bots, Memory, User, MetaApps, Traffic — the surfaces
  * that used to be Settings sections; DSH Settings itself stays stock), the
  * new-session preset chip, the right-Sidebar `bot-browser` tab type, and the
  * A2A Chat `shell.overlay` panel. The left-rail A2A glyph is currently hidden
@@ -369,6 +369,8 @@ export function apply(ctx: ClientContext): void {
       // Browser reveal needs the right Sidebar mounted, which gates on
       // activePanelId === null.
       close: () => { ctx.layout.selectPanel(null) },
+      // The in-page Bot Page dock's side-effect-free resolver.
+      resolveBotPage: (uri: string | null) => api.browserResolve(uri),
     }),
     children: { 'oac.bots.section': { kind: 'list', scope: 'root' } },
   }, BotsPage))
@@ -458,6 +460,7 @@ export function apply(ctx: ClientContext): void {
     inject: () => ({
       bots: () => api.list(),
       list: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
+      search: (size?: number, cursor?: string) => api.metaappSearch(size, cursor),
       publish: (from: string, payload: Record<string, unknown>, opId?: string) =>
         api.metaappPublish(from, payload, opId),
       update: (from: string, targetPinId: string, payload: Record<string, unknown>, opId?: string) =>

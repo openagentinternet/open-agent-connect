@@ -16,11 +16,12 @@ import {
 } from './icons.ts'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotRow, CommandEnvelope } from './api.ts'
-import type { MetaAppListPayload, MetaAppRecord } from '../apps.ts'
+import type { MetaAppChainRow, MetaAppChainSearchPayload, MetaAppListPayload, MetaAppRecord } from '../apps.ts'
 import {
   chainTxids,
   displayValue,
   formatTimestamp,
+  metaAppChainRowToRecord,
   metaAppPublishStage,
   metaAppPublishStageLocaleKey,
   metaAppUriFor,
@@ -33,11 +34,13 @@ import {
   recordSubtitle,
   recordTags,
   recordText,
+  recordViewPinId,
   runUrlFor,
   type MetaAppForkResult,
   type MetaAppPublishStage,
 } from '../apps.ts'
 import { AssetImage } from './AssetImage.tsx'
+import { BotAvatar } from './BotAvatar.tsx'
 import type { AppsLocaleKey } from './locale-apps.ts'
 import { interpolate } from './parse.ts'
 import { MetaAppForm } from './MetaAppForm.tsx'
@@ -47,6 +50,8 @@ type Translate = (key: AppsLocaleKey | CommonKeyOf, vars?: Record<string, string
 export interface AppsPanelInjected {
   bots: () => Promise<BotRow[]>
   list: (from: string, size?: number, cursor?: string) => Promise<MetaAppListPayload>
+  /** Global on-chain feed (metaso aggregation) — the 链上元应用 tab. */
+  search: (size?: number, cursor?: string) => Promise<MetaAppChainSearchPayload>
   publish: (from: string, payload: Record<string, unknown>, opId?: string) => Promise<CommandEnvelope>
   update: (from: string, targetPinId: string, payload: Record<string, unknown>, opId?: string) => Promise<CommandEnvelope>
   remove: (from: string, targetPinId: string) => Promise<CommandEnvelope>
@@ -79,6 +84,7 @@ type ChainState = {
 } | null
 
 const PAGE_SIZE = 12
+const CHAIN_PAGE_SIZE = 12
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
@@ -99,13 +105,20 @@ function correctNextCursor(rawNext: string, total: number, count: number): strin
 export function AppsPanel({
   bots,
   list,
+  search,
   publish,
   update,
   remove,
   fork,
   upload,
+  openBotPage,
   t,
-}: AppsPanelInjected & { t: Translate }): ReactNode {
+}: AppsPanelInjected & {
+  t: Translate
+  /** Owner prop from the Bots page: opens a URI in the in-page dock (the right Sidebar unmounts under a main panel). */
+  openBotPage: (uri: string | null, title: string) => void
+}): ReactNode {
+  const [tab, setTab] = useState<'chain' | 'local'>('chain')
   const [profiles, setProfiles] = useState<BotRow[]>([])
   const [from, setFrom] = useState('')
   const [records, setRecords] = useState<MetaAppRecord[]>([])
@@ -114,6 +127,13 @@ export function AppsPanel({
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 链上元应用 (on-chain feed) state: cursor-paged, no upstream total.
+  const [chainRows, setChainRows] = useState<MetaAppChainRow[]>([])
+  const [chainCursorStack, setChainCursorStack] = useState<string[]>([''])
+  const [chainNextCursor, setChainNextCursor] = useState('')
+  const [chainLoaded, setChainLoaded] = useState(false)
+  const [chainLoading, setChainLoading] = useState(false)
+  const [chainError, setChainError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState>(null)
   const [chain, setChain] = useState<ChainState>(null)
   const [forkState, setForkState] = useState<ForkState>(null)
@@ -212,6 +232,38 @@ export function AppsPanel({
     void loadPage('', [''])
   }
 
+  const loadChainPage = async (cursor: string, stack: string[]): Promise<void> => {
+    setChainLoading(true)
+    try {
+      const data = await search(CHAIN_PAGE_SIZE, cursor)
+      if (data.items.length === 0 && cursor !== '') {
+        // Spurious trailing cursor: the page after the last returns nothing.
+        setChainNextCursor('')
+        setChainError(null)
+        return
+      }
+      setChainRows(data.items)
+      setChainNextCursor(data.hasMore ? data.nextCursor : '')
+      setChainCursorStack(stack)
+      setChainError(null)
+    } catch (cause) {
+      setChainError(errorText(cause))
+    } finally {
+      setChainLoading(false)
+    }
+  }
+
+  // The chain tab loads on first visit; refresh always re-reads page one.
+  useEffect(() => {
+    if (tab !== 'chain' || chainLoaded) return
+    setChainLoaded(true)
+    void loadChainPage('', [''])
+  }, [tab, chainLoaded])
+
+  const reloadChainFirstPage = (): void => {
+    void loadChainPage('', [''])
+  }
+
   const runApp = (record: MetaAppRecord): void => {
     if (record.disabled === true) return
     const url = runUrlFor(record)
@@ -299,25 +351,61 @@ export function AppsPanel({
     }
   }
 
-  const renderTile = (record: MetaAppRecord): ReactNode => {
+  // One card serves both tabs: the local (owner) variant keeps edit/details
+  // and opens the detail modal on click; the chain variant drops edit/details,
+  // runs the app in the in-page dock on click, and carries the author row at
+  // the foot's left (avatar + name → the author's Bot page in the dock).
+  const renderTile = (record: MetaAppRecord, chainRow?: MetaAppChainRow): ReactNode => {
+    const isChain = chainRow !== undefined
     const name = recordName(record, t('untitled'))
     const pinId = recordPinId(record)
+    const viewPin = recordViewPinId(record)
     const subtitle = recordSubtitle(record)
     const intro = recordText(record, ['intro'])
     const tags = recordTags(record)
     const coverSrc = recordImage(record, ['coverImg', 'coverImage', 'cover'])
     const iconSrc = recordImage(record, ['icon', 'iconImg', 'iconImage'])
     const copyKey = `pin-${pinId}`
+    const openInDock = (): void => {
+      if (record.disabled === true || !viewPin) return
+      openBotPage(`metaapp://${viewPin}`, name)
+    }
+    const authorName = chainRow
+      ? chainRow.publisherName || chainRow.publisherGlobalMetaId || t('authorUnknown')
+      : ''
+    const authorRow = chainRow ? (
+      chainRow.publisherGlobalMetaId ? (
+        <button
+          type="button"
+          className="oac-apps-author"
+          data-tip={interpolate(t('openAuthorPage'), { name: authorName })}
+          aria-label={interpolate(t('openAuthorPage'), { name: authorName })}
+          onClick={(event) => {
+            event.stopPropagation()
+            openBotPage(`metaid://${chainRow.publisherGlobalMetaId}`, authorName)
+          }}
+        >
+          <BotAvatar name={authorName} src={chainRow.publisherAvatarId || undefined} className="oac-apps-author-avatar" />
+          <span className="oac-apps-author-name">{authorName}</span>
+        </button>
+      ) : (
+        <span className="oac-apps-author oac-apps-author-static">
+          <BotAvatar name={authorName} src={chainRow.publisherAvatarId || undefined} className="oac-apps-author-avatar" />
+          <span className="oac-apps-author-name">{authorName}</span>
+        </span>
+      )
+    ) : null
     return (
       <li
         className="oac-apps-card"
         key={pinId || name}
         tabIndex={0}
-        onClick={() => setModal({ kind: 'detail', record })}
+        onClick={() => (isChain ? openInDock() : setModal({ kind: 'detail', record }))}
         onKeyDown={(event: KeyboardEvent<HTMLLIElement>) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
-            setModal({ kind: 'detail', record })
+            if (isChain) openInDock()
+            else setModal({ kind: 'detail', record })
           }
         }}
       >
@@ -356,26 +444,29 @@ export function AppsPanel({
             </div>
           ) : null}
         </div>
-        <div className="oac-apps-card-foot">
+        <div className={isChain ? 'oac-apps-card-foot oac-apps-card-foot-chain' : 'oac-apps-card-foot'}>
+          {authorRow}
           <button
             type="button"
             className="oac-icon-btn"
             data-tip={t('run')}
             aria-label={`${t('run')}: ${name}`}
             disabled={record.disabled === true}
-            onClick={(event) => { event.stopPropagation(); runApp(record) }}
+            onClick={(event) => { event.stopPropagation(); if (isChain) openInDock(); else runApp(record) }}
           >
             <IconPlayOutline16 />
           </button>
-          <button
-            type="button"
-            className="oac-icon-btn"
-            data-tip={t('edit')}
-            aria-label={`${t('edit')}: ${name}`}
-            onClick={(event) => { event.stopPropagation(); setModal({ kind: 'edit', record }) }}
-          >
-            <IconEditOutline16 />
-          </button>
+          {isChain ? null : (
+            <button
+              type="button"
+              className="oac-icon-btn"
+              data-tip={t('edit')}
+              aria-label={`${t('edit')}: ${name}`}
+              onClick={(event) => { event.stopPropagation(); setModal({ kind: 'edit', record }) }}
+            >
+              <IconEditOutline16 />
+            </button>
+          )}
           <button
             type="button"
             className="oac-icon-btn"
@@ -394,15 +485,17 @@ export function AppsPanel({
           >
             <IconShareOutline16 />
           </button>
-          <button
-            type="button"
-            className="oac-icon-btn"
-            data-tip={t('details')}
-            aria-label={`${t('details')}: ${name}`}
-            onClick={(event) => { event.stopPropagation(); setModal({ kind: 'detail', record }) }}
-          >
-            <IconEllipsisOutline16 />
-          </button>
+          {isChain ? null : (
+            <button
+              type="button"
+              className="oac-icon-btn"
+              data-tip={t('details')}
+              aria-label={`${t('details')}: ${name}`}
+              onClick={(event) => { event.stopPropagation(); setModal({ kind: 'detail', record }) }}
+            >
+              <IconEllipsisOutline16 />
+            </button>
+          )}
         </div>
       </li>
     )
@@ -781,79 +874,90 @@ export function AppsPanel({
   }
 
   const hasPrevious = cursorStack.length > 1
+  const chainHasPrevious = chainCursorStack.length > 1
 
   return (
     <div className="oac-panel">
       <div className="oac-row">
         <h2>{t('title')}</h2>
         <div className="oac-actions">
-          <Button type="button" icon={<IconRefreshOutline16 />} disabled={loading || !from} onClick={reloadFirstPage}>
+          <Button
+            type="button"
+            icon={<IconRefreshOutline16 />}
+            disabled={tab === 'chain' ? chainLoading : loading || !from}
+            onClick={tab === 'chain' ? reloadChainFirstPage : reloadFirstPage}
+          >
             {t('refresh')}
           </Button>
-          <Button type="button" variant="primary" icon={<IconPlusOutline16 />} disabled={!from} onClick={() => { setModal({ kind: 'publish' }); setError(null) }}>
-            {t('publish')}
-          </Button>
+          {tab === 'local' ? (
+            <Button type="button" variant="primary" icon={<IconPlusOutline16 />} disabled={!from} onClick={() => { setModal({ kind: 'publish' }); setError(null) }}>
+              {t('publish')}
+            </Button>
+          ) : null}
         </div>
       </div>
-      {error ? <div className="oac-error" role="alert">{error}</div> : null}
-      <label className="oac-field">
-        <span className="oac-field-label">{t('fieldBot')}</span>
-        <select
-          className="oac-input oac-input-select"
-          value={from}
-          disabled={profiles.length === 0}
-          onChange={(event) => setFrom(event.target.value)}
+      <div className="oac-tablist" role="tablist" aria-label={t('title')}>
+        <button
+          type="button"
+          role="tab"
+          className="oac-tab"
+          data-active={tab === 'chain' ? 'true' : undefined}
+          aria-selected={tab === 'chain'}
+          onClick={() => setTab('chain')}
         >
-          <option value="">{t('pickBot')}</option>
-          {profiles.map((bot) => (
-            <option key={bot.slug} value={bot.slug}>{bot.name} ({bot.slug})</option>
-          ))}
-        </select>
-      </label>
-      {from ? (
+          {t('tabChain')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="oac-tab"
+          data-active={tab === 'local' ? 'true' : undefined}
+          aria-selected={tab === 'local'}
+          onClick={() => setTab('local')}
+        >
+          {t('tabLocal')}
+        </button>
+      </div>
+      {tab === 'chain' ? (
         <section>
-          <div className="oac-section-head" style={{ marginBottom: 10 }}>
-            <div className="oac-section-text">
-              <span className="oac-section-title">{t('galleryTitle')}</span>
-            </div>
-          </div>
-          {loading && records.length === 0 ? <p className="oac-muted">{t('loading')}</p> : null}
-          {!loading && records.length === 0 ? (
+          {chainError ? <div className="oac-error" role="alert">{chainError}</div> : null}
+          {chainLoading && chainRows.length === 0 ? <p className="oac-muted">{t('loading')}</p> : null}
+          {!chainLoading && chainRows.length === 0 && !chainError ? (
             <div className="oac-apps-empty">
-              <strong>{t('emptyTitle')}</strong>
-              <p>{t('emptyMessage')}</p>
+              <strong>{t('chainEmptyTitle')}</strong>
+              <p>{t('chainEmptyMessage')}</p>
             </div>
           ) : null}
-          {records.length > 0 ? (
+          {chainRows.length > 0 ? (
             <>
               <ul className="oac-apps-grid">
-                {records.map((record) => renderTile(record))}
+                {chainRows.map((row) => renderTile(metaAppChainRowToRecord(row), row))}
               </ul>
-              {nextCursor || hasPrevious ? (
+              {chainNextCursor || chainHasPrevious ? (
                 <div className="oac-apps-pager" style={{ marginTop: 12 }}>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={loading || !hasPrevious}
+                    disabled={chainLoading || !chainHasPrevious}
                     onClick={() => {
-                      const stack = cursorStack.slice(0, -1)
-                      void loadPage(stack[stack.length - 1] ?? '', stack)
+                      const stack = chainCursorStack.slice(0, -1)
+                      void loadChainPage(stack[stack.length - 1] ?? '', stack)
                     }}
                   >
                     {t('pagePrev')}
                   </Button>
                   <span className="oac-apps-pager-label">
-                    {total > 0 ? `${records.length} / ${total}` : String(records.length)}
+                    {interpolate(t('pageInfo'), { page: chainCursorStack.length })}
                   </span>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={loading || !nextCursor}
+                    disabled={chainLoading || !chainNextCursor}
                     onClick={() => {
-                      const stack = [...cursorStack, nextCursor]
-                      void loadPage(nextCursor, stack)
+                      const stack = [...chainCursorStack, chainNextCursor]
+                      void loadChainPage(chainNextCursor, stack)
                     }}
                   >
                     {t('pageNext')}
@@ -863,7 +967,79 @@ export function AppsPanel({
             </>
           ) : null}
         </section>
-      ) : null}
+      ) : (
+        <>
+          {error ? <div className="oac-error" role="alert">{error}</div> : null}
+          <label className="oac-field">
+            <span className="oac-field-label">{t('fieldBot')}</span>
+            <select
+              className="oac-input oac-input-select"
+              value={from}
+              disabled={profiles.length === 0}
+              onChange={(event) => setFrom(event.target.value)}
+            >
+              <option value="">{t('pickBot')}</option>
+              {profiles.map((bot) => (
+                <option key={bot.slug} value={bot.slug}>{bot.name} ({bot.slug})</option>
+              ))}
+            </select>
+          </label>
+          {from ? (
+            <section>
+              <div className="oac-section-head" style={{ marginBottom: 10 }}>
+                <div className="oac-section-text">
+                  <span className="oac-section-title">{t('galleryTitle')}</span>
+                </div>
+              </div>
+              {loading && records.length === 0 ? <p className="oac-muted">{t('loading')}</p> : null}
+              {!loading && records.length === 0 ? (
+                <div className="oac-apps-empty">
+                  <strong>{t('emptyTitle')}</strong>
+                  <p>{t('emptyMessage')}</p>
+                </div>
+              ) : null}
+              {records.length > 0 ? (
+                <>
+                  <ul className="oac-apps-grid">
+                    {records.map((record) => renderTile(record))}
+                  </ul>
+                  {nextCursor || hasPrevious ? (
+                    <div className="oac-apps-pager" style={{ marginTop: 12 }}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={loading || !hasPrevious}
+                        onClick={() => {
+                          const stack = cursorStack.slice(0, -1)
+                          void loadPage(stack[stack.length - 1] ?? '', stack)
+                        }}
+                      >
+                        {t('pagePrev')}
+                      </Button>
+                      <span className="oac-apps-pager-label">
+                        {total > 0 ? `${records.length} / ${total}` : String(records.length)}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={loading || !nextCursor}
+                        onClick={() => {
+                          const stack = [...cursorStack, nextCursor]
+                          void loadPage(nextCursor, stack)
+                        }}
+                      >
+                        {t('pageNext')}
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </section>
+          ) : null}
+        </>
+      )}
       {modal?.kind === 'publish' || modal?.kind === 'edit' ? renderEditorModal() : null}
       {modal?.kind === 'detail' ? renderDetailModal(modal.record) : null}
       {modal?.kind === 'share' ? renderShareModal(modal.record) : null}
