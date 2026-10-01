@@ -398,13 +398,14 @@ export const APPS_CSS = `
 .oac-apps-card:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -1px; }
 .oac-apps-card-cover { position: relative; display: flex; align-items: center; justify-content: center; height: 120px; flex: none; background: linear-gradient(135deg, var(--dsw-alias-bg-layer-1), var(--dsw-alias-bg-layer-2)); border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-apps-cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.oac-apps-card-icon { position: relative; flex: none; width: 40px; height: 40px; border-radius: 10px; object-fit: cover; box-shadow: var(--dsw-shadow-lv1); }
+.oac-apps-card-icon { flex: none; width: 40px; height: 40px; border-radius: 10px; object-fit: cover; box-shadow: var(--dsw-shadow-lv1); }
 .oac-apps-icon-fallback { display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-tertiary); font-size: 14px; font-weight: 600; }
 .oac-apps-state-pill { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 20px; }
 .oac-apps-state-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-state-success-primary); }
 .oac-apps-state-pill.disabled::before { background: var(--dsw-alias-state-warn-label); }
 .oac-apps-card-body { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 8px; min-width: 0; flex: 1 1 auto; }
-.oac-apps-card-title { min-width: 0; }
+.oac-apps-card-title { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 40px; }
+.oac-apps-card-title-copy { min-width: 0; flex: 1; }
 .oac-apps-card-title h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-apps-card-title p { margin: 2px 0 0; font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-apps-pin-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
