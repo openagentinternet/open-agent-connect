@@ -92,7 +92,7 @@ test('GET /ui/conversations localizes the group-task section to Simplified Chine
   assert.match(html, /选择一个群组任务/);
 });
 
-test('GET /ui/bot links Knowledge and Scheduled entries to the standalone pages', async (t) => {
+test('GET /ui/bot links Knowledge, Surf, and Memory entries to the standalone pages', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -101,12 +101,15 @@ test('GET /ui/bot links Knowledge and Scheduled entries to the standalone pages'
 
   assert.equal(response.status, 200);
   assert.match(html, /data-tab-link="kb"[^>]*href="\/ui\/kb"/);
-  assert.match(html, /data-tab-link="schedule"[^>]*href="\/ui\/schedule"/);
+  assert.match(html, /data-tab-link="surf"[^>]*href="\/ui\/surf"/);
+  assert.match(html, /data-tab-link="memory"[^>]*href="\/ui\/memory"/);
   assert.match(html, /data-i18n-key="bot\.knowledgeTab"/);
-  assert.match(html, /data-i18n-key="bot\.scheduledTab"/);
+  assert.match(html, /data-i18n-key="bot\.surfTab"/);
+  assert.match(html, /data-i18n-key="bot\.memoryTab"/);
+  assert.doesNotMatch(html, /data-tab-link="schedule"/);
 });
 
-test('GET /ui/bot localizes the Knowledge and Scheduled entries to Simplified Chinese', async (t) => {
+test('GET /ui/bot localizes the Knowledge, Surf, and Memory entries to Simplified Chinese', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -115,9 +118,11 @@ test('GET /ui/bot localizes the Knowledge and Scheduled entries to Simplified Ch
 
   assert.equal(response.status, 200);
   assert.match(html, /data-tab-link="kb"/);
-  assert.match(html, /data-tab-link="schedule"/);
+  assert.match(html, /data-tab-link="surf"/);
+  assert.match(html, /data-tab-link="memory"/);
   assert.match(html, /知识库/);
-  assert.match(html, /定时任务/);
+  assert.match(html, /冲浪/);
+  assert.match(html, /记忆/);
 });
 
 test('i18n debt pages render byte-identical English chrome and full Simplified Chinese', async (t) => {
@@ -170,7 +175,8 @@ test('i18n dictionaries keep exact en/zh-CN parity after the C2 paydown', () => 
     'settings.user.title',
     'conversations.grouptask.title',
     'bot.knowledgeTab',
-    'bot.scheduledTab',
+    'bot.surfTab',
+    'bot.memoryTab',
     'hub.title',
     'publish.title',
     'refund.title',

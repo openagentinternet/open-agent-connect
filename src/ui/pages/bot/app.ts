@@ -1103,14 +1103,14 @@ function selectMetabot(slug){
   renderCurrentTab();
 }
 
-// Knowledge/Scheduled deep links follow the selected Bot so the standalone
+// Knowledge/Surf/Memory deep links follow the selected Bot so the standalone
 // pages open scoped to the same Bot (the from query param they read).
 function syncDeepLinks(){
   var profile=selectedProfile();
   var slug=profile&&profile.slug?String(profile.slug):'';
   qq('[data-tab-link]').forEach(function(el){
     var target=el.getAttribute('data-tab-link');
-    var base=target==='kb'?'/ui/kb':'/ui/schedule';
+    var base=target==='kb'?'/ui/kb':target==='surf'?'/ui/surf':'/ui/memory';
     el.setAttribute('href',slug?base+'?from='+encodeURIComponent(slug):base);
   });
 }

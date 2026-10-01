@@ -62,7 +62,7 @@ test('GET /ui/surf serves the Surf page with console chrome', async (t) => {
   assert.match(html, /data-surf-budget-form/);
   assert.match(html, /data-surf-reports-table/);
   assert.match(html, /data-language-toggle/);
-  assert.match(html, /href="\/ui\/surf"[^>]*class="active"|class="active"[^>]*href="\/ui\/surf"/);
+  assert.doesNotMatch(html, /href="\/ui\/surf"[^>]*class="active"|class="active"[^>]*href="\/ui\/surf"/);
   assert.match(html, /<title data-i18n-title="surf\.title">Surf — Open Agent Connect<\/title>/);
 });
 
@@ -98,10 +98,8 @@ test('console navigation includes Knowledge and Surf between Apps and the traili
   const order = [
     '/ui/bot',
     '/ui/conversations',
-    '/ui/services',
     '/ui/apps',
     '/ui/kb',
-    '/ui/surf',
   ];
   let lastIndex = -1;
   for (const href of order) {
@@ -111,7 +109,9 @@ test('console navigation includes Knowledge and Surf between Apps and the traili
     lastIndex = index;
   }
   assert.match(nav, /data-i18n-key="nav.knowledge"/);
-  assert.match(nav, /data-i18n-key="nav.surf"/);
+  assert.doesNotMatch(nav, /href="\/ui\/services"/);
+  assert.doesNotMatch(nav, /href="\/ui\/surf"/);
+  assert.doesNotMatch(nav, /href="\/ui\/memory"/);
 });
 
 test('GET /ui/<unknown> still rejects pages that are not registered', async (t) => {

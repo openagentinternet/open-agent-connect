@@ -69,11 +69,8 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'bot', labelKey: 'nav.botPage' },
   { page: 'conversations', labelKey: 'nav.conversations' },
-  { page: 'services', labelKey: 'nav.services' },
   { page: 'apps', labelKey: 'nav.apps' },
   { page: 'kb', labelKey: 'nav.knowledge' },
-  { page: 'surf', labelKey: 'nav.surf' },
-  { page: 'memory', labelKey: 'nav.memory' },
   { page: 'schedule', labelKey: 'nav.schedule' },
 ];
 
