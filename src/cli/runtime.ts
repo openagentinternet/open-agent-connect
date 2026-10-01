@@ -5174,6 +5174,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
       },
       list: async (input) => {
+        if (input.all === true) {
+          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+          const profiles = await listMetabotProfiles(systemHomeDir).catch(() => []);
+          const groups = [];
+          for (const profile of profiles) {
+            if (!profile.homeDir) continue;
+            const tasks = await createScheduleStore(resolveMetabotPaths(profile.homeDir)).listTasks();
+            if (tasks.length > 0) groups.push({ slug: profile.slug, tasks });
+          }
+          return commandSuccess({ groups });
+        }
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
         const paths = resolveMetabotPaths(actor.homeDir);

@@ -356,7 +356,7 @@ export interface CliDependencies {
       expiresAt?: string | null;
       enabled?: boolean;
     }) => Awaitable<MetabotCommandResult<unknown>>;
-    list?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: { from?: string; all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     show?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
     update?: (input: { from?: string; id: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     delete?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
