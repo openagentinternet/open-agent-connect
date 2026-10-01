@@ -54,7 +54,7 @@ test('GET /ui/memory serves the Memory page with console chrome and all five tab
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);
   assert.match(html, /data-settings-modal/);
-  assert.match(html, /href="\/ui\/memory"[^>]*class="active"|class="active"[^>]*href="\/ui\/memory"/);
+  assert.doesNotMatch(html, /href="\/ui\/memory"[^>]*class="active"|class="active"[^>]*href="\/ui\/memory"/);
   assert.match(html, /<title data-i18n-title="memory\.title">Memory — Open Agent Connect<\/title>/);
 });
 
@@ -115,11 +115,9 @@ test('console navigation includes Memory after Surf', async (t) => {
   const order = [
     '/ui/bot',
     '/ui/conversations',
-    '/ui/services',
     '/ui/apps',
     '/ui/kb',
-    '/ui/surf',
-    '/ui/memory',
+    '/ui/schedule',
   ];
   let lastIndex = -1;
   for (const href of order) {
@@ -128,7 +126,9 @@ test('console navigation includes Memory after Surf', async (t) => {
     assert.ok(index > lastIndex, `${href} should follow the previous nav item`);
     lastIndex = index;
   }
-  assert.match(nav, /data-i18n-key="nav.memory"/);
+  assert.doesNotMatch(nav, /href="\/ui\/services"/);
+  assert.doesNotMatch(nav, /href="\/ui\/surf"/);
+  assert.doesNotMatch(nav, /href="\/ui\/memory"/);
 });
 
 test('i18n dictionaries keep exact en/zh-CN parity including the memory family', () => {

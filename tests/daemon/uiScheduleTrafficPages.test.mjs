@@ -118,11 +118,8 @@ test('console navigation includes Schedule after Memory and leaves Traffic to th
   const order = [
     '/ui/bot',
     '/ui/conversations',
-    '/ui/services',
     '/ui/apps',
     '/ui/kb',
-    '/ui/surf',
-    '/ui/memory',
     '/ui/schedule',
   ];
   let lastIndex = -1;
@@ -133,6 +130,9 @@ test('console navigation includes Schedule after Memory and leaves Traffic to th
     lastIndex = index;
   }
   assert.match(nav, /data-i18n-key="nav.schedule"/);
+  assert.doesNotMatch(nav, /href="\/ui\/services"/);
+  assert.doesNotMatch(nav, /href="\/ui\/surf"/);
+  assert.doesNotMatch(nav, /href="\/ui\/memory"/);
   assert.doesNotMatch(nav, /href="\/ui\/traffic"/);
 });
 
