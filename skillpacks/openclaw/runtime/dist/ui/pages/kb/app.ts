@@ -104,7 +104,7 @@ export function buildKbPageDefinition(i18n: LocalUiI18nContext = createI18nConte
     studyStatus: document.querySelector('[data-kb-study-status]'),
   };
   const query = new URLSearchParams(window.location.search);
-  const fromBot = (query.get('from') || '').trim();
+  const fromBot = (query.get('from') || document.querySelector('[data-kb-shell]')?.getAttribute('data-bot-slug') || '').trim();
   const withFrom = (body) => {
     const payload = body || {};
     return fromBot ? Object.assign({}, payload, { from: fromBot }) : payload;

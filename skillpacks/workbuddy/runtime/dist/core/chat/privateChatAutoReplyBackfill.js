@@ -383,7 +383,7 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
     // up to a cap; any activity returns to the base cadence immediately.
     let idleStreak = 0;
     const maxIdleIntervalMs = Math.max(intervalMs, normalizePositiveInteger(options.maxIdleIntervalMs, DEFAULT_MAX_IDLE_INTERVAL_MS));
-    const syncOnce = async () => {
+    const syncOnce = async (shouldAbort) => {
         const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
         if (!selfGlobalMetaId) {
             return { peers: 0, processed: 0, skipped: 0, failed: 0, recovered: 0 };
@@ -441,6 +441,11 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
                 return;
             }
             const existingCursor = cursorState.peers[peerKey];
+            // The background loop passes shouldAbort=() => !running; once stop()
+            // lands mid-pass, skip this peer's history fetch so a stopped loop
+            // stays silent instead of issuing one more chain request.
+            if (shouldAbort?.())
+                return;
             let response;
             try {
                 response = existingCursor
@@ -531,6 +536,8 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
                     && getNow() - latestMessage.timestamp >= outboundRecoveryDelayMs
                     && retryCount < maxOutboundRecoveryAttempts);
                 if (recoveryEligible && latestMessage) {
+                    if (shouldAbort?.())
+                        return;
                     try {
                         const recoveryHistory = existingCursor
                             ? await historyClient.fetchRecent({
@@ -590,12 +597,16 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
         };
     };
     const runBackgroundSync = () => {
+        // stop() may land between the timer being queued and this callback
+        // running — do not start a fresh pass for a stopped loop.
+        if (!running)
+            return;
         if (syncing) {
             scheduleNext();
             return;
         }
         syncing = true;
-        void syncOnce()
+        void syncOnce(() => !running)
             .then((result) => {
             const idle = result.processed === 0 && result.recovered === 0;
             idleStreak = idle ? idleStreak + 1 : 0;

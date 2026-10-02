@@ -297,7 +297,8 @@ export declare const DICTIONARIES: {
         readonly 'bot.pageHeading': "Bot Page";
         readonly 'bot.pageDescription': "Manage your Bot identity, public page, provider settings, and execution history.";
         readonly 'bot.knowledgeTab': "Knowledge";
-        readonly 'bot.scheduledTab': "Scheduled";
+        readonly 'bot.surfTab': "Surf";
+        readonly 'bot.memoryTab': "Memory";
         readonly 'bot.copyGlobalMetaId': "Copy GlobalMetaID";
         readonly 'bot.copyHomepageUri': "Copy Homepage URI";
         readonly 'bot.pendingGlobalMetaId': "Pending GlobalMetaID";
@@ -1014,6 +1015,7 @@ export declare const DICTIONARIES: {
         readonly 'surf.nextOff': "Off";
         readonly 'surf.nextTonight': "Tonight, before the dream";
         readonly 'surf.nextDueTonight': "Due tonight, before the dream";
+        readonly 'surf.nextDeferred': "Paused until {time} ({count} consecutive failures)";
         readonly 'surf.cardStatus': "Surf status";
         readonly 'surf.cardSettings': "Surf settings";
         readonly 'surf.reportsTitle': "Surf reports";
@@ -1804,7 +1806,8 @@ export declare const DICTIONARIES: {
         readonly 'bot.pageHeading': "Bot Page";
         readonly 'bot.pageDescription': "管理 Bot 身份、公开主页、提供方设置和执行历史。";
         readonly 'bot.knowledgeTab': "知识库";
-        readonly 'bot.scheduledTab': "定时任务";
+        readonly 'bot.surfTab': "冲浪";
+        readonly 'bot.memoryTab': "记忆";
         readonly 'bot.copyGlobalMetaId': "复制 GlobalMetaID";
         readonly 'bot.copyHomepageUri': "复制主页 URI";
         readonly 'bot.pendingGlobalMetaId': "等待 GlobalMetaID";
@@ -2521,6 +2524,7 @@ export declare const DICTIONARIES: {
         readonly 'surf.nextOff': "已关闭";
         readonly 'surf.nextTonight': "今晚做梦前";
         readonly 'surf.nextDueTonight': "今晚做梦前到期";
+        readonly 'surf.nextDeferred': "已暂停至 {time}（连续失败 {count} 次）";
         readonly 'surf.cardStatus': "冲浪状态";
         readonly 'surf.cardSettings': "冲浪设置";
         readonly 'surf.reportsTitle': "冲浪报告";

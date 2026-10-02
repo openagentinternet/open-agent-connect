@@ -79,6 +79,8 @@ export declare function createSurfDaemonHandlers(input: CreateSurfDaemonHandlers
             surfBeforeDreamEnabled: boolean;
             interactionBudget: number;
             preDreamDue: boolean;
+            preDreamDeferral: import("../core/surf/failure").SurfPreDreamDeferral | null;
+            surfCircuit: import("../core/surf/failure").SurfCircuitState | null;
             formatted: string;
         };
     }) | ({
@@ -95,6 +97,8 @@ export declare function createSurfDaemonHandlers(input: CreateSurfDaemonHandlers
             surfBeforeDreamEnabled: boolean;
             interactionBudget: number;
             preDreamDue: boolean;
+            preDreamDeferral: import("../core/surf/failure").SurfPreDreamDeferral | null;
+            surfCircuit: import("../core/surf/failure").SurfCircuitState | null;
             formatted: string;
         };
     })>;

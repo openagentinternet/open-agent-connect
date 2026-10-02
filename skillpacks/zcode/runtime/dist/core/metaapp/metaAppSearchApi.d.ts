@@ -25,6 +25,10 @@ export type MetaAppSearchItem = {
     title: string;
     appName: string;
     intro: string;
+    /** Icon metafile reference (pin id / metafile:// URI), when indexed. */
+    icon: string;
+    /** Cover image metafile reference, when indexed. */
+    coverImg: string;
     tags: string[];
     runtime: string;
     version: string;
@@ -89,6 +93,8 @@ export type TrimmedMetaAppSearchItem = {
     title: string;
     appName: string;
     intro: string;
+    icon: string;
+    coverImg: string;
     tags: string[];
     runtime: string;
     version: string;
