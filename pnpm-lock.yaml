@@ -26,17 +26,17 @@ importers:
         specifier: ^4.0.0
         version: 4.1.0(typescript@5.9.3)
       '@openagentinternet/agent-browser-core':
-        specifier: 0.6.2
-        version: 0.6.2
+        specifier: 0.6.3
+        version: 0.6.3
       '@openagentinternet/agent-browser-host-contract':
-        specifier: 0.6.2
-        version: 0.6.2
+        specifier: 0.6.3
+        version: 0.6.3
       '@openagentinternet/agent-browser-name-resolvers':
-        specifier: 0.6.2
-        version: 0.6.2(typescript@5.9.3)
+        specifier: 0.6.3
+        version: 0.6.3(typescript@5.9.3)
       '@openagentinternet/agent-browser-ui':
-        specifier: 0.6.2
-        version: 0.6.2
+        specifier: 0.6.3
+        version: 0.6.3
       '@scure/bip39':
         specifier: ^1.6.0
         version: 1.6.0
@@ -75,8 +75,8 @@ importers:
         version: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
     devDependencies:
       '@openagentinternet/agent-browser-test-harness':
-        specifier: 0.6.2
-        version: 0.6.2
+        specifier: 0.6.3
+        version: 0.6.3
       '@types/crypto-js':
         specifier: ^4.2.2
         version: 4.2.2
@@ -241,23 +241,23 @@ packages:
     resolution: {integrity: sha512-JuCB2GJZmQnSkiw+3i6pjx5EqctpwTGXLcR66RdQlbPqXdWkXnsAyYnRob5Dyk9wD0oqlKtSINWXfbRvajhGYw==}
     engines: {node: '>=20.0.0'}
 
-  '@openagentinternet/agent-browser-core@0.6.2':
-    resolution: {integrity: sha512-X0mikhOHDbJgK5kD78+AUPniSyuJNRxv4swYy1v8Z+B6Xya/+IG34u7brU7NxGqMdlzCm409ZrWRj3qXtROsCQ==}
+  '@openagentinternet/agent-browser-core@0.6.3':
+    resolution: {integrity: sha512-IVSKeWaIT9apFbQNkCT8rCa+z3dA6dwdK9tYE0rNszbUP9+jPQbL0z4+sqTYgUTWJiDAXtVnzruLH1fOa1SJAQ==}
 
-  '@openagentinternet/agent-browser-host-contract@0.6.2':
-    resolution: {integrity: sha512-U7zpHFXrzupdgCFjeaY5CPpj1J8nFPdD24+HhGcPntKn8ULKLFI7ZmuZSLujsoe71Sd2dKAqxYJ5D4t8l4PCSg==}
+  '@openagentinternet/agent-browser-host-contract@0.6.3':
+    resolution: {integrity: sha512-6wMUkk39ZYtw8c043urZPjn1sJ72iyPzktVgrk5+XEgMuPEBy4LWr97x3EOLflP3L9dtSHck2zkpsDBzCP+nPw==}
 
-  '@openagentinternet/agent-browser-name-resolvers@0.6.2':
-    resolution: {integrity: sha512-LoD5EgdyqImeAsaCbYu8qhBGiUKp3bxaYKEabuMupEW2tUThQ1f8lj0gy6kkILm2lLg6lUwaBx+gdEPbrHjjrQ==}
+  '@openagentinternet/agent-browser-name-resolvers@0.6.3':
+    resolution: {integrity: sha512-E2VzG81N3zDnRKCa+/l6ZozNkjvGZNU5ZJ36AXPx/T1Q9vgqo0RHSJOCsAfnFeJ3MNgxcexBXE1VOGpiuGVugw==}
 
-  '@openagentinternet/agent-browser-renderers@0.6.2':
-    resolution: {integrity: sha512-EMz7nus+12L+ZMwX3hnXF7B4TxHe25t63ApnynUFfhPQJUuR/UD3I/DaAAhwiYA/NKASHZ/9RBiHuXuB0VQ1Zg==}
+  '@openagentinternet/agent-browser-renderers@0.6.3':
+    resolution: {integrity: sha512-xLBvWyt+ZN81fgftWiRiwk503wfu8XEBtqb7enTLKZOJrHxu2f1g4vdWM61+L/Pq0jSI5hZHdzHfmb+PfziS+A==}
 
-  '@openagentinternet/agent-browser-test-harness@0.6.2':
-    resolution: {integrity: sha512-eFwV2m/wwdHnExM2UWwJ4sylt0KIrhSlwW4UPOb9c8Uyo5oh6sMoPmSrnx/v1bPPp7KJjwolwUT8Dj4tk1007A==}
+  '@openagentinternet/agent-browser-test-harness@0.6.3':
+    resolution: {integrity: sha512-ng1dZmjs7aU5KZaKnKMaHmwRf8T9r1xre5WXbJEgygfEHXwAtLBESO7JhFTyP9Al7yLkzbye6dRGFjWB6dYRsQ==}
 
-  '@openagentinternet/agent-browser-ui@0.6.2':
-    resolution: {integrity: sha512-BzEYtCGo53Pt9yDEuo0uMxFvldprjDddDWtoNwehYAavUcgNNKDmqzcvNxhiLldlX4snwWMLw8K/MWnNTzzjkA==}
+  '@openagentinternet/agent-browser-ui@0.6.3':
+    resolution: {integrity: sha512-XC+0Py5G2V5TC6DYDMD17zNEbXQognPJpETuxX8QMM6aLzM9pLbrpsNawZFgjSRkL1byJ1b1XC+J5yZ/K1e7Xg==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -1317,15 +1317,15 @@ snapshots:
       - encoding
       - typescript
 
-  '@openagentinternet/agent-browser-core@0.6.2':
+  '@openagentinternet/agent-browser-core@0.6.3':
     dependencies:
-      '@openagentinternet/agent-browser-host-contract': 0.6.2
+      '@openagentinternet/agent-browser-host-contract': 0.6.3
 
-  '@openagentinternet/agent-browser-host-contract@0.6.2': {}
+  '@openagentinternet/agent-browser-host-contract@0.6.3': {}
 
-  '@openagentinternet/agent-browser-name-resolvers@0.6.2(typescript@5.9.3)':
+  '@openagentinternet/agent-browser-name-resolvers@0.6.3(typescript@5.9.3)':
     dependencies:
-      '@openagentinternet/agent-browser-core': 0.6.2
+      '@openagentinternet/agent-browser-core': 0.6.3
       viem: 2.0.0(typescript@5.9.3)
     transitivePeerDependencies:
       - bufferutil
@@ -1333,20 +1333,20 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@openagentinternet/agent-browser-renderers@0.6.2':
+  '@openagentinternet/agent-browser-renderers@0.6.3':
     dependencies:
-      '@openagentinternet/agent-browser-host-contract': 0.6.2
+      '@openagentinternet/agent-browser-host-contract': 0.6.3
       marked: 18.0.11
 
-  '@openagentinternet/agent-browser-test-harness@0.6.2':
+  '@openagentinternet/agent-browser-test-harness@0.6.3':
     dependencies:
-      '@openagentinternet/agent-browser-host-contract': 0.6.2
+      '@openagentinternet/agent-browser-host-contract': 0.6.3
 
-  '@openagentinternet/agent-browser-ui@0.6.2':
+  '@openagentinternet/agent-browser-ui@0.6.3':
     dependencies:
-      '@openagentinternet/agent-browser-core': 0.6.2
-      '@openagentinternet/agent-browser-host-contract': 0.6.2
-      '@openagentinternet/agent-browser-renderers': 0.6.2
+      '@openagentinternet/agent-browser-core': 0.6.3
+      '@openagentinternet/agent-browser-host-contract': 0.6.3
+      '@openagentinternet/agent-browser-renderers': 0.6.3
 
   '@protobufjs/aspromise@1.1.2': {}
 

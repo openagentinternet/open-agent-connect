@@ -43,6 +43,16 @@ tags for releases.
 
 ### Changed
 
+- Integrated Agent Browser Core 0.6.3 across the root package and all skillpack
+  runtimes. Upstream change verified compatible with OAC: MetaApp preview
+  iframes (`browser-html-frame`) now carry `allow="autoplay"` so preview media
+  can autoplay without a user gesture. The flag is decided inside the ABC UI
+  package (client script and SSR renderer both append the attribute after
+  `sandbox`/`src`/`title`, only for canonical MetaApp URIs; ordinary web
+  frames keep the browser default autoplay policy) and the html-frame sandbox
+  decision is unchanged, so OAC's iframe markup assertions and styling are
+  unaffected — OAC has no custom `allow` handling or autoplay policy of its
+  own.
 - DSH MetaApp cards: the cover area is ~25% taller (96px → 120px) and the
   card foot (run/share buttons and the chain cards' author row) is a fixed
   38px bar pinned to the card bottom — the body above stretches instead, so
