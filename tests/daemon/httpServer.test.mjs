@@ -2324,7 +2324,7 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.equal(response.status, 200);
   assert.match(nav, /href="\/ui\/bot"[^>]*>Bots(?: \*)?<\/a>/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
-  assert.match(nav, /href="\/ui\/services"[^>]*>Services(?: \*)?<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/settings"/);
   assert.doesNotMatch(nav, /href="\/ui\/hub"/);
   assert.doesNotMatch(nav, /href="\/ui\/browser"/);
@@ -2427,7 +2427,7 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   assert.equal(response.status, 200);
   assert.match(nav, /href="\/ui\/bot"[^>]*>Bots<\/a>/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>对话<\/a>/);
-  assert.match(nav, /href="\/ui\/services"[^>]*>服务<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/settings"/);
   assert.match(html, /href="\/browser"[^>]*>打开浏览器<\/a>/);
   assert.match(html, /data-i18n-key="bot\.localBots">本地 Bots<\/span>/);
@@ -3360,7 +3360,7 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.match(html, /\/api\/services\/owned\/orders/);
   assert.doesNotMatch(html, /my-services-detail-panel/);
   assert.doesNotMatch(html, /data-my-service-orders/);
-  assert.match(nav, /href="\/ui\/services"[^>]*>Services(?: \*)?<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/publish"/);
   assert.doesNotMatch(nav, /href="\/ui\/my-services"/);
 });
@@ -3555,7 +3555,7 @@ test('GET /ui/loom returns not_found after loom retirement', async (t) => {
   assert.equal(payload.code, 'not_found');
 });
 
-test('GET /ui/apps serves the Apps owner console and appears after Services', async (t) => {
+test('GET /ui/apps serves the Apps owner console and appears after Conversations', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -3571,7 +3571,8 @@ test('GET /ui/apps serves the Apps owner console and appears after Services', as
   assert.match(html, /data-apps-grid/);
   assert.match(html, /data-apps-publish-open/);
   assert.match(html, /\/api\/metaapp\/publish/);
-  assert.match(nav, /href="\/ui\/services"[\s\S]*href="\/ui\/apps"/);
+  assert.match(nav, /href="\/ui\/conversations"[\s\S]*href="\/ui\/apps"/);
+  assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/metaapps"/);
   assert.doesNotMatch(html, /\/api\/wallet/);
   assert.doesNotMatch(html, /\/api\/chain/);
