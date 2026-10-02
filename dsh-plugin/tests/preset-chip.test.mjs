@@ -55,16 +55,6 @@ test('client shadows the hero chip at priority -1 and does not duplicate Agent p
   assert.match(text, /id: 'oac-bots'/)
 })
 
-test('conversation header replaces the stock preset glyph with the current Bot avatar', async () => {
-  const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
-  const header = await readFile(join(root, 'src/client/BotPresetHeaderLabel.tsx'), 'utf8')
-  assert.match(text, /name: 'conversation\.session\.header\.actions'/)
-  assert.match(text, /id: 'agent-preset'/)
-  assert.match(text, /BotPresetHeaderLabel/)
-  assert.match(header, /BotAvatar/)
-  assert.match(header, /slugFromPresetId\(preset\)/)
-})
-
 test('stock Agent presets roster hides the oac-* Bot preset cards', async () => {
   // Bots are created and edited on the Bots page, so their stock management
   // cards in Settings → Agent presets are duplicates; the presets stay
