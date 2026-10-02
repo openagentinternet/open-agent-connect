@@ -22,12 +22,20 @@ tags for releases.
   only (availability toggle on + a DSH LLM pair — the preset-chip rule), the
   Twin Bot first, the rest by profile creation time (oldest first), and the
   Twin as the default selection.
+- CI: a new `dsh-plugin` job runs the plugin's typecheck and test suite
+  against a `0.1.7-rc.2` / `0.2.0-rc.2` kernel matrix — the plugin tree was
+  previously uncovered by CI (#19 by @WuFenG-Hub).
 
 ### Fixed
 
 - DSH Bots page: the `main` panel registration now injects `resolveBotPage`
   (the face `BotsPage` requires), unbreaking the in-page Bot Page dock and
   the avatar-click flow.
+- DSH plugin: on desktop (Electron) hosts the plugin no longer offers the
+  Electron binary as the CLI Node candidate — `process.execPath` reports the
+  embedded Node's version and passed the range check, but spawning it boots a
+  second app instance instead of running the `metabot` CLI; `OAC_NODE_PATH`
+  and nvm binaries are probed instead (#19 by @WuFenG-Hub).
 - MetaWeb surf pre-dream reliability: failed surf runs now record a
   structured `failure` (`stage`/`code`/`stack`/`context`) next to the error
   string — bootstrap module-load errors are classified (missing / denied /
