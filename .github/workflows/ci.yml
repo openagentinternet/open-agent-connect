@@ -60,3 +60,51 @@ jobs:
 
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level=moderate
+
+  dsh-plugin:
+    name: DSH plugin (dsh ${{ matrix.dsh }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Supported kernel lines (prerelease-anchored peers — see
+        # dsh-plugin/README.md). Bump/extend when a new kernel line ships.
+        dsh: ['0.1.7-rc.2', '0.2.0-rc.2']
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      # The plugin's test suite resolves the sibling `../dist/cli/main.js`
+      # (the OAC runtime) — build it from the repository root first.
+      - name: Build runtime (root)
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Install plugin dependencies (dsh ${{ matrix.dsh }})
+        working-directory: dsh-plugin
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          for (const k of Object.keys(p.devDependencies)) {
+            if (k === '@deepseek-ai/cordis') continue;
+            if (k.startsWith('@deepseek-ai/dsh-')) p.devDependencies[k] = '${{ matrix.dsh }}';
+          }
+          fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          EOF
+          pnpm install --no-frozen-lockfile
+
+      - name: Typecheck (dsh ${{ matrix.dsh }})
+        working-directory: dsh-plugin
+        run: pnpm run typecheck
+
+      - name: Build and test (dsh ${{ matrix.dsh }})
+        working-directory: dsh-plugin
+        run: pnpm run test
