@@ -107,6 +107,7 @@ function fakeDsh(handoffText, options = {}) {
   const cancelled = []
   const created = []
   const disposed = []
+  const renamed = []
   // The session/event firehose: turn events are delivered live, the way the
   // real host delivers them — the plugin taps this stream instead of reading
   // the session log back.
@@ -120,6 +121,7 @@ function fakeDsh(handoffText, options = {}) {
     cancelled,
     created,
     disposed,
+    renamed,
     ctx: {
       agentPresets: {
         mount: async (agentCtx, id) => mounted.push(id),
@@ -132,6 +134,7 @@ function fakeDsh(handoffText, options = {}) {
         }
       },
       get: (key) => {
+        if (key === 'sessionController') return { rename: async (request) => renamed.push(request) }
         if (key === 'agentDefaultModel' && options.hostModel) {
           return { currentSelection: () => options.hostModel }
         }
@@ -180,7 +183,7 @@ async function waitFor(condition) {
 test('delegate runs a worker sub-session, returns the handoff, and keeps the session alive', async () => {
   const { run, calls } = runScript()
   const dsh = fakeDsh('清单已整理好，证据如下…')
-  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
+  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run, sourceSessionId: 'session-twin-1' })
   const result = await orchestrator.delegate({
     workerSlug: 'bob',
     objective: '整理发布清单',
@@ -192,7 +195,11 @@ test('delegate runs a worker sub-session, returns the handoff, and keeps the ses
   // the worker session gets the Bot's DSH LLM pair and the host workspace cwd
   assert.deepEqual(dsh.created[0].agentOptions, { provider: 'deepseek', model: 'deepseek-chat' })
   assert.equal(dsh.created[0].meta.cwd, process.cwd())
+  assert.equal(dsh.created[0].meta.oacOrigin, 'orchestration')
+  assert.match(dsh.renamed[0].title, /^\[编排任务\] /)
   assert.match(dsh.followedUp[0].content[0].text, /<twin_delegation>/)
+  assert.match(dsh.followedUp[0].content[0].text, /Work directly in this orchestration session/)
+  assert.match(dsh.followedUp[0].content[0].text, /<source_session_id>session-twin-1<\/source_session_id>/)
   assert.match(dsh.followedUp[0].content[0].text, /整理发布清单/)
   // the handoff comes from the live session/event stream tap, and the
   // tool result is the delivery channel — no extra ORCH-NOTIFY wake-up turn
