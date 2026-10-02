@@ -22,42 +22,49 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+/**
+ * Which pipeline stage died:
+ * - 'bootstrap': loading the dist modules / resolving profile state before the briefing.
+ * - 'reconcile': seen-ledger reconciliation against the local chain-writes ledger.
+ * - 'briefing': stage-0 deterministic digest (protocol fetches, inbox, radar).
+ * - 'session': the unattended LLM tool-loop turn, including LLM resolution.
+ * - 'commit': seen-ledger / watermark commits after a successful session.
+ * - 'lifecycle': host lifecycle events (stale running sweep, restart recovery).
+ */
 export type SurfFailureStage =
-  /** Loading the dist modules / resolving profile state before the briefing. */
   | 'bootstrap'
-  /** Seen-ledger reconciliation against the local chain-writes ledger. */
   | 'reconcile'
-  /** Stage-0 deterministic digest (protocol fetches, inbox, radar). */
   | 'briefing'
-  /** The unattended LLM tool-loop turn, including LLM resolution. */
   | 'session'
-  /** Seen-ledger / watermark commits after a successful session. */
   | 'commit'
-  /** Host lifecycle events (stale running sweep, restart recovery). */
   | 'lifecycle';
 
+/**
+ * Stable machine-readable failure classification:
+ * - 'MODULE_NOT_FOUND': a dist module is missing (deleted or half-built tree).
+ * - 'MODULE_LOAD_DENIED': EPERM/EACCES opening a dist module.
+ * - 'BUILD_IN_PROGRESS': a module load raced an in-flight build (fresh build marker present).
+ * - 'PROFILE_UNRESOLVED': the bot profile home could not be resolved.
+ * - 'LLM_RUNTIME_UNAVAILABLE': no healthy runtime on the local CLI chain (and the host path produced nothing).
+ * - 'LLM_TURN_FAILED': a resolved LLM runtime errored, timed out, or returned empty output.
+ * - 'WATCHDOG_TIMEOUT': the surf wall-clock watchdog fired.
+ * - 'BRIEFING_FAILED': the deterministic stage-0 digest could not complete.
+ * - 'SESSION_FAILED': the session turn failed for a reason that is not LLM resolution.
+ * - 'COMMIT_FAILED': post-session store commits failed.
+ * - 'STALE_RUNNING_SWEPT': an orphaned 'running' row was failed by restart recovery.
+ * - 'UNKNOWN': anything else.
+ */
 export type SurfFailureCode =
-  /** A dist module is missing (deleted or half-built tree). */
   | 'MODULE_NOT_FOUND'
-  /** EPERM/EACCES opening a dist module. */
   | 'MODULE_LOAD_DENIED'
-  /** A module load raced an in-flight build (fresh build marker present). */
   | 'BUILD_IN_PROGRESS'
-  /** The bot profile home could not be resolved. */
   | 'PROFILE_UNRESOLVED'
-  /** No healthy runtime on the local CLI chain (and the host path produced nothing). */
   | 'LLM_RUNTIME_UNAVAILABLE'
-  /** A resolved LLM runtime errored, timed out, or returned empty output. */
   | 'LLM_TURN_FAILED'
-  /** The surf wall-clock watchdog fired. */
   | 'WATCHDOG_TIMEOUT'
-  /** The deterministic stage-0 digest could not complete. */
   | 'BRIEFING_FAILED'
-  /** The session turn failed for a reason that is not LLM resolution. */
   | 'SESSION_FAILED'
-  /** Post-session store commits failed. */
   | 'COMMIT_FAILED'
-  /** An orphaned 'running' row was failed by restart recovery. */
   | 'STALE_RUNNING_SWEPT'
   | 'UNKNOWN';
 

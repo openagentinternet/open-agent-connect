@@ -29,6 +29,7 @@ exports.isoNow = isoNow;
 //   pin twice" rule both read from here.
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const failure_js_1 = require("./failure.js");
 /** Exported for the surf interaction guard (duplicate-interaction checks rank actions). */
 exports.SEEN_ACTION_RANK = {
     presented: 0,
@@ -105,6 +106,7 @@ function normalizeRun(value) {
         reportMarkdown: typeof record.reportMarkdown === 'string' && record.reportMarkdown ? record.reportMarkdown : null,
         reportJson: typeof record.reportJson === 'string' && record.reportJson ? record.reportJson : null,
         error: typeof record.error === 'string' && record.error ? record.error : null,
+        failure: (0, failure_js_1.normalizeSurfRunFailure)(record.failure),
         startedAt,
         finishedAt: typeof record.finishedAt === 'string' && record.finishedAt ? record.finishedAt : null,
         createdAt: typeof record.createdAt === 'string' && record.createdAt ? record.createdAt : startedAt,
@@ -227,6 +229,7 @@ function createMetawebSurfStore(paths) {
                 reportMarkdown: null,
                 reportJson: null,
                 error: null,
+                failure: null,
                 startedAt: input.nowIso,
                 finishedAt: null,
                 createdAt: input.nowIso,
@@ -255,6 +258,7 @@ function createMetawebSurfStore(paths) {
                     ? outcome.reportJson.slice(0, MAX_REPORT_JSON_CHARS)
                     : null;
                 run.error = outcome.error ?? null;
+                run.failure = (0, failure_js_1.normalizeSurfRunFailure)(outcome.failure);
                 run.finishedAt = outcome.finishedAtIso;
                 run.updatedAt = outcome.finishedAtIso;
                 await writeJsonAtomic(runsPath, file);
@@ -296,6 +300,7 @@ function createMetawebSurfStore(paths) {
                         continue;
                     run.status = 'failed';
                     run.error = input.error;
+                    run.failure = { stage: 'lifecycle', code: 'STALE_RUNNING_SWEPT', message: input.error };
                     run.finishedAt = input.nowIso;
                     run.updatedAt = input.nowIso;
                     changed += 1;

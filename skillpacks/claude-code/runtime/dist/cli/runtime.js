@@ -140,6 +140,7 @@ const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
 const store_3 = require("../core/surf/store");
 const settings_1 = require("../core/surf/settings");
 const format_4 = require("../core/surf/format");
+const failure_1 = require("../core/surf/failure");
 const studyJobs_1 = require("../core/knowledgebase/studyJobs");
 const service_2 = require("../core/knowledgebase/service");
 const studyJobs_2 = require("../core/knowledgebase/studyJobs");
@@ -169,6 +170,7 @@ const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
 const llmAvailabilityRecovery_1 = require("../core/llm/llmAvailabilityRecovery");
 const hostLlmExecutorBridge_1 = require("../core/llm/hostLlmExecutorBridge");
+const dshLlm_1 = require("../core/bot/dshLlm");
 const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const executor_1 = require("../core/llm/executor");
 const llmRuntimeExecution_1 = require("../core/llm/llmRuntimeExecution");
@@ -4296,6 +4298,19 @@ function createDefaultCliDependencies(context) {
                 }
             },
             list: async (input) => {
+                if (input.all === true) {
+                    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+                    const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
+                    const groups = [];
+                    for (const profile of profiles) {
+                        if (!profile.homeDir)
+                            continue;
+                        const tasks = await (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(profile.homeDir)).listTasks();
+                        if (tasks.length > 0)
+                            groups.push({ slug: profile.slug, tasks });
+                    }
+                    return (0, commandResult_1.commandSuccess)({ groups });
+                }
                 const actor = await resolveActorHomeDir(context, input.from);
                 if (!('homeDir' in actor))
                     return actor;
@@ -4924,9 +4939,14 @@ function createDefaultCliDependencies(context) {
                 ]);
                 const running = runs.some((run) => run.status === 'running');
                 const finishedMs = latest?.finishedAt ? Date.parse(latest.finishedAt) : NaN;
+                // Same breaker the daemon-side gate applies: consecutive failures
+                // back off, a same-code streak pauses the nightly surf for a day.
+                const circuit = (0, failure_1.computeSurfCircuitState)(await (0, store_3.createMetawebSurfStore)(paths).listRuns(failure_1.SURF_CIRCUIT_HISTORY_LIMIT), Date.now());
+                const circuitNotice = (0, failure_1.formatSurfCircuitNotice)(circuit);
                 const preDreamDue = settings.surfBeforeDreamEnabled
                     && !running
                     && memoryEnabled
+                    && circuit.reason === 'ok'
                     && (!Number.isFinite(finishedMs) || Date.now() - finishedMs >= 20 * 60 * 60 * 1000);
                 return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({
                     runs,
@@ -4934,7 +4954,9 @@ function createDefaultCliDependencies(context) {
                     surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
                     interactionBudget: settings.interactionBudget,
                     preDreamDue,
-                    formatted: (0, format_4.formatSurfRunList)(runs),
+                    preDreamDeferral: (0, failure_1.surfPreDreamDeferral)(circuit),
+                    surfCircuit: circuit,
+                    formatted: circuitNotice ? `${circuitNotice}\n\n${(0, format_4.formatSurfRunList)(runs)}` : (0, format_4.formatSurfRunList)(runs),
                 }), 'surf', node_path_1.default.basename(paths.profileRoot));
             },
             run: async (input) => {
@@ -4971,6 +4993,7 @@ function createDefaultCliDependencies(context) {
                             status: run.status,
                             stats: run.stats,
                             error: run.error,
+                            failure: run.failure,
                             reportMarkdown: run.reportMarkdown,
                         }), 'surf', actorSlug);
                     }
@@ -5332,17 +5355,36 @@ async function serveCliDaemonProcess(context) {
     (0, hostLlmExecutorBridge_1.setActiveHostLlmExecutorBridge)(hostLlmExecutorBridge);
     let surfChainWriteRef = null;
     const runSurfSessionExecutor = async (surfContext) => {
-        const { buildSurfSessionPrompt, parseSurfRunReport, } = await Promise.resolve().then(() => __importStar(require('../core/surf/prompt.js')));
-        const { runSurfTurnWithTools, withSurfToolLoopContract, } = await Promise.resolve().then(() => __importStar(require('../core/surf/turn.js')));
-        const { createSurfChainWriteGuard, foldSurfReceiptsIntoSeenActions, recordSurfDeepRead, surfSessionPartialStats, surfReceiptSeenActions, } = await Promise.resolve().then(() => __importStar(require('../core/surf/guard.js')));
-        const { createMetawebSurfStore } = await Promise.resolve().then(() => __importStar(require('../core/surf/store.js')));
-        const { SURF_KB_ADD_BUDGET } = await Promise.resolve().then(() => __importStar(require('../core/surf/prompt.js')));
-        const { metawebPinsBatch, metawebPinVersions, metawebProtocols, } = await Promise.resolve().then(() => __importStar(require('../core/surf/surfReads.js')));
-        const { getSocialFeed, getSocialPost, getSocialPostComments, } = await Promise.resolve().then(() => __importStar(require('../core/surf/socialRecall.js')));
-        const { runOmniReadAction } = await Promise.resolve().then(() => __importStar(require('../core/surf/omniRead.js')));
-        const { surfSignerWrite, formatSurfWriteReceipt } = await Promise.resolve().then(() => __importStar(require('../core/surf/writes.js')));
-        const { formatSurfBatchPins, formatSurfPinVersions, formatSurfProtocolRegistry, formatSurfSocialPosts, formatSurfSocialPostDetail, formatSurfSocialComments, } = await Promise.resolve().then(() => __importStar(require('../core/surf/format.js')));
-        const { createChainHistoryStore } = await Promise.resolve().then(() => __importStar(require('../core/chainhistory/store.js')));
+        // Bootstrap: these dynamic imports are the first place a missing,
+        // half-built, or OS-denied dist shows up — classify the failure
+        // (missing / denied / build-in-progress) instead of recording a bare
+        // EPERM/ENOENT string. createMetawebSurfStore rides the static import.
+        let surfModules;
+        try {
+            surfModules = {
+                prompt: await Promise.resolve().then(() => __importStar(require('../core/surf/prompt.js'))),
+                turn: await Promise.resolve().then(() => __importStar(require('../core/surf/turn.js'))),
+                guard: await Promise.resolve().then(() => __importStar(require('../core/surf/guard.js'))),
+                surfReads: await Promise.resolve().then(() => __importStar(require('../core/surf/surfReads.js'))),
+                socialRecall: await Promise.resolve().then(() => __importStar(require('../core/surf/socialRecall.js'))),
+                omniRead: await Promise.resolve().then(() => __importStar(require('../core/surf/omniRead.js'))),
+                writes: await Promise.resolve().then(() => __importStar(require('../core/surf/writes.js'))),
+                surfFormat: await Promise.resolve().then(() => __importStar(require('../core/surf/format.js'))),
+                chainHistory: await Promise.resolve().then(() => __importStar(require('../core/chainhistory/store.js'))),
+            };
+        }
+        catch (error) {
+            throw await (0, failure_1.tagSurfBootstrapError)(error, { distDir: node_path_1.default.resolve(__dirname, '..') });
+        }
+        const { buildSurfSessionPrompt, parseSurfRunReport, SURF_KB_ADD_BUDGET } = surfModules.prompt;
+        const { runSurfTurnWithTools, withSurfToolLoopContract } = surfModules.turn;
+        const { createSurfChainWriteGuard, foldSurfReceiptsIntoSeenActions, recordSurfDeepRead, surfSessionPartialStats, surfReceiptSeenActions, } = surfModules.guard;
+        const { metawebPinsBatch, metawebPinVersions, metawebProtocols } = surfModules.surfReads;
+        const { getSocialFeed, getSocialPost, getSocialPostComments } = surfModules.socialRecall;
+        const { runOmniReadAction } = surfModules.omniRead;
+        const { surfSignerWrite, formatSurfWriteReceipt } = surfModules.writes;
+        const { formatSurfBatchPins, formatSurfPinVersions, formatSurfProtocolRegistry, formatSurfSocialPosts, formatSurfSocialPostDetail, formatSurfSocialComments, } = surfModules.surfFormat;
+        const { createChainHistoryStore } = surfModules.chainHistory;
         const profile = await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, surfContext.botSlug);
         const homeDir = profile?.homeDir ?? '';
         if (!homeDir)
@@ -5358,7 +5400,7 @@ async function serveCliDaemonProcess(context) {
             interactionBudget: surfContext.briefing.interactionBudget,
             kbBudget: SURF_KB_ADD_BUDGET,
         };
-        const surfStore = createMetawebSurfStore(profilePaths);
+        const surfStore = (0, store_3.createMetawebSurfStore)(profilePaths);
         const chainHistory = createChainHistoryStore(profilePaths);
         const guardedWrite = createSurfChainWriteGuard({
             write: async ({ path, payload, network }) => {
@@ -5403,6 +5445,46 @@ async function serveCliDaemonProcess(context) {
             },
         });
         const deadlineMs = Date.now() + (surfContext.trigger === 'pre-dream' ? 35 : 60) * 60_000;
+        // Host-path + local-runtime diagnostics, captured so a "no healthy LLM"
+        // failure records WHY (executor lease state, DSH pair presence, and the
+        // health/reason of every local candidate) instead of one bare line.
+        const hostLlmNotes = [];
+        const hostCompletion = (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+            dshLlmPath: profilePaths.dshLlmPath,
+            logWarning: (_scope, message) => {
+                if (hostLlmNotes.length < 8)
+                    hostLlmNotes.push(String(message).slice(0, 300));
+            },
+        });
+        const collectSurfLlmDiagnostics = async () => {
+            const diagnostics = {};
+            try {
+                const bridge = (0, hostLlmExecutorBridge_1.getActiveHostLlmExecutorBridge)();
+                const binding = await (0, dshLlm_1.readDshLlmBinding)(profilePaths.dshLlmPath).catch(() => null);
+                diagnostics.hostPath = {
+                    connectedExecutors: bridge ? bridge.connectedExecutors() : 0,
+                    dshPairConfigured: Boolean(binding?.dshLlmProvider?.trim() && binding?.dshLlmModel?.trim()),
+                    notes: hostLlmNotes,
+                };
+            }
+            catch {
+                // Best-effort diagnostics never mask the real failure.
+            }
+            try {
+                const state = await (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths).read();
+                diagnostics.localRuntimes = state.runtimes.slice(0, 12).map((runtime) => ({
+                    id: runtime.id,
+                    provider: runtime.provider,
+                    health: runtime.health,
+                    ...(runtime.healthReason ? { healthReason: String(runtime.healthReason).slice(0, 200) } : {}),
+                    ...(runtime.unavailableUntil ? { unavailableUntil: runtime.unavailableUntil } : {}),
+                }));
+            }
+            catch {
+                // Best-effort diagnostics never mask the real failure.
+            }
+            return diagnostics;
+        };
         const llm = async (history) => {
             if (Date.now() > deadlineMs) {
                 throw new Error('Surf watchdog: wall-clock budget exhausted — write the final report now.');
@@ -5411,9 +5493,7 @@ async function serveCliDaemonProcess(context) {
                 .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
                 .join('\n\n---\n\n');
             const surfSystemPrompt = 'You are a MetaBot running an unattended MetaWeb surf session. Reply with exactly one ```json fence per turn.';
-            const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
-                dshLlmPath: profilePaths.dshLlmPath,
-            })({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
+            const hostText = await hostCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
             if (hostText !== null)
                 return hostText;
             const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
@@ -5426,7 +5506,16 @@ async function serveCliDaemonProcess(context) {
                 pollIntervalMs: 5_000,
             });
             if (result.status !== 'completed') {
-                throw new Error(result.error || `Surf turn ended with status ${result.status}`);
+                const message = result.error || `Surf turn ended with status ${result.status}`;
+                const err = new Error(message);
+                err.surfFailure = {
+                    stage: 'session',
+                    code: (0, failure_1.classifySurfLlmFailureCode)(message),
+                    message,
+                    ...(err.stack ? { stack: (0, failure_1.trimSurfFailureStack)(err.stack) } : {}),
+                    context: { llm: await collectSurfLlmDiagnostics() },
+                };
+                throw err;
             }
             return result.output;
         };
@@ -5650,6 +5739,11 @@ async function serveCliDaemonProcess(context) {
         catch (error) {
             const err = error instanceof Error ? error : new Error(String(error));
             err.surfPartialStats = surfSessionPartialStats(writeState);
+            // A turn that died without an inner tag (prompt build, report parse,
+            // receipt folding) still records a classified session-stage failure.
+            const tagged = err;
+            if (!tagged.surfFailure)
+                tagged.surfFailure = (0, failure_1.toSurfRunFailure)(err, 'session');
             throw err;
         }
     };

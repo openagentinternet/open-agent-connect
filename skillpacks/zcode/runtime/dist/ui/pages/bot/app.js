@@ -3,6 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildBotPageDefinition = buildBotPageDefinition;
 const i18n_1 = require("../../i18n");
 const personaPresets_1 = require("../../../core/bot/personaPresets");
+const app_1 = require("../kb/app");
+const app_2 = require("../surf/app");
+const app_3 = require("../memory/app");
 function inlineScriptJson(value) {
     return JSON.stringify(value)
         .replace(/</g, '\\u003c')
@@ -10,6 +13,9 @@ function inlineScriptJson(value) {
         .replace(/\u2029/g, '\\u2029');
 }
 function buildBotPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
+    const kb = (0, app_1.buildKbPageDefinition)(i18n);
+    const surf = (0, app_2.buildSurfPageDefinition)(i18n);
+    const memory = (0, app_3.buildMemoryPageDefinition)(i18n);
     return {
         page: 'bot',
         title: i18n.t('bot.pageTitle'),
@@ -17,10 +23,13 @@ function buildBotPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
         heading: i18n.t('bot.pageHeading'),
         description: i18n.t('bot.pageDescription'),
         panels: [],
-        script: buildBotPageScript(),
+        contentHtml: `<div class="bot-embedded-page" data-embedded-page="knowledge">${kb.contentHtml || ''}</div>
+      <div class="bot-embedded-page" data-embedded-page="surf">${surf.contentHtml || ''}</div>
+      <div class="bot-embedded-page" data-embedded-page="memory">${memory.contentHtml || ''}</div>`,
+        script: buildBotPageScript({ kb: kb.script || '', surf: surf.script || '', memory: memory.script || '' }),
     };
 }
-function buildBotPageScript() {
+function buildBotPageScript(embeddedScripts) {
     return String.raw `var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
 var HOMEPAGE_UPLOAD_MAX_BYTES=50*1024*1024;
@@ -29,7 +38,8 @@ var AUTO_REPLY_COOLDOWN_MS_OPTIONS=[60000,300000,600000,1800000,3600000];
 var DEFAULT_AUTO_REPLY_MAX_TURNS=10;
 var DEFAULT_AUTO_REPLY_COOLDOWN_MS=60000;
 var PERSONA_PRESET_CATALOG=${inlineScriptJson(personaPresets_1.PERSONA_PRESET_CATALOG)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatSkillResolutionBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},autoReplyMaxTurnsBySlug:{},autoReplyCooldownMsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryStopWhenHealthy:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
+var EMBEDDED_PAGE_SCRIPTS=${inlineScriptJson(embeddedScripts)};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatSkillResolutionBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},autoReplyMaxTurnsBySlug:{},autoReplyCooldownMsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_embeddedInitialized:{},_embeddedTemplates:{},_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryStopWhenHealthy:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -1013,11 +1023,39 @@ function renderStats(){
   state.stats=state.stats||{};
 }
 
+function profileCreatedAt(profile){
+  var value=Number(profile&&profile.createdAt);
+  return Number.isFinite(value)?value:0;
+}
+function profileIsAvailableForList(profile){
+  if(!profile||profile.isAvailable===false)return false;
+  if(profile.setup&&profile.setup.state&&profile.setup.state!=='ready')return false;
+  return profileHasUsableLlm(profile);
+}
+function compareProfilesByCreatedAt(left,right){
+  var createdDelta=profileCreatedAt(left)-profileCreatedAt(right);
+  if(createdDelta)return createdDelta;
+  var nameDelta=String(left&&left.name||left&&left.slug||'').localeCompare(String(right&&right.name||right&&right.slug||''));
+  if(nameDelta)return nameDelta;
+  return String(left&&left.slug||'').localeCompare(String(right&&right.slug||''));
+}
+function orderedMetabotProfiles(){
+  return state.profiles.slice().sort(function(left,right){
+    var leftTwin=left&&(left.isActive===true||left.botType==='twin');
+    var rightTwin=right&&(right.isActive===true||right.botType==='twin');
+    if(leftTwin!==rightTwin)return leftTwin?-1:1;
+    var leftAvailable=profileIsAvailableForList(left);
+    var rightAvailable=profileIsAvailableForList(right);
+    if(leftAvailable!==rightAvailable)return leftAvailable?-1:1;
+    return compareProfilesByCreatedAt(left,right);
+  });
+}
+
 function renderMetabotList(){
   var list=q('[data-metabot-list]');var count=q('[data-metabot-count]');if(!list)return;
   if(count)count.textContent=String(state.profiles.length);
   if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>'+esc(uiText('bot.noBotsYet','No Bots yet'))+'</p></div>';return}
-  list.innerHTML=state.profiles.map(function(p){
+  list.innerHTML=orderedMetabotProfiles().map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
     return'<div class="metabot-item'+selected+'" role="button" tabindex="0" data-slug="'+esc(p.slug)+'">'+
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
@@ -1101,16 +1139,37 @@ function selectMetabot(slug){
   renderCurrentTab();
 }
 
-// Knowledge/Scheduled deep links follow the selected Bot so the standalone
+// Knowledge/Surf/Memory deep links follow the selected Bot so the standalone
 // pages open scoped to the same Bot (the from query param they read).
 function syncDeepLinks(){
   var profile=selectedProfile();
   var slug=profile&&profile.slug?String(profile.slug):'';
   qq('[data-tab-link]').forEach(function(el){
     var target=el.getAttribute('data-tab-link');
-    var base=target==='kb'?'/ui/kb':'/ui/schedule';
+    var base=target==='kb'?'/ui/kb':target==='surf'?'/ui/surf':'/ui/memory';
     el.setAttribute('href',slug?base+'?from='+encodeURIComponent(slug):base);
   });
+}
+
+function mountEmbeddedPage(name){
+  var profile=selectedProfile();var slug=profile&&profile.slug?String(profile.slug):'';
+  var source=q('[data-embedded-page="'+name+'"]');var host=q('[data-embedded-host="'+name+'"]');
+  if(!host||!slug)return;
+  var key=name+':'+slug;
+  if(state._embeddedInitialized[key])return;
+  if(!state._embeddedTemplates[name]&&source){state._embeddedTemplates[name]=source.innerHTML;source.remove()}
+  if(!state._embeddedTemplates[name])return;
+  host.innerHTML='';
+  var template=document.createElement('template');template.innerHTML=state._embeddedTemplates[name];
+  var shell=template.content.firstElementChild;
+  if(!shell)return;
+  shell.setAttribute('data-bot-slug',slug);
+  host.appendChild(shell);
+  var script=document.createElement('script');
+  script.text=EMBEDDED_PAGE_SCRIPTS[name==='knowledge'?'kb':name]||'';
+  document.body.appendChild(script);
+  script.remove();
+  state._embeddedInitialized[key]=true;
 }
 
 function renderCurrentTab(){
@@ -2052,7 +2111,7 @@ function toggleExecDetail(btn){
 }
 
 function switchTab(tab,silent){
-  var allowed={publicIdentity:1,behavior:1,chatSkills:1,advanced:1};
+  var allowed={publicIdentity:1,behavior:1,chatSkills:1,advanced:1,knowledge:1,surf:1,memory:1};
   state.selectedTab=allowed[tab]?tab:'publicIdentity';
   qq('[data-tab]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab')===state.selectedTab)});
   qq('[data-tab-panel]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab-panel')===state.selectedTab)});
@@ -2066,7 +2125,7 @@ function switchTab(tab,silent){
     // load error must be retried instead of sticking.
     var chatProfile=selectedProfile();
     if(chatProfile)loadChatSkillOptions(chatProfile.slug);
-  }
+  }else if(state.selectedTab==='knowledge'||state.selectedTab==='surf'||state.selectedTab==='memory')mountEmbeddedPage(state.selectedTab);
 }
 
 function loadStats(){renderStats();return Promise.resolve()}

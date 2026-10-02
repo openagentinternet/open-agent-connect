@@ -1,6 +1,7 @@
 import { type MetawebSurfRunRecord, type MetawebSurfRunStats, type MetawebSurfSeenAction, type MetawebSurfStore, type MetawebSurfTrigger } from './store.js';
 import { type SurfBriefing, type SurfInboxItem, type SurfProtocolRadarFetchResult } from './briefing.js';
 import { type SurfProtocolDescriptor } from './protocols.js';
+import { type SurfCircuitState } from './failure.js';
 import type { MetawebSurfSettingsStore } from './settings.js';
 /** A finished surf younger than this makes the pre-dream surf redundant. */
 export declare const PRE_DREAM_SURF_RECENCY_MS: number;
@@ -134,9 +135,14 @@ export declare class SurfService {
      * Pre-dream gate: the bot's surf-before-dream toggle is explicitly enabled
      * (default OFF — opt-in, since every surf spends LLM tokens and gas) and it
      * has not finished a surf within the recency window (a manual evening surf
-     * makes the nightly one redundant).
+     * makes the nightly one redundant). The failure circuit breaker also holds
+     * the gate: consecutive failures back off exponentially and a same-code
+     * streak pauses the nightly surf for a day instead of re-colliding with a
+     * deterministic environment failure every dream tick.
      */
     shouldPreDreamSurf(): Promise<boolean>;
+    /** The pre-dream failure breaker, computed from the recent run history. */
+    getSurfCircuit(): Promise<SurfCircuitState>;
     /**
      * Start a surf run in the background; returns the created run row.
      * Throws when a run is already in flight.

@@ -24,6 +24,7 @@ const service_1 = require("../core/surf/service");
 const store_2 = require("../core/surf/store");
 const settings_1 = require("../core/surf/settings");
 const format_1 = require("../core/surf/format");
+const failure_1 = require("../core/surf/failure");
 const surfReads_1 = require("../core/surf/surfReads");
 const SURF_READS_OPTIONS = (baseUrl) => (baseUrl ? { baseUrl } : undefined);
 function createSurfDaemonHandlers(input) {
@@ -142,10 +143,14 @@ function createSurfDaemonHandlers(input) {
                 (0, store_2.createMetawebSurfStore)(paths).listRuns(limit),
                 (0, settings_1.createSurfSettingsStore)(paths).read(),
             ]);
-            // Pre-dream gate (opt-in + 20h recency + memory + not running) — the
-            // dream scheduler reads this to decide whether tonight's dream gets a
-            // fresh surf first.
+            // Pre-dream gate (opt-in + 20h recency + memory + not running + the
+            // failure circuit breaker) — the dream scheduler reads this to decide
+            // whether tonight's dream gets a fresh surf first. The breaker state
+            // rides along so every surface (panel, chat tool, scheduler log) can
+            // say WHY the nightly surf is paused instead of silently skipping.
             const preDreamDue = await serviceFor(bot).shouldPreDreamSurf().catch(() => false);
+            const circuit = await serviceFor(bot).getSurfCircuit().catch(() => null);
+            const circuitNotice = (0, failure_1.formatSurfCircuitNotice)(circuit);
             return (0, commandResult_1.commandSuccess)({
                 botSlug: bot.slug,
                 runs,
@@ -153,7 +158,9 @@ function createSurfDaemonHandlers(input) {
                 surfBeforeDreamEnabled: settings.surfBeforeDreamEnabled,
                 interactionBudget: settings.interactionBudget,
                 preDreamDue,
-                formatted: (0, format_1.formatSurfRunList)(runs),
+                preDreamDeferral: (0, failure_1.surfPreDreamDeferral)(circuit),
+                surfCircuit: circuit,
+                formatted: circuitNotice ? `${circuitNotice}\n\n${(0, format_1.formatSurfRunList)(runs)}` : (0, format_1.formatSurfRunList)(runs),
             });
         },
         run: async (rawInput) => {
@@ -173,6 +180,7 @@ function createSurfDaemonHandlers(input) {
                         status: run.status,
                         stats: run.stats,
                         error: run.error,
+                        failure: run.failure,
                         reportMarkdown: run.reportMarkdown,
                     });
                 }

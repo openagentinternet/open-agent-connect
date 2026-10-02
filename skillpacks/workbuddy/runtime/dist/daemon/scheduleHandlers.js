@@ -153,6 +153,19 @@ function createScheduleDaemonHandlers(input) {
             return (0, commandResult_1.commandSuccess)({ due: [{ slug: resolved.slug, tasks }] });
         },
         list: async (rawInput) => {
+            const all = rawInput?.all === true || rawInput?.all === 'true';
+            if (all) {
+                const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
+                const groups = [];
+                for (const profile of profiles) {
+                    if (typeof profile.homeDir !== 'string' || !profile.homeDir)
+                        continue;
+                    const tasks = await storeFor(node_path_1.default.resolve(profile.homeDir)).listTasks();
+                    if (tasks.length > 0)
+                        groups.push({ slug: profile.slug, tasks });
+                }
+                return (0, commandResult_1.commandSuccess)({ groups });
+            }
             const resolved = await resolveProfileHomeDir(rawInput?.from);
             if (resolved.failure)
                 return resolved.failure;

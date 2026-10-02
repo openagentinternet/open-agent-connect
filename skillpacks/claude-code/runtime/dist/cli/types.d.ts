@@ -579,6 +579,7 @@ export interface CliDependencies {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         list?: (input: {
             from?: string;
+            all?: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         show?: (input: {
             from?: string;

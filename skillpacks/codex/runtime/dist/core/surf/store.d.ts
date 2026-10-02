@@ -1,4 +1,5 @@
 import type { MetabotPaths } from '../state/paths.js';
+import { type SurfRunFailure } from './failure.js';
 export type MetawebSurfTrigger = 'manual-chat' | 'manual-ui' | 'pre-dream';
 export type MetawebSurfRunStatus = 'running' | 'done' | 'failed';
 /**
@@ -35,6 +36,11 @@ export interface MetawebSurfRunRecord {
     reportMarkdown: string | null;
     reportJson: string | null;
     error: string | null;
+    /**
+     * Structured failure (stage/code/stack/context) for failed runs; null on
+     * running/done rows and on records written before the taxonomy existed.
+     */
+    failure: SurfRunFailure | null;
     startedAt: string;
     finishedAt: string | null;
     createdAt: string;
@@ -67,6 +73,7 @@ export interface MetawebSurfStore {
         reportMarkdown?: string | null;
         reportJson?: string | null;
         error?: string | null;
+        failure?: SurfRunFailure | null;
         finishedAtIso: string;
     }): Promise<boolean>;
     getRun(id: string): Promise<MetawebSurfRunRecord | null>;
