@@ -35,7 +35,6 @@ import { BotsPagePanelStore } from './bots-page-store.ts'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { SchedulePanel } from './SchedulePanel.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
-import { BotPresetHeaderLabel, type BotPresetHeaderLabelInjected } from './BotPresetHeaderLabel.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
 import { ConvTabStore } from './conv-tab-store.ts'
@@ -585,16 +584,6 @@ export function apply(ctx: ClientContext): void {
 
     scope.effect(() => {
       const stop = sessionsList.subscribe(() => { void seat.apply() })
-      const botPresetHeader = scope.slots.register({
-        name: 'conversation.session.header.actions',
-        id: 'agent-preset',
-        order: -10,
-        locale: 'settings.agentPreset',
-        inject: (): BotPresetHeaderLabelInjected => ({
-          hooks: { botPresetSeat: seat.store },
-          load: () => seat.load(),
-        }),
-      }, BotPresetHeaderLabel)
       const headerId = scope.slots.register({
         name: 'conversation.session.header.actions',
         id: 'oac-session-id',
@@ -611,7 +600,6 @@ export function apply(ctx: ClientContext): void {
       }, BotPresetSeat)
       return () => {
         stop()
-        botPresetHeader()
         chip()
         headerId()
       }
