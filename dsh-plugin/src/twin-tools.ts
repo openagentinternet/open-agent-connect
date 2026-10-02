@@ -72,6 +72,8 @@ export interface DelegationInput {
   stepId?: string
   taskIntent?: string
   idempotencyKey?: string
+  /** Original Twin conversation receiving the handoff. */
+  sourceSessionId?: string
 }
 
 /** Delegation user message wrapper, ported from IDBots buildWorkerPrompt. */
@@ -89,9 +91,13 @@ export function buildDelegationMessage(input: DelegationInput & { taskId: string
     lines.push(`  <verified_context>${input.context.trim()}</verified_context>`)
   }
   lines.push(`  <permission_scope>${JSON.stringify(input.permissionScope ?? { workspace: 'read_write', network: 'read_only' })}</permission_scope>`)
+  if (input.sourceSessionId?.trim()) {
+    lines.push(`  <source_session_id>${input.sourceSessionId.trim()}</source_session_id>`)
+  }
   lines.push(
     '  <handoff_contract>',
     'Return a concise structured handoff with summary, deliverables, verification evidence, and blockers. Do not claim an external action succeeded without evidence.',
+    'Work directly in this orchestration session. Do not create another conversation or delegate this step again. The Twin receives your final handoff in the source session identified above.',
     'ALWAYS close the session with a plain-text handoff summary so the Twin Bot can review your work.',
     '  </handoff_contract>',
     '</twin_delegation>',
@@ -242,7 +248,7 @@ export interface TwinOrchestrator {
 export function createTwinOrchestrator(
   ctx: HostContext,
   twinSlug: string,
-  options: { run?: RunFn; stepTimeoutMs?: number } = {},
+  options: { run?: RunFn; stepTimeoutMs?: number; sourceSessionId?: string } = {},
 ): TwinOrchestrator {
   const run = options.run ?? runMetabot
   const stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
@@ -425,7 +431,13 @@ export function createTwinOrchestrator(
           sessionId: workerSessionId,
           // cwd keeps the session in the host workspace bucket: the DSH
           // conversation list drops cold sessions without one.
-          meta: { agentPreset: presetIdForSlug(workerSlug), cwd: process.cwd() },
+          meta: {
+            agentPreset: presetIdForSlug(workerSlug),
+            cwd: process.cwd(),
+            oacOrigin: 'orchestration',
+            orchestrationTaskId: taskId,
+            ...(options.sourceSessionId ? { sourceSessionId: options.sourceSessionId } : {}),
+          },
           agentOptions: {
             provider: modelPair.provider,
             model: modelPair.model,
@@ -438,6 +450,16 @@ export function createTwinOrchestrator(
         })
         const worker = handle.agent
         flight.agent = worker
+        const sessionController = ctx.get?.('sessionController') as {
+          rename?: (request: { sessionId: string; title: string }) => Promise<unknown>
+        } | undefined
+        const titleSeed = taskTitle.trim() || input.taskIntent?.trim() || input.objective.trim()
+        const title = `[编排任务] ${titleSeed}`.slice(0, 120)
+        try {
+          await sessionController?.rename?.({ sessionId: workerSessionId, title })
+        } catch (error) {
+          ctx.logger?.warn?.(`[oac-dsh] orchestration session rename failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
         worker.ctx.systemPrompt?.section({
           name: 'oac:worker-delegation',
           order: 100,
@@ -445,7 +467,7 @@ export function createTwinOrchestrator(
         })
         worker.followup?.({
           role: 'user',
-          content: [{ type: 'text', text: buildDelegationMessage({ ...input, taskId, stepId }) }],
+          content: [{ type: 'text', text: buildDelegationMessage({ ...input, sourceSessionId: options.sourceSessionId, taskId, stepId }) }],
           source: oacMessageSource('delegation'),
         })
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined
@@ -793,7 +815,7 @@ export function buildTwinToolDefinitions(
     },
     {
       name: 'local_worker_delegate',
-      description: 'Delegate one bounded step to a local Worker Bot. Runs the Worker session to completion and returns its handoff; the session stays live in the conversation list afterwards, so you can follow up there or with oac_session_insert_user_message.',
+      description: 'Delegate one bounded step to a local Worker Bot. Opens one clearly named [编排任务] Worker conversation, runs the step there, keeps that conversation visible, and returns the Worker handoff to the originating Twin conversation.',
       parameters: {
         type: 'object',
         properties: {
@@ -991,7 +1013,8 @@ export function installTwinOnAgent(
   twinSlug: string,
   options: { run?: RunFn; stepTimeoutMs?: number } = {},
 ): TwinOrchestrator {
-  const orchestrator = createTwinOrchestrator(ctx, twinSlug, options)
+  const sourceSessionId = typeof agent.session?.id === 'string' ? agent.session.id : undefined
+  const orchestrator = createTwinOrchestrator(ctx, twinSlug, { ...options, sourceSessionId })
   agent.ctx.systemPrompt?.section({
     name: 'oac:twin-orchestration',
     order: 100,
