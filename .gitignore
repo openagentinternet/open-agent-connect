@@ -23,5 +23,6 @@ output/*
 
 !skillpacks/**/runtime/dist/
 !skillpacks/**/runtime/dist/**
+skillpacks/**/runtime/dist/.build-stamp.json
 !skillpacks/**/runtime/node_modules/
 !skillpacks/**/runtime/node_modules/**

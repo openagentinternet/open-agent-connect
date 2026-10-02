@@ -22,7 +22,7 @@ overrides:
   patch-package: 8.0.1
   protobufjs: 7.6.5
   tmp: 0.2.7
-  undici: 6.28.0
+  undici: 6.28.1
   valibot: 1.4.2
   ws: 8.21.0
 

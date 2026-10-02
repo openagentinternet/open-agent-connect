@@ -5,7 +5,7 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
-## Unreleased
+## 0.9.1 - 2026-10-03
 
 ### Added
 
@@ -79,6 +79,14 @@ tags for releases.
   bodies. The MetaApp preview storage persistence rides in the ephemeral
   preview origin used by adapter hosts; OAC's daemon-routed local previews are
   unaffected (agent-browser-core itself ships no runtime change in 0.6.2).
+
+- Security: patched production-dependency audit findings to their first
+  fixed releases — `undici` 6.28.0 → 6.28.1 (override bump; WebSocket DoS
+  advisories GHSA-rfgv-xxqx-mfg5 / GHSA-3wwx-pv8p-q78v) and
+  `brace-expansion` 5.0.9 → 5.0.12 (in-range update under `minimatch`;
+  recursion/CPU DoS advisories GHSA-qhr7-859c-m2p7 / GHSA-6j4f-fj2g-mc7p /
+  GHSA-q2hr-2g5m-vwhr). `pnpm audit --prod --audit-level=moderate` now
+  passes with one low-severity finding remaining.
 
 ## 0.9.0 - 2026-09-25
 
