@@ -787,6 +787,9 @@ export const USER_CSS = `
 export const PRESETS_CSS = `
 .oac-session-id-header { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dsw-alias-label-secondary); }
 .oac-session-id-header code { font-family: inherit; }
+.oac-bot-preset-header-label { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 240px); color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oac-bot-preset-header-icon { flex: none; color: var(--dsw-alias-label-primary); }
+.oac-bot-preset-header-avatar { flex: none; width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
 .oac-preset-seat { display: inline-flex; align-items: center; gap: 4px; max-width: min(100%, 240px); min-height: 28px; padding: 0 8px; border: none; border-radius: 16px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .oac-preset-seat:not(:disabled):hover, .oac-preset-seat[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); }
 .oac-preset-seat:disabled { cursor: default; color: var(--dsw-alias-label-quaternary); }
