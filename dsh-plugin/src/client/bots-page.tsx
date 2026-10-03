@@ -1,11 +1,10 @@
 /**
  * Bots page (client half): the plugin's dedicated surface in the DSH frame,
  * reached from the left-rail `sidebar.panellist` row (id `oac-bots`). The
- * page hosts the OAC surfaces that used to be Settings sections (Bots,
- * Memory, User, MetaApps, Traffic) as one `oac.bots.section` list entry each
- * — the first labeled 我的 Bot / My Bots — plus the unified 定时任务
- * (Scheduled) list extracted from the Bot editor, so DSH Settings stays
- * exactly stock.
+ * page hosts the OAC surfaces that used to be Settings sections as one
+ * `oac.bots.section` list entry each — My Bots, MetaApps, and the merged
+ * 插件设置 / Plugin Settings (the former User and Traffic sections as top
+ * tabs) — so DSH Settings stays exactly stock.
  *
  * The page is a `shell.overlay` entry (the A2A Chat pattern), NOT a kernel
  * `main` panel: the overlay covers the center column only, so the official
@@ -41,9 +40,8 @@ import { BOTS_PANEL_ROW_MARK } from './a2a-panel-row.ts'
 import type { BotsPagePanelState } from './bots-page-store.ts'
 import {
   IconAgentPresetOutline16,
-  IconGaugeOutline16,
   IconGlobeOutline16,
-  IconUserOutline16,
+  IconSettingsOutline16,
   type CompatIconProps,
 } from './icons.ts'
 import type { BotsLocaleKey } from './locale.ts'
@@ -111,13 +109,17 @@ const ACTIVE_SECTION_STORAGE_KEY = 'oac-dsh:bots-page-section:v1'
 /** Per-section nav icons, keyed by section id (the Settings left nav maps its row icons by id the same way). */
 const SECTION_ICONS: Readonly<Record<string, ComponentType<CompatIconProps>>> = {
   'oac-bots': IconAgentPresetOutline16,
-  'oac-user': IconUserOutline16,
   'oac-apps': IconGlobeOutline16,
-  'oac-traffic': IconGaugeOutline16,
+  'oac-settings': IconSettingsOutline16,
 }
 
 function readActiveSection(): string | null {
-  try { return window.localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY) } catch { return null }
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY)
+    // The User and Traffic sections merged into Plugin Settings; a stored
+    // pre-merge id lands on the merged section instead of falling back.
+    return stored === 'oac-user' || stored === 'oac-traffic' ? 'oac-settings' : stored
+  } catch { return null }
 }
 
 function writeActiveSection(id: string): void {

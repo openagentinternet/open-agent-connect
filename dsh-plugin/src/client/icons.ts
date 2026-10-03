@@ -56,6 +56,7 @@ export const IconQuestionOutline14 = compatIcon('IconQuestionOutline14', 'IconQu
 export const IconRefreshOutline16 = compatIcon('IconRefreshOutline16', 'IconRefreshOutlineRegular', 16)
 export const IconRightUpOutline16 = compatIcon('IconRightUpOutline16', 'IconRightUpOutlineRegular', 16)
 export const IconSendOutline14 = compatIcon('IconSendOutline14', 'IconSendOutlineRegular', 14)
+export const IconSettingsOutline16 = compatIcon('IconSettingsOutline16', 'IconSettingsOutlineRegular', 16)
 export const IconShareOutline16 = compatIcon('IconShareOutline16', 'IconShareOutlineRegular', 16)
 export const IconSparkle16 = compatIcon('IconSparkle16', 'IconSparkleRegular', 16)
 export const IconThinkOutline16 = compatIcon('IconThinkOutline16', 'IconThinkOutlineRegular', 16)

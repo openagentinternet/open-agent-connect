@@ -1,12 +1,12 @@
 /**
  * Browser half of open-agent-connect-dsh: locale dictionaries, the Bots page
  * (a left-rail `sidebar.panellist` row + `shell.overlay` entry — the A2A Chat
- * pattern, so the official right Sidebar stays mounted — hosting the six
- * `oac.bots.section` pages — My Bots, 定时任务, Memory, User, MetaApps, Traffic — the
- * surfaces that used to be Settings sections, plus the unified scheduled-task
- * list extracted from the Bot editor; DSH Settings itself stays stock), the
- * new-session preset chip, the right-Sidebar `bot-browser` tab type, and the
- * A2A Chat `shell.overlay` panel. The left-rail A2A glyph is currently hidden
+ * pattern, so the official right Sidebar stays mounted — hosting the
+ * `oac.bots.section` pages — My Bots, MetaApps, and the merged Plugin
+ * Settings (User + Traffic as top tabs) — the surfaces that used to be
+ * Settings sections; DSH Settings itself stays stock), the new-session preset
+ * chip, the right-Sidebar `bot-browser` tab type, and the A2A Chat
+ * `shell.overlay` panel. The left-rail A2A glyph is currently hidden
  * (`SHOW_A2A_PANELLIST_ROW`). Does not shadow Settings → Agent presets.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -35,6 +35,7 @@ import { BotsPagePanelStore } from './bots-page-store.ts'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { HeaderBotLabel, type HeaderBotLabelInjected } from './HeaderBotLabel.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
+import { PluginSettingsPanel } from './PluginSettingsPanel.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
 import { ConvTabStore } from './conv-tab-store.ts'
@@ -59,8 +60,6 @@ import { memoryEn, MEMORY_NS, memoryZh, type MemoryLocaleKey } from './locale-me
 import { userEn, USER_NS, userZh, type UserLocaleKey } from './locale-user.ts'
 import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
 import { trafficEn, TRAFFIC_NS, trafficZh, type TrafficLocaleKey } from './locale-traffic.ts'
-import { TrafficPanel } from './TrafficPanel.tsx'
-import { UserPanel } from './UserPanel.tsx'
 import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { startHeroIdentityMount } from './hero-identity.ts'
@@ -474,21 +473,6 @@ export function apply(ctx: ClientContext): void {
   }, BotPanel))
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
-    id: 'oac-user',
-    order: 23,
-    label: () => tUser('nav'),
-    locale: USER_NS,
-    inject: () => ({
-      who: () => api.userWho(),
-      create: (name: string) => api.userCreate(name),
-      importIdentity: (input: { name: string; mnemonic: string; path?: string }) => api.userImport(input),
-      rename: (name: string) => api.userRename(name),
-      reveal: () => api.userReveal(),
-      deleteIdentity: () => api.userDelete(),
-    }),
-  }, UserPanel))
-  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
-    name: 'oac.bots.section',
     id: 'oac-apps',
     order: 24,
     label: () => tApps('nav'),
@@ -506,14 +490,26 @@ export function apply(ctx: ClientContext): void {
       upload: (from: string, file: File) => api.metaappUpload(from, file),
     }),
   }, AppsPanel))
+  // The former User and Traffic sections merged into one 插件设置 (Plugin
+  // Settings) section: both panels survive verbatim as top tabs inside
+  // PluginSettingsPanel, so this registration carries the union of their
+  // injected faces plus their per-tab translators. Order 25 keeps the merged
+  // section at the nav's end, where settings-type entries belong.
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
-    id: 'oac-traffic',
+    id: 'oac-settings',
     order: 25,
-    label: () => tTraffic('nav'),
-    locale: TRAFFIC_NS,
+    label: () => t('navSettings'),
+    locale: NS,
     inject: () => ({
+      userT: tUser,
+      trafficT: tTraffic,
       who: () => api.userWho(),
+      create: (name: string) => api.userCreate(name),
+      importIdentity: (input: { name: string; mnemonic: string; path?: string }) => api.userImport(input),
+      rename: (name: string) => api.userRename(name),
+      reveal: () => api.userReveal(),
+      deleteIdentity: () => api.userDelete(),
       bots: () => api.list(),
       status: () => api.trafficStatus(),
       setMode: (mode: 'traffic' | 'selfpay') => api.trafficMode(mode),
@@ -524,7 +520,7 @@ export function apply(ctx: ClientContext): void {
       redeem: (code: string) => api.trafficRedeem(code),
       apiBase: (action?: 'get' | 'set' | 'reset', value?: string) => api.trafficApiBase(action, value),
     }),
-  }, TrafficPanel))
+  }, PluginSettingsPanel))
 
   ctx.inject(['slots', 'conversation', 'sessions'], (scope: ClientContext) => {
     const remote = ctx.remote

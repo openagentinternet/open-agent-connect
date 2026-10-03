@@ -47,18 +47,23 @@ test('traffic locale en and zh dictionaries stay in sync', async () => {
 
 // --- client registration ---------------------------------------------------
 
-test('client registers the traffic Bots-page section right after apps', async () => {
+test('the traffic panel renders inside the Plugin Settings section, after apps', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
-  assert.match(text, /id: 'oac-traffic'/)
+  // User and Traffic merged into the oac-settings section; the traffic
+  // dictionary and translator still register for the Traffic tab.
+  assert.match(text, /id: 'oac-settings'/)
   assert.match(text, /order: 25/)
+  assert.doesNotMatch(text, /id: 'oac-traffic'/)
   assert.match(text, /'settings\.oac\.traffic': TrafficLocaleKey/)
   assert.match(text, /ctx\.locale\.register\(TRAFFIC_NS, \{ zh: trafficZh, en: trafficEn \}\)/)
   assert.match(text, /ctx\.locale\.bind\(TRAFFIC_NS\)/)
   assert.match(text, /APPS_CSS \+ TRAFFIC_CSS/)
   assert.ok(
-    text.indexOf("id: 'oac-apps'") < text.indexOf("id: 'oac-traffic'"),
-    'oac-traffic registers after oac-apps',
+    text.indexOf("id: 'oac-apps'") < text.indexOf("id: 'oac-settings'"),
+    'oac-settings registers after oac-apps',
   )
+  const panel = await readFile(join(root, 'src/client/PluginSettingsPanel.tsx'), 'utf8')
+  assert.match(panel, /<TrafficPanel/)
 })
 
 // --- host route dispatch (CLI bridge mocked) --------------------------------

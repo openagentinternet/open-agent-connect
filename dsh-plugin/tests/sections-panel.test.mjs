@@ -72,8 +72,9 @@ test('client registers the Bots overlay with its panellist row and the remaining
   assert.match(text, /ctx\.slots\.entries\('oac\.bots\.section'\)/)
   assert.match(text, /resolveSlotLabel\(entry\.options\.label\)/)
   assert.match(text, /hooks: \{ sections: botsPageSections, panel: botsPagePanel \}/)
-  // Section ids and orders: My Bots, User, Apps, Traffic. Scheduled tasks and
-  // Memory now live inside the selected Bot editor.
+  // Section ids and orders: My Bots, Apps, Plugin Settings. Scheduled tasks
+  // and Memory live inside the selected Bot editor; User and Traffic merged
+  // into the Plugin Settings section as top tabs.
   assert.match(text, /id: 'oac-bots'/)
   assert.doesNotMatch(text, /id: 'oac-services'/)
   assert.doesNotMatch(text, /id: 'oac-schedule'/)
@@ -81,18 +82,53 @@ test('client registers the Bots overlay with its panellist row and the remaining
   assert.match(text, /id: 'oac-apps'/)
   assert.doesNotMatch(text, /id: 'oac-conversations'/)
   assert.doesNotMatch(text, /id: 'oac-memory'/)
-  assert.match(text, /id: 'oac-user'/)
-  assert.match(text, /id: 'oac-traffic'/)
+  assert.match(text, /id: 'oac-settings'/)
+  assert.doesNotMatch(text, /id: 'oac-user'/)
+  assert.doesNotMatch(text, /id: 'oac-traffic'/)
   assert.match(text, /name: 'shell\.overlay'/)
   assert.match(text, /if \(SHOW_A2A_PANELLIST_ROW\)/)
   assert.match(text, /id: 'oac-a2a'/)
   assert.doesNotMatch(text, /key: 'oac-a2a'/)
   assert.doesNotMatch(text, /sidebar\.footer\.action/)
   assert.match(text, /order: 20/)
-  assert.match(text, /order: 23/)
   assert.match(text, /order: 24/)
   assert.match(text, /order: 25/)
+  assert.doesNotMatch(text, /order: 23/)
   assert.doesNotMatch(text, /id: 'oac'/)
+})
+
+test('Plugin Settings merges the former User and Traffic sections as top tabs', async () => {
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  // One section registration carries the union of both former faces plus
+  // their per-tab translators, labeled by the shared navSettings key.
+  assert.match(index, /label: \(\) => t\('navSettings'\)/)
+  assert.match(index, /userT: tUser/)
+  assert.match(index, /trafficT: tTraffic/)
+  assert.match(index, /\}, PluginSettingsPanel\)/)
+  // The merged section registers after MetaApps (order 24 < order 25).
+  assert.ok(
+    index.indexOf("id: 'oac-apps'") < index.indexOf("id: 'oac-settings'"),
+    'oac-settings registers after oac-apps',
+  )
+  // Both locale dictionaries stay registered — the tabs read them.
+  assert.match(index, /ctx\.locale\.register\(USER_NS, \{ zh: userZh, en: userEn \}\)/)
+  assert.match(index, /ctx\.locale\.register\(TRAFFIC_NS, \{ zh: trafficZh, en: trafficEn \}\)/)
+
+  const panel = await readFile(join(root, 'src/client/PluginSettingsPanel.tsx'), 'utf8')
+  // The MetaApps `oac-tablist` strip hosts the two former sections verbatim.
+  assert.match(panel, /className="oac-tablist" role="tablist" aria-label=\{t\('navSettings'\)\}/)
+  assert.match(panel, /\{userT\('nav'\)\}/)
+  assert.match(panel, /\{trafficT\('nav'\)\}/)
+  // Keep-alive: both panels stay mounted behind `hidden`, like the page nav
+  // keeps visited sections mounted.
+  assert.match(panel, /<UserPanel/)
+  assert.match(panel, /<TrafficPanel/)
+  assert.match(panel, /hidden=\{tab !== 'user'\}/)
+  assert.match(panel, /hidden=\{tab !== 'traffic'\}/)
+  // The last-open tab persists in localStorage (the page's other remembered
+  // preferences use the same idiom).
+  assert.match(panel, /oac-dsh:bots-page-settings-tab:v1/)
+  assert.match(panel, /window\.localStorage/)
 })
 
 test('the Bots page projects the section ledger into a keep-alive vertical nav', async () => {
@@ -108,13 +144,16 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(text, /aria-current=\{selected \? 'true' : undefined\}/)
   assert.match(text, /oac-dsh:bots-page-section:v1/)
   assert.match(text, /window\.localStorage/)
+  // A stored pre-merge section id (User/Traffic) heals to the merged section.
+  assert.match(text, /stored === 'oac-user' \|\| stored === 'oac-traffic' \? 'oac-settings' : stored/)
   // Each nav row carries a per-section icon (Settings left-nav parity).
   assert.match(text, /'oac-bots': IconAgentPresetOutline16/)
   assert.doesNotMatch(text, /'oac-schedule': IconAlarmClockOutline16/)
   assert.doesNotMatch(text, /'oac-memory': IconThinkOutline16/)
-  assert.match(text, /'oac-user': IconUserOutline16/)
   assert.match(text, /'oac-apps': IconGlobeOutline16/)
-  assert.match(text, /'oac-traffic': IconGaugeOutline16/)
+  assert.match(text, /'oac-settings': IconSettingsOutline16/)
+  assert.doesNotMatch(text, /'oac-user': IconUserOutline16/)
+  assert.doesNotMatch(text, /'oac-traffic': IconGaugeOutline16/)
   assert.match(text, /oac-bots-page-nav-icon/)
   assert.match(text, /oac-bots-page-nav-label/)
   const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
