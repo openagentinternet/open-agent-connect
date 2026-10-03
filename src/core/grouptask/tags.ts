@@ -21,7 +21,15 @@ import type { GroupTaskMessage, GroupTaskStatus } from './types';
 // Tag regexes (exact IDBots grammar)
 // ---------------------------------------------------------------------------
 
-export const DELIVERABLE_TAG = /\[DELIVERABLE\]/i;
+/**
+ * [DELIVERABLE] in its protocol position: the START of a line, optionally
+ * wrapped in markdown emphasis/backticks — the same adjudication
+ * lastHonoredStatusTag applies to status tags. A prose mention like
+ * "完成后按 [DELIVERABLE] 要求提交" is a citation, never a delivery.
+ */
+export const DELIVERABLE_TAG = /^[ \t]*[*_`]*\[DELIVERABLE\][*_`]?/imu;
+/** Splits a deliverable line into tag-delimited payload segments. */
+const DELIVERABLE_SPLIT_TAG = /\[DELIVERABLE\][*_`]*/iu;
 export const STATUS_TAG = /\[STATUS:\s*(EXECUTING|REVIEW)\s*\]/i;
 /**
  * Status tags move the task only from protocol positions: a line START, or
@@ -139,17 +147,20 @@ function classifyUriToken(raw: string): { kind: GroupTaskDeliverableKind; uri: s
 }
 
 /**
- * Extract deliverable candidates from a message. Line-scoped: each line
- * containing [DELIVERABLE] yields one candidate per tag occurrence, its
- * payload being the text after that tag. Lines with a URI-shaped token that
- * fails validation are dropped (fabrication guard); URI-free payloads become
- * text deliverables.
+ * Extract deliverable candidates from a message. Line-scoped: each line whose
+ * [DELIVERABLE] tag sits at the protocol position (line start, markdown
+ * wrapping allowed) yields one candidate per tag occurrence, its payload being
+ * the text after that tag. Lines with a URI-shaped token that fails validation
+ * are dropped (fabrication guard); URI-free payloads become text deliverables.
  */
 export function parseDeliverableCandidates(content: string): GroupTaskDeliverableCandidate[] {
   const candidates: GroupTaskDeliverableCandidate[] = [];
-  for (const line of content.split(/\r?\n/u)) {
-    if (!DELIVERABLE_TAG.test(line)) continue;
-    const segments = line.split(/\[DELIVERABLE\]/iu).slice(1);
+  for (const rawLine of content.split(/\r?\n/u)) {
+    if (!DELIVERABLE_TAG.test(rawLine)) continue;
+    // Normalize line edges so a markdown-wrapped tag still exposes a clean
+    // payload; interior prose is untouched.
+    const line = rawLine.trim().replace(/^[*_`]+/u, '').replace(/[*_`]+$/u, '');
+    const segments = line.split(DELIVERABLE_SPLIT_TAG).slice(1);
     for (const segment of segments) {
       const payload = segment.trim();
       if (!payload) continue;

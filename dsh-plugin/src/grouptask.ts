@@ -359,13 +359,15 @@ export async function dispatchGroupTaskRoutes(
       return failed('missing_proposal', 'proposalId must be a positive integer')
     }
     const decision = readTrimmed(body, 'decision')
-    if (!['confirm', 'revise', 'skip'].includes(decision)) {
-      return failed('invalid_decision', "decision must be 'confirm', 'revise', or 'skip'")
+    if (!['confirm', 'revise', 'skip', 'reject'].includes(decision)) {
+      return failed('invalid_decision', "decision must be 'confirm', 'revise', 'skip', or 'reject'")
     }
-    return run(
-      ['grouptask', 'staffing', 'decide', '--chair', chair, '--proposal', String(proposalId), '--decision', decision],
-      { timeoutMs: READ_TIMEOUT_MS },
-    )
+    const args = ['grouptask', 'staffing', 'decide', '--chair', chair, '--proposal', String(proposalId), '--decision', decision]
+    // Provenance survives the CLI hop: the panel sends 'ui', while the chat
+    // tool omits it and the CLI defaults to 'chat'.
+    const source = readTrimmed(body, 'source')
+    if (source === 'ui' || source === 'chat') args.push('--source', source)
+    return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
   if (method === 'grouptask/staffing/create') {

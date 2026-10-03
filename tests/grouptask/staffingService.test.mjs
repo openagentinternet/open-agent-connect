@@ -238,6 +238,55 @@ test('failed chain create releases the CAS claim so the slate survives', async (
   assert.equal(created.task.task.status, 'planning');
 });
 
+test('propose persists the triggering wish; decisions record their source and actor', async () => {
+  const { ctx } = createFakeContext('metabot-gt-decision-source-');
+  const { proposal } = await proposeGroupTaskStaffing(ctx, {
+    title: 'T', goal: 'G', plan: validPlan, triggeringWish: '帮我做个落地页',
+  });
+  assert.equal(proposal.triggeringWish, '帮我做个落地页');
+  assert.equal(proposal.decisionSource, null);
+
+  const decided = await recordStaffingOwnerDecision(ctx, 'twin-bot', proposal.id, 'confirm', {
+    source: 'ui', decidedBy: 'owner',
+  });
+  assert.equal(decided.status, 'confirmed');
+  assert.equal(decided.decisionSource, 'ui');
+  assert.equal(decided.decidedBy, 'owner');
+
+  // The pre-existing call shape (no opts) still works and records no source.
+  const { proposal: second } = await proposeGroupTaskStaffing(ctx, {
+    title: 'T2', goal: 'G', plan: validPlan, triggeringWish: '做个任务',
+  });
+  const skipped = await recordStaffingOwnerDecision(ctx, 'twin-bot', second.id, 'skip');
+  assert.equal(skipped.status, 'skip_authorized');
+  assert.equal(skipped.decisionSource, null);
+});
+
+test('a chat veto persists rejected and drops the proposal from the list', async () => {
+  const { ctx } = createFakeContext('metabot-gt-reject-');
+  const { proposal } = await proposeGroupTaskStaffing(ctx, {
+    title: 'T', goal: 'G', plan: validPlan, triggeringWish: '做个任务',
+  });
+  const messages = [
+    { type: 'user', content: '做个任务', timestamp: proposal.createdAt - 1000 },
+    { type: 'assistant', content: 'slate', timestamp: proposal.createdAt },
+    { type: 'user', content: '不需要开群任务', timestamp: proposal.createdAt + 1000 },
+  ];
+  const gate = await evaluateStaffingOwnerGate(ctx, { proposalId: proposal.id, sessionMessages: messages });
+  assert.equal(gate.allowed, false);
+  assert.equal(gate.decision, 'owner_rejected');
+  assert.equal(gate.proposal.status, 'rejected', 'the veto is persisted');
+  assert.equal(gate.proposal.ownerDecision, 'reject');
+  assert.equal(gate.proposal.decisionSource, 'chat_reply');
+
+  await assert.rejects(
+    createGroupTaskFromProposal(ctx, { proposalId: proposal.id }),
+    (error) => error.code === 'PROPOSAL_NOT_USABLE',
+  );
+  const rows = await listStaffingProposals(ctx);
+  assert.ok(!rows.some((row) => row.id === proposal.id), 'rejected proposals leave the list');
+});
+
 test('listStaffingProposals returns fresh proposals for the chair', async () => {
   const { ctx } = createFakeContext('metabot-gt-list-');
   await proposeGroupTaskStaffing(ctx, { title: 'a', goal: 'b', plan: validPlan, triggeringWish: '做' });

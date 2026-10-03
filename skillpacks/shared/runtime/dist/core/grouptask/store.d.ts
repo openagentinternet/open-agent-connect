@@ -209,6 +209,8 @@ export interface GroupTaskStore {
     }): Promise<GroupTaskMessagesPage>;
     getMessageByPinId(groupId: string, pinId: string): Promise<GroupTaskMessage | null>;
     getMessageCursor(groupId: string): Promise<number>;
+    /** Wall-clock ms of the last message-cache write; null when never synced. */
+    getMessagesSyncedAt(groupId: string): Promise<number | null>;
     getMembersLastSpeakAt(groupId: string, globalMetaIds: Array<string | null>): Promise<Map<string, number>>;
     getMembersWorkingAt(groupId: string, globalMetaIds: Array<string | null>): Promise<Map<string, number>>;
     kvGet(key: string): Promise<string | undefined>;

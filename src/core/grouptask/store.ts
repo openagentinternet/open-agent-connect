@@ -324,6 +324,8 @@ export interface GroupTaskStore {
   listMessages(groupId: string, opts?: { limit?: number; beforeIndex?: number }): Promise<GroupTaskMessagesPage>;
   getMessageByPinId(groupId: string, pinId: string): Promise<GroupTaskMessage | null>;
   getMessageCursor(groupId: string): Promise<number>;
+  /** Wall-clock ms of the last message-cache write; null when never synced. */
+  getMessagesSyncedAt(groupId: string): Promise<number | null>;
   getMembersLastSpeakAt(groupId: string, globalMetaIds: Array<string | null>): Promise<Map<string, number>>;
   getMembersWorkingAt(groupId: string, globalMetaIds: Array<string | null>): Promise<Map<string, number>>;
 
@@ -401,9 +403,23 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
     return path.join(messagesRoot, `${safe}.json`);
   }
 
+  async function readMessagesFile(groupId: string): Promise<{
+    messages: GroupTaskMessage[];
+    updatedAt: number | null;
+  }> {
+    const parsed = await readJsonFile<{ messages?: GroupTaskMessage[]; updatedAt?: number }>(
+      messagesPath(groupId),
+    );
+    return {
+      messages: Array.isArray(parsed?.messages) ? parsed.messages : [],
+      updatedAt: typeof parsed?.updatedAt === 'number' && Number.isFinite(parsed.updatedAt)
+        ? parsed.updatedAt
+        : null,
+    };
+  }
+
   async function readMessages(groupId: string): Promise<GroupTaskMessage[]> {
-    const parsed = await readJsonFile<{ messages?: GroupTaskMessage[] }>(messagesPath(groupId));
-    return Array.isArray(parsed?.messages) ? parsed.messages : [];
+    return (await readMessagesFile(groupId)).messages;
   }
 
   return {
@@ -1168,6 +1184,8 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       if (messages.length === 0) return -1;
       return messages[messages.length - 1]!.index;
     },
+
+    getMessagesSyncedAt: async (groupId) => (await readMessagesFile(groupId)).updatedAt,
 
     getMembersLastSpeakAt: async (groupId, globalMetaIds) => {
       const wanted = new Set(globalMetaIds.map(normalizeGlobalMetaId).filter(Boolean));

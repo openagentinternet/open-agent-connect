@@ -435,10 +435,14 @@ async function runGroupTaskCommand(args, context) {
                 return (0, commandResult_1.commandFailed)('invalid_flag', '--proposal must be a positive integer.');
             }
             const decision = normalizeText((0, helpers_1.readFlagValue)(args, '--decision'));
-            if (!['confirm', 'revise', 'skip'].includes(decision)) {
-                return (0, commandResult_1.commandFailed)('invalid_flag', '--decision must be one of: confirm, revise, skip.');
+            if (!['confirm', 'revise', 'skip', 'reject'].includes(decision)) {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--decision must be one of: confirm, revise, skip, reject.');
             }
-            return handler({ chairSlug: chair, proposalId, decision });
+            // `source` records where the decision was made: the panel forwards 'ui'
+            // via --source; a bare CLI/chat call defaults to 'chat'.
+            const sourceFlag = normalizeText((0, helpers_1.readFlagValue)(args, '--source'));
+            const source = sourceFlag === 'ui' || sourceFlag === 'chat' ? sourceFlag : 'chat';
+            return handler({ chairSlug: chair, proposalId, decision, source });
         }
         if (sub === 'create') {
             const handler = requireHandler(context, 'staffingCreate');

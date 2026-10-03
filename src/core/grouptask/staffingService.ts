@@ -31,6 +31,7 @@ import {
 import {
   staffingProposalUsableAt,
   type GroupTaskStaffingProposalRecord,
+  type StaffingDecisionSource,
   type StaffingOwnerDecisionMarker,
 } from './staffingStore';
 import {
@@ -114,6 +115,7 @@ export async function proposeGroupTaskStaffing(
     acceptanceCriteria: input.acceptanceCriteria ?? null,
     plan,
     skipAuthorized,
+    triggeringWish: triggeringWish || null,
   });
 
   const ownerConfirmRequired = !skipAuthorized;
@@ -133,9 +135,10 @@ export async function recordStaffingOwnerDecision(
   chairSlug: string,
   proposalId: number,
   decision: StaffingOwnerDecisionMarker,
+  opts?: { source?: StaffingDecisionSource; decidedBy?: string | null },
 ): Promise<GroupTaskStaffingProposalRecord> {
   const chair = await requireProfile(ctx, chairSlug);
-  return staffingStoreFor(ctx, chair).setOwnerDecision(proposalId, decision);
+  return staffingStoreFor(ctx, chair).setOwnerDecision(proposalId, decision, opts);
 }
 
 export interface EvaluateStaffingGateInput {
@@ -172,9 +175,14 @@ export async function evaluateStaffingOwnerGate(
   if (proposal.ownerDecision === 'revise') {
     return { allowed: false, decision: 'owner_revise', proposal };
   }
+  if (proposal.ownerDecision === 'reject') {
+    return { allowed: false, decision: 'owner_rejected', proposal };
+  }
 
   // 2. Chat replies after the propose (last-intent gate), when a transcript
-  //    is available (CLI/session-driven flows).
+  //    is available (CLI/session-driven flows). A verdict the gate reads here
+  //    used to be computed and discarded; persist it (source + who) so the
+  //    decision leaves a trace and later evaluations see the same answer.
   if (input.sessionMessages?.length) {
     const { triggeringWish, repliesAfterPropose } = splitSessionMessagesForStaffingGate(
       input.sessionMessages,
@@ -185,6 +193,18 @@ export async function evaluateStaffingOwnerGate(
       repliesAfterPropose,
       persistedSkip: proposal.skipAuthorized,
     });
+    if (gate.decision === 'owner_confirmed') {
+      const persisted = await staffingStoreFor(ctx, chair)
+        .setOwnerDecision(input.proposalId, 'confirm', { source: 'chat_reply' })
+        .catch(() => proposal);
+      return { ...gate, proposal: persisted };
+    }
+    if (gate.decision === 'owner_rejected') {
+      const persisted = await staffingStoreFor(ctx, chair)
+        .setOwnerDecision(input.proposalId, 'reject', { source: 'chat_reply' })
+        .catch(() => proposal);
+      return { ...gate, proposal: persisted };
+    }
     return { ...gate, proposal };
   }
 
@@ -211,12 +231,18 @@ export async function createGroupTaskFromProposal(
   const now = input.now ?? Date.now;
   const gate = await evaluateStaffingOwnerGate(ctx, input);
   if (!gate.allowed) {
-    const code = gate.decision === 'owner_revise' ? 'OWNER_REVISE_REQUIRED' : 'OWNER_CONFIRM_REQUIRED';
+    const code = gate.decision === 'owner_revise'
+      ? 'OWNER_REVISE_REQUIRED'
+      : gate.decision === 'owner_rejected'
+        ? 'OWNER_REJECTED'
+        : 'OWNER_CONFIRM_REQUIRED';
     throw new GroupTaskStaffingError(
       code,
       gate.decision === 'owner_revise'
         ? 'The owner asked for a revised roster before creating the group task.'
-        : 'Owner confirmation is required before creating the group task.',
+        : gate.decision === 'owner_rejected'
+          ? 'The owner declined this group task; the proposal stays rejected.'
+          : 'Owner confirmation is required before creating the group task.',
     );
   }
 
@@ -272,7 +298,9 @@ export async function listStaffingProposals(
     : await resolveChairProfile(ctx);
   const now = Date.now();
   const rows = await staffingStoreFor(ctx, chair).listProposals();
-  return rows.filter((row) => !isStaffingProposalExpired(row.createdAt, now) || row.createdTaskId !== null);
+  // Rejected proposals are settled: they drop off the list like expired ones.
+  return rows.filter((row) => row.status !== 'rejected'
+    && (!isStaffingProposalExpired(row.createdAt, now) || row.createdTaskId !== null));
 }
 
 async function requireUsableProposal(

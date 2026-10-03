@@ -2716,7 +2716,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'health', summary: 'Preflight snapshot: chair/owner prerequisites, listener switch, task counts, recent engine log.' },
       { name: 'staffing propose', summary: 'Persist a staffing slate (stages + coarse seats) and return the owner-facing slate text.' },
       { name: 'staffing list', summary: 'List fresh staffing proposals for the chair.' },
-      { name: 'staffing decide', summary: 'Record the owner decision on a proposal (confirm | revise | skip).' },
+      { name: 'staffing decide', summary: 'Record the owner decision on a proposal (confirm | revise | skip | reject).' },
       { name: 'staffing create', summary: 'Owner-gated create from a proposal: local seats join, remote seats returned for OpenTeam invites.' },
       { name: 'staffing search', summary: 'Seat candidate search: local workers + online bot search + impression verdicts.' },
     ],

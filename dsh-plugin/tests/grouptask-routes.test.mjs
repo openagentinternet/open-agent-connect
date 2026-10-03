@@ -180,6 +180,20 @@ test('grouptask staffing routes map to CLI staffing verbs', async () => {
   const badDecision = await capture('grouptask/staffing/decide', { chairSlug: 'twin', proposalId: 3, decision: 'yes' })
   assert.equal(badDecision.result.code, 'invalid_decision')
 
+  const uiDecide = await capture('grouptask/staffing/decide', {
+    chairSlug: 'twin', proposalId: 3, decision: 'confirm', source: 'ui',
+  })
+  assert.equal(
+    uiDecide.calls[0].args[uiDecide.calls[0].args.indexOf('--source') + 1],
+    'ui',
+    'the panel provenance reaches the CLI',
+  )
+  const rejectDecide = await capture('grouptask/staffing/decide', {
+    chairSlug: 'twin', proposalId: 3, decision: 'reject', source: 'engine',
+  })
+  assert.equal(rejectDecide.calls[0].args.includes('--source'), false, 'unknown sources never reach the CLI')
+  assert.equal(rejectDecide.calls[0].args[rejectDecide.calls[0].args.indexOf('--decision') + 1], 'reject')
+
   const create = await capture('grouptask/staffing/create', { proposalId: 3 })
   assert.deepEqual(create.calls[0].args, ['grouptask', 'staffing', 'create', '--proposal', '3'])
   assert.ok(create.calls[0].options.timeoutMs >= 120_000, 'create waits on chain writes')

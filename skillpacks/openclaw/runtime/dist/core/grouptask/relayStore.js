@@ -15,8 +15,29 @@ exports.resolveGroupTaskRelayPath = resolveGroupTaskRelayPath;
 exports.createGroupTaskRelayStore = createGroupTaskRelayStore;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+/** Drained rows older than this are pruned on the next drain. */
+const RELAY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+/** Upper bound on retained rows; the oldest drained rows go first. */
+const RELAY_MAX_ROWS = 200;
 function emptyState() {
     return { seq: 0, rows: [] };
+}
+/**
+ * Bounded retention for the relay file: drop drained rows past the 30-day
+ * window, then cap the total, always evicting the oldest drained rows first
+ * and never a pending one.
+ */
+function pruneRelayRows(rows, nowMs) {
+    const cutoff = nowMs - RELAY_RETENTION_MS;
+    const kept = rows.filter((row) => row.drainedAt == null || row.drainedAt >= cutoff);
+    if (kept.length <= RELAY_MAX_ROWS)
+        return kept;
+    const pending = kept.filter((row) => row.drainedAt == null);
+    const drained = kept
+        .filter((row) => row.drainedAt != null)
+        .sort((left, right) => (left.drainedAt - right.drainedAt) || (left.id - right.id));
+    const room = Math.max(0, RELAY_MAX_ROWS - pending.length);
+    return [...pending, ...drained.slice(drained.length - room)].sort((left, right) => left.id - right.id);
 }
 function resolveGroupTaskRelayPath(paths) {
     return node_path_1.default.join(paths.runtimeRoot, 'grouptask', 'relay.json');
@@ -75,11 +96,13 @@ function createGroupTaskRelayStore(paths) {
         drain: () => enqueue(async () => {
             const state = await readState();
             const pending = state.rows.filter((row) => row.drainedAt == null);
-            if (pending.length === 0)
-                return [];
             const now = Date.now();
             for (const row of pending)
                 row.drainedAt = now;
+            const pruned = pruneRelayRows(state.rows, now);
+            if (pending.length === 0 && pruned.length === state.rows.length)
+                return [];
+            state.rows = pruned;
             await writeState(state);
             return pending;
         }),

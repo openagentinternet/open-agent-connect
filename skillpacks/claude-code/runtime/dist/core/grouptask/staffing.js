@@ -105,6 +105,20 @@ const CONFIRM_PHRASE_PATTERNS = [
     /confirmed the (roster|slate|team)/i,
     /looks good,? (start|go|proceed)/i,
 ];
+/**
+ * High-confidence owner vetoes ("不需要开群任务", "don't create it"). Applied
+ * only after the keep-roster/revise/confirm patterns and never on an
+ * interrogative sweep ("不需要开群任务吗？" is a question, not a verdict):
+ * missing a veto leaves the slate pending, a mis-read one kills the task.
+ */
+const REJECT_PATTERNS = [
+    /不(?:需|用|要).{0,6}(?:开|建|做).{0,4}(?:群|任务)/,
+    /别(?:开|建)/,
+    /取消(?:这个|该)?(?:提案|任务)/,
+    /don'?t (?:create|open|start)/i,
+    /no need to/i,
+    /reject/i,
+];
 function isSeatRole(value) {
     return typeof value === 'string' && exports.GROUP_TASK_SEAT_ROLES.includes(value);
 }
@@ -221,6 +235,9 @@ function classifyOwnerStaffingReply(text) {
         return 'confirm';
     if (CONFIRM_PHRASE_PATTERNS.some((pattern) => pattern.test(value)))
         return 'confirm';
+    if (!isInterrogativeStaffingText(value) && REJECT_PATTERNS.some((pattern) => pattern.test(value))) {
+        return 'reject';
+    }
     return 'unknown';
 }
 function pickTriggeringWishText(messages, atOrBeforeMs) {
@@ -246,6 +263,8 @@ function resolveStaffingOwnerGate(input) {
         const kind = classifyOwnerStaffingReply(reply);
         if (kind === 'revise')
             lastIntent = 'owner_revise';
+        else if (kind === 'reject')
+            lastIntent = 'owner_rejected';
         else if (kind === 'confirm')
             lastIntent = 'owner_confirmed';
         else if (detectSkipConfirmInWish(reply))
@@ -253,6 +272,8 @@ function resolveStaffingOwnerGate(input) {
     }
     if (lastIntent === 'owner_revise')
         return { allowed: false, decision: 'owner_revise' };
+    if (lastIntent === 'owner_rejected')
+        return { allowed: false, decision: 'owner_rejected' };
     if (lastIntent === 'owner_confirmed')
         return { allowed: true, decision: 'owner_confirmed' };
     if (lastIntent === 'skip_authorized')

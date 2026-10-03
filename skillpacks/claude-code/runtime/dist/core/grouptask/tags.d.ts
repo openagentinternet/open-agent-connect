@@ -15,6 +15,12 @@
  * on old transcripts stay inert (never trigger replies).
  */
 import type { GroupTaskMessage, GroupTaskStatus } from './types';
+/**
+ * [DELIVERABLE] in its protocol position: the START of a line, optionally
+ * wrapped in markdown emphasis/backticks — the same adjudication
+ * lastHonoredStatusTag applies to status tags. A prose mention like
+ * "完成后按 [DELIVERABLE] 要求提交" is a citation, never a delivery.
+ */
 export declare const DELIVERABLE_TAG: RegExp;
 export declare const STATUS_TAG: RegExp;
 export declare const CHECKPOINT_OPEN_TAG: RegExp;
@@ -66,11 +72,11 @@ export interface ParsedGroupTaskTags {
     deadlineMinutes: number | null;
 }
 /**
- * Extract deliverable candidates from a message. Line-scoped: each line
- * containing [DELIVERABLE] yields one candidate per tag occurrence, its
- * payload being the text after that tag. Lines with a URI-shaped token that
- * fails validation are dropped (fabrication guard); URI-free payloads become
- * text deliverables.
+ * Extract deliverable candidates from a message. Line-scoped: each line whose
+ * [DELIVERABLE] tag sits at the protocol position (line start, markdown
+ * wrapping allowed) yields one candidate per tag occurrence, its payload being
+ * the text after that tag. Lines with a URI-shaped token that fails validation
+ * are dropped (fabrication guard); URI-free payloads become text deliverables.
  */
 export declare function parseDeliverableCandidates(content: string): GroupTaskDeliverableCandidate[];
 /** Parse a [WORKING] acknowledgement: note after the tag + optional ETA. */

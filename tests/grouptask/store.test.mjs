@@ -157,10 +157,12 @@ test('grouptask store message cache: append dedupes, cursor, working/speak maps'
   });
 
   assert.equal(await store.getMessageCursor(groupId), -1);
+  assert.equal(await store.getMessagesSyncedAt(groupId), null, 'never-synced cache has no watermark');
   assert.equal(await store.appendMessages(groupId, [message(0), message(1)]), 2);
   // Duplicate pinIds are ignored
   assert.equal(await store.appendMessages(groupId, [message(1), message(2, { content: '[WORKING] busy' })]), 1);
   assert.equal(await store.getMessageCursor(groupId), 2);
+  assert.ok((await store.getMessagesSyncedAt(groupId)) > 0, 'cache write time is exposed');
 
   const page = await store.listMessages(groupId, { limit: 2 });
   assert.equal(page.total, 3);

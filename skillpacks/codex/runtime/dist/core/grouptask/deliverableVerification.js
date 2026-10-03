@@ -54,6 +54,11 @@ function createMetasoPinVerifier(options = {}) {
  * `confirmation` to confirmed and `pending` rows to `delivered` (IDBots
  * parity: verification is what "delivers" a deliverable); errors keep the
  * row unconfirmed for the next re-verification pass.
+ *
+ * On-chain confirmation is keyed on the deliverable's OWN URI: the message
+ * pin that carried the line proves the line was posted, not that the artifact
+ * itself exists on-chain. A URI-free row (text note or local file) therefore
+ * stays `unconfirmed` / `pending` — never "confirmed" off its carrier pin.
  */
 async function verifyTaskDeliverables(store, taskId, verifier, options = {}) {
     const now = options.now ?? Date.now;
@@ -62,7 +67,7 @@ async function verifyTaskDeliverables(store, taskId, verifier, options = {}) {
     for (const row of rows) {
         if (row.confirmation === 'confirmed' || row.status === 'rejected' || row.status === 'accepted')
             continue;
-        const pinId = extractDeliverablePinId(row.uri) ?? (row.msgPinId && /^([0-9a-f]{64}i\d+)$/i.test(row.msgPinId) ? row.msgPinId.toLowerCase() : null);
+        const pinId = extractDeliverablePinId(row.uri);
         if (!pinId)
             continue;
         report.checked += 1;

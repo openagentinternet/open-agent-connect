@@ -311,6 +311,18 @@ export interface GroupTaskMessage {
      */
     senderSuspect: boolean;
 }
+/**
+ * Paged message cache for one group plus its sync watermark, so an empty page
+ * can be told apart from "the cache has not synced yet".
+ */
+export interface GroupTaskMessagesView {
+    messages: GroupTaskMessage[];
+    total: number;
+    /** Wall-clock ms the group's message cache was last written; null if never synced. */
+    syncedAt: number | null;
+    /** Highest chain index the engine has processed for this task (-1 when none). */
+    lastProcessedIndex: number;
+}
 export type GroupTaskMemberWorkStatus = 'working' | 'error' | 'timeout' | 'idle' | 'unknown';
 export type GroupTaskMemberInviteStatus = 'none' | 'invite_pending' | 'invite_accepted' | 'invite_declined' | 'invite_expired' | 'joined';
 export interface GroupTaskMemberSummary extends GroupTaskMember {

@@ -84,6 +84,7 @@ import {
 } from './prompts';
 import {
   GROUP_TASK_LEGAL_TRANSITIONS,
+  type GroupTaskAcceptanceSummaryDeliverable,
   type GroupTaskDeliverable,
   type GroupTaskMember,
   type GroupTaskMessage,
@@ -908,11 +909,21 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     // never reached the chain, and unconfirmed rows are still being indexed.
     const labels = deliverables.map((row) => deliverableVerificationLabel(row));
     const warnings: string[] = [];
-    const localOnlyCount = labels.filter((label) => label === 'local-only').length;
-    if (localOnlyCount > 0) {
+    const localFileCount = deliverables.filter((row) => looksLikeLocalFilePath(row.uri)).length;
+    if (localFileCount > 0) {
       warnings.push(
-        `${localOnlyCount} deliverable${localOnlyCount === 1 ? '' : 's'} exist only as local files `
+        `${localFileCount} deliverable${localFileCount === 1 ? '' : 's'} exist only as local files `
         + '(no on-chain URI), so their content cannot be verified from the chain.',
+      );
+    }
+    // A URI-free row is a text note, not an artifact: say so instead of
+    // claiming it is a local file the owner could open.
+    const textNoteCount = deliverables.filter((row) => !(row.uri ?? '').trim()).length;
+    if (textNoteCount > 0) {
+      warnings.push(
+        `${textNoteCount} deliverable line${textNoteCount === 1 ? '' : 's'} carr${textNoteCount === 1 ? 'ies' : 'y'} `
+        + 'no artifact URI (text notes), so the content lives only in the group message '
+        + 'and cannot be verified from the chain.',
       );
     }
     const unsettledCount = labels.filter((label) => label === 'unverified' || label === 'pending sync').length;
@@ -923,17 +934,38 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       );
     }
 
-    await store.addAcceptanceSummary({
-      taskId: task.id,
-      goal: task.goal,
-      acceptanceCriteria: task.acceptanceCriteria,
-      deliverables: deliverables.map((row) => ({
+    // Author attribution for the owner-facing summary: the ledger row carries
+    // the author GlobalMetaID only, so resolve it through the roster.
+    const nameForGmid = (globalMetaId: string | null): string | null => {
+      const key = (globalMetaId ?? '').trim().toLowerCase();
+      if (!key) return null;
+      const member = members.find((entry) => (entry.globalMetaId ?? '').trim().toLowerCase() === key);
+      return member?.displayName ?? member?.slug ?? null;
+    };
+    const summaryDeliverables: GroupTaskAcceptanceSummaryDeliverable[] = [];
+    for (const row of deliverables) {
+      let previewText: string | null = null;
+      // Legacy text rows carry no payload: preview the message that announced
+      // them so the owner sees what the note said.
+      if (!(row.uri ?? '').trim() && row.msgPinId && task.groupId) {
+        const message = await store.getMessageByPinId(task.groupId, row.msgPinId).catch(() => null);
+        if (message) previewText = preview(message.content, 160);
+      }
+      summaryDeliverables.push({
         kind: row.kind,
         uri: row.uri,
         status: row.status,
         confirmation: row.confirmation,
-        authorName: null,
-      })),
+        authorName: nameForGmid(row.authorGlobalMetaId),
+        ...(previewText ? { preview: previewText } : {}),
+      });
+    }
+
+    await store.addAcceptanceSummary({
+      taskId: task.id,
+      goal: task.goal,
+      acceptanceCriteria: task.acceptanceCriteria,
+      deliverables: summaryDeliverables,
       members: members
         .filter((member) => member.removedAt == null)
         .map((member) => ({
@@ -1428,7 +1460,12 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           await store.kvDelete(`${GROUP_TASK_DEADLINE_KV_PREFIX}${task.id}:${senderSeat.slug}`);
         }
         let recordedAny = false;
+        // A message that already delivers a URI artifact never also mints a
+        // text row: a URI-free [DELIVERABLE] line beside it is a summary of
+        // the actual artifact, not a second deliverable.
+        const hasUriCandidate = tags.deliverables.some((entry) => entry.uri != null);
         for (const candidate of tags.deliverables) {
+          if (candidate.kind === 'text' && hasUriCandidate) continue;
           // Per-(msgPin, uri, kind) dedupe (IDBots parity): the same line
           // replayed through indexer re-sync never double-records.
           const existing = await store.findDeliverableByMsgPinAndUri(

@@ -43,12 +43,30 @@ test('parseDeliverableCandidates: strict URIs, text fallback, fabrication guard'
 
 test('parseDeliverableCandidates: multiple tags on one line and corrections', () => {
   const rows = parseDeliverableCandidates(
-    `更正 [DELIVERABLE] metafile://${PIN_A} v2 [DELIVERABLE] https://example.com/x`,
+    `[DELIVERABLE] 更正 metafile://${PIN_A} v2 [DELIVERABLE] https://example.com/x`,
   );
   assert.equal(rows.length, 2);
   assert.ok(rows.every((row) => row.correction === true));
   assert.equal(rows[0].kind, 'metafile');
   assert.equal(rows[1].kind, 'link');
+});
+
+test('parseDeliverableCandidates: only protocol-position tags count (line start, markdown-wrapped)', () => {
+  // The live defect: a mid-sentence citation on a [WORKING] line was recorded
+  // as a text deliverable.
+  const inline = parseDeliverableCandidates('[WORKING] 完成后按 [DELIVERABLE] 要求提交');
+  assert.equal(inline.length, 0, 'an inline mention is a citation, not a delivery');
+
+  const proseBefore = parseDeliverableCandidates(`结果见 [DELIVERABLE] metafile://${PIN_A}`);
+  assert.equal(proseBefore.length, 0, 'prose before the tag on the same line stays inert');
+
+  const lineStart = parseDeliverableCandidates(`[DELIVERABLE] metafile://${PIN_A} done`);
+  assert.equal(lineStart.length, 1, 'a line-start tag is honored');
+
+  const bolded = parseDeliverableCandidates(`**[DELIVERABLE]** metafile://${PIN_A} done`);
+  assert.equal(bolded.length, 1, 'a markdown-wrapped line-start tag is honored');
+  assert.equal(bolded[0].uri, `metafile://${PIN_A}`);
+  assert.equal(bolded[0].payload, `metafile://${PIN_A} done`, 'markdown wrapper stripped from the payload');
 });
 
 test('parseWorkingAck: note capping and ETA in zh/en', () => {

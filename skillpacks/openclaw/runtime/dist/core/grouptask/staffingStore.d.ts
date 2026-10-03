@@ -14,7 +14,9 @@
  */
 import type { MetabotPaths } from '../state/paths';
 import { type GroupTaskStaffingPlan, type GroupTaskStaffingProposalStatus } from './staffing';
-export type StaffingOwnerDecisionMarker = 'confirm' | 'revise' | 'skip';
+export type StaffingOwnerDecisionMarker = 'confirm' | 'revise' | 'skip' | 'reject';
+/** Where an owner decision came from (UI card, chat verdict, engine gate). */
+export type StaffingDecisionSource = 'ui' | 'chat' | 'chat_reply' | 'engine';
 export interface GroupTaskStaffingProposalRecord {
     id: number;
     chairSlug: string;
@@ -25,8 +27,14 @@ export interface GroupTaskStaffingProposalRecord {
     plan: GroupTaskStaffingPlan;
     status: GroupTaskStaffingProposalStatus;
     skipAuthorized: boolean;
-    /** Last explicit owner decision recorded via UI/CLI ('confirm'|'revise'|'skip'). */
+    /** Last explicit owner decision recorded via UI/CLI ('confirm'|'revise'|'skip'|'reject'). */
     ownerDecision: StaffingOwnerDecisionMarker | null;
+    /** Surface that recorded the last owner decision (null for legacy rows). */
+    decisionSource: StaffingDecisionSource | null;
+    /** Identity stamped with the last owner decision (null when unknown). */
+    decidedBy: string | null;
+    /** The raw wish text that triggered this proposal (null for legacy rows). */
+    triggeringWish: string | null;
     createdTaskId: number | null;
     createdAt: number;
     confirmedAt: number | null;
@@ -40,6 +48,8 @@ export interface CreateStaffingProposalInput {
     acceptanceCriteria?: string | null;
     plan: unknown;
     skipAuthorized: boolean;
+    /** The raw wish text that triggered this proposal. */
+    triggeringWish?: string | null;
 }
 export declare class StaffingStoreError extends Error {
     readonly code: string;
@@ -59,12 +69,15 @@ export interface StaffingStore {
     releaseProposal(id: number): Promise<GroupTaskStaffingProposalRecord>;
     /** Records the created task on a claimed proposal. */
     markProposalCreated(id: number, taskId: number): Promise<GroupTaskStaffingProposalRecord>;
-    setOwnerDecision(id: number, decision: StaffingOwnerDecisionMarker): Promise<GroupTaskStaffingProposalRecord>;
+    setOwnerDecision(id: number, decision: StaffingOwnerDecisionMarker, opts?: {
+        source?: StaffingDecisionSource;
+        decidedBy?: string | null;
+    }): Promise<GroupTaskStaffingProposalRecord>;
     cancelProposal(id: number): Promise<GroupTaskStaffingProposalRecord>;
 }
 export declare function createStaffingStore(paths: MetabotPaths): StaffingStore;
 /** Read-time usability check shared by the service gate. */
 export declare function staffingProposalUsableAt(record: GroupTaskStaffingProposalRecord, nowMs: number): {
     usable: boolean;
-    reason: 'ok' | 'consumed' | 'cancelled' | 'created' | 'expired';
+    reason: 'ok' | 'consumed' | 'cancelled' | 'created' | 'expired' | 'rejected';
 };

@@ -127,9 +127,17 @@ function createGroupTaskStore(paths) {
         const safe = groupId.replace(/[^0-9a-zA-Z_-]/gu, '_');
         return node_path_1.default.join(messagesRoot, `${safe}.json`);
     }
-    async function readMessages(groupId) {
+    async function readMessagesFile(groupId) {
         const parsed = await readJsonFile(messagesPath(groupId));
-        return Array.isArray(parsed?.messages) ? parsed.messages : [];
+        return {
+            messages: Array.isArray(parsed?.messages) ? parsed.messages : [],
+            updatedAt: typeof parsed?.updatedAt === 'number' && Number.isFinite(parsed.updatedAt)
+                ? parsed.updatedAt
+                : null,
+        };
+    }
+    async function readMessages(groupId) {
+        return (await readMessagesFile(groupId)).messages;
     }
     return {
         root,
@@ -841,6 +849,7 @@ function createGroupTaskStore(paths) {
                 return -1;
             return messages[messages.length - 1].index;
         },
+        getMessagesSyncedAt: async (groupId) => (await readMessagesFile(groupId)).updatedAt,
         getMembersLastSpeakAt: async (groupId, globalMetaIds) => {
             const wanted = new Set(globalMetaIds.map(normalizeGlobalMetaId).filter(Boolean));
             const result = new Map();

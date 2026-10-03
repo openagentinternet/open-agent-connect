@@ -23,7 +23,10 @@ import {
   type GroupTaskStaffingProposalStatus,
 } from './staffing';
 
-export type StaffingOwnerDecisionMarker = 'confirm' | 'revise' | 'skip';
+export type StaffingOwnerDecisionMarker = 'confirm' | 'revise' | 'skip' | 'reject';
+
+/** Where an owner decision came from (UI card, chat verdict, engine gate). */
+export type StaffingDecisionSource = 'ui' | 'chat' | 'chat_reply' | 'engine';
 
 export interface GroupTaskStaffingProposalRecord {
   id: number;
@@ -35,8 +38,14 @@ export interface GroupTaskStaffingProposalRecord {
   plan: GroupTaskStaffingPlan;
   status: GroupTaskStaffingProposalStatus;
   skipAuthorized: boolean;
-  /** Last explicit owner decision recorded via UI/CLI ('confirm'|'revise'|'skip'). */
+  /** Last explicit owner decision recorded via UI/CLI ('confirm'|'revise'|'skip'|'reject'). */
   ownerDecision: StaffingOwnerDecisionMarker | null;
+  /** Surface that recorded the last owner decision (null for legacy rows). */
+  decisionSource: StaffingDecisionSource | null;
+  /** Identity stamped with the last owner decision (null when unknown). */
+  decidedBy: string | null;
+  /** The raw wish text that triggered this proposal (null for legacy rows). */
+  triggeringWish: string | null;
   createdTaskId: number | null;
   createdAt: number;
   confirmedAt: number | null;
@@ -51,6 +60,8 @@ export interface CreateStaffingProposalInput {
   acceptanceCriteria?: string | null;
   plan: unknown;
   skipAuthorized: boolean;
+  /** The raw wish text that triggered this proposal. */
+  triggeringWish?: string | null;
 }
 
 interface StaffingStateFile {
@@ -100,6 +111,7 @@ export interface StaffingStore {
   setOwnerDecision(
     id: number,
     decision: StaffingOwnerDecisionMarker,
+    opts?: { source?: StaffingDecisionSource; decidedBy?: string | null },
   ): Promise<GroupTaskStaffingProposalRecord>;
   cancelProposal(id: number): Promise<GroupTaskStaffingProposalRecord>;
 }
@@ -168,6 +180,9 @@ export function createStaffingStore(paths: MetabotPaths): StaffingStore {
         status: input.skipAuthorized ? 'skip_authorized' : 'pending',
         skipAuthorized: input.skipAuthorized,
         ownerDecision: null,
+        decisionSource: null,
+        decidedBy: null,
+        triggeringWish: input.triggeringWish?.trim() || null,
         createdTaskId: null,
         createdAt: now,
         confirmedAt: null,
@@ -226,7 +241,7 @@ export function createStaffingStore(paths: MetabotPaths): StaffingStore {
       return record;
     }),
 
-    setOwnerDecision: (id, decision) => enqueue(async () => {
+    setOwnerDecision: (id, decision, opts) => enqueue(async () => {
       const state = await readState();
       const record = requireProposal(state, id);
       if (record.status === 'consumed' || record.status === 'cancelled') {
@@ -236,12 +251,16 @@ export function createStaffingStore(paths: MetabotPaths): StaffingStore {
         );
       }
       record.ownerDecision = decision;
+      record.decisionSource = opts?.source ?? null;
+      record.decidedBy = opts?.decidedBy?.trim() || null;
       const now = Date.now();
       if (decision === 'confirm') {
         record.status = 'confirmed';
         record.confirmedAt = now;
       } else if (decision === 'skip') {
         record.status = 'skip_authorized';
+      } else if (decision === 'reject') {
+        record.status = 'rejected';
       } else {
         // 'revise' reopens the slate for a fresh proposal round.
         record.status = 'pending';
@@ -276,12 +295,20 @@ function normalizeProposalRecord(value: unknown): GroupTaskStaffingProposalRecor
     || record.status === 'skip_authorized'
     || record.status === 'consumed'
     || record.status === 'cancelled'
+    || record.status === 'rejected'
     ? record.status
     : 'pending';
   const ownerDecision = record.ownerDecision === 'confirm'
     || record.ownerDecision === 'revise'
     || record.ownerDecision === 'skip'
+    || record.ownerDecision === 'reject'
     ? record.ownerDecision
+    : null;
+  const decisionSource = record.decisionSource === 'ui'
+    || record.decisionSource === 'chat'
+    || record.decisionSource === 'chat_reply'
+    || record.decisionSource === 'engine'
+    ? record.decisionSource
     : null;
   const toNumber = (input: unknown): number | null => (
     typeof input === 'number' && Number.isFinite(input) ? input : null
@@ -297,6 +324,11 @@ function normalizeProposalRecord(value: unknown): GroupTaskStaffingProposalRecor
     status,
     skipAuthorized: record.skipAuthorized === true,
     ownerDecision,
+    decisionSource,
+    decidedBy: typeof record.decidedBy === 'string' && record.decidedBy.trim() ? record.decidedBy : null,
+    triggeringWish: typeof record.triggeringWish === 'string' && record.triggeringWish.trim()
+      ? record.triggeringWish
+      : null,
     createdTaskId: toNumber(record.createdTaskId),
     createdAt: toNumber(record.createdAt) ?? 0,
     confirmedAt: toNumber(record.confirmedAt),
@@ -308,10 +340,11 @@ function normalizeProposalRecord(value: unknown): GroupTaskStaffingProposalRecor
 export function staffingProposalUsableAt(
   record: GroupTaskStaffingProposalRecord,
   nowMs: number,
-): { usable: boolean; reason: 'ok' | 'consumed' | 'cancelled' | 'created' | 'expired' } {
+): { usable: boolean; reason: 'ok' | 'consumed' | 'cancelled' | 'created' | 'expired' | 'rejected' } {
   if (record.createdTaskId !== null) return { usable: false, reason: 'created' };
   if (record.status === 'consumed') return { usable: false, reason: 'consumed' };
   if (record.status === 'cancelled') return { usable: false, reason: 'cancelled' };
+  if (record.status === 'rejected') return { usable: false, reason: 'rejected' };
   if (isStaffingProposalExpired(record.createdAt, nowMs)) return { usable: false, reason: 'expired' };
   return { usable: true, reason: 'ok' };
 }

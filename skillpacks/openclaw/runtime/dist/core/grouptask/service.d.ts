@@ -11,7 +11,7 @@ import { type GroupTaskRelayStore } from './relayStore';
 import { type OpenTeamStore } from './openteamStore';
 import { type StaffingStore } from './staffingStore';
 import { type GroupTaskTransportOptions } from './transport';
-import { type CreateGroupTaskInput, type GroupTaskDetail, type GroupTaskListTab, type GroupTaskMember, type GroupTaskMemberStatus, type GroupTaskMemberSummary, type GroupTaskMemberWorkStatus, type GroupTaskMessage, type GroupTaskRecord, type GroupTaskRelayKind, type GroupTaskRelayRow, type GroupTaskStatusEventActor, type GroupTaskSummary, type GroupTaskSuperviseAction } from './types';
+import { type CreateGroupTaskInput, type GroupTaskDetail, type GroupTaskListTab, type GroupTaskMember, type GroupTaskMemberStatus, type GroupTaskMemberSummary, type GroupTaskMemberWorkStatus, type GroupTaskMessagesView, type GroupTaskRecord, type GroupTaskRelayKind, type GroupTaskRelayRow, type GroupTaskStatusEventActor, type GroupTaskSummary, type GroupTaskSuperviseAction } from './types';
 export interface GroupTaskProfileRef {
     slug: string;
     homeDir: string;
@@ -166,10 +166,7 @@ export declare function listGroupTaskMessages(ctx: GroupTaskServiceContext, chai
     limit?: number;
     beforeIndex?: number;
     sync?: boolean;
-}): Promise<{
-    messages: GroupTaskMessage[];
-    total: number;
-}>;
+}): Promise<GroupTaskMessagesView>;
 export interface PostGroupTaskMessageInput {
     /** Local member Bot to speak as; mutually exclusive with asOwner. */
     asSlug?: string;

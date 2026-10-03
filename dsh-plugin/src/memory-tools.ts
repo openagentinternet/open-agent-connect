@@ -317,7 +317,7 @@ export function buildMemoryToolDefinitions(slug: string, run: RunFn = runMetabot
     },
     {
       name: 'oac_session_read_all',
-      description: 'Read ALL messages from another local session — a DSH conversation (any local Bot, e.g. a delegated Worker) or an A2A private chat — given the session id that recent_chats, conversation_search, or twin_task_status print as (session:<id>). Read-only, never modifies the target. Use to review what a delegated Worker did or catch up on another conversation; for just the last message use oac_session_read_latest (cheaper). Do not read the CURRENT session (already in context). Returns the session summary and full message log; an error if the session does not exist.',
+      description: 'Read ALL messages from another local session — a DSH conversation (any local Bot, e.g. a delegated Worker) or an A2A private chat — given the session id that recent_chats, conversation_search, or twin_task_status print as (session:<id>). Read-only, never modifies the target. Use to review what a delegated Worker did or catch up on another conversation; for just the last message use oac_session_read_latest (cheaper). Do not read the CURRENT session (already in context). Returns the session summary and full message log; an error if the session does not exist. The mirror lands at the end of a turn, so an in-flight turn is not visible yet — a running Worker session may look empty or stale until its turn finishes.',
       parameters: {
         type: 'object',
         properties: {
@@ -332,7 +332,7 @@ export function buildMemoryToolDefinitions(slug: string, run: RunFn = runMetabot
     },
     {
       name: 'oac_session_read_latest',
-      description: 'Read only the LATEST message from another local session (DSH conversation or A2A private chat), given its session id. Read-only. Use for a quick status check on another session ("did the Worker finish?", "what is the latest in that task") without pulling the whole history; when you need full context or decisions, use oac_session_read_all instead. Returns the session summary and the single latest message; an error if the session does not exist.',
+      description: 'Read only the LATEST message from another local session (DSH conversation or A2A private chat), given its session id. Read-only. Use for a quick status check on another session ("did the Worker finish?", "what is the latest in that task") without pulling the whole history; when you need full context or decisions, use oac_session_read_all instead. Returns the session summary and the single latest message; an error if the session does not exist. The mirror lands at the end of a turn, so an in-flight turn is not visible yet — a running Worker session may look empty or stale until its turn finishes.',
       parameters: {
         type: 'object',
         properties: {
