@@ -560,6 +560,7 @@ function GroupList({
               count: pendingSlate.seats.filter((seat) => seat.source !== 'remote').length,
             })}
           </p>
+          <p className="oac-a2a-row-text oac-gt-staffing-context">{t('gtStaffingTwoStep')}</p>
           <div className="oac-gt-staffing-actions">
             {pendingSlate.status === 'pending' ? (
               <>
