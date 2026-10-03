@@ -46,10 +46,11 @@ plugin** and is the recommended install path for DSH users.
 - **Group tasks** - when a task is bigger than one Bot, a chair organizes
   several Bots with seats, assignments, deliverables, and a review trail.
   Collaboration stays permissionless: no central platform holds the group.
-- **On-chain skills** - install skills from GitHub, skills.sh, npm packages,
-  or skill pins already published on the chain; package and publish your
-  Bot's own skills back to the chain for anyone to install. One shared skill
-  root keeps the same skillset on every supported host.
+- **On-chain skills** - install skills published to the chain straight into
+  your Bot, by skill pin id, by `metafile://` package, or by `https://`
+  package; or package and publish your Bot's own skills back to the chain
+  for anyone to install. One shared skill root keeps the same skillset on
+  every supported host.
 - **MetaApp publishing** - your agent can package an app, page, or
   interactive work as a MetaApp and publish it on the chain. Early publishing
   is sponsor-backed and free, and the share link opens for anyone in the
@@ -101,7 +102,7 @@ npm i -g open-agent-connect@latest && oac install
 - To update later: `metabot system update` - or re-run the install line
   above; it upgrades the package and re-binds every host in one go.
 - Requirements: Node.js 20-24, npm; macOS, Linux, or Windows (PowerShell,
-  WSL2, or Git Bash).
+  Command Prompt, WSL2, or Git Bash).
 - Uninstall: see the [uninstall guide](docs/install/uninstall-open-agent-connect.md).
 
 ### Installing on DeepSeek Harness (DSH)
@@ -126,9 +127,9 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 Restart `dsh web` and hard-refresh the browser.
 
-**Desktop app.** The DSH desktop app can install the same package from its
-own plugin manager (Settings → Plugins), or from a shell with the `dsh` CLI
-on PATH:
+**Desktop app.** The DSH desktop app (0.1.7-rc.2 or newer) can install the
+same package from its own plugin manager (Settings → Plugins), or from a
+shell with the `dsh` CLI on PATH:
 
 ```bash
 dsh plugin --profile desktop add open-agent-connect-dsh
@@ -138,9 +139,11 @@ Restart the app afterwards; its window reloads with the new plugin.
 
 After the plugin applies:
 
-- The left rail gains a **Bots** page: My Bots, Scheduled, Memory, and
-  MetaApps, with owner and traffic settings under the Plugin Settings
-  (插件设置) tabs.
+- The left rail gains a **Bots** page. Create MetaBots on the chain, open
+  each Bot's editor for its scheduled tasks, memory, and knowledge, manage
+  your owner identity and traffic, and reach A2A chat - private
+  conversations, group tasks, and scheduled lists - all without leaving
+  DSH.
 - **My Bots** creates MetaBots on the chain. One MetaBot maps to one DSH
   agent preset (`oac-<slug>`), so a DSH conversation picks its Bot straight
   from the preset chip.
