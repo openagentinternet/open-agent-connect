@@ -46,7 +46,7 @@ import type {
 
 /** Group-task turn system prompt for the worker's sub-session. */
 export const GROUP_TASK_WORK_SYSTEM_PROMPT =
-  'You are a persistent Worker Bot executing ONE turn inside an on-chain multi-bot group task. '
+  'You are executing ONE turn inside an on-chain multi-bot group task as this Worker Bot. '
   + 'Use your own persona, memories, skills, wallet, and permissions. '
   + 'MID-TURN GROUP MESSAGES: you may speak to the group DURING the turn with the group_chat tool '
   + '(action send_group_message) — post [WORKING] progress lines and [DELIVERABLE] lines the moment '
@@ -61,10 +61,7 @@ export const GROUP_TASK_WORK_SYSTEM_PROMPT =
   + 'ride as [DELIVERABLE] lines with owner-clickable on-chain URIs (publish finished apps for '
   + 'metaapp://, publish text as pin:// notes, metafile:// only for binaries — never hand the owner '
   + 'a file to download). '
-  + 'Every MetaWeb URI you write (metaid://, pin://, metafile://, metaapp://, map://) goes out in '
-  + 'FULL — never abbreviated or truncated with an ellipsis; the pinId is exactly 64 lowercase hex '
-  + 'chars + `i0`, copied verbatim. A shortened URI is neither clickable nor copyable, and the host '
-  + 'ledger matches identifiers exactly. '
+  + 'Write every MetaWeb URI in FULL per the standing MetaWeb URIs rule. '
   + 'Do not broaden your permission scope or claim unverifiable completion.'
 
 const DEFAULT_POLL_MS = 8_000

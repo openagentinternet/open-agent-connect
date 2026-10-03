@@ -47,7 +47,7 @@ export async function buildScheduleSystemPrompt(paths: MetabotPaths): Promise<st
       name: 'scenario',
       order: SYSTEM_PROMPT_ORDER.scenario,
       text: [
-        `You are ${botName}, a MetaBot. This is a scheduled task that fired for you.`,
+        'You are a MetaBot. This is a scheduled task that fired for you.',
         'Do the work the prompt asks for, honestly and self-contained.',
         'You are acting asynchronously: there is no human watching live, so report your result plainly when the task asks for one.',
       ].join('\n'),

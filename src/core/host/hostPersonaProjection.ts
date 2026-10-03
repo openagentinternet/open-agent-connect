@@ -147,7 +147,7 @@ async function compileProjection(input: HostPersonaProjectionInput): Promise<{
     `Use ${profile.name} for tasks that benefit from this MetaBot's role, personality, and goal.`,
   );
   const instructions = [
-    `You are operating as the local MetaBot persona named ${profile.name}.`,
+    'You are operating as the local MetaBot persona defined below.',
     '',
     'This persona is an identity and behavior overlay for Codex. Keep Codex host capabilities intact.',
     '',

@@ -1,10 +1,12 @@
 /**
  * Group Task chat tools for the DSH host: one twin-only `group_task` tool
- * whose `action` union mirrors the IDBots metabot-group-task skill verbs
- * (propose/create/list/show/send/invite/kick/close/supervise-shaped surface,
- * backed by the OAC staffing + task stores instead of IDBots RPC). Execution
- * goes through dispatchGroupTaskRoutes — the same runner the panel routes use —
- * so flag building, timeouts, and the local-read fast path stay in one place.
+ * whose `action` union (list/detail/messages/create/propose/decide/
+ * create_from_proposal/search_candidates/post/close/reopen/kick/member_status/
+ * invite/invites/supervise/deliverable_delete/health) mirrors the IDBots
+ * metabot-group-task skill verbs, backed by the OAC staffing + task stores
+ * instead of IDBots RPC. Execution goes through dispatchGroupTaskRoutes — the
+ * same runner the panel routes use — so flag building, timeouts, and the
+ * local-read fast path stay in one place.
  *
  * The `oac:group-task` prompt section is the DSH port of the IDBots
  * metabot-group-task SKILL.md: wish → coarse seats → candidate search → slate
@@ -36,14 +38,14 @@ Do NOT open one for single-step jobs (do them yourself or use local_worker_deleg
 3. For each seat call \`{action:"search_candidates", seat}\` once (match-first; local Workers are a tie-break, not a gate), then \`{action:"propose", title, goal, plan, acceptanceCriteria}\`. The plan is {stages:[{id,title,seatRole,dependsOn[]}], seats:[{role, candidateName, candidateSlug?, candidateGlobalMetaId?, source:"local"|"remote", reason, domainLabel?, backupName?}]}. A local seat must name an AVAILABLE local Bot (Bots page → My Bots toggle on AND a DSH LLM pair configured) — propose refuses slugs that are unknown or unavailable, so only pick candidates search_candidates returned; never seat a Bot you merely remember.
 4. The propose result carries \`slateText\` — show it to the owner in the owner's language (pass \`language\`), then WAIT. The owner confirms in chat → \`{action:"decide", proposalId, decision:"confirm"}\`; asks for changes → "revise", then propose again; wants staffing skipped → "skip".
 5. After a confirm decision call \`{action:"create_from_proposal", proposalId}\`. Auto-start waiver: when the triggering wish itself said to just start (直接开始 / 直接开 / "just start" / "no need to confirm"), you may create immediately — pass the original wish text as \`wish\` on propose so the gate records it.
-6. create_from_proposal returns the task (taskId, groupId) and \`pendingRemoteSeats\`. One Bot can hold several seats — invite each remote BOT exactly ONCE, by its GlobalMetaId; a single invite covers all its seats (duplicate invites are refused: invite_pending / already_member). Invites expire in 10 minutes and the daemon must be alive when one arrives. Then report the group's title, roster, and stage plan to the owner and let the engine run. When the result lists \`skippedWorkers\`, those local seats were dropped as unavailable — name them to the owner and note the group runs short those seats.
+6. create_from_proposal returns the task (taskId, groupId) and \`pendingRemoteSeats\`. One Bot can hold several seats — invite each remote BOT exactly ONCE, by its globalMetaId; a single invite covers all its seats (duplicate invites are refused: invite_pending / already_member). Invites expire in 10 minutes. Then report the group's title, roster, and stage plan to the owner and let the engine run. When the result lists \`skippedWorkers\`, those local seats were dropped as unavailable — name them to the owner and note the group runs short those seats.
 
 ### After creation
 The daemon engine drives the task: it posts the kickoff, runs the planning turn, wakes @-mentioned workers, verifies deliverables, and moves planning → executing → review. SINGLE COMMANDER: the chair is the only coordinator and the host itself NEVER speaks in the group — every group message is written by a participant (chair, workers, or the owner); host observations reach the chair as private environment notes in its turn context. Do not speak as the chair inside the group while it runs (the engine speaks with the chair's voice); if you must post, post as the owner (\`asOwner\`) or as a member Bot (\`asSlug\`).
 - Follow progress: \`{action:"detail", taskId}\` / \`{action:"messages", taskId}\`.
 - When the task reaches review, walk the owner through the acceptance summary in this chat, then close it: \`{action:"close", taskId, outcome:"done", rating:1-5, comment?}\` — or back to work: \`{action:"reopen", taskId, reason}\`. Cancel with outcome:"cancelled". CLOSING IS THE OWNER'S DECISION, never yours: every close raises the native confirmation dialog for the owner (when approval prompts are disabled in this session, ask the owner in chat first and pass \`ownerConfirmed:true\` — only after an explicit yes). Never close or rate a task on your own authority because the deliverables "look done" — present the evidence and wait.
-- Roster control: \`{action:"member_status", taskId, status, member|globalMetaId}\`, \`{action:"kick", taskId, member|globalMetaId, reason?}\`, \`{action:"invite", ...}\` to add a remote Bot by GlobalMetaId.
-- Statuses: planning, executing, review, done, cancelled. Deliverables arrive as [DELIVERABLE] messages and are verified on-chain; app work must show up as a clickable \`metaapp://\` link — if a worker hands the owner a raw file instead, send it back before review. Every MetaWeb URI (metaid://, pin://, metafile://, metaapp://, map://) is always shown in FULL — never abbreviated or truncated with an ellipsis; the pinId part is 64 lowercase hex chars + \`i0\`, copied verbatim.
+- Roster control: \`{action:"member_status", taskId, status, member|globalMetaId}\`, \`{action:"kick", taskId, member|globalMetaId, reason?}\`, \`{action:"invite", ...}\` to add a remote Bot by globalMetaId.
+- Statuses: planning, executing, review, done, cancelled. Deliverables arrive as [DELIVERABLE] messages and are verified on-chain; app work must show up as a clickable \`metaapp://\` link — if a worker hands the owner a raw file instead, send it back before review. Write every MetaWeb URI in FULL per the standing MetaWeb URIs rule.
 - Owner supervision via \`{action:"supervise", taskId, superviseAction}\`: "nudge" wakes a quiet member through the chair's turn context (optionally target one with member/globalMetaId), "pause" suspends dispatch and "resume" continues (the chair re-engages the roster), "flag" records an observation into the acceptance record. Supervision never posts into the group. Use \`{action:"deliverable_delete", taskId, deliverableId}\` to drop a mis-reported ledger row.
 Never fabricate progress or completion; report what detail/messages actually show, refer to tasks by title (not raw ids) in conversation, and point the owner to the Group Tasks panel for the live view.`
 
@@ -159,7 +161,7 @@ function formatCreated(data: Record<string, unknown>): string {
       entry.roles.push(String(seat.role))
       byBot.set(key, entry)
     }
-    lines.push(`Pending remote Bots (${byBot.size}, holding ${remoteSeats.length} seat${remoteSeats.length === 1 ? '' : 's'}) — invite each BOT once; a single invite by its GlobalMetaId covers all its seats. Invites expire in 10 minutes:`)
+    lines.push(`Pending remote Bots (${byBot.size}, holding ${remoteSeats.length} seat${remoteSeats.length === 1 ? '' : 's'}) — invite each BOT once; a single invite by its globalMetaId covers all its seats. Invites expire in 10 minutes:`)
     for (const bot of byBot.values()) {
       lines.push(`  - ${bot.name}${bot.gmid ? ` (globalMetaId ${bot.gmid})` : ''} — seats: ${bot.roles.join(', ')}`)
     }
@@ -549,7 +551,7 @@ export function buildGroupTaskToolDefinition(
         asSlug: { type: 'string', description: 'Post as this member Bot instead of the owner.' },
         asOwner: { type: 'boolean', description: 'Post as the owner identity.' },
         replyPin: { type: 'string' },
-        mention: { type: 'array', items: { type: 'string' }, description: 'GlobalMetaIds or @Names to mention.' },
+        mention: { type: 'array', items: { type: 'string' }, description: 'globalMetaIds or @Names to mention.' },
         workerSlugs: { type: 'array', items: { type: 'string' }, description: 'Direct-create local worker seats (bypasses staffing; prefer propose). Unavailable Bots (Settings toggle off, or no DSH LLM pair) are skipped and reported as skippedWorkers.' },
         outcome: { type: 'string', enum: ['done', 'cancelled'] },
         rating: { type: 'integer', description: '1-5 acceptance rating on close done.' },
@@ -557,7 +559,7 @@ export function buildGroupTaskToolDefinition(
         ownerConfirmed: { type: 'boolean', description: 'Close only: true after the owner explicitly confirmed the outcome and rating in chat (required when approval prompts are disabled).' },
         reason: { type: 'string' },
         member: { type: 'string', description: 'Member Bot slug (kick/member_status).' },
-        globalMetaId: { type: 'string', description: 'Remote member GlobalMetaId (kick/member_status/invite).' },
+        globalMetaId: { type: 'string', description: 'Remote member globalMetaId (kick/member_status/invite).' },
         status: { type: 'string', description: 'Member status: assigned|working|standby|done|unreachable|delivered.' },
         name: { type: 'string', description: 'Display name for an invited remote Bot.' },
         skills: { type: 'array', items: { type: 'string' } },

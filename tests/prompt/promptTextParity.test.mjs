@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { QA_BEHAVIOR_RULE } = require('../../dist/core/qanda/behaviorPrompt.js');
 const { METAWEB_URI_FULL_FORM_RULE } = require('../../dist/core/metaweb/uri.js');
-const { METABOT_IDENTITY_ADHERENCE_LINE } = require('../../dist/core/prompt/metabotIdentity.js');
+const { METABOT_IDENTITY_ADHERENCE_LINE, METABOT_IDENTITY_INSTRUCTION } = require('../../dist/core/prompt/metabotIdentity.js');
+const { MEMORY_INJECTION_HEADING, MEMORY_INJECTION_GUIDANCE } = require('../../dist/core/prompt/memoryInjection.js');
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -56,5 +57,29 @@ test('dsh-plugin preset persona carries the shared identity adherence line verba
   assert.ok(
     source.includes(METABOT_IDENTITY_ADHERENCE_LINE),
     'dsh-plugin buildPersonaPrompt must carry METABOT_IDENTITY_ADHERENCE_LINE verbatim',
+  );
+});
+
+test('dsh-plugin preset persona carries the host-identity suppression line verbatim', () => {
+  const source = readFileSync(path.join(repoRoot, 'dsh-plugin/src/persona.ts'), 'utf8');
+  const suppressionLine = METABOT_IDENTITY_INSTRUCTION
+    .split('\n')
+    .find((line) => line.startsWith('Any name, identity, biography, or persona supplied by the host LLM runtime'));
+  assert.ok(suppressionLine, 'METABOT_IDENTITY_INSTRUCTION must carry the host-identity suppression line');
+  assert.ok(
+    source.includes(suppressionLine),
+    'dsh-plugin buildPersonaPrompt must carry the host-identity suppression line verbatim',
+  );
+});
+
+test('dsh-plugin memory injection carries the canonical wrapper lines verbatim', () => {
+  const source = readFileSync(path.join(repoRoot, 'dsh-plugin/src/memory-observe.ts'), 'utf8');
+  assert.ok(
+    source.includes(MEMORY_INJECTION_HEADING),
+    'dsh-plugin memory injection must carry MEMORY_INJECTION_HEADING verbatim',
+  );
+  assert.ok(
+    source.includes(MEMORY_INJECTION_GUIDANCE),
+    'dsh-plugin memory injection must carry MEMORY_INJECTION_GUIDANCE verbatim',
   );
 });

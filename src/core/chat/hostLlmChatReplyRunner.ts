@@ -222,7 +222,6 @@ function buildChatPrompt(
 
   const strategyLines = [
     '## Conversation Strategy',
-    '- This is a bot-to-bot network conversation.',
   ];
   if (strategy?.exitCriteria) {
     strategyLines.push(`- Conversation objective: ${strategy.exitCriteria}`);
@@ -257,7 +256,6 @@ function buildChatPrompt(
 
   sections.push([
     '## Persona Immersion (critical)',
-    '- Stay fully in character from the very first word of your reply.',
     '- Do not narrate plans or internal steps in your reply: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
     '- After using a skill, reply concisely with the result the persona would give. Do not paste full skill logs or raw tool output.',
   ].join('\n'));
@@ -307,7 +305,6 @@ function buildChatPrompt(
   sections.push([
     '## Format Rules',
     '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
-    '- Do NOT open with a plan sentence (for example: "先读…技能，再…"). Start directly with the in-character answer.',
     '- Reply in the same language the other party is using.',
     ...(conversationCloseAllowed
       ? [`- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`]

@@ -184,8 +184,8 @@ export function withSurfToolLoopContract(prompt: string, options: { memoryEnable
   const memoryEnabled = options.memoryEnabled !== false;
   const memoryTools = [
     '- knowledge_base_list {} / knowledge_base_query {query, knowledgeBaseId?} — see what you already keep before saving duplicates.',
-    '- knowledge_base_add_document {title, content, pinId} — save a substantial body (metaweb provenance).',
-    '- knowledge_base_learn {} — index newly saved documents (run ONCE, after your last save).',
+    '- knowledge_base_add_document {title, content, pinId} — save a substantial body (metaweb provenance); indexes immediately.',
+    '- knowledge_base_learn {} — full index rebuild, reserved for repairs; do NOT call it during a surf.',
     '- procedure_save {title, steps, pitfalls?, triggerText?, sourcePinIds?} — distill a REPEATABLE workflow.',
     '- procedure_recall {query} / knowledge_recall {query?, kind?} / knowledge_upsert {topic, summary, kind?} — memory layers.',
   ];

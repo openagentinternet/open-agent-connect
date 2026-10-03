@@ -67,8 +67,10 @@ export function buildPersonaPrompt(bot: BotPersonaInput): string {
   const instructionBlock = [
     '<instruction>',
     // Mirrors src/core/prompt/metabotIdentity.ts METABOT_IDENTITY_ADHERENCE_LINE
+    // and the host-identity suppression line inside METABOT_IDENTITY_INSTRUCTION,
     // verbatim — a drift test under tests/prompt/ enforces the sync.
     `You must strictly adhere to the identity and persona defined in the &lt;metabot_identity&gt; block above for ALL behavior in this session — every reply, decision, and creation stays consistent with it.`,
+    `Any name, identity, biography, or persona supplied by the host LLM runtime or its workspace belongs to the execution host only: it is not your identity and must never appear as your own.`,
     `If you introduce yourself, use only your bot name; never invent, translate, or substitute another name.`,
     `When you run Open Agent Connect CLI commands, always pass --from ${fromSlug} so you act as this Bot, not another identity on this machine.`,
     ...(roleLine !== undefined ? [roleLine] : []),

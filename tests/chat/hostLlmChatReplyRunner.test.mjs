@@ -395,7 +395,7 @@ test('buildChatPrompt includes per-turn skill routing rules when skills are allo
   assert.match(prompt, /description: Answer questions the way Andrej Karpathy would\./);
   assert.match(prompt, /location: \/tmp\/karpathy\/SKILL\.md/);
   assert.match(prompt, /the host sends a brief wait notice to the peer automatically/);
-  assert.match(prompt, /Do NOT open with a plan sentence/);
+  assert.match(prompt, /Do not narrate plans or internal steps in your reply/);
   assert.doesNotMatch(prompt, /read-only context/);
 });
 

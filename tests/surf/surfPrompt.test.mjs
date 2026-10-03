@@ -74,11 +74,11 @@ test('pre-dream trigger shortens the time budget; degraded variant explains memo
   });
   assert.match(degraded, /DEGRADED SURF — your Memory is OFF tonight/);
   // Degraded runs have no save instructions at all.
-  assert.doesNotMatch(degraded, /knowledge_base_add_document with sourceType 'metaweb'/);
-  // The full prompt keeps them.
+  assert.doesNotMatch(degraded, /knowledge_base_add_document/);
+  // The full prompt keeps them (host-side provenance is automatic — no sourceType arg).
   assert.match(buildSurfSessionPrompt({
     runId: 'r', botSlug: 'b', botName: 'Bot', trigger: 'manual-ui', briefing: briefingFixture(),
-  }), /knowledge_base_add_document with sourceType 'metaweb'/);
+  }), /knowledge_base_add_document with the pinId, its title, and the full body/);
 });
 
 test('previous notes ride into the prompt verbatim', () => {

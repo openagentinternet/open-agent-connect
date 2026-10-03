@@ -258,10 +258,7 @@ export function buildChainHistorySummaryPrompt(input: ChainHistorySummaryItemInp
   const lead = input.kind === 'write'
     ? `You published the following content on-chain${context ? ` (${context})` : ''}:`
     : `You read the following on-chain content${context ? ` (${context})` : ''}:`;
-  const closing = input.kind === 'write'
-    ? 'Summarize what you published.'
-    : 'Summarize the central idea of what you read.';
-  const user = `${lead}\n\n<content>\n${input.content}\n</content>\n\n${closing}`;
+  const user = `${lead}\n\n<content>\n${input.content}\n</content>`;
   return { system, user };
 }
 
