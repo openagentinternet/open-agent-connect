@@ -13,6 +13,11 @@ const platformSkillCatalog_1 = require("../../services/platformSkillCatalog");
 const serviceRunnerContracts_1 = require("./serviceRunnerContracts");
 const providerDeliveryArtifacts_1 = require("./providerDeliveryArtifacts");
 const platformRegistry_1 = require("../../platform/platformRegistry");
+const chatPersonaLoader_1 = require("../../chat/chatPersonaLoader");
+const memoryService_1 = require("../../memory/memoryService");
+const compose_1 = require("../../prompt/compose");
+const metabotIdentity_1 = require("../../prompt/metabotIdentity");
+const paths_1 = require("../../state/paths");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -127,6 +132,37 @@ async function defaultCanStartRuntime(runtime) {
     }
     catch {
         return false;
+    }
+}
+/**
+ * Persona + experience context appended to the paid-order system prompt: the
+ * provider bot fulfills the order AS ITSELF (voice, self-cognition, work
+ * reviews), not as an anonymous executor. Never throws.
+ */
+async function buildProviderPersonaContext(profileHomeDir) {
+    try {
+        const paths = (0, paths_1.resolveMetabotPaths)(profileHomeDir);
+        const persona = await (0, chatPersonaLoader_1.loadChatPersona)(paths).catch(() => null);
+        const experienceXml = await (0, memoryService_1.buildExperienceContext)(paths);
+        return (0, compose_1.composeSystemPrompt)([
+            {
+                name: 'identity',
+                order: compose_1.SYSTEM_PROMPT_ORDER.identity,
+                text: persona
+                    ? (0, metabotIdentity_1.buildMetabotIdentityBlock)({
+                        name: persona.identity?.name,
+                        globalMetaId: persona.identity?.globalMetaId,
+                        role: persona.role,
+                        soul: persona.soul,
+                        goal: persona.goal,
+                    })
+                    : '',
+            },
+            { name: 'experience', order: compose_1.SYSTEM_PROMPT_ORDER.experience, text: experienceXml },
+        ]);
+    }
+    catch {
+        return '';
     }
 }
 function buildPaidOrderSystemPrompt(input) {
@@ -588,7 +624,11 @@ function createProviderServiceRunner(input) {
                 }
             }
             const initialRuntime = selection.runtime;
-            const systemPrompt = buildPaidOrderSystemPrompt({
+            const personaContext = input.profileHomeDir
+                ? await buildProviderPersonaContext(input.profileHomeDir)
+                : '';
+            const withPersonaContext = (base) => (personaContext ? `${base}\n\n${personaContext}` : base);
+            const systemPrompt = withPersonaContext(buildPaidOrderSystemPrompt({
                 serviceName: order.serviceName ?? '',
                 displayName: order.displayName ?? '',
                 providerSkill,
@@ -597,7 +637,7 @@ function createProviderServiceRunner(input) {
                 userTask: order.userTask,
                 taskContext: order.taskContext,
                 executionReminder: order.executionReminder,
-            });
+            }));
             const runNonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
             let attemptIndex = 0;
             const executeWithSelection = async (selectedSelection) => {
@@ -819,16 +859,22 @@ function createProviderServiceRunner(input) {
                     selection,
                 });
             }
-            const systemPrompt = buildPaidOrderSystemPrompt({
-                serviceName: order.serviceName ?? '',
-                displayName: order.displayName ?? '',
-                providerSkill,
-                providerSkills,
-                outputType: order.outputType ?? 'text',
-                userTask: order.userTask,
-                taskContext: order.taskContext,
-                executionReminder: order.executionReminder,
-            });
+            const personaContext = input.profileHomeDir
+                ? await buildProviderPersonaContext(input.profileHomeDir)
+                : '';
+            const systemPrompt = [
+                buildPaidOrderSystemPrompt({
+                    serviceName: order.serviceName ?? '',
+                    displayName: order.displayName ?? '',
+                    providerSkill,
+                    providerSkills,
+                    outputType: order.outputType ?? 'text',
+                    userTask: order.userTask,
+                    taskContext: order.taskContext,
+                    executionReminder: order.executionReminder,
+                }),
+                personaContext,
+            ].filter(Boolean).join('\n\n');
             const selectedSkills = selection.skills.length > 0 ? selection.skills : [selection.skill];
             const skillSourcePaths = Object.fromEntries(selectedSkills.map((skill) => [skill.skillName, skill.absolutePath]));
             let sessionId;

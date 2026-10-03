@@ -5,7 +5,10 @@ exports.createGeminiBackend = createGeminiBackend;
 const backend_1 = require("./backend");
 const jsonProcess_1 = require("./jsonProcess");
 function buildGeminiArgs(request) {
-    const args = ['-p', request.prompt, '--yolo', '-o', 'stream-json'];
+    // Gemini CLI has no system-prompt channel: deliver system + user as one
+    // message (same pattern as the other concatenating backends).
+    const message = request.systemPrompt ? `${request.systemPrompt}\n\n${request.prompt}` : request.prompt;
+    const args = ['-p', message, '--yolo', '-o', 'stream-json'];
     if (request.model)
         args.push('-m', request.model);
     if (request.resumeSessionId)

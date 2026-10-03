@@ -14,6 +14,9 @@ const llmRuntimeResolver_1 = require("../llm/llmRuntimeResolver");
 const llmRuntimeStore_1 = require("../llm/llmRuntimeStore");
 const llmRuntimeExecution_1 = require("../llm/llmRuntimeExecution");
 const orderMessage_1 = require("../orders/orderMessage");
+const memoryService_1 = require("../memory/memoryService");
+const memoryInjection_1 = require("../prompt/memoryInjection");
+const metabotIdentity_1 = require("../prompt/metabotIdentity");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -90,20 +93,25 @@ function normalizeGeneratedOrderProtocolText(value, options) {
     }
     return text;
 }
-function buildSystemPrompt(persona) {
+function buildSystemPrompt(persona, experienceXml = '') {
     const sections = [
         'You write one natural-language body for an Open Agent Connect skill-service protocol message.',
         'The daemon adds protocol tags and structured payment/order metadata. Do not include tags, metadata labels, txids, order ids, pin ids, URLs, markdown tables, or final "Bye" lines unless the user task itself truly requires a URL.',
-        'Use first person when natural. Follow the local MetaBot persona without quoting the persona fields.',
+        'Use first person when natural. Follow the bot persona below without quoting the persona fields verbatim.',
     ];
-    if (persona.role) {
-        sections.push(`Persona role:\n${persona.role}`);
+    const identityBlock = (0, metabotIdentity_1.buildMetabotIdentityBlock)({
+        name: persona.identity?.name,
+        globalMetaId: persona.identity?.globalMetaId,
+        role: persona.role,
+        soul: persona.soul,
+        goal: persona.goal,
+    });
+    if (identityBlock) {
+        sections.push(identityBlock);
     }
-    if (persona.soul) {
-        sections.push(`Persona style:\n${persona.soul}`);
-    }
-    if (persona.goal) {
-        sections.push(`Persona goal:\n${persona.goal}`);
+    const memorySection = (0, memoryInjection_1.wrapMemoryInjection)(experienceXml);
+    if (memorySection) {
+        sections.push(memorySection);
     }
     return sections.join('\n\n');
 }
@@ -183,6 +191,9 @@ function createLlmOrderProtocolTextGenerator(options) {
     const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 45_000));
     const pollIntervalMs = Math.max(1, Math.floor(options.pollIntervalMs ?? 500));
     async function run(input) {
+        // The experience hot layer (self-identity, value boundaries, work reviews)
+        // keeps even one-line protocol texts aligned with the bot's self-cognition.
+        const experienceXml = await (0, memoryService_1.buildExperienceContext)(input.paths);
         // Unified passive-LLM priority: the Bot's DSH pair (through a connected
         // host executor) takes the first attempt; the local chain below follows.
         const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
@@ -190,7 +201,7 @@ function createLlmOrderProtocolTextGenerator(options) {
             timeoutMs,
         })({
             botSlug: node_path_1.default.basename(input.paths.profileRoot),
-            system: buildSystemPrompt(input.persona),
+            system: buildSystemPrompt(input.persona, experienceXml),
             user: input.prompt,
         });
         if (hostText !== null) {
@@ -220,7 +231,7 @@ function createLlmOrderProtocolTextGenerator(options) {
             runtimeResolver,
             llmExecutor: options.llmExecutor,
             metaBotSlug: node_path_1.default.basename(input.paths.profileRoot),
-            systemPrompt: buildSystemPrompt(input.persona),
+            systemPrompt: buildSystemPrompt(input.persona, experienceXml),
             prompt: input.prompt,
             timeoutMs,
             pollIntervalMs,

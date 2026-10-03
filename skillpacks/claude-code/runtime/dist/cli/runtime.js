@@ -78,6 +78,7 @@ const readLedger_1 = require("../core/chainhistory/readLedger");
 const memoryStore_1 = require("../core/memory/memoryStore");
 const memoryPolicy_1 = require("../core/memory/memoryPolicy");
 const memoryService_1 = require("../core/memory/memoryService");
+const sessionSystemPrompt_1 = require("../core/prompt/sessionSystemPrompt");
 const memoryTurnExtraction_1 = require("../core/memory/memoryTurnExtraction");
 const transcriptStore_1 = require("../core/memory/transcriptStore");
 const capabilityStore_1 = require("../core/memory/capabilityStore");
@@ -5485,6 +5486,11 @@ async function serveCliDaemonProcess(context) {
             }
             return diagnostics;
         };
+        // Persona + experience hot layer: the surf prompt asks the bot's persona
+        // to "decide EVERYTHING tonight" — it must actually BE in the prompt.
+        const surfSystemPrompt = await (0, sessionSystemPrompt_1.buildPersonaSessionSystemPrompt)(profilePaths, {
+            scenario: 'You are a MetaBot running an unattended MetaWeb surf session. Reply with exactly one ```json fence per turn.',
+        });
         const llm = async (history) => {
             if (Date.now() > deadlineMs) {
                 throw new Error('Surf watchdog: wall-clock budget exhausted — write the final report now.');
@@ -5492,7 +5498,6 @@ async function serveCliDaemonProcess(context) {
             const historyText = history
                 .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
                 .join('\n\n---\n\n');
-            const surfSystemPrompt = 'You are a MetaBot running an unattended MetaWeb surf session. Reply with exactly one ```json fence per turn.';
             const hostText = await hostCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
             if (hostText !== null)
                 return hostText;
@@ -6423,11 +6428,16 @@ async function serveCliDaemonProcess(context) {
                                     }
                                 },
                             });
+                            // Persona + experience hot layer: nightly study/QA-surf prompts
+                            // judge everything against the bot's role — the persona must
+                            // actually BE in the prompt.
+                            const studySystemPrompt = await (0, sessionSystemPrompt_1.buildPersonaSessionSystemPrompt)(profilePaths, {
+                                scenario: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
+                            });
                             const llm = async (history) => {
                                 const historyText = history
                                     .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
                                     .join('\n\n---\n\n');
-                                const studySystemPrompt = 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.';
                                 // Unified passive-LLM priority: DSH pair first, then local chain.
                                 const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
                                     dshLlmPath: profilePaths.dshLlmPath,

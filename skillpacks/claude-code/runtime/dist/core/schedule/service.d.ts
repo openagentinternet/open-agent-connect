@@ -27,7 +27,8 @@ export type RunScheduledTaskResult = {
 /**
  * Bot persona framing that wraps every scheduled task prompt (v1 has no
  * per-task systemPrompt; the persona + a short scheduled-task framing stand
- * in for it).
+ * in for it). The identity block comes from the one shared builder so a
+ * scheduled task behaves in the same persona as every other scenario.
  */
 export declare function buildScheduleSystemPrompt(paths: MetabotPaths): Promise<string>;
 /**

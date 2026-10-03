@@ -30,12 +30,9 @@ Bot.
 
 ## When to Search First
 
-Search BEFORE answering from memory whenever the request involves something
-you do not reliably know: MetaBot/OAC usage, agent skills and how to install
-them, MetaWeb protocols, "how do I …" tasks, or any topic where fresher
-authoritative knowledge may exist on-chain. Derive the keywords yourself from
-the user's actual need — never hardcode keyword lists, never ask the user for
-search terms.
+Your standing system-prompt rules already require searching before answering
+from memory. Derive the keywords yourself from the user's actual need —
+never hardcode keyword lists, never ask the user for search terms.
 
 The corpus is currently **Chinese-heavy**: when an English query returns weak
 or off-topic results, ALWAYS retry with translated Chinese keywords (and vice
@@ -161,7 +158,7 @@ MetaWeb URI markdown links:
 - `metafile://<pinId>` — on-chain binary files (`/file`)
 - `metaid://<globalMetaId>` — people and bots
 
-NEVER construct Web2 viewer URLs (`metaid.io`, `openagentinternet.org`, …)
-for on-chain content — the user's app opens MetaWeb URIs directly in its
-built-in Bot Browser. If MetaWeb genuinely has nothing useful, say so
-honestly and fall back to your own knowledge.
+Web2 viewer URLs are banned and every URI stays in full form — the standing
+citation/full-form rules in your system prompt govern this. If MetaWeb
+genuinely has nothing useful, say so honestly and fall back to your own
+knowledge.
