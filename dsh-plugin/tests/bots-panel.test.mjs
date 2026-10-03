@@ -34,6 +34,11 @@ test('the listing-head availability filter persists locally and uses the chip av
   assert.match(text, /useState<boolean>\(readAvailableOnly\)/)
   assert.match(text, /writeAvailableOnly\(next\)/)
   assert.match(text, /availableOnly \? bots\.filter\(\(bot\) => isChipBotAvailable\(bot\)\) : bots/)
+  // The roster sort is availability-aware: the Twin always first, then the
+  // available Bots oldest-first, then the unavailable ones oldest-first —
+  // in BOTH views (the available-only filter makes ranks 0+1 the whole list).
+  assert.match(text, /sortBotsTwinAvailableFirst\(rows\)/)
+  assert.doesNotMatch(text, /setBots\(sortBotsTwinFirst\(/)
   const styles = await readFile(join(dirname(fileURLToPath(import.meta.url)), '../src/client/styles.ts'), 'utf8')
   assert.match(styles, /\.oac-bot-listing-head \{ display: flex; align-items: center/)
 })

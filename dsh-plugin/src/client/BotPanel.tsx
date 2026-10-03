@@ -20,7 +20,7 @@ import {
   type ChatSkillsPayload,
   type LlmDirectory
 } from './api.ts'
-import { sortBotsTwinFirst } from '../bot-order.ts'
+import { sortBotsTwinAvailableFirst } from '../bot-order.ts'
 import { isChipBotAvailable } from '../chip-logic.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
@@ -150,7 +150,7 @@ export function BotPanel({
   useEffect(() => {
     let current = true
     void list().then(
-      (rows) => { if (current) { setBots(sortBotsTwinFirst(rows)); setError(null) } },
+      (rows) => { if (current) { setBots(sortBotsTwinAvailableFirst(rows)); setError(null) } },
       (cause: unknown) => { if (current) setError(errorText(cause)) },
     )
     return () => { current = false }
@@ -185,7 +185,7 @@ export function BotPanel({
       let recovered: BotRow | null = null
       try {
         const rows = await list()
-        setBots(sortBotsTwinFirst(rows))
+        setBots(sortBotsTwinAvailableFirst(rows))
         const needle = input.name.trim().toLowerCase()
         recovered = rows.find((row) => row.name.trim().toLowerCase() === needle) ?? null
       } catch { /* keep the original error */ }

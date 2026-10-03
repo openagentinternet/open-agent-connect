@@ -42,6 +42,27 @@ export function sortAvailableBotsTwinFirst<T extends BotOrderFields & BotAvailab
 }
 
 /**
+ * Bots-page "My Bots" roster order (full-list view): the Twin always first
+ * even when unavailable, then the available Bots (the preset-chip rule)
+ * oldest-first by profile creation time, then the unavailable ones (toggle
+ * off or no DSH LLM pair) also oldest-first. Rows without a `botType` count
+ * as workers; a missing `createdAt` sorts as 0. Returns a new array; the
+ * input is not mutated.
+ */
+export function sortBotsTwinAvailableFirst<T extends BotOrderFields & BotAvailabilityFields>(
+  rows: readonly T[],
+): T[] {
+  const rank = (row: BotOrderFields & BotAvailabilityFields): number =>
+    row.botType === 'twin' ? 0 : isChipBotAvailable(row) ? 1 : 2
+  return [...rows].sort((left, right) => {
+    const leftRank = rank(left)
+    const rightRank = rank(right)
+    if (leftRank !== rightRank) return leftRank - rightRank
+    return (left.createdAt ?? 0) - (right.createdAt ?? 0)
+  })
+}
+
+/**
  * Default Bot for pickers that show available Bots only (the shared
  * BotPicker): the available Twin, else the first available Bot. Returns ''
  * when no Bot is available.
