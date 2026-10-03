@@ -267,7 +267,7 @@ test('bot page list hides the Default badge when only one Bot exists', () => {
   assert.equal((list.innerHTML.match(/metabot-default-label/g) || []).length, 0);
 });
 
-test('bot page hero syncs the set-as-default toggle from the active profile', () => {
+test('bot page hero offers the set-as-default toggle only while no Twin Bot exists', () => {
   const toggle = toggleElement();
   const control = { hidden: false };
   const status = { textContent: 'stale', className: 'save-status error', hidden: false };
@@ -292,7 +292,7 @@ test('bot page hero syncs the set-as-default toggle from the active profile', ()
   vm.runInNewContext(buildBotPageDefinition().script, context);
   context.state.profiles = [
     { slug: 'alice-bot', name: 'Alice', isActive: false },
-    { slug: 'bob-bot', name: 'Bob', isActive: true },
+    { slug: 'bob-bot', name: 'Bob', isActive: false },
   ];
   context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: false });
 
@@ -306,13 +306,23 @@ test('bot page hero syncs the set-as-default toggle from the active profile', ()
   assert.equal(status.textContent, '');
   assert.equal(status.className, 'save-status');
 
-  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: true });
+  // Once a Twin Bot exists, the toggle leaves every edit page so another
+  // Bot cannot be promoted by accident; the list badge keeps identifying
+  // the sitting Twin.
+  context.state.profiles = [
+    { slug: 'alice-bot', name: 'Alice', isActive: false },
+    { slug: 'bob-bot', name: 'Bob', isActive: true, botType: 'twin' },
+  ];
+  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: false });
 
-  assert.equal(toggle.classList.contains('on'), true);
-  assert.equal(toggle.disabled, true);
-  assert.equal(toggle.getAttribute('aria-checked'), 'true');
-  assert.equal(toggle.getAttribute('title'), 'This is the Twin Bot');
-  assert.equal(toggle.textEl.textContent, 'On');
+  assert.equal(control.hidden, true);
+  assert.equal(status.hidden, true);
+
+  // The Twin's own edit page hides it too.
+  context.renderBotHero({ slug: 'bob-bot', name: 'Bob', globalMetaId: 'gm-bob', isActive: true, botType: 'twin' });
+
+  assert.equal(control.hidden, true);
+  assert.equal(status.hidden, true);
 });
 
 test('bot page hero hides the set-as-default toggle when only one Bot exists', () => {
