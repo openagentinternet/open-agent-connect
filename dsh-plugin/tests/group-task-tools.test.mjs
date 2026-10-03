@@ -256,12 +256,30 @@ test('acceptanceCriteria rejects an object instead of silently dropping it', asy
   )
 })
 
+test('acceptanceCriteria unwraps a host-serialized JSON array string', async () => {
+  const createData = { chairSlug: 'alice', task: { id: 5, groupId: 'g-1', title: 'T', status: 'planning' } }
+  const { calls, run } = fakeRun(() => ({ ok: true, state: 'success', data: createData }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+
+  // The DSH host may stringify a non-string argument: the array arrives as
+  // its JSON form and must still be joined, not stored verbatim.
+  await controller.run('create', { title: 'T', goal: 'G', acceptanceCriteria: '["可点击链接"," 无报错 "]' })
+  const created = calls.filter((args) => args[1] === 'create').at(-1)
+  assert.equal(flagValue(created, '--acceptance'), '可点击链接\n无报错')
+
+  // A criteria line that merely starts with '[' is JSON-invalid and stays literal.
+  await controller.run('create', { title: 'T', goal: 'G', acceptanceCriteria: '[重要] 标准\n可点击' })
+  const literal = calls.filter((args) => args[1] === 'create').at(-1)
+  assert.equal(flagValue(literal, '--acceptance'), '[重要] 标准\n可点击')
+})
+
 test('decide accepts the explicit reject decision', async () => {
   const { calls, run } = fakeRun(() => ({ ok: true, state: 'success', data: { proposal: { id: 7 } } }))
   const controller = plugin.createGroupTaskController('alice', { run })
   await controller.run('decide', { proposalId: 7, decision: 'reject' })
   const decideCall = calls.find((args) => args[2] === 'decide')
   assert.equal(flagValue(decideCall, '--decision'), 'reject')
+  assert.equal(flagValue(decideCall, '--source'), 'tool', 'the chat tool names itself as the decision source')
 })
 
 test('create_from_proposal warns when the created task carries no acceptanceCriteria', async () => {

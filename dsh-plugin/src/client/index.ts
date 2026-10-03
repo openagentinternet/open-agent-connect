@@ -237,7 +237,7 @@ export function apply(ctx: ClientContext): void {
     collabMessages: (slug: string, groupId: string) => api.grouptaskCollabMessages(slug, groupId),
     health: () => api.grouptaskHealth(),
     staffingList: () => api.grouptaskStaffingList(),
-    staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip') =>
+    staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip' | 'reject') =>
       api.grouptaskStaffingDecide(chair, proposalId, decision),
     staffingCreate: (proposalId: number) => api.grouptaskStaffingCreate(proposalId),
   }

@@ -188,6 +188,14 @@ test('grouptask staffing routes map to CLI staffing verbs', async () => {
     'ui',
     'the panel provenance reaches the CLI',
   )
+  const toolDecide = await capture('grouptask/staffing/decide', {
+    chairSlug: 'twin', proposalId: 3, decision: 'confirm', source: 'tool',
+  })
+  assert.equal(
+    toolDecide.calls[0].args[toolDecide.calls[0].args.indexOf('--source') + 1],
+    'tool',
+    'the chat tool provenance reaches the CLI',
+  )
   const rejectDecide = await capture('grouptask/staffing/decide', {
     chairSlug: 'twin', proposalId: 3, decision: 'reject', source: 'engine',
   })

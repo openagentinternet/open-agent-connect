@@ -69,7 +69,7 @@ export interface GroupTaskInjectedApi {
   collabMessages: (slug: string, groupId: string) => Promise<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] }>
   health: () => Promise<GroupTaskHealthPayload>
   staffingList: () => Promise<GroupTaskStaffingProposalRow[]>
-  staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip') => Promise<unknown>
+  staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip' | 'reject') => Promise<unknown>
   staffingCreate: (proposalId: number) => Promise<{ taskId: number; pendingRemoteSeats: number; skippedWorkers: GroupTaskSkippedWorkerRow[] }>
 }
 
@@ -1109,13 +1109,15 @@ export function GroupTaskView({
 
   const decideStaffing = useCallback(async (
     proposal: GroupTaskStaffingProposalRow,
-    decision: 'confirm' | 'revise' | 'skip',
+    decision: 'confirm' | 'revise' | 'skip' | 'reject',
   ): Promise<void> => {
     const ok = await runAction(() => gt.staffingDecide(proposal.chairSlug, proposal.id, decision), true)
     if (ok) {
       setInfoNote(t(decision === 'confirm'
         ? 'gtStaffingConfirmed'
-        : decision === 'skip' ? 'gtStaffingSkipped' : 'gtStaffingReopened'))
+        : decision === 'skip'
+          ? 'gtStaffingSkipped'
+          : decision === 'reject' ? 'gtStaffingRejectedNote' : 'gtStaffingReopened'))
     }
   }, [gt, runAction, t])
 
@@ -1240,6 +1242,9 @@ export function GroupTaskView({
                       </Button>
                       <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void decideStaffing(pendingSlate, 'skip') }}>
                         {t('gtStaffingSkip')}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" className="oac-danger-outline" disabled={busy} onClick={() => { void decideStaffing(pendingSlate, 'reject') }}>
+                        {t('gtStaffingReject')}
                       </Button>
                     </>
                   )

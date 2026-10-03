@@ -302,6 +302,73 @@ test('engine: a message delivering a URI artifact drops its sibling text summary
   assert.equal(after[1].uri, null);
 });
 
+test('engine: a local delivery line survives prose mentioning bare schemes (round-3 ledger)', async () => {
+  const h = createHarness('metabot-gt-engine-local-delivery-');
+  const task = await h.seedTask('executing');
+  const { createGroupTaskEngine } = require('../../dist/core/grouptask/engine.js');
+  const uploads = [];
+  const engine = createGroupTaskEngine({
+    ctx: h.ctx,
+    runLlmTurn: async () => '',
+    loadPersona: async () => ({}),
+    uploadDeliverableFile: async (input) => {
+      uploads.push(input);
+      return { metafileUri: 'metafile://never', pinId: 'never' };
+    },
+  });
+  const sha256 = '9f'.repeat(32);
+  // Round-3 smoke shape: the tag line opens with a negation ("no pin:// and no
+  // metafile://") and the artifact is a local path plus its sha256 on the
+  // following lines. The whole line used to be dropped by the parser, so both
+  // the ledger and the panel's pending read-aid stayed empty.
+  h.pushHistory('IDWORKER1', [
+    '[DELIVERABLE] 本地交付：报告已完成，无 pin:// 也无 metafile://，仅本地文件',
+    '/Users/worker-1/out/report-final.md',
+    `sha256: ${sha256}`,
+  ].join('\n'));
+  await engine.tick();
+
+  const rows = await h.chairStore.listDeliverables(task.id);
+  assert.equal(rows.length, 1, 'the delivery line reaches the ledger');
+  assert.equal(rows[0].kind, 'text');
+  assert.equal(rows[0].uri, null);
+  assert.equal(rows[0].authorGlobalMetaId, 'IDWORKER1');
+  // Bare schemes are prose, not rejected URI attempts: no parse note.
+  const parseNotes = (await h.chairStore.listHostNotes(task.id)).filter((note) => note.kind === 'parse');
+  assert.equal(parseNotes.length, 0, 'a bare scheme mention is not reported as a bad URI');
+  // The upload seam reads the TAG LINE payload only, so a path written on a
+  // following line never enters it. Round-3 decision: keep that scope (see the
+  // engine's local-file upgrade comment) — extending it means the parser plus
+  // the seam, with a wrong-URI risk when a continuation line merely mentions
+  // some other file.
+  assert.equal(uploads.length, 0);
+});
+
+test('engine: an unvalidatable deliverable URI is a text note plus one parse note', async () => {
+  const h = createHarness('metabot-gt-engine-unparsed-uri-');
+  const task = await h.seedTask('executing');
+  h.pushHistory('IDWORKER1', '[DELIVERABLE] metafile://abc123 fabricated report');
+  // One script for the chair's deliverable turn, one for a possible notes turn.
+  h.llmTurns.push('[NO_REPLY]', '[NO_REPLY]');
+  await h.engine.tick();
+
+  const rows = await h.chairStore.listDeliverables(task.id);
+  assert.equal(rows.length, 1, 'the fabricated URI line is recorded as a text note');
+  assert.equal(rows[0].kind, 'text');
+  assert.equal(rows[0].uri, null, 'a fabricated URI never becomes a URI row');
+
+  const parseNotes = (await h.chairStore.listHostNotes(task.id)).filter((note) => note.kind === 'parse');
+  assert.equal(parseNotes.length, 1, 'the chair is told which URI was rejected');
+  assert.match(parseNotes[0].body, /metafile:\/\/abc123/);
+  assert.match(parseNotes[0].body, /text note/);
+
+  // The note is keyed per message: a second pass over the same state never
+  // stacks a duplicate while it is still unconsumed.
+  await h.engine.tick();
+  const again = (await h.chairStore.listHostNotes(task.id)).filter((note) => note.kind === 'parse');
+  assert.equal(again.length, 1);
+});
+
 test('engine: chair [STATUS:REVIEW] closes checkpoints and persists the acceptance summary (no host post)', async () => {
   const h = createHarness('metabot-gt-engine-review-');
   const task = await h.seedTask('executing');

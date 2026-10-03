@@ -654,6 +654,49 @@ test('getGroupTaskDetail surfaces deliverables posted before the engine tick (G2
   assert.equal(detail.pendingDeliverables[0].authorName, 'worker 1');
 });
 
+test('getGroupTaskDetail pending read-aid keeps a delivery line whose prose mentions bare schemes (round-3)', async () => {
+  const { ctx } = createFakeContext('metabot-gt-pending-round3-');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { task, chairSlug } = await createGroupTask(ctx, {
+    title: 'Pending round-3 delivery',
+    goal: 'Keep the swallowed line visible',
+    workerSlugs: ['worker-1'],
+  });
+  const chairProfile = await ctx.getProfile(chairSlug);
+  const store = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
+  const record = await store.getTaskById(task.id);
+  const sha256 = '9f'.repeat(32);
+  await store.appendMessages(record.groupId, [{
+    index: 9,
+    pinId: 'pin-pending-r3-9',
+    txId: 'tx-pending-r3-9',
+    senderMetaId: 'meta-worker-1',
+    senderGlobalMetaId: 'IDWORKER1',
+    senderName: 'worker 1',
+    senderAvatar: null,
+    content: [
+      '[DELIVERABLE] 本地交付：报告已完成，无 pin:// 也无 metafile://，仅本地文件',
+      '/Users/worker-1/out/report-final.md',
+      `sha256: ${sha256}`,
+    ].join('\n'),
+    contentType: 'text/plain',
+    chainTimestamp: Math.floor(Date.now() / 1000),
+    replyPin: null,
+    mention: [],
+    senderSuspect: false,
+  }]);
+
+  const detail = await getGroupTaskDetail(ctx, chairSlug, task.id, { sync: false });
+  assert.equal(detail.pendingDeliverables.length, 1, 'the line is pending, not invisible');
+  assert.equal(detail.pendingDeliverables[0].kind, 'text');
+  assert.equal(detail.pendingDeliverables[0].uri, null);
+  assert.equal(
+    detail.pendingDeliverables[0].payload,
+    '本地交付：报告已完成，无 pin:// 也无 metafile://，仅本地文件',
+  );
+});
+
 test('drainGroupTaskRelay annotates rows with the task status at drain time (G3)', async () => {
   const { ctx } = createFakeContext('metabot-gt-relay-status-');
   const { task, chairSlug } = await createGroupTask(ctx, {

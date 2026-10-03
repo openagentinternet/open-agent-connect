@@ -46,6 +46,12 @@ export interface GroupTaskDeliverableCandidate {
     payload: string;
     /** True when the payload announces a correction of a previous deliverable. */
     correction: boolean;
+    /**
+     * The first URI-shaped token of the payload when NO token validated — the
+     * line is recorded as a text note, and this is what the host reports as a
+     * rejected URI attempt. Null for every other candidate.
+     */
+    unparsedUri: string | null;
 }
 export interface GroupTaskWorkingAck {
     /** Free-text note after the tag, capped at 120 chars. */
@@ -75,8 +81,12 @@ export interface ParsedGroupTaskTags {
  * Extract deliverable candidates from a message. Line-scoped: each line whose
  * [DELIVERABLE] tag sits at the protocol position (line start, markdown
  * wrapping allowed) yields one candidate per tag occurrence, its payload being
- * the text after that tag. Lines with a URI-shaped token that fails validation
- * are dropped (fabrication guard); URI-free payloads become text deliverables.
+ * the text after that tag. The first URI-shaped token that validates decides
+ * the kind and uri; a payload whose URI tokens ALL fail validation still yields
+ * a text candidate (with the rejected token in `unparsedUri`) instead of being
+ * dropped — a swallowed line left the ledger empty and the owner blind (round-3
+ * smoke test: a local delivery line citing a sha256 was lost for mentioning
+ * "no pin://, no metafile://").
  */
 export declare function parseDeliverableCandidates(content: string): GroupTaskDeliverableCandidate[];
 /** Parse a [WORKING] acknowledgement: note after the tag + optional ETA. */

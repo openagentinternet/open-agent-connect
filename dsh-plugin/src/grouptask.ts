@@ -363,10 +363,10 @@ export async function dispatchGroupTaskRoutes(
       return failed('invalid_decision', "decision must be 'confirm', 'revise', 'skip', or 'reject'")
     }
     const args = ['grouptask', 'staffing', 'decide', '--chair', chair, '--proposal', String(proposalId), '--decision', decision]
-    // Provenance survives the CLI hop: the panel sends 'ui', while the chat
-    // tool omits it and the CLI defaults to 'chat'.
+    // Provenance survives the CLI hop: the panel sends 'ui' and the chat tool
+    // sends 'tool'; a bare CLI call defaults to 'chat'.
     const source = readTrimmed(body, 'source')
-    if (source === 'ui' || source === 'chat') args.push('--source', source)
+    if (source === 'ui' || source === 'chat' || source === 'tool') args.push('--source', source)
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
