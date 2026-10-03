@@ -284,15 +284,19 @@ export function apply(ctx: ClientContext): void {
   // Row clicks must also work while a kernel main panel (插件 / Bots) is
   // active: the overlay renders nothing until activePanelId returns to null,
   // so exit to the conversation column first — the same destination a local
-  // conversation's click reaches through kernel session navigation. The
-  // selectPanel(null) wrap below closes the overlay and forces the tabs back
-  // to 本地对话, but that wrap exists for SESSION navigation; a list-row
-  // click is not one, so the row's own tab is restored before the target
-  // opens.
+  // conversation's click reaches through kernel session navigation. The exit
+  // runs ONLY when a panel is actually active: the selectPanel(null) wrap
+  // closes both overlays and force-resets the tabs to 本地对话 on every
+  // call, so an unconditional exit made every row click pay the close/reset
+  // dance and re-arm it by hand — pure churn while the column is already
+  // active, and the first thing to break when ordering drifts. openOn runs
+  // last and unconditionally, so the target is never eaten by the exit.
   const openA2A = (target: A2APanelTarget): void => {
-    const tab = convTabs.getSnapshot().tab
-    ctx.layout.selectPanel(null)
-    convTabs.setTab(tab)
+    if (ctx.layout.panelInfo.getSnapshot().activePanelId !== null) {
+      const tab = convTabs.getSnapshot().tab
+      ctx.layout.selectPanel(null)
+      convTabs.setTab(tab)
+    }
     botsPagePanel.close()
     a2aPanel.openOn(target)
   }
