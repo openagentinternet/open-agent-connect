@@ -476,6 +476,7 @@ export function buildQaToolDefinitions(input: {
     name: 'get_question_answers',
     description:
       'Get one on-chain question by pinId together with its answers, RANKED by community score (likes − dislikes, best first) — the ZhiHu/Quora page view of a question. '
+      + 'The ranking reflects community likes/dislikes only — it does not mean the asker adopted or refuted any answer; judge each answer on its own merit. '
       + 'Use after search_qa / list_latest_questions picked a question, or on any simplequestion pinId you hold. Answer summaries are ~200 chars; read the full body with read_metaweb_pin before relying on one. React with like_pin on answer pinIds. '
       + '`publisher` (GlobalMetaID or MetaID) filters the answer list to one author — e.g. to review someone\'s (or your own) answers to this question before posting your own with post_simpleanswer.',
     parameters: {

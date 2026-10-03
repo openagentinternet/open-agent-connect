@@ -158,8 +158,8 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
       // Any turn ending releases the buffer: a later turn starts fresh.
       const buffer = turnBufferBySession.get(sessionId)
       turnBufferBySession.delete(sessionId)
-      const reason = (event.data as { reason?: { kind?: unknown } } | undefined)?.reason
-      if (reason?.kind !== 'completed') return
+      const reason = (event.data as { reason?: { kind?: unknown; error?: { message?: unknown } } } | undefined)?.reason
+      const completed = reason?.kind === 'completed'
 
       const preset = (sessionId ? presetBySession.get(sessionId) : undefined)
         ?? session.header?.agentPreset
@@ -169,6 +169,16 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
       const userText = (buffer?.userTexts ?? []).join('\n').trim()
       const assistantText = (buffer?.assistantTexts ?? []).join('\n').trim()
       if (!userText && !assistantText) return
+
+      // A timed-out or recycled turn holds real content; mirror it so
+      // oac_session_read_* can still find the session, and stamp the end
+      // reason on the tail. Memory extraction stays completed-only: a partial
+      // exchange is not a settled unit to learn from.
+      const endReason = typeof reason?.kind === 'string' ? reason.kind : 'unknown'
+      const endDetail = typeof reason?.error?.message === 'string' ? `: ${reason.error.message}` : ''
+      const mirroredAssistantText = completed
+        ? assistantText
+        : [assistantText, `[turn ended: ${endReason}${endDetail}]`].filter(Boolean).join('\n')
 
       const capturedSessionId = sessionId || `dsh-${Date.now()}`
       enqueue(capturedSessionId, async () => {
@@ -182,16 +192,16 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
             run,
           ).catch(() => undefined)
         }
-        if (assistantText) {
+        if (mirroredAssistantText) {
           await runMetabotWithPayloadFile(
             ['memory', 'transcript', 'append', '--from', slug],
-            { sessionId: capturedSessionId, role: 'assistant', text: assistantText, ts: ts + 1, channel: 'dsh' },
+            { sessionId: capturedSessionId, role: 'assistant', text: mirroredAssistantText, ts: ts + 1, channel: 'dsh' },
             '--payload-file',
             [],
             run,
           ).catch(() => undefined)
         }
-        if (userText) {
+        if (completed && userText) {
           await runMetabotWithPayloadFile(
             ['memory', 'extract', '--from', slug],
             {

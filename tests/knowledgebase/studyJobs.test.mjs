@@ -239,3 +239,44 @@ test('executor tool loop: no-fence replies are nudged; step exhaustion fails', a
     (error) => error instanceof Error && error.code === 'study_steps_exhausted'
   );
 });
+
+test('parseStudyRunReport accepts the executor loop\'s bare JSON as well as a fenced reply', () => {
+  const bare = parseStudyRunReport('{"processedPinIds":["p1"],"summary":"bare report"}');
+  assert.deepEqual(bare.processedPinIds, ['p1']);
+  assert.equal(bare.summary, 'bare report');
+  assert.throws(() => parseStudyRunReport('prose without a report'), /no json report fence/);
+  assert.throws(() => parseStudyRunReport('{"processedPinIds":[]}'), /no summary/);
+});
+
+test('runStudyTick records a step-ceiling partial report end to end (D1-b)', async () => {
+  const paths = makeProfile('metabot-study-e2e-');
+  const jobs = createStudyJobStore(paths);
+  const { job } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'E2E topic' });
+  const tools = {
+    searchMetaweb: async () => 'hits',
+    readMetawebPin: async () => 'x',
+    addDocument: async () => 'x',
+    learnKnowledgeBase: async () => 'x',
+  };
+  let turns = 0;
+  const attempted = await store.runStudyTick(jobs, {
+    now: () => new Date(2026, 7, 24, 2, 0).getTime(),
+    log: () => undefined,
+    runStudyTurn: async ({ prompt }) => store.runStudyTurnWithTools(prompt, {
+      maxSteps: 1,
+      tools,
+      runLlm: async () => {
+        turns += 1;
+        return turns === 1
+          ? '```json\n{"tool":"search_metaweb","args":{"query":"罗马法"}}\n```'
+          : '```json\n{"processedPinIds":["p1"],"summary":"collected one pin"}\n```';
+      },
+    }),
+  });
+  assert.equal(attempted, job.id);
+  const after = await jobs.getStudyJob(job.id);
+  assert.equal(after.consecutiveFailures, 0, 'the run completed instead of failing');
+  assert.deepEqual(after.processedPinIds, ['p1']);
+  assert.match(after.summary, /^\[partial\] collected one pin/);
+  assert.equal(after.status, 'pending', 'a new pin in the partial report re-pends the job');
+});

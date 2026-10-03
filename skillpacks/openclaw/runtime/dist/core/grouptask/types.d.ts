@@ -275,6 +275,12 @@ export interface GroupTaskAcceptanceSummary {
     outcome: GroupTaskStatus | null;
     rating: number | null;
     ratingComment: string | null;
+    /**
+     * Human-readable cautions about the ledger at review entry (local-only
+     * deliverables, chain confirmation still pending). Optional: summaries
+     * written before this field existed stay valid.
+     */
+    warnings?: string[];
     generatedBy: string;
     generatedAt: number;
     /** Pin of the group message that published this summary. */
@@ -332,9 +338,32 @@ export interface GroupTaskSummary extends GroupTaskRecord {
     /** True when any active member is a remote OpenTeam member. */
     openTeam: boolean;
 }
+/**
+ * A [DELIVERABLE] line already posted on-chain but not yet accounted for by
+ * the engine cursor — the read-only gap between a worker's post and the next
+ * 5s engine tick. Rendered separately so "posted, not yet in the ledger" never
+ * reads as "nothing delivered".
+ */
+export interface GroupTaskPendingDeliverable {
+    /** Chain message index the deliverable was announced in. */
+    messageIndex: number;
+    msgPinId: string;
+    authorGlobalMetaId: string | null;
+    authorName: string | null;
+    kind: string;
+    uri: string | null;
+    /** Raw payload text after the [DELIVERABLE] tag. */
+    payload: string;
+    chainTimestamp: number | null;
+}
 export interface GroupTaskDetail extends GroupTaskRecord {
     members: GroupTaskMemberSummary[];
     deliverables: GroupTaskDeliverable[];
+    /**
+     * [DELIVERABLE] messages past the engine cursor that the ledger has not
+     * recorded yet (read-only scan; the engine tick will land them).
+     */
+    pendingDeliverables: GroupTaskPendingDeliverable[];
     transitions: GroupTaskTransition[];
     integrityEvents: GroupTaskIntegrityEvent[];
     messages: GroupTaskMessage[];

@@ -64,6 +64,7 @@ const TASK_STATUSES: readonly string[] = ['planning', 'running', 'review', 'comp
 const STEP_STATUSES: readonly string[] = ['blocked', 'ready', 'queued', 'running', 'waiting_input', 'completed', 'failed', 'cancelled'];
 const ATTEMPT_STATUSES: readonly string[] = ['queued', 'running', 'completed', 'failed', 'timed_out', 'cancelled'];
 const TERMINAL_ATTEMPT_STATUSES: readonly string[] = ['completed', 'failed', 'timed_out', 'cancelled'];
+const TERMINAL_STEP_STATUSES: readonly string[] = ['completed', 'failed', 'cancelled'];
 
 let atomicWriteSequence = 0;
 
@@ -310,6 +311,16 @@ export function createOrchestrationStore(paths: MetabotPaths): OrchestrationStor
         if (patch.status !== undefined) step.status = patch.status;
         if (patch.workerSlug !== undefined && text(patch.workerSlug)) step.workerSlug = text(patch.workerSlug);
         step.updatedAt = Date.now();
+        // A step reaching a terminal state aggregates into the parent task. Only
+        // a `running` task is touched: planning/review/completed/cancelled are
+        // owned by other flows. `cancelled` steps never trigger it — the
+        // stop/reassign flows deliberately leave the task state to the caller.
+        if ((patch.status === 'completed' || patch.status === 'failed') && task.status === 'running') {
+          const hasOpenStep = task.steps.some((entry) => !TERMINAL_STEP_STATUSES.includes(entry.status));
+          if (!hasOpenStep) {
+            task.status = task.steps.some((entry) => entry.status === 'failed') ? 'failed' : 'review';
+          }
+        }
         task.updatedAt = step.updatedAt;
         await writeFile(file);
         return step;

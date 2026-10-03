@@ -4530,7 +4530,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           }
         }
         if (!found) {
-          return commandFailed('session_not_found', `No session found for id: ${input.session.trim()}`);
+          return commandFailed(
+            'session_not_found',
+            `No session found for id: ${input.session.trim()} (searched the OAC transcript mirror at ${actorPaths.memoryTranscriptsRoot}). Only turns mirrored back to OAC are readable here; if the session was reclaimed by the DSH host, its raw log may still exist at ~/.dsh/sessions/<profile>/<sessionId>/session.v4.jsonl.zstd.`,
+          );
         }
         const turns = input.limit !== undefined ? found.turns.slice(-input.limit) : found.turns;
         return commandSuccess({

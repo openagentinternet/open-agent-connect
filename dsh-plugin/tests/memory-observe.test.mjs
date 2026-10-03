@@ -100,13 +100,48 @@ test('post-turn extraction mirrors transcripts and extracts once per completed t
   assert.equal(extracts[0].file.userText, '帮我想想上次说的咖啡')
   assert.equal(extracts[0].file.channel, 'dsh')
 
-  // Interrupted turns discard the accumulated buffer without any CLI call.
+  // Interrupted turns still mirror what was captured — the session must stay
+  // readable — but never extract memory from a partial exchange.
   calls.length = 0
   listener(session, { type: 'turn/start', data: { turn: 2 } })
   listener(session, { type: 'user/message', data: USER_MESSAGE })
+  listener(session, { type: 'assistant/message', data: { turn: 2, step: 0, message: { content: [{ type: 'text', text: '半截回复' }] } } })
   listener(session, { type: 'turn/end', data: { turn: 2, reason: { kind: 'aborted' } } })
-  await new Promise((resolve) => setTimeout(resolve, 100))
-  assert.equal(calls.length, 0)
+  await waitFor(() => calls.filter((call) => call.args[1] === 'transcript').length >= 2)
+  const interrupted = calls.filter((call) => call.args[1] === 'transcript')
+  assert.equal(interrupted.length, 2)
+  assert.equal(interrupted[0].file.role, 'user')
+  assert.equal(interrupted[1].file.role, 'assistant')
+  assert.match(interrupted[1].file.text, /半截回复/)
+  assert.match(interrupted[1].file.text, /\[turn ended: aborted\]/)
+  assert.equal(calls.filter((call) => call.args[1] === 'extract').length, 0, 'partial exchanges are not extracted')
+})
+
+test('a recycled turn with no assistant text still mirrors the session', async () => {
+  const calls = []
+  const { ctx, listeners } = fakeCtx(null)
+  plugin.applyMemoryExtraction(ctx, {
+    run: async (args) => {
+      const fileFlag = args.indexOf('--payload-file')
+      const file = fileFlag >= 0 ? JSON.parse(await readFile(args[fileFlag + 1], 'utf8')) : null
+      calls.push({ args, file })
+      return { ok: true, state: 'success', data: {} }
+    },
+  })
+  const listener = listeners.find((entry) => entry.event === 'session/event').listener
+  const session = { id: 'sess-recycled', header: { agentPreset: 'oac-alice' } }
+  listener(session, { type: 'turn/start', data: { turn: 1 } })
+  listener(session, { type: 'user/message', data: USER_MESSAGE })
+  listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'recycled' } } })
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline && calls.filter((call) => call.args[1] === 'transcript').length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  const transcripts = calls.filter((call) => call.args[1] === 'transcript')
+  assert.equal(transcripts.length, 2)
+  assert.equal(transcripts[0].file.role, 'user')
+  assert.equal(transcripts[1].file.role, 'assistant')
+  assert.match(transcripts[1].file.text, /\[turn ended: recycled\]/)
 })
 
 test('memory tools bridge to the CLI with the expected names and formatting', async () => {

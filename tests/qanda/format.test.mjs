@@ -66,6 +66,8 @@ test('question detail sheet: no answers nudges post_simpleanswer; with answers i
   };
   const detail = dist.formatQaQuestionDetail({ question: QUESTION, answers: [answer] });
   assert.match(detail, /Answers \(ranked by likes − dislikes, best first\):/);
+  assert.match(detail, /Ranking reflects community likes\/dislikes only/);
+  assert.match(detail, /does not mean the asker adopted or refuted any answer/);
   assert.match(detail, /- #1 \*\*\[best answer\]\(pin:\/\//);
   assert.match(detail, /read the full body of an answer with read_metaweb_pin/);
 });

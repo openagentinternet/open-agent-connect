@@ -24,7 +24,7 @@ import {
   type GroupTaskTransportOptions,
 } from './transport';
 import { syncGroupMessages } from './backfill';
-import { containsToolCallMarkup, isNoReplyResponse, resolveAtMentions } from './tags';
+import { containsToolCallMarkup, isNoReplyResponse, parseDeliverableCandidates, resolveAtMentions } from './tags';
 import {
   GROUP_TASK_TERMINAL_STATUSES,
   filterGroupTasksByTab,
@@ -36,6 +36,7 @@ import {
   type GroupTaskMemberSummary,
   type GroupTaskMemberWorkStatus,
   type GroupTaskMessage,
+  type GroupTaskPendingDeliverable,
   type GroupTaskRecord,
   type GroupTaskRelayKind,
   type GroupTaskRelayRow,
@@ -619,6 +620,51 @@ export async function syncGroupTaskMessages(
   }
 }
 
+/** Cap for the read-only pending-deliverable scan (newest window). */
+const PENDING_DELIVERABLE_SCAN_LIMIT = 500;
+
+/**
+ * Read-only [DELIVERABLE] scan of messages the engine cursor has not consumed
+ * yet. Mirrors the engine's accounting filters — non-chair, non-suspect sender
+ * with a chain pin — using the same `parseDeliverableCandidates` parser, so the
+ * detail view can say "posted, not yet in the ledger" instead of showing an
+ * empty deliverables list until the next 5s tick.
+ */
+function collectPendingDeliverables(
+  task: GroupTaskRecord,
+  messages: GroupTaskMessage[],
+  members: GroupTaskMember[],
+  nameForGmid: (globalMetaId: string | null) => string | null,
+): GroupTaskPendingDeliverable[] {
+  if (!task.groupId) return [];
+  const chairGmid = (task.chairGlobalMetaId ?? '').trim().toLowerCase();
+  const memberGmids = new Set(members
+    .map((member) => (member.globalMetaId ?? '').trim().toLowerCase())
+    .filter((gmid) => gmid.length > 0));
+  const pending: GroupTaskPendingDeliverable[] = [];
+  for (const message of messages) {
+    if (message.index <= task.lastProcessedIndex) continue;
+    if (message.senderSuspect || !message.pinId) continue;
+    const gmid = (message.senderGlobalMetaId ?? '').trim().toLowerCase();
+    if (!gmid || gmid === chairGmid || !memberGmids.has(gmid)) continue;
+    const candidates = parseDeliverableCandidates(message.content);
+    if (candidates.length === 0) continue;
+    for (const candidate of candidates) {
+      pending.push({
+        messageIndex: message.index,
+        msgPinId: message.pinId,
+        authorGlobalMetaId: message.senderGlobalMetaId,
+        authorName: nameForGmid(message.senderGlobalMetaId) ?? message.senderName,
+        kind: candidate.kind,
+        uri: candidate.uri,
+        payload: candidate.payload,
+        chainTimestamp: message.chainTimestamp,
+      });
+    }
+  }
+  return pending;
+}
+
 export async function getGroupTaskDetail(
   ctx: GroupTaskServiceContext,
   chairSlug: string,
@@ -706,10 +752,37 @@ export async function getGroupTaskDetail(
     ? await store.listMessages(task.groupId, { limit: view === 'full' ? 50 : 5 })
     : { messages: [] as GroupTaskMessage[], total: 0 };
 
+  // Messages past the engine cursor may already carry [DELIVERABLE] lines the
+  // 5s tick has not accounted for; surface them read-only so the detail view
+  // never reads as "nothing delivered" during that window.
+  let pendingDeliverables: GroupTaskPendingDeliverable[] = [];
+  if (task.groupId) {
+    try {
+      const scan = await store.listMessages(task.groupId, { limit: PENDING_DELIVERABLE_SCAN_LIMIT });
+      const nameByGmid = new Map<string, string>();
+      for (const member of members) {
+        const gmid = (member.globalMetaId ?? '').trim().toLowerCase();
+        if (!gmid) continue;
+        const profile = member.slug ? profileBySlug.get(member.slug) : undefined;
+        const name = (profile?.name ?? member.displayName ?? '').trim();
+        if (name) nameByGmid.set(gmid, name);
+      }
+      pendingDeliverables = collectPendingDeliverables(
+        task,
+        scan.messages,
+        members,
+        (gmid) => (gmid ? nameByGmid.get(gmid.trim().toLowerCase()) ?? null : null),
+      );
+    } catch {
+      // Best-effort read aid: a scan failure never fails the detail call.
+    }
+  }
+
   return {
     ...task,
     members: memberSummaries,
     deliverables,
+    pendingDeliverables,
     transitions: await store.listTransitions(taskId),
     integrityEvents: await store.listIntegrityEvents(taskId),
     messages: messagesPage.messages,
@@ -916,7 +989,12 @@ export async function closeGroupTask(
     `Task closed as ${opts.status}`
     + (opts.rating ? ` · owner rating ${opts.rating}/5` : '')
     + (opts.ratingComment ? ` · "${opts.ratingComment}"` : '')
-    + (opts.status === 'done' ? ' — thank the members and wrap up.' : ''));
+    // The close already made the group read-only (post is refused afterwards),
+    // so never ask the origin session to do the impossible: state the terminal
+    // outcome as a fact, not an instruction.
+    + (opts.status === 'done'
+      ? ' — the task is now done and the group is read-only; no further messages can be posted.'
+      : ''));
   return getGroupTaskDetail(ctx, chairSlug, taskId, { sync: false });
 }
 
@@ -1015,6 +1093,13 @@ export async function emitGroupTaskRelay(
 
 export interface DrainedGroupTaskRelayRow extends GroupTaskRelayRow {
   chairSlug: string;
+  /**
+   * The task's status at drain time (null when the record could not be read).
+   * A row drained after its task closed is a delayed historical event, not a
+   * live instruction — the consumer uses this plus closedAt to say so.
+   */
+  taskStatus: GroupTaskRecord['status'] | null;
+  closedAt: number | null;
 }
 
 /**
@@ -1032,8 +1117,25 @@ export async function drainGroupTaskRelay(
   const drained: DrainedGroupTaskRelayRow[] = [];
   for (const profile of profiles) {
     try {
+      const store = storeFor(ctx, profile);
+      const taskMeta = new Map<number, { status: GroupTaskRecord['status'] | null; closedAt: number | null }>();
       const rows = await relayStoreFor(ctx, profile).drain();
-      for (const row of rows) drained.push({ ...row, chairSlug: profile.slug });
+      for (const row of rows) {
+        if (!taskMeta.has(row.taskId)) {
+          const task = await store.getTaskById(row.taskId).catch(() => null);
+          taskMeta.set(row.taskId, {
+            status: task?.status ?? null,
+            closedAt: task?.closedAt ?? null,
+          });
+        }
+        const meta = taskMeta.get(row.taskId)!;
+        drained.push({
+          ...row,
+          chairSlug: profile.slug,
+          taskStatus: meta.status,
+          closedAt: meta.closedAt,
+        });
+      }
     } catch (error) {
       logOf(ctx)(
         `[GroupTask] Relay drain failed for profile ${profile.slug}: `
@@ -1093,17 +1195,26 @@ export async function superviseGroupTask(
 
   if (action === 'pause') {
     if (task.dispatchPausedAt != null) {
-      return { task, action, notice: null, nudgeQueued: false };
+      return {
+        task, action, nudgeQueued: false,
+        notice: `Dispatch is already paused for task ${taskId}.`,
+      };
     }
     const updated = await store.setTaskDispatchPaused(taskId, Date.now());
     await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
     await emitGroupTaskRelay(ctx, chair, updated, 'paused', 'The owner paused this task; dispatch is suspended.');
-    return { task: updated, action, notice: null, nudgeQueued: false };
+    return {
+      task: updated, action, nudgeQueued: false,
+      notice: `Dispatch paused for task ${taskId}.`,
+    };
   }
 
   if (action === 'resume') {
     if (task.dispatchPausedAt == null) {
-      return { task, action, notice: null, nudgeQueued: false };
+      return {
+        task, action, nudgeQueued: false,
+        notice: `Dispatch is already running for task ${taskId}.`,
+      };
     }
     const updated = await store.setTaskDispatchPaused(taskId, null);
     await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
@@ -1115,7 +1226,8 @@ export async function superviseGroupTask(
     }));
     await emitGroupTaskRelay(ctx, chair, updated, 'resumed', 'The owner resumed this task; work continues.');
     return {
-      task: updated, action, notice: null, nudgeQueued: true,
+      task: updated, action, nudgeQueued: true,
+      notice: `Dispatch resumed for task ${taskId}; chair nudged.`,
       chairUnavailable: updated.chairDegradedAt != null,
     };
   }
@@ -1141,7 +1253,14 @@ export async function superviseGroupTask(
       memberName: member?.displayName ?? null,
       note: input.note?.trim() || '',
     });
-    return { task, action, notice: null, nudgeQueued: false };
+    const flagTarget = member
+      ? (member.displayName ?? member.slug ?? member.globalMetaId ?? '').trim()
+      : '';
+    return {
+      task, action, nudgeQueued: false,
+      notice: `Flag recorded on the acceptance record for task ${taskId}`
+        + (flagTarget ? ` (member ${flagTarget}).` : '.'),
+    };
   }
 
   // nudge: default target = the least-recently-active non-standby worker.
@@ -1170,7 +1289,8 @@ export async function superviseGroupTask(
   };
   await store.kvSet(`${GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`, JSON.stringify(nudge));
   return {
-    task, action, notice: null, nudgeQueued: true,
+    task, action, nudgeQueued: true,
+    notice: `Nudge queued for ${nudge.name}.`,
     chairUnavailable: task.chairDegradedAt != null,
   };
 }

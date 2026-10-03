@@ -169,7 +169,7 @@ test('propose forwards the plan, wish, language, and the source session id', asy
     ok: true,
     state: 'success',
     data: {
-      proposal: { id: 7 },
+      proposal: { id: 7, acceptanceCriteria: '应用可打开' },
       slateText: '按你的目标…回复确认',
       ownerConfirmRequired: true,
     },
@@ -181,12 +181,20 @@ test('propose forwards the plan, wish, language, and the source session id', asy
   }
   const output = await controller.run(
     'propose',
-    { title: '发布 MetaApp', goal: '上线并发布', plan, wish: '帮我发布', language: 'zh' },
+    {
+      title: '发布 MetaApp',
+      goal: '上线并发布',
+      plan,
+      acceptanceCriteria: '应用可打开',
+      wish: '帮我发布',
+      language: 'zh',
+    },
     { sessionId: 'sess-1' },
   )
   const proposeCall = calls.find((args) => args[1] === 'staffing' && args[2] === 'propose')
   assert.ok(proposeCall)
   assert.deepEqual(JSON.parse(flagValue(proposeCall, '--plan')), plan)
+  assert.equal(flagValue(proposeCall, '--acceptance'), '应用可打开', 'acceptanceCriteria reaches the CLI')
   assert.equal(flagValue(proposeCall, '--session'), 'sess-1')
   assert.equal(flagValue(proposeCall, '--wish'), '帮我发布')
   assert.equal(flagValue(proposeCall, '--lang'), 'zh')
@@ -194,6 +202,38 @@ test('propose forwards the plan, wish, language, and the source session id', asy
   assert.match(output, /按你的目标…回复确认/)
   assert.match(output, /proposalId: 7/)
   assert.match(output, /ownerConfirmRequired: true/)
+  assert.match(output, /acceptanceCriteria: 应用可打开/, 'the receipt echoes the acceptance criteria')
+})
+
+test('propose states a missing acceptanceCriteria instead of leaving it implicit', async () => {
+  const { run } = fakeRun(() => ({
+    ok: true,
+    state: 'success',
+    data: { proposal: { id: 8 }, slateText: 'slate', ownerConfirmRequired: true },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const output = await controller.run('propose', {
+    title: 'T',
+    goal: 'G',
+    plan: { stages: [], seats: [] },
+  })
+  assert.match(output, /acceptanceCriteria: \(none\) — the task will have no acceptance criteria/)
+})
+
+test('create_from_proposal warns when the created task carries no acceptanceCriteria', async () => {
+  const { run } = fakeRun(() => ({
+    ok: true,
+    state: 'success',
+    data: {
+      chairSlug: 'alice',
+      task: { id: 10, groupId: 'group-pin-4', title: 'T', status: 'planning' },
+      taskId: 10,
+      decision: 'owner_confirmed',
+    },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  const output = await controller.run('create_from_proposal', { proposalId: 7 })
+  assert.match(output, /Warning: no acceptanceCriteria was set on this task/)
 })
 
 test('propose through the tool execute path captures the running session id', async () => {

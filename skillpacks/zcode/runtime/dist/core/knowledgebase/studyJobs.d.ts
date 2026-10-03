@@ -9,7 +9,11 @@ import type { MetabotPaths } from '../state/paths';
 export declare const DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 20;
 export declare const MAX_STUDY_RUNS_PER_JOB = 10;
 export declare const MAX_STUDY_CONSECUTIVE_FAILURES = 3;
-/** Tool-step cap for one nightly study turn (topic jobs) — after this the turn must have reported. */
+/**
+ * Tool-step cap for one nightly study turn (topic jobs). Hitting the cap does
+ * not fail the run: the loop takes one final no-tools report turn and marks
+ * the result partial (same graceful degradation as the surf loop).
+ */
 export declare const STUDY_TURN_MAX_TOOL_STEPS = 12;
 /** Tool-step cap for one nightly Q&A-surf turn (surf sessions page feeds and answer questions). */
 export declare const QA_SURF_TURN_MAX_TOOL_STEPS = 24;
@@ -110,7 +114,9 @@ export declare function buildStudySessionPrompt(input: {
 export declare function buildQaSurfSessionPrompt(job: Pick<StudyJobRecord, 'processedPinIds' | 'budgetPins'>): string;
 /**
  * Parse the study run report: the LAST json fence wins; a prose-only reply
- * throws (the job fails rather than guessing).
+ * throws (the job fails rather than guessing). The executor loop hands back
+ * the normalized report as bare JSON while the model's raw reply carries a
+ * fence, so both shapes are accepted.
  */
 export declare function parseStudyRunReport(reply: string): {
     processedPinIds: string[];
@@ -222,6 +228,7 @@ export interface StudyLoopDeps {
  * the model proposes one json tool call per step, the executor runs it (or
  * rejects it), and only allowlisted operations ever execute. Pin budget is
  * enforced by a counting wrapper around addDocument — prompt guidance alone
- * is not a budget. Returns the final report text.
+ * is not a budget. Returns the final report text; hitting the step cap takes
+ * one final no-tools report turn (marked partial) instead of failing the run.
  */
 export declare function runStudyTurnWithTools(prompt: string, deps: StudyLoopDeps): Promise<string>;

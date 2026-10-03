@@ -214,6 +214,13 @@ export declare const GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = "group_task_nudge_att
 export declare function emitGroupTaskRelay(ctx: GroupTaskServiceContext, chair: GroupTaskProfileRef, task: GroupTaskRecord, kind: GroupTaskRelayKind, text: string): Promise<void>;
 export interface DrainedGroupTaskRelayRow extends GroupTaskRelayRow {
     chairSlug: string;
+    /**
+     * The task's status at drain time (null when the record could not be read).
+     * A row drained after its task closed is a delayed historical event, not a
+     * live instruction — the consumer uses this plus closedAt to say so.
+     */
+    taskStatus: GroupTaskRecord['status'] | null;
+    closedAt: number | null;
 }
 /**
  * Drain pending relay rows across every profile (or one chair): returns the

@@ -66,3 +66,56 @@ test('study prompt lists the triage targets (KB bodies, procedures, knowledge po
     assert.ok(prompt.includes(marker), `prompt mentions ${marker}`);
   }
 });
+
+test('step ceiling degrades to one final no-tools report and marks it partial (D1-b)', async () => {
+  const calls = [];
+  const replies = [
+    fence({ tool: 'search_metaweb', args: { query: 'oac' } }),
+    fence({ tool: 'read_metaweb_pin', args: { pinId: 'p1' } }),
+    fence({ processedPinIds: ['p1'], summary: 'collected one pin before the cap' }),
+  ];
+  const lastPrompts = [];
+  const result = await runStudyTurnWithTools('topic prompt', {
+    maxSteps: 2,
+    runLlm: async (history) => {
+      lastPrompts.push(history[history.length - 1].content);
+      return replies.shift();
+    },
+    tools: makeTools(calls),
+  });
+  assert.deepEqual(JSON.parse(result), {
+    processedPinIds: ['p1'],
+    summary: '[partial] collected one pin before the cap',
+  });
+  assert.match(lastPrompts.at(-1), /Tool-step budget exhausted/);
+  assert.match(lastPrompts.at(-1), /no further tool calls will run/);
+  assert.deepEqual(calls, [['search', 'oac'], ['read', 'p1']]);
+});
+
+test('a tool fence in the step-ceiling turn is never dispatched; no report still fails (D1-b)', async () => {
+  const calls = [];
+  const replies = [
+    fence({ tool: 'search_metaweb', args: { query: 'first' } }),
+    fence({ tool: 'search_metaweb', args: { query: 'second' } }),
+  ];
+  await assert.rejects(
+    runStudyTurnWithTools('topic prompt', {
+      maxSteps: 1,
+      runLlm: async () => replies.shift(),
+      tools: makeTools(calls),
+    }),
+    (error) => error instanceof Error && error.code === 'study_steps_exhausted',
+  );
+  assert.deepEqual(calls, [['search', 'first']], 'the post-ceiling tool call is never executed');
+});
+
+test('an existing PARTIAL marker is not double-prefixed (D1-b)', async () => {
+  const result = await runStudyTurnWithTools('p', {
+    maxSteps: 1,
+    runLlm: async (history) => (history.length === 1
+      ? fence({ tool: 'search_metaweb', args: { query: 'q' } })
+      : fence({ processedPinIds: [], summary: 'PARTIAL: nothing saved in time' })),
+    tools: makeTools([]),
+  });
+  assert.equal(JSON.parse(result).summary, 'PARTIAL: nothing saved in time');
+});

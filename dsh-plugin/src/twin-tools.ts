@@ -62,6 +62,16 @@ const DEFAULT_STEP_TIMEOUT_MS = 300_000
 /** IDBots CROSS_SESSION_INSERT_MAX_CHARS, kept for the cross-session insert tool. */
 const CROSS_SESSION_INSERT_MAX_CHARS = 12_000
 
+/**
+ * Mirrors OrchestrationTaskStatus in src/core/memory/orchestrationStore.ts.
+ * Kept local because the plugin talks to the core through the CLI boundary,
+ * not through package imports; the list is the status filter whitelist.
+ */
+const TWIN_TASK_STATUSES: readonly string[] = ['planning', 'running', 'review', 'completed', 'failed', 'cancelled']
+
+/** How much of the last partial assistant output a timeout receipt carries. */
+const TIMEOUT_TAIL_MAX_CHARS = 500
+
 export interface DelegationInput {
   workerSlug: string
   objective: string
@@ -162,6 +172,35 @@ export function errorFromTurnEvents(events: ReadonlyArray<{ type: string; data?:
     if (reason?.kind === 'error' && typeof reason.error?.message === 'string') return reason.error.message
   }
   return ''
+}
+
+/**
+ * Timeout receipt for a wedged delegation: identity (session/task/step/attempt),
+ * whatever partial assistant output streamed before the hang, and the next
+ * inspection steps — the bare "timed out" line left the model no way back to
+ * the live session.
+ */
+export function timedOutErrorText(input: {
+  timeoutMs: number
+  dshSessionId: string
+  taskId: string
+  stepId: string
+  attemptId: string
+  events: ReadonlyArray<{ type: string; data?: unknown }>
+}): string {
+  const lastOutput = textFromAssistantEvents(input.events).replace(/\s+/g, ' ').trim()
+  const tail = lastOutput.length > TIMEOUT_TAIL_MAX_CHARS
+    ? `${lastOutput.slice(0, TIMEOUT_TAIL_MAX_CHARS - 1)}…`
+    : lastOutput
+  return [
+    `worker step timed out after ${Math.round(input.timeoutMs / 1000)}s`,
+    `dshSessionId: ${input.dshSessionId}`,
+    `taskId: ${input.taskId}`,
+    `stepId: ${input.stepId}`,
+    `attemptId: ${input.attemptId}`,
+    ...(tail ? [`last assistant output: ${tail}`] : []),
+    `Next: read the live session with oac_session_read_latest (sessionId ${input.dshSessionId}) or check the task with twin_task_status (taskId ${input.taskId}).`,
+  ].join('\n')
 }
 
 export interface DshModelPair {
@@ -485,6 +524,9 @@ export function createTwinOrchestrator(
         clearTimeout(timeoutTimer)
         if (outcome === 'timed_out') {
           timedOut = true
+          // Snapshot before the tap is disposed: the partial stream is the only
+          // evidence of how far the wedged worker got.
+          sessionEvents = tappedOrSnapshot(tap, worker.session)
           try {
             worker.cancel?.({ kind: 'hook', reason: 'timeout' })
           } catch {
@@ -512,7 +554,14 @@ export function createTwinOrchestrator(
       const errorText = settleOverride?.error
         ?? failureText
         ?? (timedOut
-          ? `worker step timed out after ${Math.round(stepTimeoutMs / 1000)}s`
+          ? timedOutErrorText({
+              timeoutMs: stepTimeoutMs,
+              dshSessionId: workerSessionId,
+              taskId,
+              stepId,
+              attemptId: attempt.id,
+              events: sessionEvents,
+            })
           : handoff
             ? null
             : errorFromTurnEvents(sessionEvents)
@@ -535,7 +584,12 @@ export function createTwinOrchestrator(
         await tasksUpdate({ taskId, stepId, attemptId: attempt.id, markNotified: true })
         if (!settleOverride) {
           await tasksUpdate({ taskId, stepId, stepStatus: attemptStatus === 'completed' ? 'completed' : 'failed' })
-          await tasksUpdate({ taskId, taskStatus: attemptStatus === 'completed' ? 'review' : 'running' })
+          // The store aggregates a failed step into the parent task; writing
+          // `running` here would fight that. A completed step still records a
+          // review entry point.
+          if (attemptStatus === 'completed') {
+            await tasksUpdate({ taskId, taskStatus: 'review' })
+          }
         }
       } finally {
         // The flight stays resolvable until bookkeeping is done so a concurrent
@@ -579,7 +633,11 @@ export function createTwinOrchestrator(
       await flight.settled
       inFlight.delete(`${taskId}:${stepId}`)
       await tasksUpdate({ taskId, stepId, stepStatus: 'cancelled' })
-      return { ok: true, state: 'success', data: { stopped: true } }
+      return {
+        ok: true,
+        state: 'success',
+        data: { stopped: true, taskId, stepId, workerSlug: flight.workerSlug, sessionId: flight.sessionId },
+      }
     },
 
     async reassign(input) {
@@ -712,12 +770,19 @@ export function createTwinOrchestrator(
           `That session is running a delegated step; stop it with worker_session_stop using taskId "${taskId}" and stepId "${stepId}" so the task bookkeeping settles too.`,
         )
       }
+      if (!resolved.agent.cancel) {
+        return failure('stop_unavailable', `The live session for "${target.trim()}" exposes no cancellable turn (nothing to stop).`)
+      }
       try {
-        resolved.agent.cancel?.({ kind: 'hook', reason: 'Twin requested stop via worker_session_stop' })
+        resolved.agent.cancel({ kind: 'hook', reason: 'Twin requested stop via worker_session_stop' })
       } catch (error) {
         return failure('stop_failed', error instanceof Error ? error.message : String(error))
       }
-      return { ok: true, state: 'success', data: { target: target.trim(), stopped: true } }
+      return {
+        ok: true,
+        state: 'success',
+        data: { target: target.trim(), workerSlug: resolved.slug, sessionId: resolved.sessionId, stopped: true },
+      }
     },
 
     async insertSessionMessage(target, message) {
@@ -912,11 +977,17 @@ export function buildTwinToolDefinitions(
         render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: String(value) }],
       },
       async execute(args) {
+        const status = typeof args.status === 'string' ? args.status.trim() : ''
+        if (status && !TWIN_TASK_STATUSES.includes(status)) {
+          throw new Error(`Invalid status "${status}". Valid task statuses: ${TWIN_TASK_STATUSES.join(', ')}.`)
+        }
         if (typeof args.taskId === 'string' && args.taskId.trim()) {
           const result = await run(['twin', 'tasks', 'show', '--from', twinSlug, '--task-id', args.taskId.trim()], { timeoutMs: 30_000 })
           return JSON.stringify(dataOf(result).task ?? null, null, 2)
         }
-        const result = await run(['twin', 'tasks', 'list', '--from', twinSlug], { timeoutMs: 30_000 })
+        const listArgs = ['twin', 'tasks', 'list', '--from', twinSlug]
+        if (status) listArgs.push('--status', status)
+        const result = await run(listArgs, { timeoutMs: 30_000 })
         const tasks = (dataOf(result).tasks ?? []) as Array<Record<string, unknown>>
         if (tasks.length === 0) return 'No delegation tasks.'
         return tasks.map((task) =>
@@ -972,13 +1043,19 @@ export function buildTwinToolDefinitions(
       },
       async execute(args) {
         const target = typeof args.target === 'string' ? args.target.trim() : ''
-        if (target) {
-          const result = await orchestrator.stopLiveSession(target)
-          if (!result.ok) throw new Error(result.message ?? 'stop failed')
-          return 'Worker session stopped.'
-        }
-        const result = await orchestrator.stopAttempt(String(args.taskId ?? ''), String(args.stepId ?? ''))
+        const result = target
+          ? await orchestrator.stopLiveSession(target)
+          : await orchestrator.stopAttempt(String(args.taskId ?? ''), String(args.stepId ?? ''))
         if (!result.ok) throw new Error(result.message ?? 'stop failed')
+        // Echo what was actually stopped: the model needs the Worker slug and
+        // session id to inspect or follow up, not a constant ack.
+        const data = (result.data ?? {}) as { workerSlug?: unknown; sessionId?: unknown; target?: unknown }
+        const slug = typeof data.workerSlug === 'string' && data.workerSlug
+          ? data.workerSlug
+          : typeof data.target === 'string' ? data.target : ''
+        const sessionId = typeof data.sessionId === 'string' ? data.sessionId : ''
+        if (slug && sessionId) return `Worker session stopped: ${slug} (session ${sessionId}).`
+        if (slug) return `Worker session stopped: ${slug}.`
         return 'Worker session stopped.'
       },
     },

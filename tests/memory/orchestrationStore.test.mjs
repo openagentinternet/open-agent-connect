@@ -70,6 +70,55 @@ test('idempotency keys are unique across all tasks', async () => {
   );
 });
 
+test('a terminal step aggregates into a running task, but a cancelled step does not', async () => {
+  const paths = await createTempProfileHome();
+  const store = createOrchestrationStore(paths);
+
+  // A task is only touched while running; a step failure then fails it.
+  const planning = await store.createTask({
+    title: '未启动',
+    steps: [{ workerSlug: 'bob', objective: 'a' }],
+  });
+  await store.updateStep(planning.id, planning.steps[0].id, { status: 'failed' });
+  assert.equal((await store.getTask(planning.id)).status, 'planning');
+
+  const failed = await store.createTask({
+    title: '失败聚合',
+    steps: [
+      { workerSlug: 'bob', objective: 'a' },
+      { workerSlug: 'bob', objective: 'b' },
+    ],
+  });
+  await store.updateTaskStatus(failed.id, 'running');
+  await store.updateStep(failed.id, failed.steps[0].id, { status: 'failed' });
+  assert.equal((await store.getTask(failed.id)).status, 'running', 'an open step keeps the task running');
+  await store.updateStep(failed.id, failed.steps[1].id, { status: 'failed' });
+  assert.equal((await store.getTask(failed.id)).status, 'failed');
+
+  // All steps completed moves the task to review.
+  const completed = await store.createTask({
+    title: '完成聚合',
+    steps: [
+      { workerSlug: 'bob', objective: 'a' },
+      { workerSlug: 'bob', objective: 'b' },
+    ],
+  });
+  await store.updateTaskStatus(completed.id, 'running');
+  await store.updateStep(completed.id, completed.steps[0].id, { status: 'completed' });
+  assert.equal((await store.getTask(completed.id)).status, 'running');
+  await store.updateStep(completed.id, completed.steps[1].id, { status: 'completed' });
+  assert.equal((await store.getTask(completed.id)).status, 'review');
+
+  // A cancelled step is owned by the stop/reassign flow: no recompute.
+  const cancelled = await store.createTask({
+    title: '取消聚合',
+    steps: [{ workerSlug: 'bob', objective: 'a' }],
+  });
+  await store.updateTaskStatus(cancelled.id, 'running');
+  await store.updateStep(cancelled.id, cancelled.steps[0].id, { status: 'cancelled' });
+  assert.equal((await store.getTask(cancelled.id)).status, 'running');
+});
+
 test('active workload counts queued/running steps of open tasks only', async () => {
   const paths = await createTempProfileHome();
   const store = createOrchestrationStore(paths);

@@ -117,7 +117,13 @@ export function formatQaQuestionDetail(input: {
     lines.push('', 'No answers yet — if you know the answer, post_simpleanswer with `answer_to` = the question pinId above.');
     return lines.join('\n');
   }
-  lines.push('', 'Answers (ranked by likes − dislikes, best first):', formatQaAnswerBullets(input.answers));
+  lines.push(
+    '',
+    'Answers (ranked by likes − dislikes, best first):',
+    formatQaAnswerBullets(input.answers),
+    '',
+    'Ranking reflects community likes/dislikes only — it does not mean the asker adopted or refuted any answer; judge each answer on its own merit.',
+  );
   lines.push('', 'Answer summaries are ~200 chars; read the full body of an answer with read_metaweb_pin on its pinId before relying on it. React with like_pin (1 like / -1 dislike) on the answer pinId.');
   return lines.join('\n');
 }

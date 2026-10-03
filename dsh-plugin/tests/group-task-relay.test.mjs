@@ -72,6 +72,42 @@ test('relay rows for closed sessions wait and inject on the next turn', async ()
   drainer.stop()
 })
 
+test('a relay row drained after its task closed is delivered as a delayed event', async () => {
+  const closedAt = Date.now()
+  const stale = row({
+    id: 3,
+    taskStatus: 'done',
+    closedAt,
+    createdAt: closedAt - 60_000,
+    kind: 'review',
+    text: 'The task awaits acceptance.',
+  })
+  const { ctx, preStepHandlers } = fakeCtx()
+  const delivered = []
+  plugin.liveOacAgents.set('bob', {
+    ctx: {},
+    session: { id: 'sess-origin' },
+    followup: (message) => delivered.push(message),
+  })
+  const drainer = plugin.applyGroupTaskRelayDrain(ctx, { daemonAlive: async () => true, run: async () => ({ ok: true, data: { relayed: [stale] } }) })
+  await drainer.drainOnce()
+  assert.equal(delivered.length, 1)
+  assert.match(delivered[0].content[0].text, /^\[delayed event — task 42 is now done\]/)
+  assert.match(delivered[0].content[0].text, /\[Group Task\] 发布 MetaApp/, 'the original text follows the annotation')
+
+  // A still-running task keeps the plain live wording.
+  plugin.liveOacAgents.delete('bob')
+  const live = row({ id: 4, taskStatus: 'executing', closedAt: null, createdAt: Date.now() })
+  const second = plugin.applyGroupTaskRelayDrain(ctx, { daemonAlive: async () => true, run: async () => ({ ok: true, data: { relayed: [live] } }) })
+  await second.drainOnce()
+  const decision = await preStepThrough(preStepHandlers.at(-1), { session: { id: 'sess-origin' } })
+  const text = decision.messages.at(-1).content[0].text
+  assert.doesNotMatch(text, /delayed event/)
+  assert.match(text, /\[Group Task\] 发布 MetaApp/)
+  drainer.stop()
+  second.stop()
+})
+
 test('relay drain survives CLI failures and ignores foreign sessions', async () => {
   const { ctx, preStepHandlers } = fakeCtx()
   let fail = true

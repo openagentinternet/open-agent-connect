@@ -41,9 +41,12 @@ export declare const VISION_VIDEO_MAX_SECONDS = 180;
 /** At most this many confirmation calls per transcription (daily-quota guard). */
 export declare const MAX_SPELLED_LETTER_CONFIRMATIONS = 3;
 /**
- * Suspect all-caps runs (2-5 letters) in one transcript, deduped, in order.
- * Hyphenated spelled forms (O-A-C) never match — they contain no 2+ letter
- * run — so a transcript that already kept the letters is left untouched.
+ * Suspect letter runs (2-5 letters) in one transcript, deduped, in order.
+ * ASR merges spelled sequences into all-caps tokens (OASIS) or mixed-case
+ * ones ("oC" for "O C"), so any token carrying an uppercase letter is a
+ * suspect except ordinary capitalized words like "The". Hyphenated spelled
+ * forms (O-A-C) never match — they contain no 2+ letter run — so a transcript
+ * that already kept the letters is left untouched.
  */
 export declare function findSpelledLetterCandidates(content: string): string[];
 /** The format-constrained confirmation prompt for one suspect token. */

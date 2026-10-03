@@ -31,6 +31,10 @@ export interface GroupTaskRelayRow {
   text: string
   createdAt: number
   chairSlug?: string
+  /** Task status at drain time; drives the delayed-event annotation. */
+  taskStatus?: string | null
+  /** Task close time (epoch ms); a row older than it is a historical event. */
+  closedAt?: number | null
 }
 
 const DEFAULT_TICK_MS = 30_000
@@ -49,8 +53,21 @@ export interface GroupTaskRelayDrainer {
   stop(): void
 }
 
+function isTerminalStatus(status: string | null | undefined): boolean {
+  return status === 'done' || status === 'cancelled'
+}
+
 function relayTextOf(row: GroupTaskRelayRow): string {
-  return `[Group Task] ${row.title}\n${row.text}`
+  const base = `[Group Task] ${row.title}\n${row.text}`
+  // A milestone that was emitted before the task closed but drained after it
+  // is history, not a live instruction: state the settled status up front so
+  // the origin session never reads "task awaited acceptance" as current.
+  if (isTerminalStatus(row.taskStatus)
+    && typeof row.closedAt === 'number'
+    && row.createdAt < row.closedAt) {
+    return `[delayed event — task ${row.taskId} is now ${row.taskStatus}]\n${base}`
+  }
+  return base
 }
 
 function relayMessageOf(text: string): HostUserMessage {
@@ -77,10 +94,11 @@ export function applyGroupTaskRelayDrain(
   function deliver(row: GroupTaskRelayRow): boolean {
     const key = `${row.chairSlug ?? ''}:${row.id}`
     if (deliveredKeys.has(key)) return true
+    const text = relayTextOf(row)
     for (const agent of liveOacAgents.values()) {
       if (agent.session?.id === row.sessionId && agent.followup) {
         try {
-          agent.followup(relayMessageOf(relayTextOf(row)))
+          agent.followup(relayMessageOf(text))
           deliveredKeys.add(key)
           return true
         } catch {
@@ -89,7 +107,7 @@ export function applyGroupTaskRelayDrain(
       }
     }
     const list = pendingBySession.get(row.sessionId) ?? []
-    list.push(relayTextOf(row))
+    list.push(text)
     pendingBySession.set(row.sessionId, list)
     return false
   }

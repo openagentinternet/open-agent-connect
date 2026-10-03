@@ -300,7 +300,8 @@ test('describeAudio handles local files, URLs, data URIs, and video-container ex
   await service.describeAudio({ source: 'https://example.test/a.mp3', prompt: 'summarize' });
   assert.equal(seen[1].body.audioUrl, 'https://example.test/a.mp3');
   assert.equal(seen[1].body.mimeType, 'audio/mpeg');
-  assert.equal(seen[1].body.prompt, 'summarize');
+  assert.match(seen[1].body.prompt, /^summarize\n/);
+  assert.match(seen[1].body.prompt, /逐字母念出的字母序列按连字符保留/, 'a caller prompt keeps the letter-preservation constraint');
 
   await service.describeAudio({ source: 'data:audio/wav;base64,QUJD' });
   assert.equal(seen[2].body.audioBase64, 'QUJD');
@@ -334,6 +335,13 @@ test('findSpelledLetterCandidates flags merged words, skips common acronyms and 
   assert.deepEqual(findSpelledLetterCandidates('call the API over HTTP'), [], 'common acronyms never trigger a confirmation call');
   assert.deepEqual(findSpelledLetterCandidates('OIC and OOC and OIC again'), ['OIC', 'OOC'], 'deduped, in order');
   assert.deepEqual(findSpelledLetterCandidates('lowercase only'), []);
+});
+
+test('findSpelledLetterCandidates also catches mixed-case merges but not ordinary words (E1)', () => {
+  assert.deepEqual(findSpelledLetterCandidates('这是 OAC 冒烟'), ['OAC']);
+  assert.deepEqual(findSpelledLetterCandidates('这是 oC 冒烟'), ['oC'], 'a mixed-case merge is a suspect too');
+  assert.deepEqual(findSpelledLetterCandidates('The tool works'), [], '"The" is an ordinary capitalized word');
+  assert.deepEqual(findSpelledLetterCandidates('hello there'), [], 'lowercase words are never suspects');
 });
 
 test('parseSpelledLetterConfirmation classifies letters, words, and honest doubt', () => {
@@ -424,4 +432,29 @@ test('describeAudio leaves a transcript without suspect tokens on a single call'
   const result = await service.describeAudio({ source: audioFile });
   assert.equal(result.content, '这是 O-A-C 工具冒烟测试。');
   assert.equal(calls, 1, 'an already-spelled form needs no confirmation call');
+});
+
+test('describeAudio confirms a mixed-case merge and keeps the constraint with a caller prompt (E1)', async () => {
+  const systemHomeDir = await mkdtempTempRoot('oac-llm-relay-test-');
+  const audioFile = path.join(systemHomeDir, 'note.wav');
+  await fs.writeFile(audioFile, Buffer.from('RIFF----WAVEfmt '));
+  const bodies = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    return jsonResponse({
+      code: 0,
+      data: { content: bodies.length > 1 ? 'o-c' : '这是 oC 的冒烟测试。', remainingToday: 30 },
+    });
+  };
+  const service = createLlmRelayService({
+    systemHomeDir,
+    fetchImpl,
+    staticCredentials: { apiKey: 'mrk_test', baseUrl: 'https://gw.example.test/assist-open-api' },
+  });
+  const result = await service.describeAudio({ source: audioFile, prompt: '只转写，不要总结' });
+  assert.match(bodies[0].prompt, /^只转写，不要总结\n/);
+  assert.match(bodies[0].prompt, /逐字母念出的字母序列按连字符保留/, 'the caller prompt does not drop the constraint');
+  assert.ok(bodies[1].prompt.includes('oC'), 'the confirmation call names the mixed-case suspect');
+  assert.equal(result.content, '这是 O-C 的冒烟测试。');
 });
