@@ -104,6 +104,44 @@ export function applyPrivateLatest(
   }
 }
 
+/**
+ * Clear one private unread mark (the user opened the thread) while keeping
+ * the seen baseline at the worst accounted timestamp. Every written map is
+ * copied: snapshot stores may deep-freeze the state, so an in-place write
+ * throws. Returns null when the key carries no mark, so the caller can skip
+ * the store write entirely.
+ */
+export function clearPrivateMark(
+  state: Readonly<UnreadState>,
+  key: string,
+): UnreadState | null {
+  const marked = state.private[key]
+  if (marked === undefined) return null
+  const priv = { ...state.private }
+  delete priv[key]
+  return {
+    ...state,
+    private: priv,
+    privateSeen: { ...state.privateSeen, [key]: Math.max(state.privateSeen[key] ?? 0, marked) },
+  }
+}
+
+/** Group-task twin of `clearPrivateMark`. */
+export function clearGroupMark(
+  state: Readonly<UnreadState>,
+  key: string,
+): UnreadState | null {
+  const marked = state.group[key]
+  if (marked === undefined) return null
+  const group = { ...state.group }
+  delete group[key]
+  return {
+    ...state,
+    group,
+    groupSeen: { ...state.groupSeen, [key]: Math.max(state.groupSeen[key] ?? 0, marked) },
+  }
+}
+
 /** Seed a private baseline without marking unread (first sight). */
 export function seedPrivateSeen(
   state: Readonly<UnreadState>,

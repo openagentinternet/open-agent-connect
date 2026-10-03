@@ -815,6 +815,8 @@ export {
 export {
   applyGroupUpdate,
   applyPrivateLatest,
+  clearGroupMark,
+  clearPrivateMark,
   diffGroupTasks,
   EMPTY_UNREAD,
   hasAnyUnread,

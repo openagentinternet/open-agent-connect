@@ -80,6 +80,37 @@ test('hasAnyUnread drives the entry dot', () => {
   assert.equal(plugin.hasAnyUnread({ ...plugin.EMPTY_UNREAD, group: { 'bob:1': 1 } }), true)
 })
 
+test('clearGroupMark/clearPrivateMark clear the mark without mutating a frozen snapshot', () => {
+  // dsh-client-store deep-freezes every snapshot, so the clear path must copy
+  // every map it writes — an in-place *Seen assignment threw
+  // "Cannot assign to read only property '<chair>:<taskId>'" and crashed the
+  // panel render for any task carrying an unread mark.
+  const state = Object.freeze({
+    private: Object.freeze({ 'bob:p1': 20 }),
+    group: Object.freeze({ 'bob:302': 500 }),
+    privateSeen: Object.freeze({ 'bob:p1': 10 }),
+    groupSeen: Object.freeze({ 'bob:302': 400 }),
+  })
+  const afterGroup = plugin.clearGroupMark(state, 'bob:302')
+  assert.deepEqual(afterGroup.group, {})
+  assert.deepEqual(afterGroup.groupSeen, { 'bob:302': 500 })
+  const afterPrivate = plugin.clearPrivateMark(state, 'bob:p1')
+  assert.deepEqual(afterPrivate.private, {})
+  assert.deepEqual(afterPrivate.privateSeen, { 'bob:p1': 20 })
+  assert.deepEqual(state.group, { 'bob:302': 500 }, 'input snapshot untouched')
+  assert.deepEqual(state.private, { 'bob:p1': 20 }, 'input snapshot untouched')
+  assert.equal(plugin.clearGroupMark(state, 'bob:999'), null)
+  assert.equal(plugin.clearPrivateMark(state, 'bob:none'), null)
+})
+
+test('client clear paths delegate to the pure mark-clearing helpers', async () => {
+  const feed = await readFile(join(root, 'src/client/a2a-unread-store.ts'), 'utf8')
+  assert.match(feed, /clearPrivateMark/)
+  assert.match(feed, /clearGroupMark/)
+  assert.doesNotMatch(feed, /\.groupSeen\[key\] =/)
+  assert.doesNotMatch(feed, /\.privateSeen\[key\] =/)
+})
+
 test('chat watcher is push-only: no polling loop, store paths filtered by pattern', async () => {
   const watcher = await readFile(join(root, 'src/chat-watcher.ts'), 'utf8')
   assert.match(watcher, /watch\(/)
