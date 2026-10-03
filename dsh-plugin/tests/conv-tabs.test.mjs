@@ -64,6 +64,11 @@ test('the conversation tabs mount anchors on the slot renderer wrapper and fails
 test('the tab strip renders three tabs and hides the official region only via the html class', async () => {
   const css = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
   assert.match(css, /html\.oac-conv-tabs-active \[data-slot="sidebar\.workspaces"\] \{ display: none/)
+  // Scroll fix: while a non-local tab owns the column the mount host must
+  // fill the region area (flex:1 + min-height:0) — at content height the
+  // list body overflows the region's overflow:hidden clip and the rows
+  // area's overflow-y never engages (the unscrollable 线上对话/群任务 list).
+  assert.match(css, /html\.oac-conv-tabs-active \[data-oac-conv-tabs\] \{ flex: 1 1 auto; min-height: 0; \}/)
   const component = await readFile(join(root, 'src/client/ConvTabs.tsx'), 'utf8')
   // Rows navigate (open the A2A overlay on the target) — they never render
   // threads in the sidebar column.
