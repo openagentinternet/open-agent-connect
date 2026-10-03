@@ -3,7 +3,16 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import net from 'node:net';
-import { collectDaemonStartupDiagnostics, formatDaemonStartupTimeoutMessage } from './daemonStartupDiagnostics';
+import {
+  classifyDaemonRecordState,
+  collectDaemonStartupDiagnostics,
+  formatDaemonChildStartCause,
+  formatDaemonStartupTimeoutMessage,
+  formatPermissionDeniedStartupError,
+  isPermissionDeniedErrno,
+  type DaemonChildStartCause,
+} from './daemonStartupDiagnostics';
+import type { DaemonLifecycleEvent } from '../core/state/daemonStateStore';
 import { CLI_VERSION } from './version';
 import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
@@ -331,6 +340,11 @@ const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_PROVIDER_LLM_REPLY_ENV = 'METABOT_TEST_FAKE_PROVIDER_LLM_REPLY';
 const TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV = 'METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
+/** Who asked for this daemon serve process — recorded in the lifecycle journal. */
+const DAEMON_START_TRIGGER_ENV = 'METABOT_DAEMON_START_TRIGGER';
+/** Pid of the crashed daemon this serve process replaces (respawn marker). */
+const DAEMON_REPLACED_PID_ENV = 'METABOT_DAEMON_REPLACED_PID';
+const DAEMON_LOG_MAX_BYTES = 5 * 1024 * 1024;
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
@@ -1429,10 +1443,10 @@ function daemonConfigMatchesContext(
 async function stopRunningDaemon(input: {
   daemonRecord: RuntimeDaemonRecord;
   lockPath: string;
-}): Promise<'already_stopped' | 'stopped'> {
+}): Promise<'found_dead' | 'stopped'> {
   const { daemonRecord, lockPath } = input;
   if (!Number.isFinite(daemonRecord.pid) || daemonRecord.pid <= 0) {
-    return 'already_stopped';
+    return 'found_dead';
   }
 
   const ownership = await verifyDaemonProcessOwnership({ daemonRecord, lockPath });
@@ -1446,7 +1460,7 @@ async function stopRunningDaemon(input: {
         `Daemon process ${daemonRecord.pid} is already gone, but ${daemonRecord.host || DEFAULT_DAEMON_HOST}:${daemonRecord.port} is still occupied.`,
       );
     }
-    return 'already_stopped';
+    return 'found_dead';
   }
   if (ownership !== 'verified') {
     throw new DaemonOwnershipVerificationError(daemonRecord.pid, lockPath);
@@ -1457,7 +1471,7 @@ async function stopRunningDaemon(input: {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ESRCH') {
-      return 'already_stopped';
+      return 'found_dead';
     }
     throw error;
   }
@@ -1580,7 +1594,7 @@ async function migrateLegacyProfileDaemons(systemHomeDir: string): Promise<void>
 
 async function ensureDaemonBaseUrl(
   context: CliRuntimeContext,
-  options: { allowUnindexedExplicitHome?: boolean } = {},
+  options: { allowUnindexedExplicitHome?: boolean; startTrigger?: string } = {},
 ): Promise<string> {
   const explicitBaseUrl = typeof context.env.METABOT_DAEMON_BASE_URL === 'string'
     ? context.env.METABOT_DAEMON_BASE_URL.trim()
@@ -1591,7 +1605,6 @@ async function ensureDaemonBaseUrl(
 
   const daemonRecord = await resolveDaemonRecord(context);
   if (daemonRecord) {
-    const daemonPaths = resolveMetabotDaemonPaths(normalizeSystemHomeDir(context.env, context.cwd));
     if (
       daemonRecord.baseUrl
       && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)
@@ -1600,82 +1613,142 @@ async function ensureDaemonBaseUrl(
         return daemonRecord.baseUrl;
       }
     }
-    await stopRunningDaemon({ daemonRecord, lockPath: daemonPaths.daemonLockPath });
-    return startDetachedDaemon(context, options);
+    // No explicit stop here: startDetachedDaemon re-reads the same record and
+    // owns the whole stop-or-replace transition (including the crash journal).
   }
 
   return startDetachedDaemon(context, options);
 }
 
+/**
+ * The single CLI-side daemon lifecycle transition point. Stops (or detects a
+ * crashed) tracked daemon, spawns the detached serve child with its stderr
+ * captured to the daemon log, and appends start/crash/respawn lifecycle
+ * events so `daemon status` can reconstruct what happened.
+ */
 async function startDetachedDaemon(
   context: CliRuntimeContext,
-  options: { allowUnindexedExplicitHome?: boolean } = {},
+  options: { allowUnindexedExplicitHome?: boolean; startTrigger?: string } = {},
 ): Promise<string> {
   const homeDir = normalizeHomeDir(context.env, context.cwd, options);
   const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-  const store = createDaemonStateStore(systemHomeDir);
+  const daemonPaths = resolveMetabotDaemonPaths(systemHomeDir);
+  const store = createDaemonStateStore(daemonPaths);
   const expectedConfigHash = buildDaemonConfigHash(context.env);
-  const persistedRecord = await store.readDaemon();
-  if (!persistedRecord) {
-    await migrateLegacyProfileDaemons(systemHomeDir);
-  }
-  const installation = await selectDaemonInstallation(context);
-  const preferredPort = installation.port;
-  if (persistedRecord) {
-    const daemonPaths = resolveMetabotDaemonPaths(systemHomeDir);
-    if (
-      persistedRecord.baseUrl
-      && await isDaemonReachable(persistedRecord.baseUrl, persistedRecord.ownerId)
-    ) {
-      if (daemonConfigMatchesContext(persistedRecord, context)) {
-        return persistedRecord.baseUrl;
+  const appendLifecycleEvent = async (event: DaemonLifecycleEvent): Promise<void> => {
+    try {
+      await store.appendDaemonEvent(event);
+    } catch (error) {
+      // Journaling must never block a start; the timeout diagnostics still
+      // report the state files directly.
+      console.warn('[daemon lifecycle journal]', error instanceof Error ? error.message : String(error));
+    }
+  };
+  try {
+    const persistedRecord = await store.readDaemon();
+    if (!persistedRecord) {
+      await migrateLegacyProfileDaemons(systemHomeDir);
+    }
+    const installation = await selectDaemonInstallation(context);
+    const preferredPort = installation.port;
+    let replacedCrashedPid: number | null = null;
+    if (persistedRecord) {
+      if (
+        persistedRecord.baseUrl
+        && await isDaemonReachable(persistedRecord.baseUrl, persistedRecord.ownerId)
+      ) {
+        if (daemonConfigMatchesContext(persistedRecord, context)) {
+          return persistedRecord.baseUrl;
+        }
+      }
+      const stopOutcome = await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: daemonPaths.daemonLockPath });
+      if (stopOutcome === 'found_dead') {
+        // The tracked daemon died without a clean shutdown (its record
+        // survived) — journal the crash; the fresh serve below journals the
+        // respawn.
+        replacedCrashedPid = persistedRecord.pid;
+        await appendLifecycleEvent({
+          at: Date.now(),
+          event: 'crash',
+          pid: persistedRecord.pid,
+          trigger: options.startTrigger ?? 'cli:auto-start',
+          detail: `tracked daemon record survived its process (baseUrl=${persistedRecord.baseUrl})`,
+        });
       }
     }
-    await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: daemonPaths.daemonLockPath });
-  }
-  if (!persistedRecord && !await isPortBindable(installation.host, installation.port)) {
-    throw new Error(
-      `daemon_port_in_use: the configured daemon endpoint ${installation.host}:${installation.port} is occupied. Use an explicit port migration to change it.`,
-    );
-  }
-  await store.clearDaemon();
-
-  const child = spawn(
-    process.execPath,
-    [resolveCliEntrypoint(), 'daemon', 'serve'],
-    {
-      cwd: systemHomeDir,
-      detached: true,
-      stdio: 'ignore',
-      env: {
-        ...context.env,
-        HOME: systemHomeDir,
-        METABOT_HOME: homeDir,
-        ...(options.allowUnindexedExplicitHome ? { [ALLOW_UNINDEXED_HOME_ENV]: '1' } : {}),
-        [DAEMON_PREFERRED_PORT_ENV]: String(preferredPort),
-      },
+    if (!persistedRecord && !await isPortBindable(installation.host, installation.port)) {
+      throw new Error(
+        `daemon_port_in_use: the configured daemon endpoint ${installation.host}:${installation.port} is occupied. Use an explicit port migration to change it.`,
+      );
     }
-  );
-  child.unref();
+    await store.clearDaemon();
 
-  const startedAt = Date.now();
-  while ((Date.now() - startedAt) < DEFAULT_DAEMON_START_TIMEOUT_MS) {
-    const daemonRecord = await store.readDaemon();
-    if (
-      daemonRecord?.baseUrl
-      && normalizeEnvText(daemonRecord.configHash) === expectedConfigHash
-      && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)
-    ) {
-      return daemonRecord.baseUrl;
+    // Cap the startup log so a repeatedly-crashing daemon cannot grow it
+    // without bound.
+    const logStat = await fs.promises.stat(daemonPaths.daemonLogPath).catch(() => null);
+    if (logStat && logStat.size > DAEMON_LOG_MAX_BYTES) {
+      await fs.promises.writeFile(daemonPaths.daemonLogPath, '', 'utf8');
     }
-    await sleep(DAEMON_START_POLL_INTERVAL_MS);
-  }
+    const logHandle = await fs.promises.open(daemonPaths.daemonLogPath, 'a');
+    const childCause: DaemonChildStartCause = { spawnError: null, exitCode: null, signal: null };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(
+        process.execPath,
+        [resolveCliEntrypoint(), 'daemon', 'serve'],
+        {
+          cwd: systemHomeDir,
+          detached: true,
+          // stderr (and only stderr) is the daemon's own crash output — keep
+          // it on disk so a failed start can name the real cause.
+          stdio: ['ignore', 'ignore', logHandle.fd],
+          env: {
+            ...context.env,
+            HOME: systemHomeDir,
+            METABOT_HOME: homeDir,
+            ...(options.allowUnindexedExplicitHome ? { [ALLOW_UNINDEXED_HOME_ENV]: '1' } : {}),
+            [DAEMON_PREFERRED_PORT_ENV]: String(preferredPort),
+            [DAEMON_START_TRIGGER_ENV]: options.startTrigger ?? 'cli:auto-start',
+            ...(replacedCrashedPid != null ? { [DAEMON_REPLACED_PID_ENV]: String(replacedCrashedPid) } : {}),
+          },
+        }
+      );
+      child.on('error', (error) => {
+        childCause.spawnError = error instanceof Error ? error.message : String(error);
+      });
+      child.on('exit', (code, signal) => {
+        childCause.exitCode = code;
+        childCause.signal = signal;
+      });
+    } finally {
+      await logHandle.close();
+    }
+    child.unref();
 
-  const diagnostics = await collectDaemonStartupDiagnostics({
-    systemHomeDir,
-    preferredPort,
-  });
-  throw new Error(formatDaemonStartupTimeoutMessage(diagnostics));
+    const startedAt = Date.now();
+    while ((Date.now() - startedAt) < DEFAULT_DAEMON_START_TIMEOUT_MS) {
+      const daemonRecord = await store.readDaemon();
+      if (
+        daemonRecord?.baseUrl
+        && normalizeEnvText(daemonRecord.configHash) === expectedConfigHash
+        && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)
+      ) {
+        return daemonRecord.baseUrl;
+      }
+      await sleep(DAEMON_START_POLL_INTERVAL_MS);
+    }
+
+    const diagnostics = await collectDaemonStartupDiagnostics({
+      systemHomeDir,
+      preferredPort,
+    });
+    throw new Error(formatDaemonStartupTimeoutMessage(diagnostics, childCause));
+  } catch (error) {
+    if (isPermissionDeniedErrno(error)) {
+      throw new Error(await formatPermissionDeniedStartupError(error));
+    }
+    throw error;
+  }
 }
 
 async function requestJson<T>(
@@ -2637,7 +2710,7 @@ async function runHostPersonaProjection(
 }
 
 async function runDaemonStartCommand(context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
-  const baseUrl = await ensureDaemonBaseUrl(context);
+  const baseUrl = await ensureDaemonBaseUrl(context, { startTrigger: 'cli:daemon-start' });
   const daemonRecord = await resolveDaemonRecord(context);
   const parsed = new URL(baseUrl);
   return commandSuccess({
@@ -2665,7 +2738,7 @@ async function runDaemonStopCommand(context: CliRuntimeContext): Promise<Metabot
     return commandSuccess({
       pid,
       stopped: stopped === 'stopped',
-      alreadyStopped: stopped === 'already_stopped',
+      alreadyStopped: stopped === 'found_dead',
     });
   } catch (error) {
     if (error instanceof DaemonOwnershipVerificationError) {
@@ -2673,6 +2746,68 @@ async function runDaemonStopCommand(context: CliRuntimeContext): Promise<Metabot
     }
     const code = (error as NodeJS.ErrnoException).code;
     return commandFailed('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
+  }
+}
+
+/**
+ * `metabot daemon status`: the single read-only view over the daemon's
+ * tracked state. Works without a running daemon — that is the point: it
+ * reports the tracked record, whether its process is still alive, and the
+ * recent lifecycle journal (start/stop/crash/respawn).
+ */
+async function runDaemonStatusCommand(context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  const daemonPaths = resolveMetabotDaemonPaths(systemHomeDir);
+  const daemonStore = createDaemonStateStore(daemonPaths);
+  try {
+    const record = await daemonStore.readDaemon();
+    const recordState = classifyDaemonRecordState(record);
+    const lockInfo = await readDaemonLockInfo(daemonPaths.daemonLockPath);
+    if (recordState === 'stale' && record) {
+      // Record the observed crash once per dead pid so status output and the
+      // journal agree without spamming duplicates on repeated reads.
+      const recentEvents = await daemonStore.readDaemonEvents(50);
+      const alreadyJournaled = recentEvents.some((event) => event.event === 'crash' && event.pid === record.pid);
+      if (!alreadyJournaled) {
+        await daemonStore.appendDaemonEvent({
+          at: Date.now(),
+          event: 'crash',
+          pid: record.pid,
+          trigger: 'cli:status-check',
+          detail: `tracked daemon record survived its process (baseUrl=${record.baseUrl})`,
+        }).catch(() => undefined);
+      }
+    }
+    return commandSuccess({
+      state: recordState,
+      trackedProcessAlive: recordState === 'alive' ? true : recordState === 'stale' ? false : null,
+      daemon: record
+        ? {
+          pid: record.pid,
+          baseUrl: record.baseUrl,
+          host: record.host,
+          port: record.port,
+          startedAt: record.startedAt,
+          oacVersion: record.oacVersion,
+          supervisor: record.supervisor,
+        }
+        : null,
+      configMatchesCurrentInstall: record
+        ? normalizeEnvText(record.configHash) === buildDaemonConfigHash(context.env)
+        : null,
+      lock: lockInfo,
+      eventLogPath: daemonPaths.daemonEventsPath,
+      startupLogPath: daemonPaths.daemonLogPath,
+      recentEvents: await daemonStore.readDaemonEvents(10),
+    });
+  } catch (error) {
+    if (isPermissionDeniedErrno(error)) {
+      return commandFailed('daemon_status_read_failed', await formatPermissionDeniedStartupError(error));
+    }
+    return commandFailed(
+      'daemon_status_read_failed',
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -3782,6 +3917,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     daemon: {
       start: () => runDaemonStartCommand(context),
       stop: () => runDaemonStopCommand(context),
+      status: () => runDaemonStatusCommand(context),
       restart: async () => {
         const stopResult = await runDaemonStopCommand(context);
         // Restart tolerates "nothing was running"; any real stop failure
@@ -6808,6 +6944,21 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     startedAt: Date.now(),
     configHash: buildDaemonConfigHash(context.env),
   });
+  // Lifecycle journal: this serve process records its own start (or respawn
+  // when it replaces a crashed daemon) so `daemon status` can reconstruct the
+  // history without ps/lsof archaeology.
+  const serveStartTrigger = normalizeEnvText(process.env[DAEMON_START_TRIGGER_ENV]) || 'serve';
+  const replacedPidRaw = Number(process.env[DAEMON_REPLACED_PID_ENV]);
+  const serveReplacedPid = Number.isInteger(replacedPidRaw) && replacedPidRaw > 0 ? replacedPidRaw : null;
+  await daemonStore.appendDaemonEvent({
+    at: Date.now(),
+    event: serveReplacedPid ? 'respawn' : 'start',
+    pid: process.pid,
+    trigger: serveStartTrigger,
+    detail: serveReplacedPid ? `replaced crashed daemon pid ${serveReplacedPid}` : null,
+  }).catch((error) => {
+    console.warn('[daemon lifecycle journal]', error instanceof Error ? error.message : String(error));
+  });
   const onlineServiceCacheStore = createOnlineServiceCacheStore(paths);
   const ratingDetailStateStore = createRatingDetailStateStore(paths);
   const refreshOnlineServiceCache = async () => {
@@ -7891,9 +8042,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   }
 
   let shuttingDown = false;
-  const shutdown = async (exitCode: number) => {
+  const shutdown = async (exitCode: number, cause: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    await daemonStore.appendDaemonEvent({
+      at: Date.now(),
+      event: 'stop',
+      pid: process.pid,
+      trigger: cause,
+      detail: null,
+    }).catch(() => undefined);
     simplemsgPresenceWatchdog.stop();
     simplemsgListener.stop();
     chatAutoReplyBackfill.stop();
@@ -7928,15 +8086,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     process.exit(exitCode);
   };
 
-  process.on('SIGTERM', () => { void shutdown(0); });
-  process.on('SIGINT', () => { void shutdown(0); });
+  process.on('SIGTERM', () => { void shutdown(0, 'signal:SIGTERM'); });
+  process.on('SIGINT', () => { void shutdown(0, 'signal:SIGINT'); });
   process.on('uncaughtException', (error) => {
     console.error(error);
-    void shutdown(1);
+    void shutdown(1, 'uncaughtException');
   });
   process.on('unhandledRejection', (error) => {
     console.error(error);
-    void shutdown(1);
+    void shutdown(1, 'unhandledRejection');
   });
 
   return new Promise<never>(() => {});

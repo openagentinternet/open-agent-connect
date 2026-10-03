@@ -215,7 +215,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
     { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
-    { name: 'daemon', summary: 'Start, stop, or restart the local MetaBot daemon process.' },
+    { name: 'daemon', summary: 'Start, stop, inspect status of, or restart the local MetaBot daemon process.' },
     { name: 'file', summary: 'Upload local files to MetaWeb.' },
     { name: 'buzz', summary: 'Publish simplebuzz posts to MetaWeb.' },
     { name: 'metaapp', summary: 'Manage MetaApp owner list/delete, payload publishing, project packaging, sharing, viewing, and commenting.' },
@@ -1046,6 +1046,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     subcommands: [
       { name: 'start', summary: 'Start or reuse the local daemon process.' },
       { name: 'stop', summary: 'Stop the currently running local daemon process.' },
+      { name: 'status', summary: 'Show the tracked daemon state and its recent start/stop/crash/respawn lifecycle events.' },
       { name: 'restart', summary: 'Stop the tracked daemon (if any) and start a fresh one.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -1061,6 +1062,25 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails when the daemon cannot bind its local port or initialize runtime dependencies.',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['daemon', 'status'],
+    summary: 'Report the tracked local daemon state without starting one: record, liveness, config match, and recent lifecycle events.',
+    usage: 'metabot daemon status',
+    successFields: [
+      'state',
+      'trackedProcessAlive',
+      'daemon',
+      'configMatchesCurrentInstall',
+      'lock',
+      'eventLogPath',
+      'startupLogPath',
+      'recentEvents',
+    ],
+    failureSemantics: [
+      'Fails with daemon_status_read_failed when the runtime state files cannot be read (e.g. permission-denied).',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },

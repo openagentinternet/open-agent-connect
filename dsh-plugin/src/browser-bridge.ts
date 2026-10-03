@@ -164,6 +164,8 @@ export type SseCallbacks = {
   onEvent: (eventName: string, data: string) => void
   onClose: () => void
   onError: (message: string) => void
+  /** Stream established (HTTP 200) — reconnect loops use this to reset backoff. */
+  onOpen?: () => void
 }
 
 /** Subscribe to one daemon SSE endpoint (frames: `event:`/`data:` lines). */
@@ -174,6 +176,7 @@ export function subscribeDaemonSse(url: string, callbacks: SseCallbacks, label =
       response.resume()
       return
     }
+    callbacks.onOpen?.()
     response.setEncoding('utf8')
     let buffer = ''
     let eventName = ''

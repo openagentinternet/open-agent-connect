@@ -223,16 +223,16 @@ test('runCli doctor reports when the invoked CLI entry differs from the canonica
 
   assert.equal(exitCode, 0);
   const payload = parseLastJson(harness.stdout);
-  assert.deepEqual(
-    payload.data.checks.find((check) => check.code === 'cli_runtime_matches_canonical_shim'),
-    {
-      code: 'cli_runtime_matches_canonical_shim',
-      ok: false,
-      canonicalShimPath,
-      canonicalTargetPath,
-      currentEntryPath,
-    },
-  );
+  const shimCheck = payload.data.checks.find((check) => check.code === 'cli_runtime_matches_canonical_shim');
+  assert.equal(shimCheck.ok, false);
+  assert.equal(shimCheck.canonicalShimPath, canonicalShimPath);
+  assert.equal(shimCheck.canonicalTargetPath, canonicalTargetPath);
+  assert.equal(shimCheck.currentEntryPath, currentEntryPath);
+  // A mismatched install must come with copy-pasteable repair steps, not a
+  // bare ok:false (multi-install drift is unfixable without guidance).
+  assert.ok(Array.isArray(shimCheck.remediation) && shimCheck.remediation.length > 0);
+  assert.ok(shimCheck.remediation.some((line) => line.includes('oac install')));
+  assert.ok(shimCheck.remediation.some((line) => line.includes('metabot daemon restart')));
 });
 
 test('runCli dispatches `metabot identity create --name` with the provided MetaBot name', async () => {

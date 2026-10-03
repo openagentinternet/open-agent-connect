@@ -466,3 +466,72 @@ test('agent mode retries on the fallback pair and reports failure without a runn
     await new Promise((resolve) => serverB.close(resolve))
   }
 })
+
+test('executor automatically reconnects after the daemon drops the stream', async () => {
+  const posted = []
+  let connectionCount = 0
+  let currentResponse = null
+  const request = {
+    type: 'generate',
+    requestId: 'req-reconnect',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    system: 'You are Alice.',
+    prompt: 'Reply now:',
+    timeoutMs: 5_000,
+  }
+  const server = createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/api/llm/host-executor/events') {
+      connectionCount += 1
+      currentResponse = res
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      if (connectionCount === 1) {
+        // First connection: drop the stream immediately (simulated channel
+        // loss). The executor must retry on its own — no restart involved.
+        res.end()
+        return
+      }
+      res.write(`data: ${JSON.stringify(request)}\n\n`)
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/llm/host-executor/result') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        posted.push(JSON.parse(body))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, state: 'success', data: { accepted: true } }))
+      })
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+
+  const llm = {
+    stream() {
+      return (async function* () {
+        yield { type: 'text-delta', text: 'Back online.' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
+    },
+  }
+  const executor = new HostLlmExecutor({
+    env: { METABOT_DAEMON_BASE_URL: `http://127.0.0.1:${port}` },
+    llm,
+  })
+  executor.start()
+  try {
+    // Reconnect backoff starts at 2s, so this settles well inside 30s — the
+    // report's acceptance bound for a self-healed channel.
+    await waitFor(() => posted.length === 1, 15_000)
+    assert.equal(connectionCount >= 2, true)
+    assert.deepEqual(posted[0], { requestId: 'req-reconnect', ok: true, output: 'Back online.' })
+  } finally {
+    executor.stop()
+    currentResponse?.end()
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
