@@ -468,3 +468,92 @@ test('first global start quarantines stale profile daemon metadata without touch
   });
   assert.equal(stopExitCode, 0, stopOutput.join(''));
 });
+
+test('daemon status reports the tracked record from the single state source without starting a daemon', async (t) => {
+  const { systemHomeDir, homeDir } = await createIndexedProfileHome();
+  const store = createDaemonStateStore(systemHomeDir);
+  t.after(async () => {
+    await cleanupTempRoot(systemHomeDir);
+  });
+
+  // No record yet: status must report missing, not spin anything up.
+  const emptyStdout = [];
+  const emptyExitCode = await runCli(['daemon', 'status'], {
+    env: statusTestEnv(systemHomeDir, homeDir),
+    cwd: homeDir,
+    stdout: { write: (chunk) => { emptyStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(emptyExitCode, 0);
+  const emptyPayload = parseLastJson(emptyStdout);
+  assert.equal(emptyPayload.ok, true);
+  assert.equal(emptyPayload.data.state, 'missing');
+  assert.equal(emptyPayload.data.trackedProcessAlive, null);
+  assert.equal(emptyPayload.data.daemon, null);
+
+  // A record whose pid is alive (this test process) reads back as alive.
+  await store.writeDaemon(globalDaemonRecord({ pid: process.pid }));
+  const aliveStdout = [];
+  const aliveExitCode = await runCli(['daemon', 'status'], {
+    env: statusTestEnv(systemHomeDir, homeDir),
+    cwd: homeDir,
+    stdout: { write: (chunk) => { aliveStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(aliveExitCode, 0);
+  const alivePayload = parseLastJson(aliveStdout);
+  assert.equal(alivePayload.data.state, 'alive');
+  assert.equal(alivePayload.data.trackedProcessAlive, true);
+  assert.equal(alivePayload.data.daemon.pid, process.pid);
+  assert.equal(alivePayload.data.configMatchesCurrentInstall, false);
+});
+
+test('daemon status detects a crashed tracked daemon, journals the crash once, and lists lifecycle events', async (t) => {
+  const { systemHomeDir, homeDir } = await createIndexedProfileHome();
+  const store = createDaemonStateStore(systemHomeDir);
+  const env = statusTestEnv(systemHomeDir, homeDir);
+  t.after(async () => {
+    await cleanupTempRoot(systemHomeDir);
+  });
+
+  await store.writeDaemon(globalDaemonRecord({ pid: 999_999 }));
+  await store.appendDaemonEvent({ at: 1, event: 'start', pid: 999_999, trigger: 'cli:daemon-start', detail: null });
+
+  const stdout = [];
+  const exitCode = await runCli(['daemon', 'status'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(exitCode, 0);
+  const payload = parseLastJson(stdout);
+  // kill -9 leaves the record behind with a dead pid — status names the crash.
+  assert.equal(payload.data.state, 'stale');
+  assert.equal(payload.data.trackedProcessAlive, false);
+  const journaledCrash = payload.data.recentEvents.find((event) => event.event === 'crash' && event.pid === 999_999);
+  assert.ok(journaledCrash, 'status must journal the observed crash');
+  assert.equal(journaledCrash.trigger, 'cli:status-check');
+
+  // A repeated read must not spam duplicate crash entries for the same pid.
+  const repeatStdout = [];
+  await runCli(['daemon', 'status'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { repeatStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  const repeatPayload = parseLastJson(repeatStdout);
+  const crashCount = repeatPayload.data.recentEvents.filter((event) => event.event === 'crash').length;
+  assert.equal(crashCount, 1);
+});
+
+function statusTestEnv(systemHomeDir, homeDir) {
+  return {
+    ...process.env,
+    PATH: DAEMON_TEST_PATH,
+    HOME: systemHomeDir,
+    METABOT_HOME: homeDir,
+    METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
+  };
+}

@@ -19,6 +19,14 @@ export async function runDaemonCommand(args: string[], context: CliRuntimeContex
     return handler();
   }
 
+  if (args[0] === 'status') {
+    const handler = context.dependencies.daemon?.status;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Daemon status handler is not configured.');
+    }
+    return handler();
+  }
+
   if (args[0] === 'restart') {
     const handler = context.dependencies.daemon?.restart;
     if (!handler) {

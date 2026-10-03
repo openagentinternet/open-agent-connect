@@ -105,6 +105,8 @@ export interface MetabotDaemonPaths {
   recoveryRoot: string;
   installationPath: string;
   daemonStatePath: string;
+  /** Append-only lifecycle journal (start/stop/crash/respawn) next to daemon.json. */
+  daemonEventsPath: string;
   daemonLockPath: string;
   daemonLogPath: string;
   migrationStatePath: string;
@@ -356,6 +358,7 @@ export function resolveMetabotDaemonPaths(systemHomeDir: string): MetabotDaemonP
     recoveryRoot,
     installationPath: path.join(runtimeRoot, 'installation.json'),
     daemonStatePath: path.join(runtimeRoot, 'daemon.json'),
+    daemonEventsPath: path.join(runtimeRoot, 'daemon-events.jsonl'),
     daemonLockPath: path.join(locksRoot, 'daemon.lock'),
     daemonLogPath: path.join(logsRoot, 'daemon.log'),
     migrationStatePath: path.join(recoveryRoot, 'migration.json'),

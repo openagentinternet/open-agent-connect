@@ -17,7 +17,14 @@ import { request as httpRequest } from 'node:http'
 import { resolveDaemonBaseUrl, subscribeDaemonSse } from './browser-bridge.js'
 import { generateLlmText, type LlmStreamLike } from './llm-generate.js'
 
-const RETRY_DELAY_MS = 2_000
+const RETRY_BASE_DELAY_MS = 2_000
+/**
+ * Cap for the reconnect backoff. The channel is host-initiated, so the only
+ * recovery for a dropped executor stream is this loop retrying — it backs off
+ * exponentially (2s→4s→…→30s) instead of hammering or giving up, and resets
+ * once a stream opens again.
+ */
+const RETRY_MAX_DELAY_MS = 30_000
 const RESULT_POST_TIMEOUT_MS = 10_000
 /** Reply turns target 2-4 sentences; a generous cap keeps runaway models bounded. */
 const GENERATE_MAX_TOKENS = 1024
@@ -133,6 +140,7 @@ export class HostLlmExecutor {
   private started = false
   private subscription: (() => void) | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retryDelayMs = RETRY_BASE_DELAY_MS
 
   constructor(options: {
     env?: NodeJS.ProcessEnv
@@ -167,33 +175,47 @@ export class HostLlmExecutor {
     if (!this.started) return
     this.subscription?.()
     this.subscription = null
-    const baseUrl = await resolveDaemonBaseUrl(this.env)
-    if (baseUrl === null) {
-      this.scheduleRetry()
-      return
-    }
-    this.subscription = subscribeDaemonSse(
-      `${baseUrl}/api/llm/host-executor/events`,
-      {
-        onEvent: (_eventName, data) => {
-          const generateRequest = parseGenerateRequest(data)
-          if (generateRequest !== null) {
-            void this.handleGenerate(baseUrl, generateRequest)
-          }
+    try {
+      const baseUrl = await resolveDaemonBaseUrl(this.env, {
+        onReject: (reason) => this.log(`[oac-dsh host llm] daemon record refused: ${reason}`),
+      })
+      if (baseUrl === null) {
+        this.scheduleRetry()
+        return
+      }
+      this.subscription = subscribeDaemonSse(
+        `${baseUrl}/api/llm/host-executor/events`,
+        {
+          onOpen: () => {
+            this.retryDelayMs = RETRY_BASE_DELAY_MS
+          },
+          onEvent: (_eventName, data) => {
+            const generateRequest = parseGenerateRequest(data)
+            if (generateRequest !== null) {
+              void this.handleGenerate(baseUrl, generateRequest)
+            }
+          },
+          onClose: () => this.scheduleRetry(),
+          onError: () => this.scheduleRetry(),
         },
-        onClose: () => this.scheduleRetry(),
-        onError: () => this.scheduleRetry(),
-      },
-      'daemon host-executor events',
-    )
+        'daemon host-executor events',
+      )
+    } catch (error) {
+      // A thrown connect attempt must never kill the retry loop — that is
+      // how the channel used to freeze at connected:0 until a DSH restart.
+      this.log(`[oac-dsh host llm] executor connect failed: ${error instanceof Error ? error.message : String(error)}`)
+      this.scheduleRetry()
+    }
   }
 
   private scheduleRetry(): void {
     if (!this.started || this.retryTimer !== null) return
+    const delay = this.retryDelayMs
+    this.retryDelayMs = Math.min(this.retryDelayMs * 2, RETRY_MAX_DELAY_MS)
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
       void this.connect()
-    }, RETRY_DELAY_MS)
+    }, delay)
   }
 
   private async handleGenerate(baseUrl: string, generateRequest: GenerateRequest): Promise<void> {

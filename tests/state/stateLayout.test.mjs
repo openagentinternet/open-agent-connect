@@ -101,6 +101,7 @@ test('resolveMetabotDaemonPaths keeps machine daemon process state outside profi
     recoveryRoot: '/tmp/system-home/.metabot/runtime/recovery',
     installationPath: '/tmp/system-home/.metabot/runtime/installation.json',
     daemonStatePath: '/tmp/system-home/.metabot/runtime/daemon.json',
+    daemonEventsPath: '/tmp/system-home/.metabot/runtime/daemon-events.jsonl',
     daemonLockPath: '/tmp/system-home/.metabot/runtime/locks/daemon.lock',
     daemonLogPath: '/tmp/system-home/.metabot/runtime/logs/daemon.log',
     migrationStatePath: '/tmp/system-home/.metabot/runtime/recovery/migration.json',
