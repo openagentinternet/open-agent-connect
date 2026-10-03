@@ -55,6 +55,28 @@ test('client shadows the hero chip at priority -1 and does not duplicate Agent p
   assert.match(text, /id: 'oac-bots'/)
 })
 
+test('session header shadows the stock agent-preset cell for the Bot avatar', async () => {
+  // Same list id as the stock AgentPresetLabel cell at a lower priority: the
+  // slots framework renders a list cell's lowest-priority entry, so the Bot
+  // label replaces the stock one and the stock label returns unchanged when
+  // this registration retires.
+  const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(
+    text,
+    /name: 'conversation\.session\.header\.actions',\s*id: 'agent-preset',\s*order: -10,\s*priority: -1,/,
+  )
+  const label = await readFile(join(root, 'src/client/HeaderBotLabel.tsx'), 'utf8')
+  assert.match(label, /slugFromPresetId/)
+  assert.match(label, /BotAvatar/)
+  assert.match(label, /chipDisplayName/)
+  assert.match(label, /useSessions/)
+  // Stock presets keep the stock label face (compat icon + roster copy).
+  assert.match(label, /IconAgentPresetOutline16/)
+  assert.match(label, /presetDisplayText/)
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /oac-header-bot-label/)
+})
+
 test('stock Agent presets roster hides the oac-* Bot preset cards', async () => {
   // Bots are created and edited on the Bots page, so their stock management
   // cards in Settings → Agent presets are duplicates; the presets stay

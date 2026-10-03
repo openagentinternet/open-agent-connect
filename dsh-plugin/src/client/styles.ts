@@ -798,6 +798,18 @@ export const PRESETS_CSS = `
 .oac-preset-seat-item-icon { flex: none; }
 .oac-preset-avatar.oac-preset-seat-icon, .oac-preset-avatar.oac-preset-seat-item-icon { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
 
+/* Session-header Bot label (HeaderBotLabel.tsx): the shadowed stock
+   agent-preset header cell. An oac-* session shows its Bot's avatar beside
+   its name; every other preset re-renders the stock label face. Metrics
+   mirror the stock AgentPresetLabel.module.css so the header row keeps its
+   shape (including the narrow-container hide). */
+.oac-header-bot-label { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; height: 22px; padding: 0 2px 0 0; border-radius: var(--dsw-radius-xs); background: var(--dsw-alias-fill-tsp-secondary); color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 22px; white-space: nowrap; overflow: hidden; }
+.oac-header-bot-label-icon { opacity: .7; flex: none; }
+.oac-header-bot-label-avatar.oac-bot-avatar { width: 16px; height: 16px; font-size: 7px; }
+.oac-header-bot-label-avatar.oac-bot-avatar-fallback { font-size: 7px; }
+.oac-header-bot-label-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@container (width <= 540px) { .oac-header-bot-label { display: none; } }
+
 /* Settings → Agent presets keeps its stock roster, but the oac-* Bot presets
    no longer show in its 自定义 group: every local Bot is created and edited
    on the Bots page, so those stock management cards were pure duplicates.

@@ -33,6 +33,7 @@ import { BotPanel } from './BotPanel.tsx'
 import { BotsPageGlyph, BotsPageOverlay, type BotsPageGlyphInjected, type BotsPageOverlayInjected, type BotsPageSectionRow } from './bots-page.tsx'
 import { BotsPagePanelStore } from './bots-page-store.ts'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
+import { HeaderBotLabel, type HeaderBotLabelInjected } from './HeaderBotLabel.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
@@ -573,6 +574,11 @@ export function apply(ctx: ClientContext): void {
       select: (id: string) => seat.select(id),
     })
 
+    const labelInjected = (): HeaderBotLabelInjected => ({
+      hooks: { botPresetSeat: seat.store },
+      load: () => seat.load(),
+    })
+
     scope.effect(() => {
       const stop = sessionsList.subscribe(() => { void seat.apply() })
       const headerId = scope.slots.register({
@@ -589,10 +595,22 @@ export function apply(ctx: ClientContext): void {
         locale: 'settings.agentPreset',
         inject: seatInjected,
       }, BotPresetSeat)
+      // Shadow of the stock agent-preset header cell: same list id, lower
+      // priority — the Bot's avatar + name for oac-* sessions, the stock
+      // label face re-rendered for every other preset.
+      const label = scope.slots.register({
+        name: 'conversation.session.header.actions',
+        id: 'agent-preset',
+        order: -10,
+        priority: -1,
+        locale: 'settings.agentPreset',
+        inject: labelInjected,
+      }, HeaderBotLabel)
       return () => {
         stop()
         chip()
         headerId()
+        label()
       }
     }, 'oac-dsh: preset chip')
 
