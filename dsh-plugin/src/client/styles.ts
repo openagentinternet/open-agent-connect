@@ -992,7 +992,16 @@ export const CONVTABS_CSS = `
    and every rule here rides the --dsw-alias-* token set like the rest of
    the plugin. */
 html.oac-conv-tabs-active [data-slot="sidebar.workspaces"] { display: none !important; }
-.oac-conv-tabs-host { flex: none; display: flex; flex-direction: column; min-height: 0; }
+/* The mount host must FILL the sidebar's region area (itself flex:1 +
+   overflow:hidden) while a non-local tab owns the column: at content height
+   the list body just overflows that hidden clip and the rows area's
+   overflow-y never engages — the unscrollable-list bug. min-height:0 lets
+   the chain shrink to the region so the rows area absorbs the overflow.
+   Local mode keeps the host at content height (flex defaults), so the
+   official region below is untouched. */
+[data-oac-conv-tabs] { display: flex; flex-direction: column; }
+html.oac-conv-tabs-active [data-oac-conv-tabs] { flex: 1 1 auto; min-height: 0; }
+.oac-conv-tabs-host { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .oac-conv-tablist { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 6px 4px 4px; padding: 2px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }
 .oac-conv-tab { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 24px; min-width: 0; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
 .oac-conv-tab:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
