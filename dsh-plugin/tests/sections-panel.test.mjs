@@ -261,6 +261,24 @@ test('the MetaApps section hosts the on-chain feed tab with author rows into the
   assert.match(styles, /\.oac-apps-card-title-copy \{[^}]*flex: 1;/)
 })
 
+test('the MetaApps local list retries transient daemon-replacement failures, bounded', async () => {
+  const panel = await readFile(join(root, 'src/client/AppsPanel.tsx'), 'utf8')
+  // The section stays mounted across visits, so a failed initial load never
+  // refetches on its own — the raw CLI error and the empty list just sit
+  // there while the daemon the error raced has long settled. The bounded
+  // backoff rides out a `dsh web` restart's daemon swap (seconds) without
+  // becoming a keep-alive loop (each retry is a CLI call that can attempt a
+  // daemon start).
+  assert.match(panel, /LOCAL_LOAD_RETRIES = 4/)
+  assert.match(panel, /LOCAL_RETRY_BASE_MS = 3_000/)
+  // Both initial loads retry (bots + first page); pagination keeps its
+  // manual retry so a retry never yanks the user back to page one.
+  assert.match(panel, /\[bots, retryTick\]/)
+  assert.match(panel, /\[from, list, retryTick\]/)
+  // A fresh Bot selection opens a fresh retry window.
+  assert.match(panel, /useEffect\(\(\) => \{\s*retryAttemptsRef\.current = 0\s*\}, \[from\]\)/)
+})
+
 test('Bot pickers share the available-only twin-first BotPicker; app cards pin a fixed foot', async () => {
   const picker = await readFile(join(root, 'src/client/BotPicker.tsx'), 'utf8')
   assert.match(picker, /sortAvailableBotsTwinFirst/)
