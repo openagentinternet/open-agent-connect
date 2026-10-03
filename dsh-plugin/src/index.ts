@@ -820,6 +820,7 @@ export {
   type GroupTaskUpdate,
   type UnreadState,
 } from './unread-logic.js'
+export { PRIVATE_FILE, GROUP_FILE } from './chat-watcher.js'
 export { dispatchSection } from './sections.js'
 export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
