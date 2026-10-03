@@ -95,6 +95,10 @@ export interface CliDependencies {
     who?: () => Awaitable<MetabotCommandResult<unknown>>;
     list?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
+  user?: {
+    /** Name/avatar profile save with on-chain publish (daemon-backed). */
+    update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;

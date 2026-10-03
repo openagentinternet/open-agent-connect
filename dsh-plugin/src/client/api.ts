@@ -234,6 +234,7 @@ export type OwnerIdentityRow = {
   mvcAddress?: string
   metaId?: string
   globalMetaId?: string
+  avatarDataUrl?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -246,6 +247,18 @@ export type OwnerWritePayload = {
   identity: OwnerIdentityRow
   /** Returned once on create/import so the UI can drive the backup view. */
   mnemonic?: string
+}
+
+/** Name/avatar profile save input; avatarDataUrl '' clears the avatar. */
+export type OwnerUpdateInput = {
+  name?: string
+  avatarDataUrl?: string
+}
+
+export type OwnerUpdatePayload = {
+  identity: OwnerIdentityRow
+  chainWrites?: Array<{ txids?: string[]; pinId?: string; path?: string }>
+  chainSync?: { ok: boolean; error?: string }
 }
 
 /** Same option sets the OAC chat settings tab offers. */
@@ -751,7 +764,7 @@ export const api = {
   userCreate: async (name: string): Promise<OwnerWritePayload> => post('user/create', { name }),
   userImport: async (input: { name: string; mnemonic: string; path?: string }): Promise<OwnerWritePayload> =>
     post('user/import', input),
-  userRename: async (name: string): Promise<OwnerWhoPayload> => post('user/rename', { name }),
+  userUpdate: async (input: OwnerUpdateInput): Promise<OwnerUpdatePayload> => post('user/update', input),
   userReveal: async (): Promise<{ mnemonic: string }> => post('user/reveal'),
   userDelete: async (): Promise<{ deleted?: boolean }> => post('user/delete'),
   /** Traffic (流量) account surface — thin wrappers over the `metabot traffic *` verbs. */

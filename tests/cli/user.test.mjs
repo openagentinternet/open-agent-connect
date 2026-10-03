@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
@@ -7,14 +9,14 @@ import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 
-function makeContext(homeDir) {
+function makeContext(homeDir, dependencies = {}) {
   let output = '';
   const context = {
     stdout: { write: (chunk) => { output += String(chunk); return true; } },
     stderr: { write: () => true },
     env: { HOME: homeDir },
     cwd: homeDir,
-    dependencies: {},
+    dependencies,
   };
   return {
     context,
@@ -91,4 +93,51 @@ test('user ensure creates a default identity once', async () => {
   const secondData = second.parseEnvelope().data;
   assert.equal(secondData.created, false);
   assert.equal(secondData.identity.globalMetaId, firstData.identity.globalMetaId);
+});
+
+test('user update forwards --name to the daemon-backed handler', async () => {
+  const home = await mkdtempTempRoot('metabot-user-cli-');
+  const calls = [];
+  const dependencies = {
+    user: {
+      update: async (input) => {
+        calls.push(input);
+        return { ok: true, state: 'success', data: { identity: { name: input.name }, chainWrites: [], chainSync: { ok: true } } };
+      },
+    },
+  };
+  const { context, parseEnvelope } = makeContext(home, dependencies);
+  assert.equal(await runCli(['user', 'update', '--name', 'Alicia', '--json'], context), 0);
+  assert.deepEqual(calls, [{ name: 'Alicia' }]);
+  assert.equal(parseEnvelope().data.identity.name, 'Alicia');
+});
+
+test('user update reads the request file and forwards name and avatar', async () => {
+  const home = await mkdtempTempRoot('metabot-user-cli-');
+  const calls = [];
+  const dependencies = {
+    user: {
+      update: async (input) => {
+        calls.push(input);
+        return { ok: true, state: 'success', data: { identity: { name: input.name }, chainWrites: [], chainSync: { ok: true } } };
+      },
+    },
+  };
+  const requestFile = path.join(home, 'update.json');
+  await fs.writeFile(requestFile, JSON.stringify({ name: 'Alicia', avatarDataUrl: 'data:image/png;base64,AAAA' }), 'utf8');
+  const { context } = makeContext(home, dependencies);
+  assert.equal(await runCli(['user', 'update', '--request-file', requestFile, '--json'], context), 0);
+  assert.deepEqual(calls, [{ name: 'Alicia', avatarDataUrl: 'data:image/png;base64,AAAA' }]);
+});
+
+test('user update validates input and reports a bad request file', async () => {
+  const home = await mkdtempTempRoot('metabot-user-cli-');
+
+  const empty = makeContext(home, { user: { update: async () => ({ ok: true, state: 'success', data: {} }) } });
+  assert.equal(await runCli(['user', 'update', '--json'], empty.context), 1);
+  assert.equal(empty.parseEnvelope().code, 'missing_update');
+
+  const badFile = makeContext(home, { user: { update: async () => ({ ok: true, state: 'success', data: {} }) } });
+  assert.equal(await runCli(['user', 'update', '--request-file', path.join(home, 'nope.json'), '--json'], badFile.context), 1);
+  assert.equal(badFile.parseEnvelope().code, 'invalid_request_file');
 });

@@ -788,6 +788,19 @@ export const USER_CSS = `
 .oac-mnemonic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
 .oac-mnemonic-word { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); font-size: 13px; color: var(--dsw-alias-label-primary); }
 .oac-mnemonic-index { flex: none; min-width: 18px; color: var(--dsw-alias-label-tertiary); font-size: 11px; text-align: right; }
+/* Profile card: editable avatar left of the name field. */
+.oac-user-name-row { display: flex; align-items: flex-end; gap: 14px; }
+.oac-user-avatar-col { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.oac-user-avatar-col .oac-avatar-btn { transition: opacity 120ms ease; }
+.oac-user-avatar-col .oac-avatar-btn:hover { opacity: 0.85; }
+.oac-user-avatar-remove { padding: 0; border: none; background: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; cursor: pointer; }
+.oac-user-avatar-remove:hover { color: var(--dsw-alias-label-primary); }
+.oac-user-name-field { flex: 1; min-width: 0; }
+/* Identity rows: right-aligned labels on a fixed gutter, mono value, copy icon. */
+.oac-user-info { margin-top: 4px; }
+.oac-user-info .oac-info-row { align-items: center; }
+.oac-user-info .oac-info-label { flex: none; min-width: 104px; text-align: right; }
+.oac-user-info .oac-info-value { flex: 1; min-width: 0; }
 `
 
 export const PRESETS_CSS = `

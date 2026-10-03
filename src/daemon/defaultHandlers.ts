@@ -14713,7 +14713,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     // Owner identity (the /ui/settings User section): the `metabot user *`
     // CLI surface over HTTP, additive next to the Bot-profile group above.
-    user: createUserDaemonHandlers({ systemHomeDir: normalizedSystemHomeDir }),
+    // adapters + the traffic sponsor hook let `user update` publish the owner
+    // /info/name + /info/avatar pins with the same billing as Bot writes.
+    user: createUserDaemonHandlers({ systemHomeDir: normalizedSystemHomeDir, adapters, resolveSponsorWritePin }),
     network: {
       listServices: async ({ online, query, cached }) => {
         const state = await runtimeStateStore.readState();

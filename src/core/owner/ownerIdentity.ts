@@ -10,6 +10,7 @@ import path from 'node:path';
 import * as bip39 from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { DEFAULT_DERIVATION_PATH, deriveIdentity } from '../identity/deriveIdentity';
+import { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 
 const OWNER_FILE_MODE = 0o600;
 export const DEFAULT_OWNER_NAME = 'User';
@@ -24,6 +25,8 @@ export interface OwnerIdentityRecord {
   mvcAddress: string;
   metaId: string;
   globalMetaId: string;
+  /** Avatar as an image data URL (PNG/JPEG/WebP/GIF, ≤200KB); absent when unset. */
+  avatarDataUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -33,7 +36,7 @@ export type OwnerIdentityPublic = Omit<OwnerIdentityRecord, 'mnemonic'>;
 
 export class OwnerIdentityError extends Error {
   constructor(
-    readonly code: 'owner_exists' | 'owner_missing' | 'invalid_mnemonic' | 'invalid_name',
+    readonly code: 'owner_exists' | 'owner_missing' | 'invalid_mnemonic' | 'invalid_name' | 'invalid_avatar',
     message: string,
   ) {
     super(message);
@@ -55,6 +58,7 @@ export function toOwnerIdentityPublic(record: OwnerIdentityRecord): OwnerIdentit
     mvcAddress: record.mvcAddress,
     metaId: record.metaId,
     globalMetaId: record.globalMetaId,
+    ...(record.avatarDataUrl ? { avatarDataUrl: record.avatarDataUrl } : {}),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -85,6 +89,7 @@ function normalizeOwnerIdentityRecord(value: unknown): OwnerIdentityRecord | nul
     mvcAddress,
     metaId: readString(value, 'metaId'),
     globalMetaId,
+    ...(readString(value, 'avatarDataUrl') ? { avatarDataUrl: readString(value, 'avatarDataUrl') } : {}),
     createdAt: readString(value, 'createdAt'),
     updatedAt: readString(value, 'updatedAt'),
   };
@@ -195,6 +200,50 @@ export async function renameOwnerIdentity(systemHomeDir: string, name: string): 
     throw new OwnerIdentityError('invalid_name', 'Name must not be empty.');
   }
   const record: OwnerIdentityRecord = { ...current, name: nextName, updatedAt: new Date().toISOString() };
+  await writeOwnerIdentityFile(systemHomeDir, record);
+  return record;
+}
+
+/**
+ * Update the owner profile fields (name and/or avatar). An empty avatar data
+ * URL clears the stored avatar. Callers that publish on-chain write the chain
+ * FIRST and call this only after the publish succeeded (chain-first ordering,
+ * same as the Bot profile update handler).
+ */
+export async function updateOwnerIdentityProfile(
+  systemHomeDir: string,
+  input: { name?: string; avatarDataUrl?: string },
+): Promise<OwnerIdentityRecord> {
+  const current = await readOwnerIdentity(systemHomeDir);
+  if (!current) {
+    throw new OwnerIdentityError('owner_missing', 'No owner identity exists on this machine.');
+  }
+  let nextName = current.name;
+  if (input.name !== undefined) {
+    nextName = cleanName(input.name);
+    if (!nextName) {
+      throw new OwnerIdentityError('invalid_name', 'Name must not be empty.');
+    }
+  }
+  let avatarDataUrl = current.avatarDataUrl;
+  if (input.avatarDataUrl !== undefined) {
+    const nextAvatar = input.avatarDataUrl.trim();
+    const validation = validateAvatarDataUrl(nextAvatar);
+    if (!validation.valid) {
+      throw new OwnerIdentityError('invalid_avatar', validation.error ?? 'Invalid avatar.');
+    }
+    avatarDataUrl = nextAvatar || undefined;
+  }
+  const record: OwnerIdentityRecord = {
+    ...current,
+    name: nextName,
+    updatedAt: new Date().toISOString(),
+  };
+  if (avatarDataUrl) {
+    record.avatarDataUrl = avatarDataUrl;
+  } else {
+    delete record.avatarDataUrl;
+  }
   await writeOwnerIdentityFile(systemHomeDir, record);
   return record;
 }

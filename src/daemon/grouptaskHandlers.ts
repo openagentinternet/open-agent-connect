@@ -65,13 +65,13 @@ import {
   listMetabotProfiles,
   type MetabotProfileFull,
 } from '../core/bot/metabotProfileManager';
-import { readOwnerIdentity, resolveOwnerIdfilePath, type OwnerIdentityRecord } from '../core/owner/ownerIdentity';
-import { createLocalMnemonicSigner, type ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
+import { readOwnerIdentity } from '../core/owner/ownerIdentity';
+import { createOwnerSigner } from '../core/owner/ownerSigner';
+import type { ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
-import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { createRuntimeStateStore } from '../core/state/runtimeStateStore';
-import { resolveMetabotDaemonPaths, resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
+import { resolveMetabotDaemonPaths, resolveMetabotPaths } from '../core/state/paths';
 
 export interface GroupTaskDaemonHandlers {
   create: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
@@ -178,29 +178,6 @@ async function readProfileMetaId(homeDir: string): Promise<string | null> {
   }
 }
 
-/**
- * Read-only SecretStore view over the owner identity record; the signer only
- * ever calls readIdentitySecrets. The owner home (~/.metabot/owner) is NOT a
- * profile home, so resolveMetabotPaths rejects it — the paths stub below
- * exists solely to satisfy the SecretStore interface.
- */
-function createOwnerSecretStore(systemHomeDir: string, owner: OwnerIdentityRecord): SecretStore {
-  const paths = {
-    identitySecretsPath: resolveOwnerIdfilePath(systemHomeDir),
-  } as unknown as MetabotPaths;
-  return {
-    paths,
-    ensureLayout: async () => paths,
-    readIdentitySecrets: async <T,>() => ({ mnemonic: owner.mnemonic, path: owner.path } as unknown as T),
-    writeIdentitySecrets: async () => {
-      throw new Error('Owner identity secrets are read-only in the group task context.');
-    },
-    deleteIdentitySecrets: async () => {
-      throw new Error('Owner identity secrets are read-only in the group task context.');
-    },
-  };
-}
-
 export interface CreateGroupTaskDaemonHandlersInput {
   systemHomeDir: string;
   /** The daemon's own profile home; its config holds the a2a listener switch. */
@@ -287,8 +264,9 @@ export function createGroupTaskServiceContext(
     ownerIdentity: async (): Promise<GroupTaskOwnerRef | null> => {
       const owner = await readOwnerIdentity(input.systemHomeDir);
       if (!owner) return null;
-      ownerSigner ??= createLocalMnemonicSigner({
-        secretStore: createOwnerSecretStore(input.systemHomeDir, owner),
+      ownerSigner ??= createOwnerSigner({
+        systemHomeDir: input.systemHomeDir,
+        owner,
         adapters: input.adapters,
         ...(input.resolveSponsorWritePin ? { resolveSponsorWritePin: input.resolveSponsorWritePin } : {}),
       });

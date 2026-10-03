@@ -3913,6 +3913,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
     },
+    user: {
+      // The publish happens daemon-side (signer + traffic sponsor hook live
+      // there); the CLI only forwards the parsed update input.
+      update: async (input) => requestJson(context, 'POST', '/api/user/update', input),
+    },
     network: {
       listServices: async (input) => {
         const query = new URLSearchParams();
@@ -6137,6 +6142,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
     identity: { ...defaults.identity, ...provided.identity },
+    user: { ...defaults.user, ...provided.user },
     network: { ...defaults.network, ...provided.network },
     services: { ...defaults.services, ...provided.services },
     provider: { ...defaults.provider, ...provided.provider },

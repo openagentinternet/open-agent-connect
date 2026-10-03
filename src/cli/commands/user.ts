@@ -11,7 +11,7 @@ import {
   toOwnerIdentityPublic,
 } from '../../core/owner/ownerIdentity';
 import { normalizeSystemHomeDir } from '../../core/state/homeSelection';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function ownerFailure(error: unknown): MetabotCommandResult<never> {
@@ -77,6 +77,35 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
     } catch (error) {
       return ownerFailure(error);
     }
+  }
+
+  // Name/avatar profile save with on-chain publish. The write happens in the
+  // daemon (it owns the signer and the traffic sponsor hook); the CLI parses
+  // --name and/or --request-file ({ name?, avatarDataUrl? }) and forwards.
+  if (subcommand === 'update') {
+    const requestFile = readFlagValue(args, '--request-file');
+    const nameFlag = readFlagValue(args, '--name');
+    let input: Record<string, unknown> = {};
+    if (requestFile) {
+      try {
+        input = await readJsonFile(context, requestFile);
+      } catch (error) {
+        return commandFailed('invalid_request_file', error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (nameFlag) {
+      input = { ...input, name: nameFlag };
+    }
+    const hasName = typeof input.name === 'string' && input.name.trim().length > 0;
+    const hasAvatar = typeof input.avatarDataUrl === 'string';
+    if (!hasName && !hasAvatar) {
+      return commandFailed('missing_update', 'Provide --name <name> or --request-file <json> with name/avatarDataUrl.');
+    }
+    const handler = context.dependencies.user?.update;
+    if (!handler) {
+      return commandFailed('not_implemented', 'User update handler is not configured.');
+    }
+    return handler(input);
   }
 
   if (subcommand === 'reveal') {

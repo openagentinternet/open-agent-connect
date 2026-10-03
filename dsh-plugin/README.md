@@ -451,7 +451,7 @@ data under `~/.metabot/profiles/<slug>/`):
   tab lists all recent runs (completed/failed/running, incl. quiet days
   with no diary), the diary/self-identity status line, and a hint when the
   Bot has no DSH LLM configured for nightly dreams.
-- **Bots page → Plugin Settings → User tab** — Twin Bot identity + per-Bot owner bindings.
+- **Bots page → Plugin Settings → User tab** — Twin Bot identity + per-Bot owner bindings. The owner profile card edits the name and avatar together; saving publishes the changed fields on-chain (`/info/name`, `/info/avatar`, chain-first through `metabot user update`) before the local identity updates.
 - **Twin/Worker** — one Bot marked `botType: twin` gets the local
   orchestration toolset (the IDBots seven, slug-addressed: `local_workers_list`,
   `local_worker_delegate`, `twin_task_status`, `twin_task_reassign`,
@@ -769,7 +769,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/schedule/list` / `runs` / `create` / `update` / `enable` / `disable` / `delete` / `run` | `metabot schedule *` verbs backing the Bots page 定时任务 section (`list` accepts `all: true` for the unified every-Bot list; `run` spawns the CLI detached — a manual run is a whole LLM turn) |
 | POST | `/oac/api/dream/*` | `metabot dream` verbs; `dream/run` orchestrates plan → `ctx.llm` → commit in-process |
 | POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |
-| POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner` |
+| POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner`, `metabot user *` (who/create/import/rename/update/reveal/delete; `update` is the name+avatar save that publishes `/info/name` + `/info/avatar` on-chain first) |
 | POST | `/oac/api/browser/open` | resolve a resource URI (or the Browser home) to its `localUiUrl` and open it in the right-sidebar Bot Browser |
 | POST | `/oac/api/browser/state` | DSH web client reports the live ABC tab snapshot used for per-turn `<browser_context>` |
 | POST | `/oac/api/browser/command-result` | DSH web client returns one iframe tab-command result |
