@@ -40,8 +40,10 @@ export type A2AOverlayProps =
  * list entry from its cell for the rest of the registration's life — an
  * uncaught render error inside the panel would silently kill every row
  * click until the page reloads. This boundary keeps the entry alive: the
- * error becomes a visible note, and the next navigation target (a new row
- * click writes a fresh object) resets the boundary for a fresh mount.
+ * error becomes a visible note (message + nearest component stack, so a
+ * crash is self-reporting without DevTools), and the next navigation target
+ * (a new row click writes a fresh object) resets the boundary for a fresh
+ * mount.
  */
 class OverlayPanelBoundary extends Component<
   { resetKey: unknown; errorText: string; children: ReactNode },
@@ -53,8 +55,8 @@ class OverlayPanelBoundary extends Component<
     return { error }
   }
 
-  componentDidCatch(cause: unknown): void {
-    console.error('[oac-dsh] A2A panel crashed:', cause)
+  componentDidCatch(cause: unknown, info: { componentStack?: string | null }): void {
+    console.error('[oac-dsh] A2A panel crashed:', cause, info.componentStack)
   }
 
   componentDidUpdate(previous: { resetKey: unknown }): void {
@@ -65,9 +67,14 @@ class OverlayPanelBoundary extends Component<
 
   render(): ReactNode {
     if (this.state.error !== undefined) {
+      const cause = this.state.error
+      const detail = cause instanceof Error ? cause.message : String(cause)
       return (
         <div className="oac-a2a-panel">
-          <div className="oac-gt-placeholder"><p className="oac-note error">{this.props.errorText}</p></div>
+          <div className="oac-gt-placeholder oac-panel-crash">
+            <p className="oac-note error">{this.props.errorText}</p>
+            <p className="oac-note oac-panel-crash-detail" title={detail}>{detail}</p>
+          </div>
         </div>
       )
     }

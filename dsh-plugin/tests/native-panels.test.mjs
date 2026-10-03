@@ -265,12 +265,18 @@ test('the A2A panel body is crash-contained and recovers on the next row click',
   // rest of the registration's life — an uncaught render error inside the
   // panel would silently kill every row click until the page reloads. The
   // boundary keeps the entry alive, and a fresh navigation target (each
-  // click writes a new object) resets it for a fresh mount.
+  // click writes a new object) resets it for a fresh mount. The fallback
+  // note is self-reporting: the error message itself renders below the
+  // hint, so a crash is diagnosable without DevTools.
   const overlay = await readFile(join(root, 'src/client/A2AOverlay.tsx'), 'utf8')
   assert.match(overlay, /getDerivedStateFromError/)
   assert.match(overlay, /componentDidCatch/)
   assert.match(overlay, /resetKey=\{target\}/)
   assert.match(overlay, /<CenterOverlayFrame open=\{open\} usePanelInfo=\{usePanelInfo\}>/)
+  assert.match(overlay, /oac-panel-crash-detail/)
+  assert.match(overlay, /cause instanceof Error \? cause\.message : String\(cause\)/)
+  const styles = await readFile(join(root, 'src/client/styles.ts'), 'utf8')
+  assert.match(styles, /oac-panel-crash-detail/)
 })
 
 test('list-row navigation exits an active main panel before opening the overlay', async () => {
