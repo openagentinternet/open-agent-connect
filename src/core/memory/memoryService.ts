@@ -58,6 +58,56 @@ async function readSelfIdentityText(store: MemoryStore): Promise<string> {
 }
 
 /**
+ * Experience-only hot layer: the dream-written self-identity, self-distilled
+ * value boundaries, work reviews, and recent dream diaries. For scenarios
+ * that must NOT receive scoped owner/contact memories (public-facing or
+ * protocol-short outputs) but whose behavior must still align with the bot's
+ * self-cognition. Returns '' when memory is disabled by policy; never throws.
+ */
+export async function buildExperienceContext(
+  paths: MetabotPaths,
+  stores: {
+    memory?: MemoryStore;
+    policy?: MemoryPolicyStore;
+    dream?: DreamStore;
+  } = {},
+): Promise<string> {
+  try {
+    const memory = stores.memory ?? createMemoryStore(paths);
+    const policyStore = stores.policy ?? createMemoryPolicyStore(paths);
+    const dream = stores.dream ?? createDreamStore(paths);
+    const policy = await policyStore.effectivePolicy();
+    if (!policy.memoryEnabled) {
+      return '';
+    }
+    const selfIdentityText = await readSelfIdentityText(memory);
+    const valueBoundaries = await memory.list({
+      usageClass: 'value_boundary',
+      status: 'created',
+      limit: VALUE_BOUNDARIES_MAX_ITEMS,
+    });
+    const workReviews = await memory.list({
+      usageClass: 'work_review',
+      status: 'created',
+      limit: WORK_REVIEWS_MAX_ITEMS,
+    });
+    const recentSummaries = await dream.listDailySummaries({ limit: RECENT_SUMMARIES_PROMPT_DAYS });
+    return buildExperiencePromptBlocksXml({
+      identityText: selfIdentityText || null,
+      summaries: recentSummaries.map((summary) => ({
+        summaryDate: summary.summaryDate,
+        summaryText: summary.summaryText,
+        sessionRefs: summary.sessionRefs,
+      })),
+      valueBoundaries,
+      workReviews,
+    });
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Build the full memory injection for one turn: scoped fact blocks plus the
  * experience hot layer (self-identity, value boundaries, work reviews, recent
  * dream diaries). Knowledge blocks join in their own phase — the builders
@@ -131,28 +181,7 @@ export async function buildMemoryBlocksForRequest(
   // self-distilled conduct rules, its dream-written work reviews, its recent
   // dream diaries) — never owner facts — so it is injected for every channel,
   // matching the IDBots A2A path.
-  const selfIdentityText = await readSelfIdentityText(memory);
-  const valueBoundaries = await memory.list({
-    usageClass: 'value_boundary',
-    status: 'created',
-    limit: VALUE_BOUNDARIES_MAX_ITEMS,
-  });
-  const workReviews = await memory.list({
-    usageClass: 'work_review',
-    status: 'created',
-    limit: WORK_REVIEWS_MAX_ITEMS,
-  });
-  const recentSummaries = await dream.listDailySummaries({ limit: RECENT_SUMMARIES_PROMPT_DAYS });
-  const experienceXml = buildExperiencePromptBlocksXml({
-    identityText: selfIdentityText || null,
-    summaries: recentSummaries.map((summary) => ({
-      summaryDate: summary.summaryDate,
-      summaryText: summary.summaryText,
-      sessionRefs: summary.sessionRefs,
-    })),
-    valueBoundaries,
-    workReviews,
-  });
+  const experienceXml = await buildExperienceContext(paths, { memory, policy: policyStore, dream });
 
   // Knowledge hot layer: local (owner) sessions only, matching the IDBots
   // cowork channel — A2A replies do not get the knowledge block.

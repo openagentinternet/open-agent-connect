@@ -228,6 +228,19 @@ test('chatPersonaLoader reads SOUL.md, GOAL.md, ROLE.md', async () => {
   assert.equal(persona.role, 'I am a coding assistant.');
 });
 
+test('chatPersonaLoader strips the file’s own leading heading from persona fields', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  await fs.writeFile(paths.roleMdPath, '# Role\nI am a coding assistant.', 'utf8');
+  await fs.writeFile(paths.soulMdPath, '## Soul\nI am calm.', 'utf8');
+  await fs.writeFile(paths.goalMdPath, '# Goal\nShip durable work.', 'utf8');
+
+  const persona = await loadChatPersona(paths);
+  assert.equal(persona.role, 'I am a coding assistant.');
+  assert.equal(persona.soul, 'I am calm.');
+  assert.equal(persona.goal, 'Ship durable work.');
+});
+
 test('chatPersonaLoader includes the current MetaBot identity with its persona', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

@@ -8,6 +8,8 @@ import { createLlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import { createLlmRuntimeStore } from '../llm/llmRuntimeStore';
 import { runLlmPromptWithRuntimeFallback } from '../llm/llmRuntimeExecution';
 import { createOrderMetadataLineRegex } from '../orders/orderMessage';
+import { buildExperienceContext } from '../memory/memoryService';
+import { wrapMemoryInjection } from '../prompt/memoryInjection';
 import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
 import type { PublishedServiceRecord } from '../services/publishService';
 import type { MetabotPaths } from '../state/paths';
@@ -173,7 +175,7 @@ export function normalizeGeneratedOrderProtocolText(
   return text;
 }
 
-function buildSystemPrompt(persona: ChatPersona): string {
+function buildSystemPrompt(persona: ChatPersona, experienceXml = ''): string {
   const sections = [
     'You write one natural-language body for an Open Agent Connect skill-service protocol message.',
     'The daemon adds protocol tags and structured payment/order metadata. Do not include tags, metadata labels, txids, order ids, pin ids, URLs, markdown tables, or final "Bye" lines unless the user task itself truly requires a URL.',
@@ -188,6 +190,10 @@ function buildSystemPrompt(persona: ChatPersona): string {
   });
   if (identityBlock) {
     sections.push(identityBlock);
+  }
+  const memorySection = wrapMemoryInjection(experienceXml);
+  if (memorySection) {
+    sections.push(memorySection);
   }
   return sections.join('\n\n');
 }
@@ -283,6 +289,9 @@ export function createLlmOrderProtocolTextGenerator(options: {
     allowUrls?: boolean;
     allowTables?: boolean;
   }): Promise<string | null> {
+    // The experience hot layer (self-identity, value boundaries, work reviews)
+    // keeps even one-line protocol texts aligned with the bot's self-cognition.
+    const experienceXml = await buildExperienceContext(input.paths);
     // Unified passive-LLM priority: the Bot's DSH pair (through a connected
     // host executor) takes the first attempt; the local chain below follows.
     const hostText = await createHostFirstCompletion({
@@ -290,7 +299,7 @@ export function createLlmOrderProtocolTextGenerator(options: {
       timeoutMs,
     })({
       botSlug: path.basename(input.paths.profileRoot),
-      system: buildSystemPrompt(input.persona),
+      system: buildSystemPrompt(input.persona, experienceXml),
       user: input.prompt,
     });
     if (hostText !== null) {
@@ -318,7 +327,7 @@ export function createLlmOrderProtocolTextGenerator(options: {
       runtimeResolver,
       llmExecutor: options.llmExecutor,
       metaBotSlug: path.basename(input.paths.profileRoot),
-      systemPrompt: buildSystemPrompt(input.persona),
+      systemPrompt: buildSystemPrompt(input.persona, experienceXml),
       prompt: input.prompt,
       timeoutMs,
       pollIntervalMs,

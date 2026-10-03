@@ -5,8 +5,10 @@
 import path from 'node:path';
 
 import { loadChatPersona } from '../chat/chatPersonaLoader';
+import { buildMemoryBlocksForRequest } from '../memory/memoryService';
 import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
 import { composeSystemPrompt, SYSTEM_PROMPT_ORDER } from '../prompt/compose';
+import { wrapMemoryInjection } from '../prompt/memoryInjection';
 import type { MetabotPaths } from '../state/paths';
 import {
   createScheduleStore,
@@ -91,7 +93,15 @@ export async function runScheduledTask(
   }
   const { run, task } = claimed;
   try {
-    const outcome = await deps.runLlm({ prompt: task.prompt, systemPrompt });
+    // Scoped memory + experience hot layer ride the user prompt tail
+    // (IDBots volatile-tail pattern): scheduled tasks are local owner work, so
+    // the local 'cowork_ui' channel resolves the owner scope.
+    const memorySection = await buildMemoryBlocksForRequest(paths, {
+      channel: 'cowork_ui',
+      userText: task.prompt,
+    }).then((result) => wrapMemoryInjection(result.xml)).catch(() => '');
+    const prompt = memorySection ? `${task.prompt}\n\n${memorySection}` : task.prompt;
+    const outcome = await deps.runLlm({ prompt, systemPrompt });
     if (!outcome.ok) {
       await store.complete(run.id, { error: outcome.error });
       return { kind: 'failed', error: outcome.error };
