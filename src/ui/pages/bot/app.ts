@@ -1053,6 +1053,19 @@ function orderedMetabotProfiles(){
   });
 }
 
+// At most one Bot per machine may be the Twin. Once any Bot is presented as
+// the Twin (isActive is derived live from the twin role), the set-as-Twin
+// toggle leaves every edit page — promoting a Bot is a serious, deliberate
+// act and must not be one accidental click away. The toggle only offers
+// itself while the machine is twin-less; the list badge keeps identifying
+// the sitting Twin.
+function machineHasTwinBot(){
+  return state.profiles.some(function(p){return Boolean(p)&&(p.isActive===true||p.botType==='twin')});
+}
+function twinToggleVisible(){
+  return state.profiles.length>=2&&!machineHasTwinBot();
+}
+
 function renderMetabotList(){
   var list=q('[data-metabot-list]');var count=q('[data-metabot-count]');if(!list)return;
   if(count)count.textContent=String(state.profiles.length);
@@ -1090,7 +1103,7 @@ function renderBotHero(profile){
   var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri);copyUri.setAttribute('aria-label',uiText('bot.copyHomepageUri','Copy Homepage URI'));copyUri.setAttribute('title',uiText('bot.copyHomepageUri','Copy Homepage URI'))}
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!globalMetaId;
   var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!globalMetaId;
-  var defaultControl=q('[data-default-bot-control]');if(defaultControl)defaultControl.hidden=state.profiles.length<2;
+  var defaultControl=q('[data-default-bot-control]');if(defaultControl)defaultControl.hidden=!twinToggleVisible();
   var defaultToggle=q('[data-default-bot-toggle]');
   if(defaultToggle){
     var isDefault=profile.isActive===true;
@@ -1103,7 +1116,7 @@ function renderBotHero(profile){
     defaultToggle.setAttribute('title',defaultTitle);
     var defaultText=queryWithin(defaultToggle,'.toggle-text');if(defaultText)defaultText.textContent=isDefault?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off');
   }
-  var defaultStatus=q('[data-default-bot-status]');if(defaultStatus){defaultStatus.textContent='';defaultStatus.className='save-status';defaultStatus.hidden=state.profiles.length<2}
+  var defaultStatus=q('[data-default-bot-status]');if(defaultStatus){defaultStatus.textContent='';defaultStatus.className='save-status';defaultStatus.hidden=!twinToggleVisible()}
 }
 function renderBotSetupAlert(profile){
   var alert=q('[data-bot-setup-alert]');if(!alert)return;
