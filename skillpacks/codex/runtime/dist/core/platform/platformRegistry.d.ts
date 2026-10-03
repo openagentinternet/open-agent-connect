@@ -42,6 +42,27 @@ export interface PlatformDefinition {
                 seedPaths?: string[];
             };
         };
+        /**
+         * State-home policy for managed (bot-driven) executions. Bot turns run
+         * unattended, and CLIs that record every thread in a user-visible session
+         * history (the Kimi Code desktop sidebar, `claude --resume`, Codex
+         * session list, ...) would otherwise flood the user's local conversation
+         * list with one session per bot turn. When declared, the LLM executor
+         * points `envName` at a persistent per-machine home under the executor
+         * root (`LLM/executor/provider-homes/<provider>`) and seeds it with
+         * links/copies of the auth and config entries in `seedPaths`, so managed
+         * sessions stay out of the user's platform UI while credentials and
+         * settings keep tracking the real home. Skipped when the request resumes
+         * a caller-owned session or already sets the env var itself.
+         */
+        executionHome?: {
+            /** Env var the CLI honors as its state-home directory override. */
+            envName: string;
+            /** State-home source when the env var is unset; relative to the user's home. */
+            defaultSourceHome?: string;
+            /** Files or directories linked (or copied) from the source home into the execution home. */
+            seedPaths?: string[];
+        };
     };
     skills: {
         roots: PlatformSkillRoot[];

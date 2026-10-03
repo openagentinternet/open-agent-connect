@@ -14,6 +14,7 @@ import {
   type PlatformSkillRoot,
 } from '../../platform/platformRegistry';
 import { resolveProviderProcessEnv } from '../providerProcessEnv';
+import { prepareProviderExecutionHome } from './providerExecutionHome';
 
 interface LlmExecutorOptions {
   sessionsRoot: string;
@@ -23,6 +24,12 @@ interface LlmExecutorOptions {
   env?: NodeJS.ProcessEnv;
   backends: Record<string, LlmBackendFactory>;
   sessionManager?: SessionManager;
+  /**
+   * Root for per-provider isolated execution homes (bot turns stay out of the
+   * user's platform session history). Defaults to a `provider-homes` sibling
+   * of `sessionsRoot`.
+   */
+  providerHomesRoot?: string;
 }
 
 interface EventStreamState {
@@ -488,6 +495,7 @@ export class LlmExecutor {
   private readonly sessionsRoot: string;
   private readonly transcriptsRoot: string;
   private readonly skillsRoot: string;
+  private readonly providerHomesRoot: string;
   private readonly systemHomeDir?: string;
   private readonly env?: NodeJS.ProcessEnv;
   private readonly backends: Record<string, LlmBackendFactory>;
@@ -499,6 +507,8 @@ export class LlmExecutor {
     this.sessionsRoot = options.sessionsRoot;
     this.transcriptsRoot = options.transcriptsRoot;
     this.skillsRoot = options.skillsRoot;
+    this.providerHomesRoot = options.providerHomesRoot
+      ?? path.join(path.dirname(options.sessionsRoot), 'provider-homes');
     this.systemHomeDir = options.systemHomeDir;
     this.env = options.env;
     this.backends = options.backends;
@@ -650,9 +660,33 @@ export class LlmExecutor {
         ? await resolveProviderProcessEnv(request.runtime.provider, binaryPath, baseProcessEnv)
         : { env: baseProcessEnv };
       if (processEnv.error) throw new Error(processEnv.error);
+      // Keep managed bot turns out of the user's platform session history:
+      // redirect the CLI's state home when the platform declares a policy.
+      // Strict skill isolation already runs against an isolated HOME, so the
+      // scope's platform-home env vars stay authoritative there.
+      const executionHome = isolationScope
+        ? null
+        : await prepareProviderExecutionHome({
+          provider: request.runtime.provider,
+          homesRoot: this.providerHomesRoot,
+          baseEnv: processEnv.env,
+          requestEnv: request.env,
+          resumeSessionId: request.resumeSessionId,
+        });
+      if (executionHome) {
+        processEnv.env = { ...processEnv.env, ...executionHome.env };
+        for (const warning of executionHome.warnings) {
+          this.pushEvent(sessionId, { type: 'log', level: 'warning', message: warning });
+        }
+      }
       const backendEnv = mergeStringEnvValues(processEnv.env);
       const backendRequest: LlmExecutionRequest = { ...request, cwd, env: backendEnv };
-      await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
+      await this.sessionManager.update(sessionId, {
+        status: 'running',
+        startedAt,
+        cwd,
+        providerStateHome: executionHome?.home,
+      });
 
       if (request.skills && request.skills.length > 0) {
         const injection = await injectSkills({

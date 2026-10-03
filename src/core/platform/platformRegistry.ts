@@ -75,6 +75,27 @@ export interface PlatformDefinition {
         seedPaths?: string[];
       };
     };
+    /**
+     * State-home policy for managed (bot-driven) executions. Bot turns run
+     * unattended, and CLIs that record every thread in a user-visible session
+     * history (the Kimi Code desktop sidebar, `claude --resume`, Codex
+     * session list, ...) would otherwise flood the user's local conversation
+     * list with one session per bot turn. When declared, the LLM executor
+     * points `envName` at a persistent per-machine home under the executor
+     * root (`LLM/executor/provider-homes/<provider>`) and seeds it with
+     * links/copies of the auth and config entries in `seedPaths`, so managed
+     * sessions stay out of the user's platform UI while credentials and
+     * settings keep tracking the real home. Skipped when the request resumes
+     * a caller-owned session or already sets the env var itself.
+     */
+    executionHome?: {
+      /** Env var the CLI honors as its state-home directory override. */
+      envName: string;
+      /** State-home source when the env var is unset; relative to the user's home. */
+      defaultSourceHome?: string;
+      /** Files or directories linked (or copied) from the source home into the execution home. */
+      seedPaths?: string[];
+    };
   };
   skills: {
     roots: PlatformSkillRoot[];
@@ -151,6 +172,14 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
           seedPaths: ['.credentials.json', 'settings.json'],
         },
       },
+      // Claude Code records every thread under $CLAUDE_CONFIG_DIR/projects and
+      // lists them in its session picker; managed executions redirect the
+      // config dir so bot turns stay out of it.
+      executionHome: {
+        envName: 'CLAUDE_CONFIG_DIR',
+        defaultSourceHome: '.claude',
+        seedPaths: ['.credentials.json', 'settings.json', 'CLAUDE.md', 'skills', 'agents', 'commands'],
+      },
     },
     skills: {
       roots: [
@@ -182,6 +211,14 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
           defaultSourceHome: '.codex',
           seedPaths: ['auth.json', 'config.toml'],
         },
+      },
+      // Codex stores rollout sessions under $CODEX_HOME/sessions; managed
+      // executions redirect CODEX_HOME so bot turns stay out of the user's
+      // session history.
+      executionHome: {
+        envName: 'CODEX_HOME',
+        defaultSourceHome: '.codex',
+        seedPaths: ['auth.json', 'config.toml'],
       },
     },
     skills: {
@@ -381,6 +418,27 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
             '.kimi-code/server.token',
           ],
         },
+      },
+      // Kimi Code resolves its data dir as $KIMI_CODE_HOME (falling back to
+      // ~/.kimi-code) and the desktop app lists every session stored there.
+      // Managed executions redirect KIMI_CODE_HOME only (HOME stays intact so
+      // shell tools keep working), seeded with the user's auth, config, MCP,
+      // plugin, skill, and workspace-trust entries for behavior parity.
+      executionHome: {
+        envName: 'KIMI_CODE_HOME',
+        defaultSourceHome: '.kimi-code',
+        seedPaths: [
+          'config.toml',
+          'credentials',
+          'oauth',
+          'device_id',
+          'region',
+          'server.token',
+          'mcp.json',
+          'plugins',
+          'skills',
+          'workspace-trust',
+        ],
       },
     },
     skills: {
