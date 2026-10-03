@@ -13,12 +13,36 @@ import { commandFailed, commandSuccess } from '../core/contracts/commandResult';
 import { createKnowledgeBaseService } from '../core/knowledgebase/service';
 import {
   createStudyJobStore,
+  resolveStudyJobForRun,
+  startStudyJobRun,
+  StudyRunError,
+  type StudyJobKind,
   type StudyJobRecord,
   type StudyJobStore,
 } from '../core/knowledgebase/studyJobs';
 import { resolveMetabotPaths } from '../core/state/paths';
 import type { DreamBotRef } from './dreamHandlers';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
+
+/**
+ * The unattended study turn executor, injected by the daemon runtime (same
+ * lazy-bridge pattern as the host LLM executor bridge): the scheduler block
+ * in runtime.ts builds the unified passive-LLM chain + tool wiring and
+ * registers it here, so `POST /api/kb/study/run` can drain a job NOW while
+ * the nightly tick keeps using the same closure and the same per-profile
+ * store instances (one write queue per profile across both surfaces).
+ */
+export interface ActiveStudyTurnRunner {
+  runStudyTurn(input: { slug: string; kind?: StudyJobKind; prompt: string; budgetPins: number }): Promise<string>;
+  /** Shared per-profile store factory (the nightly tick drains through the same instances). */
+  storeFor(homeDir: string): StudyJobStore;
+}
+
+let activeStudyTurnRunner: ActiveStudyTurnRunner | null = null;
+
+export function setActiveStudyTurnRunner(runner: ActiveStudyTurnRunner): void {
+  activeStudyTurnRunner = runner;
+}
 
 /**
  * Shared failed-study-job retry selection + requeue (DSH metaweb_study_retry
@@ -206,6 +230,38 @@ export function createKbDaemonHandlers(
       });
       if ('failure' in outcome) return outcome.failure;
       return commandSuccess({ retried: outcome.retried, count: outcome.retried.length });
+    },
+
+    // Manual study run (daylight-testing surface for the nightly drain):
+    // resolve + claim the job now — window ignored — and let the turn run in
+    // the daemon background. The route answers as soon as the job is claimed
+    // (`running` in the store), so clients poll `study status` / studyList
+    // for the outcome instead of holding the HTTP request for a 30-minute
+    // LLM turn. Crash recovery (stale `running` sweep) runs as part of the
+    // resolve step, and in-flight runs in this process are never double-run.
+    studyRun: async (rawInput) => {
+      const bot = await input.resolveBot(rawInput?.from);
+      if ('failure' in bot) return bot.failure;
+      const runner = activeStudyTurnRunner;
+      if (!runner) {
+        return commandFailed('not_implemented', 'The study-run executor is not configured in this daemon.');
+      }
+      const store = runner.storeFor(bot.homeDir);
+      const log = (message: string) => console.warn(message);
+      let job: StudyJobRecord;
+      try {
+        job = await resolveStudyJobForRun(store, {
+          metabotSlug: bot.slug,
+          ...(typeof rawInput?.jobId === 'string' && rawInput.jobId.trim() ? { jobId: rawInput.jobId } : {}),
+          ...(typeof rawInput?.topic === 'string' && rawInput.topic.trim() ? { topic: rawInput.topic } : {}),
+        });
+      } catch (error) {
+        if (error instanceof StudyRunError) return commandFailed(error.code, error.message);
+        return commandFailed('study_run_failed', error instanceof Error ? error.message : String(error));
+      }
+      void startStudyJobRun(store, { runStudyTurn: runner.runStudyTurn, log }, job)
+        .catch((error: unknown) => log(`[Study] Manual run of job ${job.id} failed hard: ${error instanceof Error ? error.message : String(error)}`));
+      return commandSuccess({ started: true, jobId: job.id, topic: job.topic, status: job.status, budgetPins: job.budgetPins });
     },
   };
 }

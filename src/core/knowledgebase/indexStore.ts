@@ -83,6 +83,26 @@ export interface KbLearnStats {
   updated: number;
   /** Documents that vanished from the raw dir. */
   removed: number;
+  /** Raw docs whose extraction failed this pass — first 20, with reasons (IDBots `summary.failed` parity). */
+  failed: Array<{ file: string; reason: string }>;
+  /** Total extraction failures this pass (`failed` is the bounded sample). */
+  failedTotal: number;
+}
+
+/** Bound the per-learn failure list surfaced to tools/UI; the count stays exact. */
+const KB_LEARN_FAILED_SAMPLE_CAP = 20;
+
+/** Collect up to the sample cap of `{file, reason}` failures for one learn pass. */
+class KbLearnFailureCollector {
+  readonly failed: Array<{ file: string; reason: string }> = [];
+  failedTotal = 0;
+
+  add(file: string, reason: string): void {
+    this.failedTotal += 1;
+    if (this.failed.length < KB_LEARN_FAILED_SAMPLE_CAP) {
+      this.failed.push({ file, reason: reason.slice(0, 300) });
+    }
+  }
 }
 
 export const KB_QUERY_DEFAULT_TOP_K = 8;
@@ -134,33 +154,43 @@ async function learnDoc(
   stat: { size: number; mtimeMs: number },
   rawSha256: string,
   now: () => number,
-): Promise<LearnedDoc | null> {
+): Promise<{ learned: LearnedDoc | null; failure?: { file: string; reason: string } }> {
   const { extractKnowledgeBaseTextAsync, extractKbDocTitle } = await import('./text.js');
+  const relpath = path.relative(rawDir, filePath);
   let extraction: { text: string; title?: string };
   try {
     extraction = await extractKnowledgeBaseTextAsync(filePath);
-  } catch {
-    return null; // unsupported/failed files are skipped, learn never dies on one doc
+  } catch (error) {
+    // Unsupported/failed files are skipped — the learn never dies on one doc,
+    // but the failure is reported (IDBots `summary.failed` parity).
+    return {
+      learned: null,
+      failure: {
+        file: relpath,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    };
   }
-  const relpath = path.relative(rawDir, filePath);
   const title = extraction.title?.trim() || extractKbDocTitle(filePath, extraction.text);
   const chunks = chunkKnowledgeBaseText(extraction.text);
   return {
-    row: {
-      relpath,
-      sha256: rawSha256,
-      size: stat.size,
-      mtimeMs: Math.floor(stat.mtimeMs),
-      title,
-      chunkCount: chunks.length,
-      ingestedAt: now(),
+    learned: {
+      row: {
+        relpath,
+        sha256: rawSha256,
+        size: stat.size,
+        mtimeMs: Math.floor(stat.mtimeMs),
+        title,
+        chunkCount: chunks.length,
+        ingestedAt: now(),
+      },
+      chunks: chunks.map((chunk, ord) => ({
+        docRelPath: relpath,
+        ord,
+        text: chunk.text,
+        tokens: indexTokens(chunk.text),
+      })),
     },
-    chunks: chunks.map((chunk, ord) => ({
-      docRelPath: relpath,
-      ord,
-      text: chunk.text,
-      tokens: indexTokens(chunk.text),
-    })),
   };
 }
 
@@ -178,20 +208,25 @@ function buildInverted(chunks: Array<KbIndexChunkRow>): Record<string, number[]>
  * Full rebuild: re-extract every file. Used by learn(full) and as the
  * v1→v2 migration path (v1 chunk rows carry no token lists to reuse).
  */
-async function buildFullIndex(rawDir: string, now: () => number): Promise<IndexFile> {
+async function buildFullIndex(rawDir: string, now: () => number): Promise<{
+  index: IndexFile;
+  failures: KbLearnFailureCollector;
+}> {
   const files = (await walkRawFiles(rawDir)).sort();
   const docs: KbIndexDocRow[] = [];
   const chunks: KbIndexChunkRow[] = [];
+  const failures = new KbLearnFailureCollector();
   for (const filePath of files) {
     const stat = await fs.stat(filePath);
-    const learned = await learnDoc(rawDir, filePath, stat, await sha256FileAsync(filePath), now);
+    const { learned, failure } = await learnDoc(rawDir, filePath, stat, await sha256FileAsync(filePath), now);
+    if (failure) failures.add(failure.file, failure.reason);
     if (!learned) continue;
     docs.push(learned.row);
     for (const chunk of learned.chunks) {
       chunks.push({ docRelPath: chunk.docRelPath, ord: chunk.ord, text: chunk.text, tokens: chunk.tokens });
     }
   }
-  return { version: 2, docs, chunks, inverted: buildInverted(chunks) };
+  return { index: { version: 2, docs, chunks, inverted: buildInverted(chunks) }, failures };
 }
 
 /**
@@ -203,7 +238,7 @@ async function buildIncrementalIndex(
   rawDir: string,
   previous: IndexFile,
   now: () => number,
-): Promise<IndexFile> {
+): Promise<{ index: IndexFile; failures: KbLearnFailureCollector }> {
   const oldDocByPath = new Map(previous.docs.map((doc) => [doc.relpath, doc]));
   const oldChunksByPath = new Map<string, KbIndexChunkRow[]>();
   for (const chunk of previous.chunks) {
@@ -215,6 +250,7 @@ async function buildIncrementalIndex(
   const files = (await walkRawFiles(rawDir)).sort();
   const docs: KbIndexDocRow[] = [];
   const chunks: KbIndexChunkRow[] = [];
+  const failures = new KbLearnFailureCollector();
 
   const reuseDoc = (row: KbIndexDocRow, oldChunks: KbIndexChunkRow[]): boolean => {
     if (oldChunks.length === 0) return false;
@@ -246,18 +282,25 @@ async function buildIncrementalIndex(
       continue;
     }
 
-    const learned = await learnDoc(rawDir, filePath, stat, rawSha256, now);
+    const { learned, failure } = await learnDoc(rawDir, filePath, stat, rawSha256, now);
     if (learned) {
       docs.push(learned.row);
       for (const chunk of learned.chunks) {
         chunks.push({ docRelPath: chunk.docRelPath, ord: chunk.ord, text: chunk.text, tokens: chunk.tokens });
       }
     } else if (oldRow && oldChunks.length > 0) {
-      // Previously-indexed doc became unreadable — keep the stale copy.
-      reuseDoc(oldRow, oldChunks);
+      // Previously-indexed doc became unreadable — keep the stale copy (no
+      // coverage loss) and report the failure so the surface knows why the
+      // doc's content no longer matches the file.
+      failures.add(
+        relpath,
+        `${failure ? failure.reason : 'extraction failed'} (kept the previously indexed copy)`,
+      );
+    } else if (failure) {
+      failures.add(failure.file, failure.reason);
     }
   }
-  return { version: 2, docs, chunks, inverted: buildInverted(chunks) };
+  return { index: { version: 2, docs, chunks, inverted: buildInverted(chunks) }, failures };
 }
 
 function bm25Score(
@@ -328,9 +371,10 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
 
     rebuild: async (rawDir, now, options) => {
       const previous = options?.full ? null : await readIndex();
-      const index = previous && previous.version === 2 && previous.docs.length >= 0
+      const built = previous && previous.version === 2 && previous.docs.length >= 0
         ? await buildIncrementalIndex(rawDir, previous, now)
         : await buildFullIndex(rawDir, now);
+      const index = built.index;
       await writeIndex(index);
       cache = null;
       // Learn summary vs the previous index, by raw-content sha256 per relpath
@@ -344,7 +388,15 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
       const updated = index.docs.filter(
         (doc) => prevByPath.get(doc.relpath) !== undefined && prevByPath.get(doc.relpath) !== doc.sha256,
       ).length;
-      return { docCount: index.docs.length, chunkCount: index.chunks.length, added, updated, removed };
+      return {
+        docCount: index.docs.length,
+        chunkCount: index.chunks.length,
+        added,
+        updated,
+        removed,
+        failed: built.failures.failed,
+        failedTotal: built.failures.failedTotal,
+      };
     },
 
     query: async (query, options: { topK?: number; minScore?: number } = {}) => {

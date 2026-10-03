@@ -3648,17 +3648,19 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['knowledge-base', 'study'],
     summary: 'Autonomous nightly MetaWeb study jobs: the daemon drains the queue into the Bot\'s knowledge base during the nightly window (00:00-06:00).',
-    usage: 'metabot knowledge-base study <enqueue|status|retry> [--from <bot-slug>]',
+    usage: 'metabot knowledge-base study <enqueue|status|retry|run> [--from <bot-slug>]',
     subcommands: [
       { name: 'enqueue', summary: 'Queue a study topic (dedupes against a pending/running job of the same topic).' },
       { name: 'status', summary: 'List this Bot\'s study jobs with status, runs, failures, and summaries.' },
       { name: 'retry', summary: 'Put failed jobs back into the nightly queue (by --job-id, --topic substring, or all failed).' },
+      { name: 'run', summary: 'Run one job NOW (window ignored) — manual trigger for testing the nightly flow; pass --wait to follow the run to completion.' },
     ],
     optionalFlags: [
       FROM_BOT_FLAG,
-      { flag: '--topic', value: '<text>', description: 'For enqueue: what to study (max 200 chars). For retry: retry failed jobs whose topic contains this text.' },
-      { flag: '--budget-pins', value: '<n>', description: 'For enqueue: max metaweb documents saved per night (1-50, default 20).' },
-      { flag: '--job-id', value: '<id>', description: 'For retry: one failed job id from study status.' },
+      { flag: '--topic', value: '<text>', description: 'For enqueue: what to study (max 200 chars). For retry/run: match jobs whose topic contains this text.' },
+      { flag: '--budget-pins', value: '<n>', description: 'For enqueue: max metaweb documents saved per night (1-50, default 50).' },
+      { flag: '--job-id', value: '<id>', description: 'For retry: one failed job id. For run: one job id from study status.' },
+      { flag: '--wait', description: 'For run: poll until the job settles and print its summary (may take minutes).' },
       HELP_JSON_FLAG,
     ],
     successFields: [
@@ -3667,12 +3669,15 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'jobs',
       'retried',
       'count',
+      'started (study run)',
+      'jobId (study run)',
       'localUiUrl (study status only — the /ui/kb page; omitted when no daemon base URL is resolvable)',
     ],
     examples: [
       'metabot knowledge-base study enqueue --from alice --topic "MetaID protocol deep dive" --budget-pins 10',
       'metabot knowledge-base study status --from alice',
       'metabot knowledge-base study retry --from alice',
+      'metabot knowledge-base study run --from alice --topic "MetaID protocol deep dive" --wait',
     ],
   },
   {

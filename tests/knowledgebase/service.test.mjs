@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -126,10 +126,56 @@ test('importFiles copies supported files and skips the rest', async () => {
   const docB = path.join(homeDir, 'b.exe');
   writeFileSync(docA, '# Doc A\ncontent');
   writeFileSync(docB, 'binary');
-  const imported = await service.importFiles('bot-1', kb.id, [docA, docB]);
-  assert.equal(imported, 1);
+  const result = await service.importFiles('bot-1', kb.id, [docA, docB]);
+  assert.equal(result.imported, 1);
+  assert.equal(result.skipped, 1);
+  assert.deepEqual(result.files, ['a.md']);
   assert.ok(existsSync(path.join(kb.rawDir, 'a.md')));
   assert.ok(!existsSync(path.join(kb.rawDir, 'b.exe')));
+});
+
+test('importFiles suffixes same-name imports instead of overwriting (IDBots parity)', async () => {
+  const { paths, homeDir } = makeProfile('metabot-kb-svc-import-dup-');
+  const service = createKnowledgeBaseService(paths);
+  const kb = await service.ensureDefaultKnowledgeBase('bot-1');
+  const first = path.join(homeDir, 'notes.md');
+  const second = path.join(homeDir, 'notes-2.md');
+  writeFileSync(first, '# First version\nalpha');
+  writeFileSync(second, '# Second version\nbeta');
+  const one = await service.importFiles('bot-1', kb.id, [first]);
+  const two = await service.importFiles('bot-1', kb.id, [second]);
+  assert.deepEqual(two.files, ['notes-2.md'], 'second same-name import gets the -2 suffix');
+  assert.equal(existsSync(path.join(kb.rawDir, 'notes.md')), true);
+  assert.equal(existsSync(path.join(kb.rawDir, 'notes-2.md')), true);
+  assert.equal(readFileSync(path.join(kb.rawDir, 'notes.md'), 'utf8').includes('alpha'), true,
+    'the first corpus file is never overwritten');
+  const third = path.join(homeDir, 'notes-3.md');
+  writeFileSync(third, '# Third version\ngamma');
+  const three = await service.importFiles('bot-1', kb.id, [third, third]);
+  assert.deepEqual(three.files, ['notes-3.md', 'notes-3-2.md']);
+  assert.equal(one.imported, 1);
+  assert.equal(three.imported, 2);
+});
+
+test('learnSummary names files whose extraction failed (IDBots failed parity)', async () => {
+  const { paths, homeDir } = makeProfile('metabot-kb-svc-failed-');
+  const service = createKnowledgeBaseService(paths);
+  const kb = await service.ensureDefaultKnowledgeBase('bot-1');
+  writeFileSync(path.join(kb.rawDir, 'broken.pdf'), '%PDF-garbage-not-a-real-pdf');
+  writeFileSync(path.join(kb.rawDir, 'good.md'), '# Good\n塔罗牌占卜入门知识，大阿卡纳二十二张。');
+  const learned = await service.learnKnowledgeBase('bot-1');
+  assert.equal(learned.docCount, 1, 'only the readable doc lands in the index');
+  const summary = learned.learnSummary;
+  assert.ok(summary, 'learn returns a summary');
+  assert.equal(summary.failedTotal, 1);
+  assert.equal(summary.failed.length, 1);
+  assert.equal(summary.failed[0].file, 'broken.pdf');
+  assert.ok(summary.failed[0].reason.length > 0, 'the failure carries the converter reason');
+  // A failed doc is never indexed, so every learn re-tries and re-reports it
+  // until it is fixed or removed; removing it makes the report clean again.
+  unlinkSync(path.join(kb.rawDir, 'broken.pdf'));
+  const clean = await service.learnKnowledgeBase('bot-1');
+  assert.equal(clean.learnSummary.failedTotal ?? 0, 0);
 });
 
 test('addDocument rejects empty fields; provenance bounds hold', async () => {

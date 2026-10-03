@@ -1,9 +1,10 @@
 /**
  * /api/kb/* routes — knowledge-base management plus the nightly study-job
- * surface (enqueue/status/retry, drained by the daemon nightly tick). Thin
- * dispatch onto handlers.kb; every response is a MetabotCommandResult JSON
- * body with HTTP 200, matching the schedule route style. `study/status` is
- * the DSH `metaweb_study_status` equivalent: it lists this bot's study jobs.
+ * surface (enqueue/status/retry/run, drained by the daemon nightly tick;
+ * `study/run` executes one job immediately, window ignored). Thin dispatch
+ * onto handlers.kb; every response is a MetabotCommandResult JSON body with
+ * HTTP 200, matching the schedule route style. `study/status` is the DSH
+ * `metaweb_study_status` equivalent: it lists this bot's study jobs.
  */
 
 import { commandFailed } from '../../core/contracts/commandResult';
@@ -26,6 +27,7 @@ const POST_VERBS: Record<string, KbVerb> = {
   '/api/kb/learn': 'learn',
   '/api/kb/study/enqueue': 'studyEnqueue',
   '/api/kb/study/retry': 'studyRetry',
+  '/api/kb/study/run': 'studyRun',
 };
 
 function queryToInput(url: URL): Record<string, unknown> {

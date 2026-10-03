@@ -26,7 +26,20 @@ export interface KnowledgeBaseRecord {
   createdAt: number;
   updatedAt: number;
   /** Only set on the record a learn call returns (transient, never persisted). */
-  learnSummary?: { added: number; updated: number; removed: number };
+  learnSummary?: {
+    added: number;
+    updated: number;
+    removed: number;
+    /** Raw docs whose (re-)extraction failed this pass (first 20, IDBots parity). */
+    failed?: Array<{ file: string; reason: string }>;
+    /** Total failed docs this pass — `failed` is a bounded sample of it. */
+    failedTotal?: number;
+  };
+}
+
+/** Local-timezone YYYY-MM-DD — the auto-learn "already done today" stamp. */
+export function localDateIso(now: Date): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 export interface CreateKnowledgeBaseInput {
@@ -237,7 +250,7 @@ export function createKnowledgeBaseStore(paths: MetabotPaths): KnowledgeBaseStor
 
     listDueForAutoLearn: async (now) => {
       const state = await readRegistry();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const today = localDateIso(now);
       const hour = now.getHours();
       return state.bases
         .map(normalizeRecord)

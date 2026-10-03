@@ -57,7 +57,7 @@ import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
 import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 import { dispatchGroupTaskRoutes } from './grouptask.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
-import { dispatchKbRoutes, importKbFile } from './kb-routes.js'
+import { dispatchKbRoutes, importKbFile, KB_IMPORT_MAX_BYTES } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyScheduleScheduler } from './schedule-scheduler.js'
 import { HostLlmExecutor, type HostAgentTurnRunner } from './host-llm-executor.js'
@@ -349,7 +349,20 @@ async function handleKbImport(req: PluginHttpRequest): Promise<MetabotCommandRes
   const from = url.searchParams.get('from')?.trim() ?? ''
   const id = url.searchParams.get('id')?.trim() ?? ''
   const filename = url.searchParams.get('filename')?.trim() ?? 'document.bin'
-  const bytes = await readRawBody(req)
+  // Read with one byte of slack over the import cap so an oversize upload
+  // reaches importKbFile's typed `file_too_large` failure instead of
+  // readRawBody's generic 24 MB default throw.
+  let bytes: Buffer
+  try {
+    bytes = await readRawBody(req, KB_IMPORT_MAX_BYTES + 1)
+  } catch {
+    return {
+      ok: false,
+      state: 'failed',
+      code: 'file_too_large',
+      message: `"${filename}" exceeds the import cap (${Math.floor(KB_IMPORT_MAX_BYTES / (1024 * 1024))} MB).`,
+    }
+  }
   return importKbFile(from, id, filename, bytes)
 }
 
@@ -830,7 +843,7 @@ export { PRIVATE_FILE, GROUP_FILE } from './chat-watcher.js'
 export { dispatchSection } from './sections.js'
 export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
-export { dispatchKbRoutes, importKbFile } from './kb-routes.js'
+export { dispatchKbRoutes, importKbFile, KB_IMPORT_MAX_BYTES } from './kb-routes.js'
 export { dispatchSurfRoutes } from './surf-routes.js'
 export { dispatchScheduleRoutes, migrateLegacyScheduleTasks } from './schedule-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'

@@ -53,6 +53,7 @@ test('bindKnowledgeBaseToolInstall registers all tools incl. the qa-surf pair', 
       'metaweb_qa_surf_enqueue',
       'metaweb_study_enqueue',
       'metaweb_study_retry',
+      'metaweb_study_run',
       'metaweb_study_status',
       'procedure_archive',
       'procedure_recall',
@@ -413,4 +414,26 @@ test('metaweb_study_status groups rows by status, failed first, not by createdAt
   assert.match(status, /FAILED — needs attention \(1\):[\s\S]*- "failed topic" \[failed\]/)
   assert.match(status, /IN PROGRESS \(1\):[\s\S]*- "pending topic" \[pending\]/)
   assert.match(status, /DONE \(1\):[\s\S]*- "done topic" \[done\]/)
+})
+
+test('metaweb_study_run starts a job now through the CLI verb', async () => {
+  const { exec, resolve } = profileSetup('kb-study-run-')
+  const host = fakeHost()
+  const cliCalls = []
+  const run = async (args) => {
+    cliCalls.push(args.slice())
+    return { ok: true, state: 'success', data: { started: true, jobId: 'study-9', topic: '前端框架趋势' } }
+  }
+  const defs = plugin.buildStudyToolDefinitions({
+    host: host.ctx,
+    fallbackSlug: 'test-bot',
+    resolveHomeDir: resolve,
+    run,
+  })
+  const byName = new Map(defs.map((tool) => [tool.name, tool]))
+
+  const started = await byName.get('metaweb_study_run').execute({ topic: '前端' }, exec)
+  assert.match(String(started), /is now running/)
+  assert.match(String(started), /metaweb_study_status/)
+  assert.deepEqual(cliCalls, [['knowledge-base', 'study', 'run', '--from', 'test-bot', '--topic', '前端']])
 })

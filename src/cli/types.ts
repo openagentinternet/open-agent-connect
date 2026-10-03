@@ -349,6 +349,12 @@ export interface CliDependencies {
       jobId?: string;
       topic?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Manual run of one study job NOW via the daemon (window ignored). */
+    studyRun?: (input: {
+      from?: string;
+      jobId?: string;
+      topic?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   schedule?: {
     create?: (input: {

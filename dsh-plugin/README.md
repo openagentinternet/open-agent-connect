@@ -299,8 +299,19 @@ Advanced disclosure with the destructive `Full rebuild`. New KBs need both a
 name and a description; there is no manual document typing — the corpus is fed
 by agent tools (`knowledge_base_add_document`, `skill_tool`) and file import.
 The nightly study-jobs status panel (topics assigned via
-`metaweb_study_enqueue`) sits below, and the model gets the same registry
-every turn through the `<knowledge_bases>` volatile prompt block. The
+`metaweb_study_enqueue`, per-run budget now defaulting to 50 pins like
+IDBots) sits below, and the model gets the same registry every turn through
+the `<knowledge_bases>` volatile prompt block. Parity details: a learn that
+hits unreadable raw files says so — the `learnSummary` carries the failed
+files with reasons, surfaced in the Knowledge tab notice (error styling), the
+`/ui/kb` learn message, and the `knowledge_base_learn` tool output; same-name
+imports are suffixed `-2`/`-3` instead of overwriting (reported as
+imported/skipped); `POST /oac/api/kb/import` caps uploads at 100 MB; and one
+study job can be run on demand — `metabot knowledge-base study run
+(--job-id | --topic) [--wait]`, the `metaweb_study_run` chat tool, or the
+`/ui/kb` Run-now button — which drains it immediately, nightly window
+ignored (a failed job is requeued first; a job already running anywhere in
+the daemon is refused). The
 `knowledge_base_*` tools resolve the acting Bot per call (session `oac-*`
 agent first, then the machine-default Twin — the same target a no-`--from`
 CLI call picks), so they also work from plain DSH conversations, and write

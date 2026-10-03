@@ -59,6 +59,17 @@ test('kb/import without a local profile fails explicitly; non-kb methods fall th
   assert.equal(missing.calls.length, 0)
 })
 
+test('kb/import refuses oversized uploads before touching a profile', async () => {
+  const oversized = Buffer.alloc(plugin.KB_IMPORT_MAX_BYTES + 1)
+  const result = await plugin.importKbFile('nobody-here', 'kb1', 'big.pdf', oversized)
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'file_too_large')
+  assert.match(result.message, /100 MB/)
+
+  const empty = await plugin.importKbFile('nobody-here', 'kb1', 'doc.md', Buffer.alloc(0))
+  assert.equal(empty.code, 'empty_body', 'the empty-body check still fires first')
+})
+
 test('study/list falls back to an explicit failure without local read', async () => {
   const { result } = await capture('study/list', { from: 'alice' })
   assert.equal(result.ok, false)
