@@ -10360,6 +10360,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       metaBotSlug,
       systemHomeDir: runtimeStateStore.paths.systemHomeDir,
       projectRoot: runtimeStateStore.paths.profileRoot,
+      profileHomeDir: runtimeStateStore.paths.profileRoot,
       runtimeStore: llmRuntimeStore,
       bindingStore: llmBindingStore,
       llmExecutor: input.llmExecutor ?? {
@@ -16530,6 +16531,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           metaBotSlug,
           systemHomeDir: runtimeStateStore.paths.systemHomeDir,
           projectRoot: runtimeStateStore.paths.profileRoot,
+          profileHomeDir: runtimeStateStore.paths.profileRoot,
           runtimeStore: llmRuntimeStore,
           bindingStore: llmBindingStore,
           llmExecutor: input.llmExecutor ?? {

@@ -8,10 +8,18 @@ interface ChatPersonaIdentity {
   globalMetaId: string;
 }
 
-async function readMdFile(filePath: string): Promise<string> {
+async function readMdFile(filePath: string, heading: string): Promise<string> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    return raw.trim();
+    const text = raw.trim();
+    // A leading `# <Self-heading>` line (e.g. `# Role` in ROLE.md) is the
+    // file's own label, not persona content — strip it so it never lands
+    // inside prompt fields (mirrors hostPersonaProjection's handling).
+    const lines = text.split('\n');
+    if (new RegExp(`^#{1,6}\\s+${heading}\\s*$`, 'iu').test(lines[0]?.trim() ?? '')) {
+      return lines.slice(1).join('\n').trim();
+    }
+    return text;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
@@ -44,9 +52,9 @@ async function readRuntimeIdentity(filePath: string): Promise<ChatPersonaIdentit
 
 export async function loadChatPersona(paths: MetabotPaths): Promise<ChatPersona> {
   const [soul, goal, role, identity] = await Promise.all([
-    readMdFile(paths.soulMdPath),
-    readMdFile(paths.goalMdPath),
-    readMdFile(paths.roleMdPath),
+    readMdFile(paths.soulMdPath, 'Soul'),
+    readMdFile(paths.goalMdPath, 'Goal'),
+    readMdFile(paths.roleMdPath, 'Role'),
     readRuntimeIdentity(paths.runtimeStatePath),
   ]);
   const persona = withRuntimeMetabotPersonaFallback({ soul, goal, role });

@@ -58,6 +58,7 @@ test('host agent turn runner answers from the live event stream', async () => {
   const bus = fakeEventCtx()
   const created = []
   const disposed = []
+  const followups = []
   bus.ctx.get = (key) => (key === 'agents'
     ? {
         create: async (options) => {
@@ -66,7 +67,8 @@ test('host agent turn runner answers from the live event stream', async () => {
           return {
             agent: {
               session,
-              followup: () => {
+              followup: (message) => {
+                followups.push(message)
                 bus.fire(session, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '巴黎回信' }] } } })
               },
               whenIdle: () => Promise.resolve(),
@@ -79,6 +81,7 @@ test('host agent turn runner answers from the live event stream', async () => {
   const runner = plugin.createHostAgentTurnRunner(bus.ctx)
   assert.equal(typeof runner, 'function')
   const text = await runner({
+    system: '你是 Alice。',
     prompt: '写一句回复',
     provider: 'deepseek',
     model: 'deepseek-chat',
@@ -86,6 +89,10 @@ test('host agent turn runner answers from the live event stream', async () => {
     timeoutMs: 5000,
   })
   assert.equal(text, '巴黎回信')
+  // The daemon-supplied system text must ride along with the turn — dropping
+  // it would strip the bot of its persona in agent mode.
+  assert.equal(followups.length, 1)
+  assert.equal(followups[0].content[0].text, '你是 Alice。\n\n写一句回复')
   assert.equal(disposed.length, 1, 'the ephemeral session is disposed after the turn')
   assert.equal(bus.listeners.length, 0, 'the tap is disposed after the turn')
 })

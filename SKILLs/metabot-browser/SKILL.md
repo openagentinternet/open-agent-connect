@@ -257,7 +257,6 @@ Formatting rules:
 - Render candidates only as these bullet lines — never as a plain-text table or plain list. Tables and bare lists drop the links, and links are mandatory.
 - App titles and author names are always markdown links; never restate an app or an author as plain text.
 - Link the title to the item's `localUiUrl` and the author to the item's `publisherLocalUiUrl` whenever the envelope provides them. These are plain http URLs that every host renders as clickable, and they open the app or the publisher's Bot page in the local Browser. Fall back to `metaapp://<pinId>` and `metaid://<fullGlobalMetaId>` only when an item has no link fields (no reachable daemon).
-- Never shorten, truncate, or ellipsis ids: pinIds and globalMetaIds always appear in full.
 - Use `title` for the app link text, falling back to `appName`, then the pinId.
 - Use `publisherName` for the author link text when present, otherwise the full `publisherGlobalMetaId`.
 - Keep the item's `intro` after the em dash; when it is longer than ~120 characters, trim it with an ellipsis. Omit the em dash when there is no intro.
@@ -314,7 +313,6 @@ Formatting rules:
 
 - Render candidates only as these bullet lines — never as a plain-text table or plain list. Tables and bare lists drop the links, and links are mandatory.
 - Names are always markdown links; never restate a person as plain text. Link the name to the item's `localUiUrl` whenever the envelope provides it — this is a plain http URL that opens the identity's Bot page in the local Browser. Fall back to `metaid://<fullGlobalMetaId>` only when the item has no link field (no reachable daemon).
-- Never shorten, truncate, or ellipsis ids: globalMetaIds always appear in full.
 - Use `name` for the link text, falling back to the full `globalMetaId`.
 - Keep the item's `bio` after the em dash; when it is longer than ~120 characters, trim it with an ellipsis. Omit the em dash when there is no bio.
 - Include the `skills:` segment only when `chatSkills` is non-empty, and the `can receive private messages` segment only when `hasChatPubkey` is true.
@@ -406,7 +404,7 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 
 ## Output Conventions
 
-- Link apps to their envelope `localUiUrl` when present (falling back to `metaapp://<pinId>`), Bots or authors to their `publisherLocalUiUrl` when present, and people found through `metaid search` to their `localUiUrl` when present (both falling back to `metaid://<fullGlobalMetaId>`). Full ids always; never shorten, truncate, or ellipsis them.
+- Link apps to their envelope `localUiUrl` when present (falling back to `metaapp://<pinId>`), Bots or authors to their `publisherLocalUiUrl` when present, and people found through `metaid search` to their `localUiUrl` when present (both falling back to `metaid://<fullGlobalMetaId>`). Ids stay in full form everywhere per the standing full-form URI rule.
 - Reuse the candidate bullet lines from Find And Discover MetaApps verbatim when listing apps, and the ones from Find And Discover People verbatim when listing people.
 - `localUiUrl` values always come from the CLI envelope; never invent localhost URLs.
 - Names of people and apps are links everywhere in the reply — in candidate bullets, in summary sentences ("opened [AI_Sunny](...)"), in comparisons, and in next-step hints. A person or app name without a link is a mistake; never render candidates as plain-text tables or unlinked lists.

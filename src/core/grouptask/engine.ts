@@ -27,6 +27,11 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { resolveMetabotPaths } from '../state/paths';
+import { buildMemoryBlocksForRequest } from '../memory/memoryService';
+import { METAWEB_URI_FULL_FORM_RULE } from '../metaweb/uri';
+import { composeSystemPrompt, SYSTEM_PROMPT_ORDER } from '../prompt/compose';
+import { wrapMemoryInjection } from '../prompt/memoryInjection';
+import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
 import { createGroupTaskStore, type GroupTaskStore } from './store';
 import {
   GROUP_TASK_REWORK_AT_KV_PREFIX,
@@ -487,9 +492,22 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       ownerGlobalMetaId: input.ownerGmid,
       role: input.seat.role,
     });
+    // Scoped memory + experience hot layer (self-identity, value boundaries,
+    // work reviews, recent dreams) for this seat, riding the volatile turn
+    // prompt IDBots-style. The privacy gate lives in the memory module: a
+    // group channel gets the conversation scope plus external-safe owner
+    // operational preferences only — never owner profile facts.
+    const memorySection = await buildMemoryBlocksForRequest(
+      resolveMetabotPaths(input.seat.profile.homeDir),
+      {
+        channel: 'grouptask',
+        externalConversationId: `grouptask-${input.task.id}`,
+        ...(input.target?.content ? { userText: input.target.content } : {}),
+      },
+    ).then((result) => wrapMemoryInjection(result.xml)).catch(() => '');
     // The authoritative state line leads directive prompts (IDBots order) and
     // rides the volatile context on reply turns.
-    const prompt = input.promptOverride
+    const basePrompt = input.promptOverride
       ? (input.stateLine ? `${input.stateLine}\n\n${input.promptOverride}` : input.promptOverride)
       : buildGroupTaskTurnContext({
         task: input.task,
@@ -498,6 +516,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         stateLine: input.stateLine,
         nowMs: now(),
       });
+    const prompt = memorySection ? `${basePrompt}\n\n${memorySection}` : basePrompt;
     const turn = {
       profile: input.seat.profile,
       role: input.seat.role,
@@ -956,16 +975,35 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
             .map((signal) => `${signal.signalType}${signal.memberName ? ` → ${signal.memberName}` : ''}${signal.note ? `: ${signal.note}` : ''}`)
             .slice(0, 5),
         };
+        const chairPersona = await loadPersona(chairProfile).catch(() => ({} as GroupTaskEnginePersona));
         const report = (await options.runLlmTurn({
           profile: chairProfile,
           role: 'chair',
-          systemPrompt: 'You are the chair of a group task reporting to the owner. Reply in the owner\'s language.',
+          systemPrompt: composeSystemPrompt([
+            {
+              name: 'scenario',
+              order: SYSTEM_PROMPT_ORDER.scenario,
+              text: 'You are the chair of a group task reporting to the owner. Reply in the owner\'s language.',
+            },
+            {
+              name: 'identity',
+              order: SYSTEM_PROMPT_ORDER.identity,
+              text: buildMetabotIdentityBlock({
+                name: chairProfile.name || chairSlug,
+                globalMetaId: chairProfile.globalMetaId,
+                role: chairPersona.role,
+                soul: chairPersona.soul,
+                goal: chairPersona.goal,
+                bio: chairPersona.bio,
+              }),
+            },
+          ]),
           prompt: [
             'The task below just entered review. Write a short private report to the owner.',
             'First line must be exactly 【结论】followed by a one-sentence verdict (max 120 chars).',
             'Then 3-6 bullet lines: goal, deliverables with their verification labels, member contributions, plan changes.',
             'Facts only — every claim must come from the record below; never invent outcomes or ratings.',
-            'Every MetaWeb URI (metaid://, pin://, metafile://, metaapp://, map://) must appear in FULL — never abbreviated or truncated with an ellipsis; a shortened URI is neither clickable nor copyable.',
+            METAWEB_URI_FULL_FORM_RULE,
             JSON.stringify(record),
           ].join('\n'),
         })).trim();

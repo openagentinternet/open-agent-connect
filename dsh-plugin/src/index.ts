@@ -508,10 +508,14 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
         },
       })
       const agent = handle.agent
+      // The DSH session owns its system prompt, so the daemon-supplied `system`
+      // text (bot identity/persona for this turn) is merged into the turn
+      // message — dropping it would strip the bot of its persona.
+      const turnText = input.system ? `${input.system}\n\n${input.prompt}` : input.prompt
       agent.followup?.({
         id: randomUUID(),
         role: 'user',
-        content: [{ type: 'text', text: input.prompt }],
+        content: [{ type: 'text', text: turnText }],
         source: oacMessageSource('a2a-reply'),
       })
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined

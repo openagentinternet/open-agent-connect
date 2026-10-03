@@ -10,8 +10,6 @@ function buildOpenCodeArgs(request) {
         args.push('--dir', request.cwd);
     if (request.model)
         args.push('--model', request.model);
-    if (request.systemPrompt)
-        args.push('--prompt', request.systemPrompt);
     if (request.resumeSessionId)
         args.push('--session', request.resumeSessionId);
     args.push(...(0, backend_1.filterBlockedArgs)(request.extraArgs, {
@@ -22,7 +20,10 @@ function buildOpenCodeArgs(request) {
         '--prompt': { takesValue: true },
         '--session': { takesValue: true },
     }));
-    args.push(request.prompt);
+    // opencode has no separate system-prompt channel: deliver system + user as
+    // one positional message (previously systemPrompt went via --prompt AND the
+    // prompt positionally, so opencode received both as the message).
+    args.push(request.systemPrompt ? `${request.systemPrompt}\n\n${request.prompt}` : request.prompt);
     return args;
 }
 function getPart(message) {

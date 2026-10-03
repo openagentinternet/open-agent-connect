@@ -25,10 +25,7 @@ export const MEMORY_STRATEGY_TEXT = [
   '- Memories may be injected as scoped blocks such as <ownerMemories>, <contactMemories>, <conversationMemories>, or <ownerOperationalPreferences>.',
   '- Treat each injected memory block as stable context only for that scope; do not assume omitted scopes are available.',
   '- Use `memory_user_edits` when the user asks to remember, update, list, or delete memory facts, or when you discover a durable fact worth persisting.',
-  '- Use `experience_recall` to look up your own past days: a bare call returns the last 30 days of your daily summaries, `query` searches your full history, and `date_from`/`date_to` (YYYY-MM-DD) pin a range.',
   '- When a task resembles something you have done before, first search it with `experience_recall` (keyword), then read the referenced session with `oac_session_read_all`: reuse the approaches that worked last time and avoid the pitfalls you already hit.',
-  '- When <recent_daily_summaries> is present, those summaries are your own nightly dreams (做梦): questions like "did you dream / what did you dream about / do you remember that day" should be answered from them first.',
-  '- Use `knowledge_recall` to search your reusable knowledge points (know-how, pitfalls, principles), and `knowledge_upsert` to save or revise one when you learn something worth reusing.',
   '- Never write transient conversation facts, news content, or source citations into user memory unless the user explicitly asks.',
 ].join('\n')
 

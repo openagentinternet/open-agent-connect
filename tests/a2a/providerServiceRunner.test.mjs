@@ -157,6 +157,40 @@ test('buildProviderServiceOrderPrompt describes multiple provider skills as an a
   assert.doesNotMatch(prompt, /listed order/i);
 });
 
+test('createProviderServiceRunner injects the provider persona and experience layer when profileHomeDir is set', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  try {
+    await fs.writeFile(path.join(homeDir, 'ROLE.md'), '# Role\n严谨的天气播报员。', 'utf8');
+    const { createMemoryStore } = require('../../dist/core/memory/memoryStore.js');
+    await createMemoryStore(resolveMetabotPaths(homeDir)).create({
+      text: '我是一个先验证再宣布的 MetaBot。',
+      usageClass: 'self_identity',
+      origin: 'dream',
+    });
+    const calls = [];
+    const runner = createProviderServiceRunner({
+      metaBotSlug: 'alice',
+      systemHomeDir,
+      projectRoot: homeDir,
+      profileHomeDir: homeDir,
+      runtimeStore,
+      bindingStore,
+      llmExecutor: llmExecutorForTerminalResult({ status: 'completed', output: '晴天。', durationMs: 1 }, calls),
+      canStartRuntime: () => true,
+      getFallbackRuntime: async () => runtime({ id: 'runtime-fallback', provider: 'claude-code' }),
+    });
+    const result = await runner.execute(baseOrder());
+    assert.equal(result.state, 'completed');
+    assert.ok(calls.length >= 1);
+    assert.match(calls[0].systemPrompt, /<metabot_identity>/);
+    assert.match(calls[0].systemPrompt, /<role>严谨的天气播报员。<\/role>/);
+    assert.match(calls[0].systemPrompt, /<metabot_self_identity>/);
+    assert.match(calls[0].systemPrompt, /先验证再宣布/);
+  } finally {
+    await cleanupProfileHome(homeDir);
+  }
+});
+
 test('createProviderServiceRunner uses fallback only before execution starts', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   const sessionExecutorCalls = [];

@@ -20,6 +20,18 @@ export interface MemoryBlocksResult {
     resolution: ResolvedMemoryScopes;
 }
 /**
+ * Experience-only hot layer: the dream-written self-identity, self-distilled
+ * value boundaries, work reviews, and recent dream diaries. For scenarios
+ * that must NOT receive scoped owner/contact memories (public-facing or
+ * protocol-short outputs) but whose behavior must still align with the bot's
+ * self-cognition. Returns '' when memory is disabled by policy; never throws.
+ */
+export declare function buildExperienceContext(paths: MetabotPaths, stores?: {
+    memory?: MemoryStore;
+    policy?: MemoryPolicyStore;
+    dream?: DreamStore;
+}): Promise<string>;
+/**
  * Build the full memory injection for one turn: scoped fact blocks plus the
  * experience hot layer (self-identity, value boundaries, work reviews, recent
  * dream diaries). Knowledge blocks join in their own phase — the builders

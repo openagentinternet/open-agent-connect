@@ -257,7 +257,8 @@ test('runCli binds, inspects, refreshes, and unbinds a Codex persona projection'
   assert.match(generated, /^# OAC MetaBot profile: eric$/m);
   assert.match(generated, /^name = "eric"$/m);
   assert.match(generated, /^description = "Eric specializes in frontend product design and implementation\."$/m);
-  assert.match(generated, /developer_instructions = ".*## Role\\nFrontend product engineer/);
+  assert.match(generated, /developer_instructions = ".*<metabot_identity>/);
+  assert.match(generated, /<role>Frontend product engineer<\/role>/);
   assert.match(generated, /Use the host's available skills, tools, MCP servers, sandbox, and approval policy normally/);
   assert.doesNotMatch(generated, /^(model|sandbox|approval_policy|tools|skills|mcp_servers)\s*=/m);
   assert.equal(

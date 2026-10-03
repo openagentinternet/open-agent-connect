@@ -30,6 +30,11 @@ exports.createGroupTaskEngine = createGroupTaskEngine;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
 const paths_1 = require("../state/paths");
+const memoryService_1 = require("../memory/memoryService");
+const uri_1 = require("../metaweb/uri");
+const compose_1 = require("../prompt/compose");
+const memoryInjection_1 = require("../prompt/memoryInjection");
+const metabotIdentity_1 = require("../prompt/metabotIdentity");
 const store_1 = require("./store");
 const service_1 = require("./service");
 const openteam_1 = require("./openteam");
@@ -327,9 +332,19 @@ function createGroupTaskEngine(options) {
             ownerGlobalMetaId: input.ownerGmid,
             role: input.seat.role,
         });
+        // Scoped memory + experience hot layer (self-identity, value boundaries,
+        // work reviews, recent dreams) for this seat, riding the volatile turn
+        // prompt IDBots-style. The privacy gate lives in the memory module: a
+        // group channel gets the conversation scope plus external-safe owner
+        // operational preferences only — never owner profile facts.
+        const memorySection = await (0, memoryService_1.buildMemoryBlocksForRequest)((0, paths_1.resolveMetabotPaths)(input.seat.profile.homeDir), {
+            channel: 'grouptask',
+            externalConversationId: `grouptask-${input.task.id}`,
+            ...(input.target?.content ? { userText: input.target.content } : {}),
+        }).then((result) => (0, memoryInjection_1.wrapMemoryInjection)(result.xml)).catch(() => '');
         // The authoritative state line leads directive prompts (IDBots order) and
         // rides the volatile context on reply turns.
-        const prompt = input.promptOverride
+        const basePrompt = input.promptOverride
             ? (input.stateLine ? `${input.stateLine}\n\n${input.promptOverride}` : input.promptOverride)
             : (0, prompts_1.buildGroupTaskTurnContext)({
                 task: input.task,
@@ -338,6 +353,7 @@ function createGroupTaskEngine(options) {
                 stateLine: input.stateLine,
                 nowMs: now(),
             });
+        const prompt = memorySection ? `${basePrompt}\n\n${memorySection}` : basePrompt;
         const turn = {
             profile: input.seat.profile,
             role: input.seat.role,
@@ -721,16 +737,35 @@ function createGroupTaskEngine(options) {
                         .map((signal) => `${signal.signalType}${signal.memberName ? ` → ${signal.memberName}` : ''}${signal.note ? `: ${signal.note}` : ''}`)
                         .slice(0, 5),
                 };
+                const chairPersona = await loadPersona(chairProfile).catch(() => ({}));
                 const report = (await options.runLlmTurn({
                     profile: chairProfile,
                     role: 'chair',
-                    systemPrompt: 'You are the chair of a group task reporting to the owner. Reply in the owner\'s language.',
+                    systemPrompt: (0, compose_1.composeSystemPrompt)([
+                        {
+                            name: 'scenario',
+                            order: compose_1.SYSTEM_PROMPT_ORDER.scenario,
+                            text: 'You are the chair of a group task reporting to the owner. Reply in the owner\'s language.',
+                        },
+                        {
+                            name: 'identity',
+                            order: compose_1.SYSTEM_PROMPT_ORDER.identity,
+                            text: (0, metabotIdentity_1.buildMetabotIdentityBlock)({
+                                name: chairProfile.name || chairSlug,
+                                globalMetaId: chairProfile.globalMetaId,
+                                role: chairPersona.role,
+                                soul: chairPersona.soul,
+                                goal: chairPersona.goal,
+                                bio: chairPersona.bio,
+                            }),
+                        },
+                    ]),
                     prompt: [
                         'The task below just entered review. Write a short private report to the owner.',
                         'First line must be exactly 【结论】followed by a one-sentence verdict (max 120 chars).',
                         'Then 3-6 bullet lines: goal, deliverables with their verification labels, member contributions, plan changes.',
                         'Facts only — every claim must come from the record below; never invent outcomes or ratings.',
-                        'Every MetaWeb URI (metaid://, pin://, metafile://, metaapp://, map://) must appear in FULL — never abbreviated or truncated with an ellipsis; a shortened URI is neither clickable nor copyable.',
+                        uri_1.METAWEB_URI_FULL_FORM_RULE,
                         JSON.stringify(record),
                     ].join('\n'),
                 })).trim();

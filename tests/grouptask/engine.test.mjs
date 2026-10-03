@@ -221,6 +221,36 @@ test('engine: planning turn posts the chair plan once; round-trip [STATUS:EXECUT
 });
 
 // ---------------------------------------------------------------------------
+// Memory/experience injection (Phase 2: every seat turn carries it)
+// ---------------------------------------------------------------------------
+
+test('engine: seat turns carry the experience hot layer (self-identity) but never owner facts', async () => {
+  const h = createHarness('metabot-gt-engine-mem-');
+  const { createMemoryStore } = require('../../dist/core/memory/memoryStore.js');
+  const chairMemory = createMemoryStore(resolveMetabotPaths(h.profiles[0].homeDir));
+  await chairMemory.create({
+    text: '我是一个重视验收纪律的 MetaBot。',
+    usageClass: 'self_identity',
+    origin: 'dream',
+  });
+  await chairMemory.create({ text: 'OWNER_SECRET_咖啡偏好', isExplicit: true });
+
+  await h.seedTask('planning');
+  h.pushHistory('IDTWIN', '[GROUP TASK] Engine test task');
+  h.llmTurns.push('@worker 1 please ship it\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+
+  const chairTurn = h.llmCalls.find((call) => call.role === 'chair');
+  assert.ok(chairTurn, 'chair turn ran');
+  assert.ok(chairTurn.prompt.includes('## Scoped Memory & Experience'), 'memory section injected');
+  assert.ok(chairTurn.prompt.includes('<metabot_self_identity>'), 'self-identity block injected');
+  assert.ok(chairTurn.prompt.includes('验收纪律'), 'self-identity content present');
+  assert.ok(!chairTurn.prompt.includes('OWNER_SECRET'), 'owner profile facts never reach a group-channel prompt');
+  assert.ok(chairTurn.systemPrompt.includes('<metabot_identity>'), 'identity block in the system prompt');
+  assert.equal(chairTurn.systemPrompt.split('<metabot_identity>').length - 1, 1, 'identity block exactly once');
+});
+
+// ---------------------------------------------------------------------------
 // Deliverables + review ceremony
 // ---------------------------------------------------------------------------
 

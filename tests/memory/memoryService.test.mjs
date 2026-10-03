@@ -12,6 +12,7 @@ const { createMemoryStore } = require('../../dist/core/memory/memoryStore.js');
 const { createMemoryPolicyStore } = require('../../dist/core/memory/memoryPolicy.js');
 const {
   applyTurnMemoryExtraction,
+  buildExperienceContext,
   buildMemoryBlocksForRequest,
 } = require('../../dist/core/memory/memoryService.js');
 
@@ -79,6 +80,37 @@ test('blocks: memoryEnabled=false injects nothing', async () => {
   assert.equal(result.xml, '');
   assert.equal(result.policy.memoryEnabled, false);
   assert.equal(result.policy.source, 'profile');
+});
+
+test('buildExperienceContext: experience hot layer only — owner facts stay out', async () => {
+  const paths = await createTempProfileHome();
+  const store = createMemoryStore(paths);
+  await store.create({ text: '我喜欢喝美式咖啡', isExplicit: true });
+  await store.create({
+    text: '我是一个稳定可靠的助手，逐渐形成了自己的风格。',
+    usageClass: 'self_identity',
+    origin: 'dream',
+  });
+  await store.create({
+    text: '先验证再宣布完成',
+    usageClass: 'value_boundary',
+    origin: 'dream',
+  });
+
+  const xml = await buildExperienceContext(paths);
+  assert.match(xml, /<metabot_self_identity>/);
+  assert.match(xml, /稳定可靠的助手/);
+  assert.match(xml, /<value_boundaries>/);
+  assert.match(xml, /先验证再宣布完成/);
+  assert.ok(!xml.includes('美式咖啡'), 'owner memories stay out of the experience-only layer');
+});
+
+test('buildExperienceContext: memoryEnabled=false injects nothing', async () => {
+  const paths = await createTempProfileHome();
+  const store = createMemoryStore(paths);
+  await store.create({ text: '自我认知', usageClass: 'self_identity', origin: 'dream' });
+  await createMemoryPolicyStore(paths).setOverride({ memoryEnabled: false });
+  assert.equal(await buildExperienceContext(paths), '');
 });
 
 test('extract: explicit remember lands in the store; repeat turn updates; forget deletes', async () => {

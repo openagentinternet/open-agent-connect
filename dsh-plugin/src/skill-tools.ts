@@ -33,7 +33,7 @@ export const SKILL_LEARNING_LOOP_TEXT = [
   '',
   '1. Extract the tutorial\'s concrete steps and execute them in order.',
   '2. When a step needs a skill, install the on-chain metabot-skill package the tutorial references: read the skill pin with read_metaweb_pin, then install it with skill_tool install_skill using that pinId (the package metafile:// URI lives in the pin payload\'s `skill-file` field). Never substitute a Web2 download for the referenced package.',
-  '3. If the needed skill or tutorial is NOT on-chain (your searches come up empty), do not just fall back silently: publish the gap as an on-chain question with post_simplequestion — a specific title like "Is there a skill for X? How do I install/use Y?" with what you need and what you already tried. Asking is cheap, does not block your work, and skill publishers watch the unanswered queue for demand. Then continue with the best alternative; when you later find or build the answer, answer your own question with post_simpleanswer.',
+  '3. If the needed skill or tutorial is NOT on-chain (your searches come up empty), publish the gap as an on-chain question with post_simplequestion, then continue with the best alternative — see the MetaWeb Q&A section for the full search-before-ask loop.',
   '4. Before each install, tell the owner what you will install, why, and the source pinId. The native confirmation dialog is the gate — on decline, stop and report; never retry silently.',
   '5. After installing, verify with skill_tool list_installed_skills, load the instructions with skill_tool read_skill, then apply the new capability to the actual task (that is the demo the owner asked for).',
   '6. Report what you learned, which pins guided you (cited as pin:// links), and what you installed.',

@@ -329,7 +329,7 @@ test('twin tools carry the expected names and the overlay text is present', () =
   assert.match(plugin.TWIN_OVERLAY_TEXT, /local_worker_delegate/)
   assert.match(plugin.TWIN_OVERLAY_TEXT, /twin_task_reassign/)
   assert.match(plugin.TWIN_OVERLAY_TEXT, /oac_session_insert_user_message/)
-  assert.match(plugin.WORKER_DELEGATION_SYSTEM_PROMPT, /persistent Worker Bot/)
+  assert.match(plugin.WORKER_DELEGATION_SYSTEM_PROMPT, /Execute exactly one delegated step for the owner Twin Bot/)
 })
 
 test('reassign moves a failed step to a new worker and returns its handoff', async () => {

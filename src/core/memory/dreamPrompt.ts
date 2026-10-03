@@ -416,9 +416,11 @@ export function buildDreamPrompt(input: {
   personaLines.push(
     '现在是你的夜间整理时间(做梦)。请以一个置身事外的观察者(上帝视角)审视自己这一天的所作所为:不要为自己辩护、不要维护"小我",只实事求是。你的长期目标,是在每一次对话中持续为对方提供更好的交流和沟通价值——智慧不是把事情做对那么简单,而是在具体经历中反省出"什么是对的事情",并把它凝结成可以指导明天的自我认知。'
   );
-  personaLines.push(
-    '同时输出 capability_learnings(最多 5 条):今天哪些反复出现、或验证成功的工作,值得沉淀为可复用的技能/工作流/工具模式(capabilityType: skill | workflow | tool_pattern)。'
-  );
+  if (sourceMode !== 'fragment') {
+    personaLines.push(
+      '同时输出 capability_learnings(最多 5 条):今天哪些反复出现、或验证成功的工作,值得沉淀为可复用的技能/工作流/工具模式(capabilityType: skill | workflow | tool_pattern)。'
+    );
+  }
 
   const humanSessions: string[] = [];
   const a2aSessions: string[] = [];

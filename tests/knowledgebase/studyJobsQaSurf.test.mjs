@@ -134,7 +134,7 @@ test('surf prompt carries the recent handled slice and budget', () => {
     budgetPins: 7,
     processedPinIds: Array.from({ length: 100 }, (_, index) => `p${index}`),
   });
-  assert.match(prompt, /AT MOST 7 NEW pins/);
+  assert.match(prompt, /save AT MOST 7 documents this run/);
   assert.match(prompt, /100 total, showing the 80 most recent/);
   assert.match(prompt, /- p99/);
   assert.ok(!prompt.includes('- p19\n'), 'older pins are outside the shown slice');

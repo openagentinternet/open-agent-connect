@@ -5,6 +5,10 @@
 import path from 'node:path';
 
 import { loadChatPersona } from '../chat/chatPersonaLoader';
+import { buildMemoryBlocksForRequest } from '../memory/memoryService';
+import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
+import { composeSystemPrompt, SYSTEM_PROMPT_ORDER } from '../prompt/compose';
+import { wrapMemoryInjection } from '../prompt/memoryInjection';
 import type { MetabotPaths } from '../state/paths';
 import {
   createScheduleStore,
@@ -31,20 +35,35 @@ export type RunScheduledTaskResult =
 /**
  * Bot persona framing that wraps every scheduled task prompt (v1 has no
  * per-task systemPrompt; the persona + a short scheduled-task framing stand
- * in for it).
+ * in for it). The identity block comes from the one shared builder so a
+ * scheduled task behaves in the same persona as every other scenario.
  */
 export async function buildScheduleSystemPrompt(paths: MetabotPaths): Promise<string> {
   const persona = await loadChatPersona(paths);
   const slug = path.basename(paths.profileRoot);
   const botName = persona.identity?.name || slug;
-  const parts = [
-    `You are ${botName}, a MetaBot. This is a scheduled task that fired for you.`,
-    'Do the work the prompt asks for, honestly and self-contained.',
-    'You are acting asynchronously: there is no human watching live, so report your result plainly when the task asks for one.',
-  ];
-  if (persona.role) parts.push(`Your role:\n${persona.role}`);
-  if (persona.soul) parts.push(`Your character:\n${persona.soul}`);
-  return parts.join('\n\n');
+  return composeSystemPrompt([
+    {
+      name: 'scenario',
+      order: SYSTEM_PROMPT_ORDER.scenario,
+      text: [
+        'You are a MetaBot. This is a scheduled task that fired for you.',
+        'Do the work the prompt asks for, honestly and self-contained.',
+        'You are acting asynchronously: there is no human watching live, so report your result plainly when the task asks for one.',
+      ].join('\n'),
+    },
+    {
+      name: 'identity',
+      order: SYSTEM_PROMPT_ORDER.identity,
+      text: buildMetabotIdentityBlock({
+        name: botName,
+        globalMetaId: persona.identity?.globalMetaId,
+        role: persona.role,
+        soul: persona.soul,
+        goal: persona.goal,
+      }),
+    },
+  ]);
 }
 
 /**
@@ -74,7 +93,15 @@ export async function runScheduledTask(
   }
   const { run, task } = claimed;
   try {
-    const outcome = await deps.runLlm({ prompt: task.prompt, systemPrompt });
+    // Scoped memory + experience hot layer ride the user prompt tail
+    // (IDBots volatile-tail pattern): scheduled tasks are local owner work, so
+    // the local 'cowork_ui' channel resolves the owner scope.
+    const memorySection = await buildMemoryBlocksForRequest(paths, {
+      channel: 'cowork_ui',
+      userText: task.prompt,
+    }).then((result) => wrapMemoryInjection(result.xml)).catch(() => '');
+    const prompt = memorySection ? `${task.prompt}\n\n${memorySection}` : task.prompt;
+    const outcome = await deps.runLlm({ prompt, systemPrompt });
     if (!outcome.ok) {
       await store.complete(run.id, { error: outcome.error });
       return { kind: 'failed', error: outcome.error };

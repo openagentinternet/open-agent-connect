@@ -1923,6 +1923,7 @@ send({ type: 'result', status: 'completed', sessionId: 'copilot-session-result' 
       runtimeId: 'llm_copilot',
       runtime: { ...runtime, provider: 'copilot', binaryPath },
       prompt: 'hello copilot',
+      systemPrompt: 'system copilot',
       cwd: base,
       model: 'gpt-test',
       resumeSessionId: 'copilot-session-old',
@@ -1934,7 +1935,8 @@ send({ type: 'result', status: 'completed', sessionId: 'copilot-session-result' 
   );
 
   const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.deepEqual(args.slice(0, 4), ['-p', 'hello copilot', '--output-format', 'json']);
+  // Copilot has no system-prompt channel: system + user ride one -p message.
+  assert.deepEqual(args.slice(0, 4), ['-p', 'system copilot\n\nhello copilot', '--output-format', 'json']);
   assert.ok(args.includes('--allow-all'));
   assert.ok(args.includes('--no-ask-user'));
   assert.ok(args.includes('--model'));
@@ -2069,13 +2071,13 @@ send({ type: 'step_finish', sessionID: 'opencode-session-1', part: { tokens: { i
   assert.deepEqual(args.slice(0, 6), ['run', '--format', 'json', '--dangerously-skip-permissions', '--dir', base]);
   assert.ok(args.includes('--model'));
   assert.ok(args.includes('opencode-model'));
-  assert.ok(args.includes('--prompt'));
-  assert.ok(args.includes('system opencode'));
   assert.ok(args.includes('--session'));
   assert.ok(args.includes('opencode-old'));
   assert.ok(args.includes('--debug'));
   assert.equal(args.includes('text'), false);
-  assert.equal(args.at(-1), 'hello opencode');
+  // system + user are delivered as ONE positional message (no --prompt flag).
+  assert.equal(args.includes('--prompt'), false);
+  assert.equal(args.at(-1), 'system opencode\n\nhello opencode');
   const envSnapshot = JSON.parse(await fs.readFile(envPath, 'utf8'));
   await assertSameRealpath(envSnapshot.cwd, base);
   await assertSameRealpath(envSnapshot.pwd, base);
@@ -2140,6 +2142,7 @@ send({ type: 'result', status: 'completed', stats: { models: { 'gemini-model': {
       runtimeId: 'llm_gemini',
       runtime: { ...runtime, provider: 'gemini', binaryPath },
       prompt: 'hello gemini',
+      systemPrompt: 'system gemini',
       cwd: base,
       model: 'gemini-model',
       resumeSessionId: 'gemini-old',
@@ -2150,7 +2153,8 @@ send({ type: 'result', status: 'completed', stats: { models: { 'gemini-model': {
   );
 
   const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.deepEqual(args.slice(0, 2), ['-p', 'hello gemini']);
+  // Gemini has no system-prompt channel: system + user ride one -p message.
+  assert.deepEqual(args.slice(0, 2), ['-p', 'system gemini\n\nhello gemini']);
   assert.ok(args.includes('--yolo'));
   assert.ok(args.includes('-o'));
   assert.ok(args.includes('stream-json'));

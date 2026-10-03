@@ -68,8 +68,11 @@ All verbs are local reads/writes — no chain writes, no confirmation states.
 
 ## Working With Memory Context
 
-`memory blocks` returns the same `<memory>` XML block the DSH host injects
-into every Bot turn. Hosts without native injection can call it explicitly:
+`memory blocks` returns the `<memory>` XML payload for one turn. OAC wraps it
+under the shared `## Scoped Memory & Experience` heading plus a guidance line
+before injecting it into Bot turns (DSH sessions, group tasks, scheduled
+tasks, order texts, and provider execution). Hosts without native injection
+can call it explicitly and apply the same wrapper:
 
 ```bash
 {{METABOT_CLI}} memory blocks --from <bot-slug> --payload-file payload.json

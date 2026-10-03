@@ -5,7 +5,10 @@ exports.createCopilotBackend = createCopilotBackend;
 const backend_1 = require("./backend");
 const jsonProcess_1 = require("./jsonProcess");
 function buildCopilotArgs(request) {
-    const args = ['-p', request.prompt, '--output-format', 'json', '--allow-all', '--no-ask-user'];
+    // Copilot CLI has no system-prompt channel: deliver system + user as one
+    // message (same pattern as the other concatenating backends).
+    const message = request.systemPrompt ? `${request.systemPrompt}\n\n${request.prompt}` : request.prompt;
+    const args = ['-p', message, '--output-format', 'json', '--allow-all', '--no-ask-user'];
     if (request.model)
         args.push('--model', request.model);
     if (request.resumeSessionId)

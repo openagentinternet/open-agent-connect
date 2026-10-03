@@ -6,7 +6,6 @@ function buildOpenCodeArgs(request: LlmExecutionRequest): string[] {
   const args = ['run', '--format', 'json', '--dangerously-skip-permissions'];
   if (request.cwd) args.push('--dir', request.cwd);
   if (request.model) args.push('--model', request.model);
-  if (request.systemPrompt) args.push('--prompt', request.systemPrompt);
   if (request.resumeSessionId) args.push('--session', request.resumeSessionId);
   args.push(...filterBlockedArgs(request.extraArgs, {
     '--format': { takesValue: true },
@@ -16,7 +15,10 @@ function buildOpenCodeArgs(request: LlmExecutionRequest): string[] {
     '--prompt': { takesValue: true },
     '--session': { takesValue: true },
   }));
-  args.push(request.prompt);
+  // opencode has no separate system-prompt channel: deliver system + user as
+  // one positional message (previously systemPrompt went via --prompt AND the
+  // prompt positionally, so opencode received both as the message).
+  args.push(request.systemPrompt ? `${request.systemPrompt}\n\n${request.prompt}` : request.prompt);
   return args;
 }
 

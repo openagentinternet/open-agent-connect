@@ -45,6 +45,7 @@ import {
   applyTurnMemoryExtraction,
   buildMemoryBlocksForRequest,
 } from '../core/memory/memoryService';
+import { buildPersonaSessionSystemPrompt } from '../core/prompt/sessionSystemPrompt';
 import {
   buildTurnMemoryExtractionPrompts,
   parseTurnMemoryExtractionPayload,
@@ -6430,6 +6431,11 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       }
       return diagnostics;
     };
+    // Persona + experience hot layer: the surf prompt asks the bot's persona
+    // to "decide EVERYTHING tonight" — it must actually BE in the prompt.
+    const surfSystemPrompt = await buildPersonaSessionSystemPrompt(profilePaths, {
+      scenario: 'You are a MetaBot running an unattended MetaWeb surf session. Reply with exactly one ```json fence per turn.',
+    });
     const llm = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
       if (Date.now() > deadlineMs) {
         throw new Error('Surf watchdog: wall-clock budget exhausted — write the final report now.');
@@ -6437,7 +6443,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       const historyText = history
         .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
         .join('\n\n---\n\n');
-      const surfSystemPrompt = 'You are a MetaBot running an unattended MetaWeb surf session. Reply with exactly one ```json fence per turn.';
       const hostText = await hostCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
       if (hostText !== null) return hostText;
       const result = await runLlmPromptWithRuntimeFallback({
@@ -7409,11 +7414,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
                   }
                 },
               });
+              // Persona + experience hot layer: nightly study/QA-surf prompts
+              // judge everything against the bot's role — the persona must
+              // actually BE in the prompt.
+              const studySystemPrompt = await buildPersonaSessionSystemPrompt(profilePaths, {
+                scenario: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
+              });
               const llm = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
                 const historyText = history
                   .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
                   .join('\n\n---\n\n');
-                const studySystemPrompt = 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.';
                 // Unified passive-LLM priority: DSH pair first, then local chain.
                 const hostText = await createHostFirstCompletion({
                   dshLlmPath: profilePaths.dshLlmPath,

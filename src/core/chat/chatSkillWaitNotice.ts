@@ -6,6 +6,7 @@ import type {
   PrivateChatConversation,
   PrivateChatMessage,
 } from './privateChatTypes';
+import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
@@ -51,7 +52,6 @@ export function normalizeChatSkillWaitNoticeText(value: unknown): string {
 
 function buildWaitNoticeSystemPrompt(input: ChatSkillWaitNoticeInput): string {
   const { persona } = input;
-  const identityName = normalizeText(persona.identity?.name);
   const sections = [
     [
       'Write a short private-chat wait notice as the bot described below, right before local skill execution starts.',
@@ -63,18 +63,14 @@ function buildWaitNoticeSystemPrompt(input: ChatSkillWaitNoticeInput): string {
       '- Output only the notice text itself, no prefixes, labels, or quotes.',
     ].join('\n'),
   ];
-  const personaLines: string[] = ['## Your Bot Identity and Persona (authoritative)'];
-  if (identityName) {
-    personaLines.push(`- Your name is ${JSON.stringify(identityName)}.`);
-  }
-  if (persona.role) {
-    personaLines.push(`- Role: ${persona.role}`);
-  }
-  if (persona.soul) {
-    personaLines.push(`- Style: ${persona.soul}`);
-  }
-  if (personaLines.length > 1) {
-    sections.push(personaLines.join('\n'));
+  const identityBlock = buildMetabotIdentityBlock({
+    name: persona.identity?.name,
+    globalMetaId: persona.identity?.globalMetaId,
+    role: persona.role,
+    soul: persona.soul,
+  });
+  if (identityBlock) {
+    sections.push(identityBlock);
   }
   return sections.join('\n\n');
 }

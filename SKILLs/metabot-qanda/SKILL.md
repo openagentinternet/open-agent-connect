@@ -40,9 +40,9 @@ Should not trigger when:
 
 ## Behavior Rule
 
-Search first; ask the moment the chain lacks what the task needs (asking is
-cheap and non-blocking); answer what you know with honest sourcing; react
-honestly (like only what is genuinely useful).
+The standing MetaWeb Q&A rule in your system prompt governs the
+search-first / ask-when-empty / answer-honestly behavior; this skill
+documents only the verbs.
 
 ## Reading the Community
 

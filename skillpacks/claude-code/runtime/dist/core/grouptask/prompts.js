@@ -20,32 +20,24 @@ exports.buildHostNotesDirective = buildHostNotesDirective;
 exports.buildSupervisorWakeDirective = buildSupervisorWakeDirective;
 const behaviorPrompt_1 = require("../qanda/behaviorPrompt");
 const uri_1 = require("../metaweb/uri");
+const metabotIdentity_1 = require("../prompt/metabotIdentity");
 exports.GROUP_TASK_CONTEXT_MESSAGE_COUNT = 20;
 const FIELD_CAP = 200;
 function cap(text, max = FIELD_CAP) {
     const value = (text ?? '').trim();
     return value.length > max ? `${value.slice(0, max)}…` : value;
 }
-function xmlEscape(text) {
-    return text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
-}
+// The shared identity builder renders the persona XML; group-task keeps its
+// per-field cap (prompt bytes cost context on every seat turn).
 function identityBlock(identity) {
-    const lines = ['<metabot_identity>', ` <name>${xmlEscape(identity.name)}</name>`];
-    if (identity.globalMetaId)
-        lines.push(` <globalmetaid>${xmlEscape(identity.globalMetaId)}</globalmetaid>`);
-    if (identity.role)
-        lines.push(` <role>${xmlEscape(cap(identity.role, 600))}</role>`);
-    if (identity.bio)
-        lines.push(` <bio>${xmlEscape(cap(identity.bio, 600))}</bio>`);
-    if (identity.soul)
-        lines.push(` <soul>${xmlEscape(cap(identity.soul, 600))}</soul>`);
-    if (identity.goal)
-        lines.push(` <goal>${xmlEscape(cap(identity.goal, 600))}</goal>`);
-    lines.push('</metabot_identity>');
-    lines.push('<instruction>');
-    lines.push('You must strictly adhere to the persona, soul, and bio defined in the <metabot_identity> block above for all responses in this session.');
-    lines.push('</instruction>');
-    return lines.join('\n');
+    return (0, metabotIdentity_1.buildMetabotIdentityBlock)({
+        name: identity.name,
+        globalMetaId: identity.globalMetaId,
+        role: identity.role ? cap(identity.role, 600) : null,
+        soul: identity.soul ? cap(identity.soul, 600) : null,
+        goal: identity.goal ? cap(identity.goal, 600) : null,
+        bio: identity.bio ? cap(identity.bio, 600) : null,
+    });
 }
 const SHARED_PLAYBOOK = [
     '- One group = one task. Stay on the task goal; no small talk.',
@@ -70,7 +62,7 @@ const CHAIR_PLAYBOOK = [
     '- VERIFICATION ECONOMY: the host already runs the DETERMINISTIC checks on every [DELIVERABLE] (on-chain pin existence across sources) and rides the results into your context as verification facts; worker evidence discipline supplies the raw checksums. Do NOT re-download and re-hash what a host verification fact or a worker-supplied checksum already confirms — spend your gate on the SEMANTIC layer: does the content match the frozen acceptance criteria, is it complete, plausible, and honestly reported. Re-run a deterministic check ONLY when evidence is missing or two sources contradict each other.',
     '- Removing a member (kick) is owner-confirmed, never casual: before executing a kick, restate to the owner who will be removed and that their on-chain membership will be deleted, and proceed only after the owner\'s explicit confirmation in the same conversation — a casual remark is not a kick order. A kick confirmed through the Tasks-UI modal already IS the owner\'s confirmation; never ask twice.',
     '- SERVE THE DISH: the owner must be able to verify the result by CLICKING a link in the UI — never by downloading files or running anything locally. App-type work delivers a PUBLISHED `metaapp://` link (publishing the app is part of the task, never deferred to the owner); text deliverables are `pin://` notes; `metafile://` is only for binaries. Hold every [DELIVERABLE] to this bar before emitting [STATUS:REVIEW].',
-    '- User language: refer to the task by its title, never by a raw id, and use the UI status words (planning/executing/review/done/cancelled). Keep txids and internal field names out of owner-facing reports unless the owner explicitly asks for technical detail — but ALWAYS present every final deliverable with its complete MetaWeb URI as a full-text markdown link, never abbreviated with an ellipsis: delivering the result the owner can open IS the point of the task. Lead every report with the conclusion and the action you already took — the owner should only have to confirm or redirect, never decode.',
+    '- Owner-facing reporting: refer to the task by its title, never by a raw id, and use the UI status words (planning/executing/review/done/cancelled). Keep txids and internal field names out of owner-facing reports unless the owner explicitly asks for technical detail — but ALWAYS present every final deliverable with its complete MetaWeb URI as a full-text markdown link (per the standing full-form URI rule below): delivering the result the owner can open IS the point of the task. Lead every report with the conclusion and the action you already took — the owner should only have to confirm or redirect, never decode.',
     '- Lifecycle autonomy: you drive the task through its states — never park it. When you judge the goal met, post ONE message that leads with the conclusion, summarizes what was delivered and verified, carries [STATUS:REVIEW], and tells the owner the task now awaits their acceptance in the Tasks UI. For a finished one-off or test-style task, either push it to review the same way or recommend the owner close it as cancelled with a one-line reason. When blocked, name the blocker and the default action you already took. NEVER sit in executing asking the owner "what next?" — answering that is your job.',
     '- AUTHORITY OF HOST STATE: every turn carries an `[Authoritative task state (host DB): ...]` line — it reflects the task\'s real recorded status and deliverable ledger and OUTRANKS your memory, which can be partial after a session rebuild. NEVER announce that the task is finished, frozen, or awaiting owner acceptance unless that line says `status=review`; the review state is only reached by your own [STATUS:REVIEW] message being applied. If the line says a non-review status while you remember announcing review, trust the host state: re-verify the ledger against the acceptance criteria, then re-issue the review message only if the goal is genuinely met — never sit in executing waiting on an acceptance that was never requested.',
     '- Emit [STATUS:EXECUTING] when work is underway and [STATUS:REVIEW] when you judge the goal met. Tag FORMAT is load-bearing: post the tag as a BARE token on its own line or as the last line of the message — never embedded mid-sentence. Markdown-wrapped tags on their own line (`**[STATUS:REVIEW]**`) ARE honored, but bare is preferred; a mentioned-but-not-emitted [STATUS:…] inside prose is ignored by the host.',
@@ -91,10 +83,9 @@ const CHAIR_PLAYBOOK = [
 const WORKER_PLAYBOOK = [
     '- As a worker you respond only when @-mentioned; the chair coordinates the task.',
     '- Members marked "remote teammate via OpenTeam" in the roster are external collaborators from the Agent Internet — treat them as equal teammates and be polite; their replies come from their own machine.',
-    '- When the chair assigns you work, ACK it immediately with a [WORKING] line that carries an explicit ETA in minutes (e.g. [WORKING] drafting the announcement, ETA 30 min) — the chair plans and sizes the step deadlines from your ETA, so never ACK an assignment without one — then DO THE WORK NOW within this reply using your available skills (search, read, write, publish…). Report concrete results with [DELIVERABLE] lines. NEVER reply with only a promise to work later — if you cannot perform the assignment (missing skill/access), say so explicitly and @ the chair.',
+    '- When the chair assigns you work, ACK it immediately with a [WORKING] line that carries an explicit ETA in minutes (e.g. [WORKING] drafting the announcement, ETA 30 min) — the chair plans and sizes the step deadlines from your ETA, so never ACK an assignment without one — then DO THE WORK NOW within this reply using your available skills (search, read, write, publish…). If the work spans multiple stages, post [WORKING] progress lines as stages complete. Report concrete results with [DELIVERABLE] lines. NEVER reply with only a promise to work later — if you cannot perform the assignment (missing skill/access), say so explicitly and @ the chair.',
     '- When the chair\'s assignment states a deadline (e.g. [DEADLINE: 30m]), that deadline is binding: ACK with an ETA consistent with it (equal or shorter). If you cannot meet it, say so explicitly and @ the chair BEFORE starting instead of silently accepting.',
     '- @ the chair ONLY when your output needs its action (assignment, verification, unblocking). Never @ anyone for courtesy.',
-    '- WORK STATUS PROTOCOL: when you accept an assignment, your reply should START with a [WORKING] status line — e.g. [WORKING] drafting the announcement, ETA 30 min — so the group knows you are working, not offline or crashed. If the work spans multiple stages, include [WORKING] progress lines as stages complete.',
     '- LONG-TASK HEARTBEAT: when a single step runs long (model download, video render, many-sample synthesis — anything past ~20 minutes), run it as a background step instead of a blocking one, and post a heartbeat line like [WORKING long-task, ETA 45 min] before starting it, renewing the heartbeat before the ETA expires (the ETA number may be written in the owner language). While a heartbeat is valid the host treats you as working; without one, long silence is flagged as unreachable.',
     '- If you are on the roster but NOT assigned work (observer/standby), reply with [STANDBY] so the chair knows you are present and idle.',
     '- Once the chair posts [STATUS:REVIEW], the task is awaiting owner acceptance — you will not speak again in this group (review-phase silence), and no farewell is needed.',
@@ -112,7 +103,7 @@ function buildGroupTaskSystemPrompt(input) {
     sections.push([
         '## Group task environment',
         `- You are in a GROUP TASK: a dedicated on-chain group chat whose only purpose is completing the task above. The initiator and final acceptor is the OWNER (a human${ownerSuffix}). ${input.chairName} (the owner's digital twin) chairs the task.`,
-        '- All messages here are on-chain pins (MetaWeb) — a pinid is exactly 64 lowercase hex chars + `i0`; a buzz is a `/protocols/simplebuzz` post.',
+        '- All messages here are on-chain pins (MetaWeb); a buzz is a `/protocols/simplebuzz` post.',
     ].join('\n'));
     const roster = input.seats.map((seat) => `- ${seat.name} (${seat.role}${seat.remote ? ', remote teammate via OpenTeam' : ''})`);
     sections.push(['## Roster', ...roster].join('\n'));
@@ -133,8 +124,7 @@ function buildGroupTaskSystemPrompt(input) {
     }
     sections.push([
         '## Your Role',
-        `You are ${input.identity.name}, a MetaBot participating in an on-chain group task. `
-            + `You are the ${input.role} of this task group.`,
+        `You participate in an on-chain group task as the ${input.role} of this task group. Stay in character per your persona block.`,
     ].join('\n'));
     const playbook = input.role === 'chair'
         ? [...SHARED_PLAYBOOK, ...CHAIR_PLAYBOOK]

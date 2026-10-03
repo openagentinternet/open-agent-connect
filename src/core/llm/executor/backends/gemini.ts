@@ -3,7 +3,10 @@ import { filterBlockedArgs, type LlmBackend, type LlmBackendFactory } from './ba
 import { extractUsage, getString, isRecord, resolveJsonProcessError, runJsonLineProcess, stringifyContent } from './jsonProcess';
 
 function buildGeminiArgs(request: LlmExecutionRequest): string[] {
-  const args = ['-p', request.prompt, '--yolo', '-o', 'stream-json'];
+  // Gemini CLI has no system-prompt channel: deliver system + user as one
+  // message (same pattern as the other concatenating backends).
+  const message = request.systemPrompt ? `${request.systemPrompt}\n\n${request.prompt}` : request.prompt;
+  const args = ['-p', message, '--yolo', '-o', 'stream-json'];
   if (request.model) args.push('-m', request.model);
   if (request.resumeSessionId) args.push('-r', request.resumeSessionId);
   args.push(...filterBlockedArgs(request.extraArgs, {

@@ -364,6 +364,8 @@ function buildStudySessionPrompt(input) {
     return [
         `You are running an unattended nightly study session on the topic: "${input.topic}".`,
         '',
+        'Your persona (the <metabot_identity> block in the system prompt) decides what is worth reading and saving tonight: judge every candidate against your role and goal.',
+        '',
         'Each turn, reply with exactly ONE ```json fence containing either a tool call or your final report.',
         '',
         'Tool call (the executor runs it and returns the result as your next input):',
@@ -415,7 +417,7 @@ function buildQaSurfSessionPrompt(job) {
         'You are running an unattended nightly Q&A surfing session on MetaWeb. No user is watching: never ask questions, never wait for confirmation.',
         '',
         'Your persona decides everything tonight: only questions squarely inside your role and competence deserve your attention — skip the rest without guilt.',
-        `Budget: handle AT MOST ${job.budgetPins} NEW pins this run (questions you answer plus pins you save). Answer at most ~3 questions — every answer is an on-chain write that costs sats, and quality beats volume.`,
+        `Budget: save AT MOST ${job.budgetPins} documents this run — a hard cap the executor enforces, not a goal. Answer at most ~3 questions — every answer is an on-chain write that costs sats, and quality beats volume.`,
         '',
         processedNote,
         '',
@@ -454,7 +456,6 @@ function buildQaSurfSessionPrompt(job) {
         'Rules:',
         '- Do not ask questions; nobody is watching. Work autonomously and honestly.',
         '- Never invent pin ids or content; if the queue yields nothing in your domain, say so in the summary.',
-        `- Pin budget: at most ${job.budgetPins} documents saved this session — the executor enforces it.`,
     ].join('\n');
 }
 /**

@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildExperienceContext = buildExperienceContext;
 exports.buildMemoryBlocksForRequest = buildMemoryBlocksForRequest;
 exports.applyTurnMemoryExtraction = applyTurnMemoryExtraction;
 const node_path_1 = __importDefault(require("node:path"));
@@ -34,6 +35,49 @@ async function readSelfIdentityText(store) {
         limit: 1,
     });
     return entries[0]?.text ?? '';
+}
+/**
+ * Experience-only hot layer: the dream-written self-identity, self-distilled
+ * value boundaries, work reviews, and recent dream diaries. For scenarios
+ * that must NOT receive scoped owner/contact memories (public-facing or
+ * protocol-short outputs) but whose behavior must still align with the bot's
+ * self-cognition. Returns '' when memory is disabled by policy; never throws.
+ */
+async function buildExperienceContext(paths, stores = {}) {
+    try {
+        const memory = stores.memory ?? (0, memoryStore_1.createMemoryStore)(paths);
+        const policyStore = stores.policy ?? (0, memoryPolicy_1.createMemoryPolicyStore)(paths);
+        const dream = stores.dream ?? (0, dreamStore_1.createDreamStore)(paths);
+        const policy = await policyStore.effectivePolicy();
+        if (!policy.memoryEnabled) {
+            return '';
+        }
+        const selfIdentityText = await readSelfIdentityText(memory);
+        const valueBoundaries = await memory.list({
+            usageClass: 'value_boundary',
+            status: 'created',
+            limit: VALUE_BOUNDARIES_MAX_ITEMS,
+        });
+        const workReviews = await memory.list({
+            usageClass: 'work_review',
+            status: 'created',
+            limit: WORK_REVIEWS_MAX_ITEMS,
+        });
+        const recentSummaries = await dream.listDailySummaries({ limit: experiencePromptBlocks_1.RECENT_SUMMARIES_PROMPT_DAYS });
+        return (0, experiencePromptBlocks_1.buildExperiencePromptBlocksXml)({
+            identityText: selfIdentityText || null,
+            summaries: recentSummaries.map((summary) => ({
+                summaryDate: summary.summaryDate,
+                summaryText: summary.summaryText,
+                sessionRefs: summary.sessionRefs,
+            })),
+            valueBoundaries,
+            workReviews,
+        });
+    }
+    catch {
+        return '';
+    }
 }
 /**
  * Build the full memory injection for one turn: scoped fact blocks plus the
@@ -94,28 +138,7 @@ async function buildMemoryBlocksForRequest(paths, input, stores = {}) {
     // self-distilled conduct rules, its dream-written work reviews, its recent
     // dream diaries) — never owner facts — so it is injected for every channel,
     // matching the IDBots A2A path.
-    const selfIdentityText = await readSelfIdentityText(memory);
-    const valueBoundaries = await memory.list({
-        usageClass: 'value_boundary',
-        status: 'created',
-        limit: VALUE_BOUNDARIES_MAX_ITEMS,
-    });
-    const workReviews = await memory.list({
-        usageClass: 'work_review',
-        status: 'created',
-        limit: WORK_REVIEWS_MAX_ITEMS,
-    });
-    const recentSummaries = await dream.listDailySummaries({ limit: experiencePromptBlocks_1.RECENT_SUMMARIES_PROMPT_DAYS });
-    const experienceXml = (0, experiencePromptBlocks_1.buildExperiencePromptBlocksXml)({
-        identityText: selfIdentityText || null,
-        summaries: recentSummaries.map((summary) => ({
-            summaryDate: summary.summaryDate,
-            summaryText: summary.summaryText,
-            sessionRefs: summary.sessionRefs,
-        })),
-        valueBoundaries,
-        workReviews,
-    });
+    const experienceXml = await buildExperienceContext(paths, { memory, policy: policyStore, dream });
     // Knowledge hot layer: local (owner) sessions only, matching the IDBots
     // cowork channel — A2A replies do not get the knowledge block.
     let knowledgeXml = '';

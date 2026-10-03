@@ -22,6 +22,12 @@ export interface ProviderServiceRunnerDependencies {
     metaBotSlug: string;
     systemHomeDir: string;
     projectRoot: string;
+    /**
+     * Provider bot's profile home. When present, the paid-order system prompt
+     * carries the bot's identity block + experience hot layer so the provider
+     * fulfills orders AS ITSELF (voice and self-cognition), not anonymously.
+     */
+    profileHomeDir?: string;
     runtimeStore: LlmRuntimeStore;
     bindingStore: LlmBindingStore;
     llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel'>;
