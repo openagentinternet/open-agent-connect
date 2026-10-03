@@ -20,12 +20,32 @@ import {
   renameOwnerIdentity,
   revealOwnerMnemonic,
   toOwnerIdentityPublic,
+  updateOwnerIdentityProfile,
+  type OwnerIdentityRecord,
 } from '../core/owner/ownerIdentity';
+import { createOwnerSigner } from '../core/owner/ownerSigner';
+import {
+  buildOwnerProfileChainWrites,
+  writeOwnerProfileChainRequests,
+} from '../core/owner/ownerProfilePublish';
+import { validateAvatarDataUrl } from '../core/identity/avatarChainWrite';
+import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
+import type { ChainWriteResult } from '../core/chain/writePin';
+import type { ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
+import type { Signer } from '../core/signing/signer';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 
 export interface UserDaemonHandlersInput {
   /** The machine-wide system home that owns `~/.metabot/owner/identity.json`. */
   systemHomeDir: string;
+  /** Chain adapters for the owner profile publish signer (`update` verb). */
+  adapters?: ChainAdapterRegistry;
+  /** MVC traffic (代付) sponsor hook for the owner signer; absent = self-pay. */
+  resolveSponsorWritePin?: ResolveSponsorWritePin;
+  /** Test seam: full override of the owner signer construction. */
+  createSigner?: (owner: OwnerIdentityRecord) => Signer;
+  /** Test seam: inter-write delay override for the chain publish. */
+  chainWriteDelayMs?: number;
 }
 
 function ownerFailure(error: unknown): MetabotCommandResult<never> {
@@ -85,6 +105,88 @@ export function createUserDaemonHandlers(
       try {
         const record = await renameOwnerIdentity(systemHomeDir, name);
         return commandSuccess({ identity: toOwnerIdentityPublic(record) });
+      } catch (error) {
+        return ownerFailure(error);
+      }
+    },
+
+    /**
+     * Name/avatar profile save with on-chain publish, chain-first like the
+     * Bot profile update: the changed /info/name + /info/avatar pins are
+     * written by the owner signer first, and only then does the local record
+     * update — so a saved profile always matches the chain.
+     */
+    update: async (rawInput) => {
+      const current = await readOwnerIdentity(systemHomeDir);
+      if (!current) {
+        return commandFailed('owner_missing', 'No owner identity exists on this machine.');
+      }
+      const hasName = typeof rawInput?.name === 'string';
+      const hasAvatar = typeof rawInput?.avatarDataUrl === 'string';
+      const name = hasName ? normalizeText(rawInput.name) : undefined;
+      if (hasName && !name) {
+        return commandFailed('missing_name', 'name is required.');
+      }
+      const avatarDataUrl = hasAvatar ? (rawInput.avatarDataUrl as string).trim() : undefined;
+      if (avatarDataUrl !== undefined) {
+        const validation = validateAvatarDataUrl(avatarDataUrl);
+        if (!validation.valid) {
+          return commandFailed('invalid_avatar', validation.error ?? 'Invalid avatar.');
+        }
+      }
+      if (name === undefined && avatarDataUrl === undefined) {
+        return commandFailed('missing_update', 'name or avatarDataUrl is required.');
+      }
+
+      const nameChanged = name !== undefined && name !== current.name;
+      const avatarChanged = avatarDataUrl !== undefined && avatarDataUrl !== (current.avatarDataUrl ?? '');
+      if (!nameChanged && !avatarChanged) {
+        return commandSuccess({
+          identity: toOwnerIdentityPublic(current),
+          chainWrites: [] as ChainWriteResult[],
+          chainSync: { ok: true },
+        });
+      }
+
+      const signer = input.createSigner
+        ? input.createSigner(current)
+        : input.adapters
+          ? createOwnerSigner({
+            systemHomeDir,
+            owner: current,
+            adapters: input.adapters,
+            ...(input.resolveSponsorWritePin ? { resolveSponsorWritePin: input.resolveSponsorWritePin } : {}),
+          })
+          : null;
+      if (!signer) {
+        return commandFailed('chain_unavailable', 'Chain publish is not configured in this daemon.');
+      }
+
+      const chainRequests = buildOwnerProfileChainWrites({
+        ...(nameChanged && name !== undefined ? { name } : {}),
+        ...(avatarChanged && avatarDataUrl !== undefined ? { avatarDataUrl } : {}),
+      });
+      let chainWrites: ChainWriteResult[] = [];
+      try {
+        const writeOptions = input.chainWriteDelayMs !== undefined ? { delayMs: input.chainWriteDelayMs } : {};
+        chainWrites = await writeOwnerProfileChainRequests(signer, chainRequests, writeOptions);
+      } catch (error) {
+        return commandFailed(
+          'chain_sync_failed',
+          `Chain sync failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      try {
+        const record = await updateOwnerIdentityProfile(systemHomeDir, {
+          ...(nameChanged && name !== undefined ? { name } : {}),
+          ...(avatarChanged && avatarDataUrl !== undefined ? { avatarDataUrl } : {}),
+        });
+        return commandSuccess({
+          identity: toOwnerIdentityPublic(record),
+          chainWrites,
+          chainSync: { ok: true },
+        });
       } catch (error) {
         return ownerFailure(error);
       }

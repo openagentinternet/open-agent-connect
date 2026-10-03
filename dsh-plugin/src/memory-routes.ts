@@ -31,6 +31,8 @@ import {
 
 const LIST_TIMEOUT_MS = 30_000
 const DREAM_CLI_TIMEOUT_MS = 120_000
+/** Chain-first owner profile publish: two pins + inter-write delay + sponsor round trip. */
+const USER_UPDATE_TIMEOUT_MS = 180_000
 /** Manual hygiene runs share the scheduler's budget (deep consolidation may take minutes). */
 const HYGIENE_RUN_TIMEOUT_MS = 600_000
 // Per-chunk idle budget for dream LLM streams. Daytime provider stalls used
@@ -546,6 +548,22 @@ export async function dispatchMemoryRoutes(
     const name = readTrimmed(payload, 'name')
     if (!name) return missing('missing_name', 'name is required')
     return run(['user', 'rename', '--name', name], { timeoutMs: 60_000 })
+  }
+  if (method === 'user/update') {
+    // Name/avatar save with on-chain publish. A name-only update rides argv;
+    // an avatar data URL (up to 200KB) goes through a --request-file payload,
+    // the same pattern as the qanda/protocol write routes. '' clears the
+    // avatar, so the key's presence — not its truthiness — carries intent.
+    const name = readTrimmed(payload, 'name')
+    const body = payloadObject(payload)
+    const avatarDataUrl = typeof body.avatarDataUrl === 'string' ? body.avatarDataUrl : undefined
+    if (avatarDataUrl === undefined) {
+      if (!name) return missing('missing_update', 'name or avatarDataUrl is required')
+      return run(['user', 'update', '--name', name], { timeoutMs: USER_UPDATE_TIMEOUT_MS })
+    }
+    const request: Record<string, unknown> = { avatarDataUrl }
+    if (name) request.name = name
+    return runMetabotWithPayloadFile(['user', 'update'], request, '--request-file', [], run, { timeoutMs: USER_UPDATE_TIMEOUT_MS })
   }
   if (method === 'user/reveal') {
     return run(['user', 'reveal'], { timeoutMs: LIST_TIMEOUT_MS })

@@ -18,6 +18,7 @@ const {
   resolveOwnerIdfilePath,
   revealOwnerMnemonic,
   toOwnerIdentityPublic,
+  updateOwnerIdentityProfile,
 } = require('../../dist/core/owner/ownerIdentity.js');
 
 async function tempSystemHome() {
@@ -120,4 +121,60 @@ test('owner identity path lives under ~/.metabot/owner, not manager/', async () 
   const filePath = resolveOwnerIdfilePath(systemHomeDir);
   assert.equal(filePath, path.join(systemHomeDir, '.metabot', 'owner', 'identity.json'));
   assert.ok(!filePath.includes(`${path.sep}manager${path.sep}`));
+});
+
+// 1x1 transparent PNG.
+const TINY_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('updateOwnerIdentityProfile saves name and avatar and the public view carries both', async () => {
+  const systemHomeDir = await tempSystemHome();
+  await createOwnerIdentity(systemHomeDir, { name: 'Alice' });
+  const updated = await updateOwnerIdentityProfile(systemHomeDir, { name: 'Alicia', avatarDataUrl: TINY_PNG_DATA_URL });
+  assert.equal(updated.name, 'Alicia');
+  assert.equal(updated.avatarDataUrl, TINY_PNG_DATA_URL);
+
+  const readBack = await readOwnerIdentity(systemHomeDir);
+  assert.equal(readBack.name, 'Alicia');
+  assert.equal(readBack.avatarDataUrl, TINY_PNG_DATA_URL);
+
+  const publicRecord = toOwnerIdentityPublic(readBack);
+  assert.equal(publicRecord.avatarDataUrl, TINY_PNG_DATA_URL);
+  assert.equal(publicRecord.mnemonic, undefined);
+});
+
+test('updateOwnerIdentityProfile with an empty avatar clears the stored avatar', async () => {
+  const systemHomeDir = await tempSystemHome();
+  await createOwnerIdentity(systemHomeDir, { name: 'Alice' });
+  await updateOwnerIdentityProfile(systemHomeDir, { avatarDataUrl: TINY_PNG_DATA_URL });
+  const cleared = await updateOwnerIdentityProfile(systemHomeDir, { avatarDataUrl: '' });
+  assert.equal(cleared.avatarDataUrl, undefined);
+  const raw = JSON.parse(await fs.readFile(resolveOwnerIdfilePath(systemHomeDir), 'utf8'));
+  assert.equal('avatarDataUrl' in raw, false);
+  // Name untouched by an avatar-only update.
+  assert.equal(cleared.name, 'Alice');
+});
+
+test('updateOwnerIdentityProfile rejects an invalid avatar and keeps the record unchanged', async () => {
+  const systemHomeDir = await tempSystemHome();
+  await createOwnerIdentity(systemHomeDir, { name: 'Alice' });
+  await assert.rejects(
+    () => updateOwnerIdentityProfile(systemHomeDir, { avatarDataUrl: 'data:text/plain;base64,aGVsbG8=' }),
+    (error) => error instanceof OwnerIdentityError && error.code === 'invalid_avatar',
+  );
+  const readBack = await readOwnerIdentity(systemHomeDir);
+  assert.equal(readBack.name, 'Alice');
+  assert.equal(readBack.avatarDataUrl, undefined);
+});
+
+test('updateOwnerIdentityProfile rejects an empty name and a missing identity', async () => {
+  const systemHomeDir = await tempSystemHome();
+  await assert.rejects(
+    () => updateOwnerIdentityProfile(systemHomeDir, { name: 'Nobody' }),
+    (error) => error instanceof OwnerIdentityError && error.code === 'owner_missing',
+  );
+  await createOwnerIdentity(systemHomeDir, { name: 'Alice' });
+  await assert.rejects(
+    () => updateOwnerIdentityProfile(systemHomeDir, { name: '   ' }),
+    (error) => error instanceof OwnerIdentityError && error.code === 'invalid_name',
+  );
 });

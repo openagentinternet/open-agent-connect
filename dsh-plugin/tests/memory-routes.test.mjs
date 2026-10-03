@@ -13,7 +13,9 @@ async function capture(method, payload, options = {}) {
   const result = await plugin.dispatchMemoryRoutes(method, payload, {
     run: options.run ?? (async (args) => {
       calls.push(args)
-      const fileFlag = args.includes('--payload-file') ? '--payload-file' : null
+      const fileFlag = args.includes('--payload-file')
+        ? '--payload-file'
+        : args.includes('--request-file') ? '--request-file' : null
       let file
       if (fileFlag) {
         file = JSON.parse(await readFile(args[args.indexOf(fileFlag) + 1], 'utf8'))
@@ -65,6 +67,17 @@ test('user identity routes and twin routes map to CLI verbs', async () => {
   assert.equal(missingMnemonic.result.code, 'missing_mnemonic')
   const rename = await capture('user/rename', { name: 'Alicia' })
   assert.deepEqual(rename.calls[0], ['user', 'rename', '--name', 'Alicia'])
+  const updateNameOnly = await capture('user/update', { name: 'Alicia' })
+  assert.deepEqual(updateNameOnly.calls[0], ['user', 'update', '--name', 'Alicia'])
+  const updateAvatar = await capture('user/update', { name: 'Alicia', avatarDataUrl: 'data:image/png;base64,AAAA' })
+  assert.deepEqual(updateAvatar.calls[0].slice(0, 2), ['user', 'update'])
+  assert.ok(updateAvatar.calls[0].includes('--request-file'))
+  assert.deepEqual(updateAvatar.result.data.file, { name: 'Alicia', avatarDataUrl: 'data:image/png;base64,AAAA' })
+  // An empty avatar string is a clear, not an absent field: still a request file.
+  const updateClearAvatar = await capture('user/update', { avatarDataUrl: '' })
+  assert.deepEqual(updateClearAvatar.result.data.file, { avatarDataUrl: '' })
+  const updateMissing = await capture('user/update', {})
+  assert.equal(updateMissing.result.code, 'missing_update')
   const reveal = await capture('user/reveal', {})
   assert.deepEqual(reveal.calls[0], ['user', 'reveal'])
   const current = await capture('twin/current', {})

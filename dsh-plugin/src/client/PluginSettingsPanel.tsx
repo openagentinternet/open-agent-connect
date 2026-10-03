@@ -54,7 +54,7 @@ export function PluginSettingsPanel(
     who,
     create,
     importIdentity,
-    rename,
+    update,
     reveal,
     deleteIdentity,
     bots,
@@ -110,7 +110,7 @@ export function PluginSettingsPanel(
           who={who}
           create={create}
           importIdentity={importIdentity}
-          rename={rename}
+          update={update}
           reveal={reveal}
           deleteIdentity={deleteIdentity}
           close={close}

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
-import type { OwnerIdentityRow, OwnerWhoPayload, OwnerWritePayload } from './api.ts'
+import type { OwnerIdentityRow, OwnerUpdateInput, OwnerUpdatePayload, OwnerWhoPayload, OwnerWritePayload } from './api.ts'
+import { BotAvatar } from './BotAvatar.tsx'
+import { CopyIconButton } from './CopyIconButton.tsx'
 import type { UserLocaleKey } from './locale-user.ts'
 
 type Translate = (key: UserLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
@@ -11,7 +13,8 @@ export interface UserPanelInjected {
   who: () => Promise<OwnerWhoPayload>
   create: (name: string) => Promise<OwnerWritePayload>
   importIdentity: (input: { name: string; mnemonic: string; path?: string }) => Promise<OwnerWritePayload>
-  rename: (name: string) => Promise<OwnerWhoPayload>
+  /** Name/avatar profile save; publishes the changed fields on-chain. */
+  update: (input: OwnerUpdateInput) => Promise<OwnerUpdatePayload>
   reveal: () => Promise<{ mnemonic: string }>
   deleteIdentity: () => Promise<{ deleted?: boolean }>
 }
@@ -32,6 +35,17 @@ function CopyValue({ value, t }: { value: string; t: Translate }): ReactNode {
       <code>{value}</code>
       <span>{copied ? t('copied') : t('copy')}</span>
     </button>
+  )
+}
+
+/** Read-only identity value row: right-aligned label, mono value, copy icon. */
+function InfoRow({ label, value, t }: { label: string; value: string; t: Translate }): ReactNode {
+  return (
+    <div className="oac-info-row">
+      <span className="oac-info-label">{label}</span>
+      <code className="oac-info-value">{value}</code>
+      <CopyIconButton value={value} label={t('copy')} copiedLabel={t('copied')} />
+    </div>
   )
 }
 
@@ -64,7 +78,9 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
 
   // Profile view state.
   const [nameEdit, setNameEdit] = useState('')
-  const [nameNote, setNameNote] = useState<'saving' | 'saved' | 'error' | null>(null)
+  const [avatarDraft, setAvatarDraft] = useState('')
+  const [profileNote, setProfileNote] = useState<{ tone: 'saving' | 'success' | 'error'; text: string } | null>(null)
+  const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const [revealOpen, setRevealOpen] = useState(false)
   const [revealMnemonic, setRevealMnemonic] = useState('')
   const [logoutOpen, setLogoutOpen] = useState(false)
@@ -77,6 +93,7 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
         if (result.identity) {
           setIdentity(result.identity)
           setNameEdit(result.identity.name)
+          setAvatarDraft(result.identity.avatarDataUrl ?? '')
           setView('profile')
         } else {
           setIdentity(null)
@@ -95,6 +112,7 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
   const applyWrite = (result: OwnerWritePayload): void => {
     setIdentity(result.identity)
     setNameEdit(result.identity.name)
+    setAvatarDraft(result.identity.avatarDataUrl ?? '')
     setMnemonic(result.mnemonic ?? '')
     setView('backup')
   }
@@ -131,16 +149,50 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
     setView('profile')
   }
 
-  const saveName = (): void => {
-    const next = nameEdit.trim()
-    if (!next || !identity || next === identity.name) return
-    setNameNote('saving')
-    void injected.rename(next).then(
+  // Avatar picker (Bot editor parity): the image becomes a data URL draft
+  // (200KB cap, matching the daemon's avatar validation); an empty draft
+  // clears the stored avatar. Saving publishes name/avatar on-chain.
+  const onAvatarFile = (event: ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > 200 * 1024) {
+      setProfileNote({ tone: 'error', text: t('avatarTooLarge') })
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setAvatarDraft(typeof reader.result === 'string' ? reader.result : '')
+      setProfileNote({ tone: 'success', text: t('avatarReadyToSave') })
+    }
+    reader.onerror = () => setProfileNote({ tone: 'error', text: t('avatarUploadFailed') })
+    reader.readAsDataURL(file)
+  }
+
+  const saveProfile = (): void => {
+    if (!identity) return
+    const nextName = nameEdit.trim()
+    if (!nextName) return
+    const nameChanged = nextName !== identity.name
+    const avatarChanged = avatarDraft !== (identity.avatarDataUrl ?? '')
+    if (!nameChanged && !avatarChanged) return
+    const input: OwnerUpdateInput = {
+      ...(nameChanged ? { name: nextName } : {}),
+      ...(avatarChanged ? { avatarDataUrl: avatarDraft } : {}),
+    }
+    setProfileNote({ tone: 'saving', text: t('savingName') })
+    void injected.update(input).then(
       (result) => {
-        if (result.identity) setIdentity(result.identity)
-        setNameNote('saved')
+        if (result.identity) {
+          setIdentity(result.identity)
+          setNameEdit(result.identity.name)
+          setAvatarDraft(result.identity.avatarDataUrl ?? '')
+        }
+        setProfileNote({ tone: 'success', text: t('nameSaved') })
       },
-      () => setNameNote('error'),
+      (cause: unknown) => {
+        setProfileNote({ tone: 'error', text: cause instanceof Error ? cause.message : String(cause) })
+      },
     )
   }
 
@@ -275,47 +327,60 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
             </div>
           </div>
           <div className="oac-form">
-            <label className="oac-field">
-              <span className="oac-field-label">{t('nameField')}</span>
-              <Input value={nameEdit} onChange={(event) => { setNameEdit(event.target.value); setNameNote(null) }} />
-            </label>
+            <div className="oac-user-name-row">
+              <div className="oac-user-avatar-col">
+                <button
+                  type="button"
+                  className="oac-avatar-btn"
+                  title={t('avatarChange')}
+                  aria-label={t('avatarChange')}
+                  onClick={() => avatarInputRef.current?.click()}
+                >
+                  <BotAvatar name={nameEdit.trim() || identity.name} src={avatarDraft || undefined} className="oac-bot-avatar-lg" />
+                </button>
+                {avatarDraft ? (
+                  <button
+                    type="button"
+                    className="oac-user-avatar-remove"
+                    onClick={() => { setAvatarDraft(''); setProfileNote(null) }}
+                  >
+                    {t('avatarRemove')}
+                  </button>
+                ) : null}
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  style={{ display: 'none' }}
+                  onChange={onAvatarFile}
+                />
+              </div>
+              <label className="oac-field oac-user-name-field">
+                <span className="oac-field-label">{t('nameField')}</span>
+                <Input value={nameEdit} onChange={(event) => { setNameEdit(event.target.value); setProfileNote(null) }} />
+              </label>
+            </div>
             <div className="oac-form-actions">
               <Button
                 type="button"
                 variant="primary"
-                disabled={nameNote === 'saving' || !nameEdit.trim() || nameEdit.trim() === identity.name}
-                onClick={saveName}
+                disabled={
+                  profileNote?.tone === 'saving'
+                  || !nameEdit.trim()
+                  || (nameEdit.trim() === identity.name && avatarDraft === (identity.avatarDataUrl ?? ''))
+                }
+                onClick={saveProfile}
               >
-                {nameNote === 'saving' ? t('savingName') : t('saveName')}
+                {profileNote?.tone === 'saving' ? t('savingName') : t('saveName')}
               </Button>
-              {nameNote === 'saved' ? <span className="oac-note success">{t('nameSaved')}</span> : null}
+              {profileNote && profileNote.tone !== 'saving' ? (
+                <span className={`oac-note ${profileNote.tone}`}>{profileNote.text}</span>
+              ) : null}
             </div>
           </div>
-          <div className="oac-info">
-            {identity.globalMetaId ? (
-              <div className="oac-info-row">
-                <span className="oac-info-label">{t('fieldGlobalMetaId')}</span>
-                <CopyValue value={identity.globalMetaId} t={t} />
-              </div>
-            ) : null}
-            {identity.mvcAddress ? (
-              <div className="oac-info-row">
-                <span className="oac-info-label">{t('fieldMvcAddress')}</span>
-                <CopyValue value={identity.mvcAddress} t={t} />
-              </div>
-            ) : null}
-            {identity.metaId ? (
-              <div className="oac-info-row">
-                <span className="oac-info-label">{t('fieldMetaId')}</span>
-                <CopyValue value={identity.metaId} t={t} />
-              </div>
-            ) : null}
-            {identity.createdAt ? (
-              <div className="oac-info-row">
-                <span className="oac-info-label">{t('fieldCreatedAt')}</span>
-                <span className="oac-info-value">{identity.createdAt}</span>
-              </div>
-            ) : null}
+          <div className="oac-info oac-user-info">
+            {identity.globalMetaId ? <InfoRow label={t('fieldGlobalMetaId')} value={identity.globalMetaId} t={t} /> : null}
+            {identity.mvcAddress ? <InfoRow label={t('fieldMvcAddress')} value={identity.mvcAddress} t={t} /> : null}
           </div>
         </section>
       ) : null}

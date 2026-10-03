@@ -507,7 +507,7 @@ export function apply(ctx: ClientContext): void {
       who: () => api.userWho(),
       create: (name: string) => api.userCreate(name),
       importIdentity: (input: { name: string; mnemonic: string; path?: string }) => api.userImport(input),
-      rename: (name: string) => api.userRename(name),
+      update: (input: { name?: string; avatarDataUrl?: string }) => api.userUpdate(input),
       reveal: () => api.userReveal(),
       deleteIdentity: () => api.userDelete(),
       bots: () => api.list(),

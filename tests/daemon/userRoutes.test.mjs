@@ -22,6 +22,7 @@ async function startServer() {
     create: [],
     import: [],
     rename: [],
+    update: [],
     reveal: [],
     delete: [],
   };
@@ -42,6 +43,10 @@ async function startServer() {
       rename: async (input) => {
         calls.rename.push(input);
         return commandSuccess({ identity: { name: input.name } });
+      },
+      update: async (input) => {
+        calls.update.push(input);
+        return commandSuccess({ identity: { name: input.name ?? 'Alice' }, chainWrites: [], chainSync: { ok: true } });
       },
       reveal: async () => {
         calls.reveal.push({});
@@ -83,6 +88,7 @@ test('/api/user/who reads and the write verbs forward JSON bodies', async (t) =>
     ['/api/user/create', 'create', { name: 'Alice' }],
     ['/api/user/import', 'import', { name: 'Alice', mnemonic: 'word1 word2', path: "m/44'/10001'/0'/0/0" }],
     ['/api/user/rename', 'rename', { name: 'Alice II' }],
+    ['/api/user/update', 'update', { name: 'Alice II', avatarDataUrl: 'data:image/png;base64,AAAA' }],
     ['/api/user/reveal', 'reveal', {}],
     ['/api/user/delete', 'delete', {}],
   ];
@@ -123,6 +129,16 @@ test('/api/user write verbs validate required fields and methods', async (t) => 
   assert.equal(namePayload.ok, false);
   assert.equal(namePayload.code, 'missing_name');
   assert.deepEqual(server.calls.rename, []);
+
+  const emptyUpdate = await fetch(`${server.baseUrl}/api/user/update`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  const updatePayload = await emptyUpdate.json();
+  assert.equal(updatePayload.ok, false);
+  assert.equal(updatePayload.code, 'missing_update');
+  assert.deepEqual(server.calls.update, []);
 
   const wrongMethod = await fetch(`${server.baseUrl}/api/user/create?name=Alice`, { method: 'GET' });
   const wrongPayload = await wrongMethod.json();
@@ -197,4 +213,120 @@ test('user daemon handlers run a full owner round trip on a scratch system home'
   const badImport = await group.import({ name: 'Carol', mnemonic: 'not a mnemonic at all' });
   assert.equal(badImport.ok, false);
   assert.equal(badImport.code, 'invalid_mnemonic');
+});
+
+// 1x1 transparent PNG.
+const TINY_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+function makeRecordingSigner(writeCalls, { fail = false } = {}) {
+  return () => ({
+    writePin: async (input) => {
+      writeCalls.push(input);
+      if (fail) throw new Error('broadcast failed');
+      return {
+        txids: [`tx-${writeCalls.length}`],
+        pinId: `pin-${writeCalls.length}`,
+        totalCost: 1000,
+        network: 'mvc',
+        operation: 'create',
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'id-test',
+        mvcAddress: 'mvc-test',
+      };
+    },
+  });
+}
+
+test('user update publishes name and avatar on-chain before saving locally', async () => {
+  const systemHomeDir = await mkdtempTempRoot('oac-user-update-');
+  const writeCalls = [];
+  const group = createUserDaemonHandlers({
+    systemHomeDir,
+    createSigner: makeRecordingSigner(writeCalls),
+    chainWriteDelayMs: 0,
+  });
+
+  await group.create({ name: 'Alice' });
+  const updated = await group.update({ name: 'Alicia', avatarDataUrl: TINY_PNG_DATA_URL });
+  assert.equal(updated.ok, true);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/avatar']);
+  assert.equal(writeCalls[0].payload, 'Alicia');
+  assert.equal(writeCalls[1].contentType, 'image/png;binary');
+  assert.ok(Buffer.isBuffer(writeCalls[1].payload));
+  assert.equal(updated.data.chainWrites.length, 2);
+  assert.deepEqual(updated.data.chainSync, { ok: true });
+  assert.equal(updated.data.identity.name, 'Alicia');
+  assert.equal(updated.data.identity.avatarDataUrl, TINY_PNG_DATA_URL);
+
+  // The local record reflects the published profile.
+  const who = await group.who();
+  assert.equal(who.data.identity.name, 'Alicia');
+  assert.equal(who.data.identity.avatarDataUrl, TINY_PNG_DATA_URL);
+
+  // A no-change update is a no-op: no chain writes, still ok.
+  const noop = await group.update({ name: 'Alicia', avatarDataUrl: TINY_PNG_DATA_URL });
+  assert.equal(noop.ok, true);
+  assert.equal(noop.data.chainWrites.length, 0);
+  assert.equal(writeCalls.length, 2);
+
+  // Clearing the avatar writes an empty /info/avatar pin and drops it locally.
+  const cleared = await group.update({ avatarDataUrl: '' });
+  assert.equal(cleared.ok, true);
+  assert.equal(writeCalls.length, 3);
+  assert.equal(writeCalls[2].path, '/info/avatar');
+  assert.equal(writeCalls[2].payload, '');
+  assert.equal(cleared.data.identity.avatarDataUrl, undefined);
+});
+
+test('user update fails chain-first: a failed publish leaves the local record untouched', async () => {
+  const systemHomeDir = await mkdtempTempRoot('oac-user-update-fail-');
+  const writeCalls = [];
+  const group = createUserDaemonHandlers({
+    systemHomeDir,
+    createSigner: makeRecordingSigner(writeCalls, { fail: true }),
+    chainWriteDelayMs: 0,
+  });
+
+  await group.create({ name: 'Alice' });
+  const failed = await group.update({ name: 'Alicia' });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.code, 'chain_sync_failed');
+  assert.equal(writeCalls.length, 1);
+
+  const who = await group.who();
+  assert.equal(who.data.identity.name, 'Alice', 'local name is unchanged when the chain write fails');
+});
+
+test('user update validates input and requires a configured signer', async () => {
+  const systemHomeDir = await mkdtempTempRoot('oac-user-update-validation-');
+  const group = createUserDaemonHandlers({ systemHomeDir });
+
+  // No identity yet.
+  const missing = await group.update({ name: 'Alice' });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'owner_missing');
+
+  await group.create({ name: 'Alice' });
+
+  const neither = await group.update({});
+  assert.equal(neither.ok, false);
+  assert.equal(neither.code, 'missing_update');
+
+  const emptyName = await group.update({ name: '   ' });
+  assert.equal(emptyName.ok, false);
+  assert.equal(emptyName.code, 'missing_name');
+
+  const badAvatar = await group.update({ avatarDataUrl: 'data:text/plain;base64,aGVsbG8=' });
+  assert.equal(badAvatar.ok, false);
+  assert.equal(badAvatar.code, 'invalid_avatar');
+
+  // No adapters/createSigner configured: the publish cannot run.
+  const noSigner = await group.update({ name: 'Alicia' });
+  assert.equal(noSigner.ok, false);
+  assert.equal(noSigner.code, 'chain_unavailable');
+
+  const who = await group.who();
+  assert.equal(who.data.identity.name, 'Alice');
 });
