@@ -62,23 +62,35 @@ function makeInput(overrides = {}) {
   };
 }
 
-test('buildChatPrompt includes ROLE, SOUL, GOAL sections', () => {
-  const prompt = buildChatPrompt(makeInput());
-  assert.ok(prompt.includes('## Your Role'));
-  assert.ok(prompt.includes('coding assistant MetaBot specializing in TypeScript'));
-  assert.ok(prompt.includes('## Your Style'));
-  assert.ok(prompt.includes('curious and friendly'));
-  assert.ok(prompt.includes('## Your Goal'));
-  assert.ok(prompt.includes('Explore collaboration'));
+test('buildChatPrompt references the system-prompt persona instead of restating it', () => {
+  const input = makeInput();
+  const prompt = buildChatPrompt(input);
+  const systemPrompt = buildChatSystemPrompt(input);
+  assert.match(prompt, /defined in the system prompt and are authoritative/);
+  assert.ok(!prompt.includes('## Your Bot Identity and Persona'));
+  assert.ok(!prompt.includes('## Your Role'));
+  assert.ok(!prompt.includes('## Your Style'));
+  assert.ok(!prompt.includes('## Your Goal'));
+  // The identity block must reach the model exactly once even when a backend
+  // concatenates systemPrompt + prompt into a single string.
+  const combined = `${systemPrompt}\n\n${prompt}`;
+  assert.equal(combined.split('## Your Bot Identity and Persona').length - 1, 1);
+  assert.equal(combined.split('## Your Role').length - 1, 1);
 });
 
-test('buildChatPrompt makes the current MetaBot identity authoritative over the host runtime', () => {
-  const prompt = buildChatPrompt(makeInput());
-  assert.match(prompt, /## Your Bot Identity and Persona \(authoritative\)/);
-  assert.match(prompt, /Your name is "火舞"/);
-  assert.match(prompt, /idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5/);
-  assert.match(prompt, /host LLM runtime or its workspace/);
-  assert.match(prompt, /must never appear as your own/);
+test('buildChatSystemPrompt makes the current MetaBot identity authoritative over the host runtime', () => {
+  const systemPrompt = buildChatSystemPrompt(makeInput());
+  assert.match(systemPrompt, /## Your Bot Identity and Persona \(authoritative\)/);
+  assert.match(systemPrompt, /Your name is "火舞"/);
+  assert.match(systemPrompt, /idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5/);
+  assert.match(systemPrompt, /host LLM runtime or its workspace/);
+  assert.match(systemPrompt, /must never appear as your own/);
+  assert.match(systemPrompt, /## Your Role/);
+  assert.match(systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
+  assert.match(systemPrompt, /## Your Style/);
+  assert.match(systemPrompt, /curious and friendly/);
+  assert.match(systemPrompt, /## Your Goal/);
+  assert.match(systemPrompt, /Explore collaboration/);
 });
 
 test('buildChatSystemPrompt gives every MetaBot the shared Agent Internet worldview', () => {

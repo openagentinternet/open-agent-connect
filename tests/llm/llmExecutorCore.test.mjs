@@ -2069,13 +2069,13 @@ send({ type: 'step_finish', sessionID: 'opencode-session-1', part: { tokens: { i
   assert.deepEqual(args.slice(0, 6), ['run', '--format', 'json', '--dangerously-skip-permissions', '--dir', base]);
   assert.ok(args.includes('--model'));
   assert.ok(args.includes('opencode-model'));
-  assert.ok(args.includes('--prompt'));
-  assert.ok(args.includes('system opencode'));
   assert.ok(args.includes('--session'));
   assert.ok(args.includes('opencode-old'));
   assert.ok(args.includes('--debug'));
   assert.equal(args.includes('text'), false);
-  assert.equal(args.at(-1), 'hello opencode');
+  // system + user are delivered as ONE positional message (no --prompt flag).
+  assert.equal(args.includes('--prompt'), false);
+  assert.equal(args.at(-1), 'system opencode\n\nhello opencode');
   const envSnapshot = JSON.parse(await fs.readFile(envPath, 'utf8'));
   await assertSameRealpath(envSnapshot.cwd, base);
   await assertSameRealpath(envSnapshot.pwd, base);

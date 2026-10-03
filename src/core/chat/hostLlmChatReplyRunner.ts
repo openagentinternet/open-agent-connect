@@ -200,19 +200,12 @@ function buildChatPrompt(
     'You are a bot having a private conversation with another bot through the Open Agent Connect network.'
   );
 
-  sections.push(buildAuthoritativePersonaSection(input));
-
-  if (persona.role) {
-    sections.push(`## Your Role\n${persona.role}`);
-  }
-
-  if (persona.soul) {
-    sections.push(`## Your Style\n${persona.soul}`);
-  }
-
-  if (persona.goal) {
-    sections.push(`## Your Goal\n${persona.goal}`);
-  }
+  // The identity/persona block lives ONLY in the system prompt. Several
+  // backends concatenate systemPrompt + prompt into one string, so a second
+  // copy here would inject the same identity twice.
+  sections.push(
+    'Your bot identity and persona (name, globalMetaId, Role, Style, Goal) are defined in the system prompt and are authoritative for this reply. Stay fully in character per that persona block.'
+  );
 
   const memoryContext = normalizeText(input.memoryContext);
   if (memoryContext) {

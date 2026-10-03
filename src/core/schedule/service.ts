@@ -43,7 +43,7 @@ export async function buildScheduleSystemPrompt(paths: MetabotPaths): Promise<st
     'You are acting asynchronously: there is no human watching live, so report your result plainly when the task asks for one.',
   ];
   if (persona.role) parts.push(`Your role:\n${persona.role}`);
-  if (persona.soul) parts.push(`Your character:\n${persona.soul}`);
+  if (persona.soul) parts.push(`Your soul:\n${persona.soul}`);
   return parts.join('\n\n');
 }
 
