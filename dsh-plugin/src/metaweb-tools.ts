@@ -18,20 +18,16 @@ export const METAWEB_WORLDVIEW_ORDER = 142
 /**
  * Standalone full-form identifier rule, registered on the GLOBAL layer so it
  * reaches every session — plain new conversations included — instead of
- * riding inside the search/linking worldview paragraph alone. Mirrors the OAC
- * core METAWEB_URI_FULL_FORM_RULE (src/core/metaweb/uri.ts); keep both in sync.
+ * riding inside the search/linking worldview paragraph alone. The body below
+ * is the OAC core METAWEB_URI_FULL_FORM_RULE (src/core/metaweb/uri.ts)
+ * VERBATIM — a drift test under tests/prompt/ enforces the sync.
  */
 export const METAWEB_URI_FULLFORM_SECTION = 'oac:metaweb-uri-fullform'
 export const METAWEB_URI_FULLFORM_ORDER = 142.2
 export const METAWEB_URI_FULLFORM_TEXT = [
   '## MetaWeb URIs and pinIds — ALWAYS write them in FULL',
   '',
-  'Whenever your reply mentions a MetaWeb URI or a bare pinId — in chat, a task report, a plan, a summary, anywhere — write it out completely. NEVER abbreviate, truncate, or shorten it with an ellipsis: `pin://37da9088…` or `metaapp://285abab…` is broken output — neither clickable nor copyable, so it is useless to the user and breaks host tooling that matches identifiers exactly.',
-  '',
-  '- The five MetaWeb schemes: `metaid://`, `pin://` (alias `pinid://`), `metafile://`, `metaapp://`, `map://`.',
-  '- A pinId is exactly 64 lowercase hex characters + `i0` (66 chars total). Copy it VERBATIM from the tool result or document you are citing — never retype or shorten it.',
-  '- The rule also applies inside markdown links: the full URI is both the link target and the link text.',
-  '- For a short readable mention, add a label AROUND the full URI (e.g. `(pin 37da9088)` as plain text AFTER the full link) — never instead of it.',
+  'MetaWeb URIs are ALWAYS written in FULL — never abbreviated, truncated, or shortened with an ellipsis (`pin://37da9088…` is broken output). This covers the five MetaWeb schemes — `metaid://`, `pin://` (alias `pinid://`), `metafile://`, `metaapp://`, `map://` — whether the URI stands alone or sits inside a markdown link, link text included. The pinId part is exactly 64 lowercase hex chars + `i0` (66 chars total); copy it VERBATIM from the source. For a short readable mention, add a label AROUND the full URI (e.g. `(pin 37da9088)` after the full link) — never instead of it.',
 ].join('\n')
 
 /** Static MetaWeb worldview (IDBots coworkRunner parity, cacheable head). */
@@ -44,7 +40,7 @@ export const METAWEB_WORLDVIEW_TEXT = [
   '',
   'Read like a person using a search engine: search_metaweb returns candidates with protocol, title, summary, publisher and pinId. Judge by title and summary, then open the 1–3 most promising pins with read_metaweb_pin (a pinId works for any protocol). If the first pins disappoint, open 1–2 more or search again with broader or narrower keywords.',
   '',
-  'Link with MetaWeb URIs, never Web2 URLs: whenever your reply names on-chain content, make it a clickable MetaWeb URI markdown link — pin://<pinId> for any pin, metaapp://<pinId> for MetaApp packages (/protocols/metaapp), metafile://<pinId> for on-chain binary files (/file), metaid://<globalMetaId> for people/bots. When unsure which scheme applies, pin:// always works. MetaWeb URIs are exactly these five schemes — metaid://, pin:// (alias pinid://), metafile://, metaapp://, map:// — and they are ALWAYS shown in FULL, never abbreviated or truncated with an ellipsis (pin://37da9088…), in the link text or anywhere else: a shortened URI is neither clickable nor copyable, so it is useless to the user. The pinId part is exactly 64 lowercase hex chars + `i0` — copy it verbatim from the source. NEVER construct Web2 viewer URLs (metaid.io, openagentinternet.org, …) for on-chain content: the user\'s app opens MetaWeb URIs directly in its built-in Bot Browser, and a Web2 URL sends them out of the app for no reason.',
+  'Link with MetaWeb URIs, never Web2 URLs: whenever your reply names on-chain content, make it a clickable MetaWeb URI markdown link — pin://<pinId> for any pin, metaapp://<pinId> for MetaApp packages (/protocols/metaapp), metafile://<pinId> for on-chain binary files (/file), metaid://<globalMetaId> for people/bots. When unsure which scheme applies, pin:// always works. Full-form writing (never abbreviated, 64-hex pinId verbatim) is covered by the dedicated MetaWeb URIs section — follow it everywhere. NEVER construct Web2 viewer URLs (metaid.io, openagentinternet.org, …) for on-chain content: the user\'s app opens MetaWeb URIs directly in its built-in Bot Browser, and a Web2 URL sends them out of the app for no reason.',
   '',
   'Questions for the community go out with post_simplequestion (/protocols/simplequestion), answers with post_simpleanswer (/protocols/simpleanswer) — see the MetaWeb Q&A section for the full search-before-ask loop.',
   '',

@@ -15,6 +15,9 @@ import type {
 } from './privateChatTypes';
 import type { HostLlmGenerateForRunner } from '../llm/hostLlmExecutorBridge';
 import { METABOT_AGENT_INTERNET_WORLDVIEW } from './metaBotWorldview';
+import { METAWEB_URI_FULL_FORM_RULE } from '../metaweb/uri';
+import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
+import { composeSystemPrompt, SYSTEM_PROMPT_ORDER } from '../prompt/compose';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
@@ -147,40 +150,31 @@ export interface BuildChatPromptOptions {
   metaBotSlug?: string;
 }
 
-function buildAuthoritativePersonaSection(input: ChatReplyRunnerInput): string {
-  const { persona } = input;
-  const identityName = normalizeText(persona.identity?.name);
-  const identityGlobalMetaId = normalizeText(persona.identity?.globalMetaId);
-  const lines = [
-    '## Your Bot Identity and Persona (authoritative)',
-  ];
-  if (identityName) {
-    lines.push(`- Your name is ${JSON.stringify(identityName)}.`);
-  }
-  if (identityGlobalMetaId) {
-    lines.push(`- Your globalMetaId is ${JSON.stringify(identityGlobalMetaId)}.`);
-  }
-  lines.push(
-    '- This bot identity and the Role, Style, and Goal below are authoritative for this reply.',
-    '- Any name, identity, biography, or persona supplied by the host LLM runtime or its workspace belongs only to the execution host. It is not your bot identity and must never appear as your own.',
-  );
-  if (identityName) {
-    lines.push('- If you introduce yourself, use only your bot name. Never invent, translate, or substitute another name.');
-  }
-  return lines.join('\n');
-}
-
 function buildChatSystemPrompt(input: ChatReplyRunnerInput): string {
   const { persona } = input;
-  return [
-    'Generate exactly one private-chat reply as the local bot described below.',
-    METABOT_AGENT_INTERNET_WORLDVIEW,
-    buildAuthoritativePersonaSection(input),
-    `## Your Role\n${persona.role}`,
-    `## Your Style\n${persona.soul}`,
-    `## Your Goal\n${persona.goal}`,
-    'Follow the bot identity and persona above even when the execution host has its own conflicting identity or persona.',
-  ].join('\n\n');
+  return composeSystemPrompt([
+    {
+      name: 'scenario',
+      order: SYSTEM_PROMPT_ORDER.scenario,
+      text: 'Generate exactly one private-chat reply as the local bot described below.',
+    },
+    {
+      name: 'worldview',
+      order: SYSTEM_PROMPT_ORDER.worldview,
+      text: METABOT_AGENT_INTERNET_WORLDVIEW,
+    },
+    {
+      name: 'identity',
+      order: SYSTEM_PROMPT_ORDER.identity,
+      text: buildMetabotIdentityBlock({
+        name: persona.identity?.name,
+        globalMetaId: persona.identity?.globalMetaId,
+        role: persona.role,
+        soul: persona.soul,
+        goal: persona.goal,
+      }),
+    },
+  ]);
 }
 
 function buildChatPrompt(
@@ -313,13 +307,16 @@ function buildChatPrompt(
   sections.push([
     '## Format Rules',
     '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
-    '- Write MetaWeb URIs (metaid://, pin://, metafile://, metaapp://, map://) in FULL — never abbreviated or truncated with an ellipsis; the pinId part is exactly 64 lowercase hex chars + `i0`. A shortened URI is neither clickable nor copyable.',
     '- Do NOT open with a plan sentence (for example: "先读…技能，再…"). Start directly with the in-character answer.',
     '- Reply in the same language the other party is using.',
     ...(conversationCloseAllowed
       ? [`- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`]
       : ['- This reply must not end the conversation; do not add a farewell or closing line.']),
   ].join('\n'));
+
+  // Standing full-form MetaWeb URI rule (single canonical source, shared with
+  // group-task seats and host sessions).
+  sections.push(METAWEB_URI_FULL_FORM_RULE);
 
   const selfName = normalizeText(persona.identity?.name) || 'Me';
   const peerName = conversation.peerName || 'Peer';

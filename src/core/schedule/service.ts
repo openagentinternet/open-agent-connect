@@ -5,6 +5,8 @@
 import path from 'node:path';
 
 import { loadChatPersona } from '../chat/chatPersonaLoader';
+import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
+import { composeSystemPrompt, SYSTEM_PROMPT_ORDER } from '../prompt/compose';
 import type { MetabotPaths } from '../state/paths';
 import {
   createScheduleStore,
@@ -31,20 +33,35 @@ export type RunScheduledTaskResult =
 /**
  * Bot persona framing that wraps every scheduled task prompt (v1 has no
  * per-task systemPrompt; the persona + a short scheduled-task framing stand
- * in for it).
+ * in for it). The identity block comes from the one shared builder so a
+ * scheduled task behaves in the same persona as every other scenario.
  */
 export async function buildScheduleSystemPrompt(paths: MetabotPaths): Promise<string> {
   const persona = await loadChatPersona(paths);
   const slug = path.basename(paths.profileRoot);
   const botName = persona.identity?.name || slug;
-  const parts = [
-    `You are ${botName}, a MetaBot. This is a scheduled task that fired for you.`,
-    'Do the work the prompt asks for, honestly and self-contained.',
-    'You are acting asynchronously: there is no human watching live, so report your result plainly when the task asks for one.',
-  ];
-  if (persona.role) parts.push(`Your role:\n${persona.role}`);
-  if (persona.soul) parts.push(`Your soul:\n${persona.soul}`);
-  return parts.join('\n\n');
+  return composeSystemPrompt([
+    {
+      name: 'scenario',
+      order: SYSTEM_PROMPT_ORDER.scenario,
+      text: [
+        `You are ${botName}, a MetaBot. This is a scheduled task that fired for you.`,
+        'Do the work the prompt asks for, honestly and self-contained.',
+        'You are acting asynchronously: there is no human watching live, so report your result plainly when the task asks for one.',
+      ].join('\n'),
+    },
+    {
+      name: 'identity',
+      order: SYSTEM_PROMPT_ORDER.identity,
+      text: buildMetabotIdentityBlock({
+        name: botName,
+        globalMetaId: persona.identity?.globalMetaId,
+        role: persona.role,
+        soul: persona.soul,
+        goal: persona.goal,
+      }),
+    },
+  ]);
 }
 
 /**

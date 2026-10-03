@@ -23,7 +23,11 @@ const READ_TIMEOUT_MS = 30_000
 export const QA_BEHAVIOR_SECTION = 'oac:qa-behavior'
 export const QA_BEHAVIOR_ORDER = 142.5
 
-/** Static Q&A behavior rule (mirror of src/core/qanda/behaviorPrompt.ts). */
+/**
+ * Static Q&A behavior rule — VERBATIM mirror of QA_BEHAVIOR_RULE in
+ * src/core/qanda/behaviorPrompt.ts; a drift test under tests/prompt/
+ * enforces the sync.
+ */
 export const QA_BEHAVIOR_SECTION_TEXT = [
   '## MetaWeb Q&A — search first, ask when the chain lacks what you need, answer what you know',
   '',

@@ -66,7 +66,10 @@ export function buildPersonaPrompt(bot: BotPersonaInput): string {
       : undefined
   const instructionBlock = [
     '<instruction>',
-    `You must strictly adhere to the persona defined in the &lt;metabot_identity&gt; block above.`,
+    // Mirrors src/core/prompt/metabotIdentity.ts METABOT_IDENTITY_ADHERENCE_LINE
+    // verbatim — a drift test under tests/prompt/ enforces the sync.
+    `You must strictly adhere to the identity and persona defined in the &lt;metabot_identity&gt; block above for ALL behavior in this session — every reply, decision, and creation stays consistent with it.`,
+    `If you introduce yourself, use only your bot name; never invent, translate, or substitute another name.`,
     `When you run Open Agent Connect CLI commands, always pass --from ${fromSlug} so you act as this Bot, not another identity on this machine.`,
     ...(roleLine !== undefined ? [roleLine] : []),
     '</instruction>',

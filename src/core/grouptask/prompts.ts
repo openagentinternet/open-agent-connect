@@ -12,6 +12,7 @@
 
 import { QA_BEHAVIOR_RULE } from '../qanda/behaviorPrompt';
 import { METAWEB_URI_FULL_FORM_RULE } from '../metaweb/uri';
+import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
 import type { GroupTaskMessage, GroupTaskRecord } from './types';
 
 export const GROUP_TASK_CONTEXT_MESSAGE_COUNT = 20;
@@ -51,22 +52,17 @@ function cap(text: string | null | undefined, max = FIELD_CAP): string {
   return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
-function xmlEscape(text: string): string {
-  return text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
-}
-
+// The shared identity builder renders the persona XML; group-task keeps its
+// per-field cap (prompt bytes cost context on every seat turn).
 function identityBlock(identity: GroupTaskPromptIdentity): string {
-  const lines = ['<metabot_identity>', ` <name>${xmlEscape(identity.name)}</name>`];
-  if (identity.globalMetaId) lines.push(` <globalmetaid>${xmlEscape(identity.globalMetaId)}</globalmetaid>`);
-  if (identity.role) lines.push(` <role>${xmlEscape(cap(identity.role, 600))}</role>`);
-  if (identity.bio) lines.push(` <bio>${xmlEscape(cap(identity.bio, 600))}</bio>`);
-  if (identity.soul) lines.push(` <soul>${xmlEscape(cap(identity.soul, 600))}</soul>`);
-  if (identity.goal) lines.push(` <goal>${xmlEscape(cap(identity.goal, 600))}</goal>`);
-  lines.push('</metabot_identity>');
-  lines.push('<instruction>');
-  lines.push('You must strictly adhere to the persona, soul, and bio defined in the <metabot_identity> block above for all responses in this session.');
-  lines.push('</instruction>');
-  return lines.join('\n');
+  return buildMetabotIdentityBlock({
+    name: identity.name,
+    globalMetaId: identity.globalMetaId,
+    role: identity.role ? cap(identity.role, 600) : null,
+    soul: identity.soul ? cap(identity.soul, 600) : null,
+    goal: identity.goal ? cap(identity.goal, 600) : null,
+    bio: identity.bio ? cap(identity.bio, 600) : null,
+  });
 }
 
 const SHARED_PLAYBOOK = [

@@ -8,6 +8,7 @@ import { createLlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import { createLlmRuntimeStore } from '../llm/llmRuntimeStore';
 import { runLlmPromptWithRuntimeFallback } from '../llm/llmRuntimeExecution';
 import { createOrderMetadataLineRegex } from '../orders/orderMessage';
+import { buildMetabotIdentityBlock } from '../prompt/metabotIdentity';
 import type { PublishedServiceRecord } from '../services/publishService';
 import type { MetabotPaths } from '../state/paths';
 
@@ -176,16 +177,17 @@ function buildSystemPrompt(persona: ChatPersona): string {
   const sections = [
     'You write one natural-language body for an Open Agent Connect skill-service protocol message.',
     'The daemon adds protocol tags and structured payment/order metadata. Do not include tags, metadata labels, txids, order ids, pin ids, URLs, markdown tables, or final "Bye" lines unless the user task itself truly requires a URL.',
-    'Use first person when natural. Follow the local MetaBot persona without quoting the persona fields.',
+    'Use first person when natural. Follow the bot persona below without quoting the persona fields verbatim.',
   ];
-  if (persona.role) {
-    sections.push(`Persona role:\n${persona.role}`);
-  }
-  if (persona.soul) {
-    sections.push(`Persona style:\n${persona.soul}`);
-  }
-  if (persona.goal) {
-    sections.push(`Persona goal:\n${persona.goal}`);
+  const identityBlock = buildMetabotIdentityBlock({
+    name: persona.identity?.name,
+    globalMetaId: persona.identity?.globalMetaId,
+    role: persona.role,
+    soul: persona.soul,
+    goal: persona.goal,
+  });
+  if (identityBlock) {
+    sections.push(identityBlock);
   }
   return sections.join('\n\n');
 }

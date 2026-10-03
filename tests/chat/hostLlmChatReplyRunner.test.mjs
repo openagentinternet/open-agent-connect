@@ -67,30 +67,25 @@ test('buildChatPrompt references the system-prompt persona instead of restating 
   const prompt = buildChatPrompt(input);
   const systemPrompt = buildChatSystemPrompt(input);
   assert.match(prompt, /defined in the system prompt and are authoritative/);
-  assert.ok(!prompt.includes('## Your Bot Identity and Persona'));
-  assert.ok(!prompt.includes('## Your Role'));
-  assert.ok(!prompt.includes('## Your Style'));
-  assert.ok(!prompt.includes('## Your Goal'));
+  assert.ok(!prompt.includes('<metabot_identity>'));
   // The identity block must reach the model exactly once even when a backend
   // concatenates systemPrompt + prompt into a single string.
   const combined = `${systemPrompt}\n\n${prompt}`;
-  assert.equal(combined.split('## Your Bot Identity and Persona').length - 1, 1);
-  assert.equal(combined.split('## Your Role').length - 1, 1);
+  assert.equal(combined.split('<metabot_identity>').length - 1, 1);
+  assert.equal(combined.split('<name>火舞</name>').length - 1, 1);
 });
 
 test('buildChatSystemPrompt makes the current MetaBot identity authoritative over the host runtime', () => {
   const systemPrompt = buildChatSystemPrompt(makeInput());
-  assert.match(systemPrompt, /## Your Bot Identity and Persona \(authoritative\)/);
-  assert.match(systemPrompt, /Your name is "火舞"/);
-  assert.match(systemPrompt, /idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5/);
+  assert.match(systemPrompt, /<metabot_identity>/);
+  assert.match(systemPrompt, /<name>火舞<\/name>/);
+  assert.match(systemPrompt, /<globalmetaid>idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5<\/globalmetaid>/);
+  assert.match(systemPrompt, /strictly adhere/);
   assert.match(systemPrompt, /host LLM runtime or its workspace/);
   assert.match(systemPrompt, /must never appear as your own/);
-  assert.match(systemPrompt, /## Your Role/);
-  assert.match(systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
-  assert.match(systemPrompt, /## Your Style/);
-  assert.match(systemPrompt, /curious and friendly/);
-  assert.match(systemPrompt, /## Your Goal/);
-  assert.match(systemPrompt, /Explore collaboration/);
+  assert.match(systemPrompt, /<role>I am a coding assistant MetaBot specializing in TypeScript\.<\/role>/);
+  assert.match(systemPrompt, /<soul>I am curious and friendly\.<\/soul>/);
+  assert.match(systemPrompt, /<goal>Explore collaboration opportunities\.<\/goal>/);
 });
 
 test('buildChatSystemPrompt gives every MetaBot the shared Agent Internet worldview', () => {
@@ -114,12 +109,12 @@ test('buildChatSystemPrompt gives every MetaBot the shared Agent Internet worldv
 test('buildChatSystemPrompt keeps shared worldview separate from the individual persona', () => {
   const systemPrompt = buildChatSystemPrompt(makeInput());
   const worldviewIndex = systemPrompt.indexOf('## Shared Bot Worldview');
-  const identityIndex = systemPrompt.indexOf('## Your Bot Identity and Persona (authoritative)');
-  const roleIndex = systemPrompt.indexOf('## Your Role');
+  const identityIndex = systemPrompt.indexOf('<metabot_identity>');
+  const roleIndex = systemPrompt.indexOf('<role>');
   assert.ok(worldviewIndex >= 0);
   assert.ok(identityIndex > worldviewIndex);
   assert.ok(roleIndex > identityIndex);
-  assert.match(systemPrompt, /Your name is "火舞"/);
+  assert.match(systemPrompt, /<name>火舞<\/name>/);
   assert.match(systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
 });
 
@@ -504,11 +499,11 @@ test('host LLM chat runner executes through the injected LLM executor', async ()
   assert.equal(executorCalls[0].outputMode, 'final');
   assert.equal(executorCalls[0].env.METABOT_PRIVATE_CHAT_REPLY_GENERATION, '1');
   assert.match(executorCalls[0].prompt, /Reply now:/);
-  assert.match(executorCalls[0].systemPrompt, /Your name is "火舞"/);
+  assert.match(executorCalls[0].systemPrompt, /<name>火舞<\/name>/);
   assert.match(executorCalls[0].systemPrompt, /## Shared Bot Worldview/);
   assert.match(executorCalls[0].systemPrompt, /living and interacting on the Agent Internet/);
   assert.match(executorCalls[0].systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
-  assert.match(executorCalls[0].systemPrompt, /execution host has its own conflicting identity or persona/);
+  assert.match(executorCalls[0].systemPrompt, /belongs to the execution host only/);
   assert.deepEqual(resolverCalls.resolveRuntime, [{ metaBotSlug: 'alice', excludeRuntimeIds: [] }]);
   assert.deepEqual(resolverCalls.markBindingUsed, ['binding-1']);
 });
@@ -1882,7 +1877,7 @@ test('skill-scoped host failure falls through to the local runtime chain', async
 
 test('buildChatPrompt carries the full-form MetaWeb URI rule', () => {
   const prompt = buildChatPrompt(makeInput());
-  assert.match(prompt, /MetaWeb URIs \(metaid:\/\/, pin:\/\/, metafile:\/\/, metaapp:\/\/, map:\/\/\) in FULL/);
-  assert.match(prompt, /never abbreviated or truncated with an ellipsis/);
+  assert.match(prompt, /MetaWeb URIs are ALWAYS written in FULL/);
+  assert.match(prompt, /never abbreviated, truncated, or shortened with an ellipsis/);
   assert.match(prompt, /64 lowercase hex chars/);
 });
