@@ -25,8 +25,8 @@ import {
 
 export type StaffingOwnerDecisionMarker = 'confirm' | 'revise' | 'skip' | 'reject';
 
-/** Where an owner decision came from (UI card, chat verdict, engine gate). */
-export type StaffingDecisionSource = 'ui' | 'chat' | 'chat_reply' | 'engine';
+/** Where an owner decision came from (UI card, chat verdict, agent tool, engine gate). */
+export type StaffingDecisionSource = 'ui' | 'chat' | 'chat_reply' | 'engine' | 'tool';
 
 export interface GroupTaskStaffingProposalRecord {
   id: number;
@@ -308,6 +308,7 @@ function normalizeProposalRecord(value: unknown): GroupTaskStaffingProposalRecor
     || record.decisionSource === 'chat'
     || record.decisionSource === 'chat_reply'
     || record.decisionSource === 'engine'
+    || record.decisionSource === 'tool'
     ? record.decisionSource
     : null;
   const toNumber = (input: unknown): number | null => (

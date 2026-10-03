@@ -26,12 +26,13 @@ test('parseDeliverableCandidates: strict URIs, text fallback, fabrication guard'
     'no tag on this line',
   ].join('\n');
   const rows = parseDeliverableCandidates(content);
-  assert.equal(rows.length, 4);
+  assert.equal(rows.length, 6);
   assert.deepEqual(rows[0], {
     kind: 'metafile',
     uri: `metafile://${PIN_A}`,
     payload: `metafile://${PIN_A} final report`,
     correction: false,
+    unparsedUri: null,
   });
   assert.equal(rows[1].kind, 'link');
   assert.equal(rows[1].uri, 'https://example.com/result');
@@ -39,6 +40,68 @@ test('parseDeliverableCandidates: strict URIs, text fallback, fabrication guard'
   assert.equal(rows[2].uri, PIN_A);
   assert.equal(rows[3].kind, 'text');
   assert.equal(rows[3].uri, null);
+  // A fabricated URI never becomes a URI row, but it no longer swallows the
+  // delivery line: the ledger keeps a text row and the host can name the
+  // rejected token (round-3: the whole line used to vanish).
+  assert.equal(rows[4].kind, 'text');
+  assert.equal(rows[4].uri, null);
+  assert.equal(rows[4].unparsedUri, 'metafile://abc123');
+  assert.equal(rows[5].kind, 'text');
+  assert.equal(rows[5].uri, null);
+  assert.equal(rows[5].unparsedUri, null, 'a non-ASCII placeholder is not a URI attempt');
+});
+
+test('parseDeliverableCandidates: a local delivery line survives prose that mentions bare schemes', () => {
+  // Round-3 smoke-test shape: the [DELIVERABLE] line opened with a negation
+  // ("no pin:// and no metafile://") and the artifact itself was a local path
+  // plus its sha256 on the following lines. The bare scheme was read as a URI
+  // token, failed validation, and the WHOLE line was dropped — the ledger
+  // stayed empty and the owner saw no delivery at all.
+  const sha256 = '9f'.repeat(32);
+  const rows = parseDeliverableCandidates([
+    '[DELIVERABLE] 本地交付：报告已完成，无 pin:// 也无 metafile://，仅本地文件',
+    '/Users/bob/out/report-final.md',
+    `sha256: ${sha256}`,
+  ].join('\n'));
+  assert.equal(rows.length, 1, 'the delivery line is recorded, not swallowed');
+  assert.equal(rows[0].kind, 'text');
+  assert.equal(rows[0].uri, null);
+  assert.equal(rows[0].unparsedUri, null, 'a bare scheme in prose is not a rejected URI');
+  assert.equal(rows[0].payload, '本地交付：报告已完成，无 pin:// 也无 metafile://，仅本地文件');
+
+  // A fabricated pin-scheme token is a rejected URI attempt: the line is kept
+  // and the host can tell the chair which URI failed.
+  const fabricated = parseDeliverableCandidates('[DELIVERABLE] metafile://abc123 报告');
+  assert.equal(fabricated.length, 1);
+  assert.equal(fabricated[0].kind, 'text');
+  assert.equal(fabricated[0].unparsedUri, 'metafile://abc123');
+});
+
+test('parseDeliverableCandidates: a bare sha256 checksum is not a pin id', () => {
+  const sha256 = 'ab'.repeat(32);
+  const text = parseDeliverableCandidates(`[DELIVERABLE] artifact sha256 ${sha256}`);
+  assert.equal(text.length, 1);
+  assert.equal(text[0].kind, 'text', 'a 64-hex checksum without the i<n> suffix is not a pin');
+  assert.equal(text[0].uri, null);
+  assert.equal(text[0].unparsedUri, null);
+
+  // A real pin id beside a checksum still classifies as a pin.
+  const withPin = parseDeliverableCandidates(`[DELIVERABLE] ${sha256} then pin ${PIN_A}`);
+  assert.equal(withPin.length, 1);
+  assert.equal(withPin[0].kind, 'pin');
+  assert.equal(withPin[0].uri, PIN_A);
+});
+
+test('parseDeliverableCandidates: the first URI token that validates wins', () => {
+  // An unvalidatable token earlier on the line never hides a real artifact
+  // later on it (the line used to be dropped whole).
+  const mixed = parseDeliverableCandidates(
+    '[DELIVERABLE] metafile://abc123 无效，正式版 https://example.com/final',
+  );
+  assert.equal(mixed.length, 1);
+  assert.equal(mixed[0].kind, 'link');
+  assert.equal(mixed[0].uri, 'https://example.com/final');
+  assert.equal(mixed[0].unparsedUri, null);
 });
 
 test('parseDeliverableCandidates: multiple tags on one line and corrections', () => {
@@ -59,6 +122,13 @@ test('parseDeliverableCandidates: only protocol-position tags count (line start,
 
   const proseBefore = parseDeliverableCandidates(`结果见 [DELIVERABLE] metafile://${PIN_A}`);
   assert.equal(proseBefore.length, 0, 'prose before the tag on the same line stays inert');
+
+  // Round-3 shape: prose that merely mentions the schemes is not a delivery,
+  // wherever the mention sits.
+  const schemeProseOnly = parseDeliverableCandidates('本次无 metafile:// 交付，仅本地文件');
+  assert.equal(schemeProseOnly.length, 0, 'a scheme mention without the tag stays inert');
+  const schemeProseInline = parseDeliverableCandidates('[WORKING] 无 pin:// 也无 metafile://，仅本地文件');
+  assert.equal(schemeProseInline.length, 0, 'a scheme mention on a non-deliverable line stays inert');
 
   const lineStart = parseDeliverableCandidates(`[DELIVERABLE] metafile://${PIN_A} done`);
   assert.equal(lineStart.length, 1, 'a line-start tag is honored');
@@ -288,11 +358,14 @@ test('parseDeliverableCandidates: metafile URIs with a file extension parse (tas
     + `[DELIVERABLE] metafile://metafile://${PIN_V}.png bogus scheme\n`
     + `[DELIVERABLE] metafile://${PIN_V}.jpeg`,
   );
-  // A malformed URI-shaped token drops its line (fabrication guard), so the
-  // bogus double-scheme line yields nothing.
-  assert.equal(rows.length, 2);
+  // A malformed URI-shaped token never becomes a URI row (fabrication guard),
+  // but it keeps the line as a text note instead of dropping it.
+  assert.equal(rows.length, 3);
   assert.equal(rows[0].kind, 'metafile');
   assert.equal(rows[0].uri, `metafile://${PIN_V}.mp4`, 'extension kept so the URI still serves');
-  assert.equal(rows[1].kind, 'metafile');
-  assert.equal(rows[1].uri, `metafile://${PIN_V}.jpeg`);
+  assert.equal(rows[1].kind, 'text');
+  assert.equal(rows[1].uri, null);
+  assert.equal(rows[1].unparsedUri, `metafile://metafile://${PIN_V}.png`);
+  assert.equal(rows[2].kind, 'metafile');
+  assert.equal(rows[2].uri, `metafile://${PIN_V}.jpeg`);
 });

@@ -1464,6 +1464,24 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         // text row: a URI-free [DELIVERABLE] line beside it is a summary of
         // the actual artifact, not a second deliverable.
         const hasUriCandidate = tags.deliverables.some((entry) => entry.uri != null);
+        // A line whose URI failed validation is recorded as a text note (never
+        // dropped) — and the chair is told which URI was rejected, so the
+        // fabrication guard asks for the real artifact instead of hiding the
+        // claim. One note per message; silenced when a valid URI rides along.
+        const rejectedUri = hasUriCandidate
+          ? null
+          : tags.deliverables.find((entry) => entry.unparsedUri != null)?.unparsedUri ?? null;
+        if (rejectedUri) {
+          await recordHostNote(store, task.id, {
+            kind: 'parse',
+            body: `A [DELIVERABLE] line in message #${message.index} carries a URI the host could not `
+              + `validate ("${rejectedUri.slice(0, 80)}"). It is recorded on the ledger as a text note `
+              + 'with no artifact URI, so nothing about it can be verified on-chain. If a real artifact '
+              + 'exists, ask the sender to re-post it with its complete MetaWeb URI (pin://<pinId> for '
+              + 'text documents, metaapp://<pinId> for apps, metafile://<pinId> for binary files).',
+            dedupeKey: `unparsed-deliverable-uri:${task.id}:${message.index}`,
+          }).catch(() => undefined);
+        }
         for (const candidate of tags.deliverables) {
           if (candidate.kind === 'text' && hasUriCandidate) continue;
           // Per-(msgPin, uri, kind) dedupe (IDBots parity): the same line
@@ -1506,6 +1524,9 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           // already has a classified uri (pin/metaapp/metafile/link) is
           // on-chain and must never be re-read as a file — stripping its
           // scheme ("pin://…" → "//…") would fake an absolute path.
+          // The scan is TAG-LINE scoped (the payload is the text after the
+          // tag): a path on a following line is a message-level fact, not the
+          // deliverable's own file, so the seam deliberately ignores it.
           const payloadPath = candidate.uri == null
             ? candidate.payload.replace(/^file:\s*/i, '').trim()
             : '';

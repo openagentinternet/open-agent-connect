@@ -94,22 +94,38 @@ function readString(args: Record<string, unknown>, key: string): string | undefi
  * Acceptance criteria arrive as a newline-separated string OR a string array —
  * models reliably hand back an array (the sibling `local_worker_delegate`
  * parameter is typed as one), so an array must be joined, never dropped.
- * Any other explicitly passed type is a caller bug and fails loudly.
+ * The host may also serialize a non-string parameter before the tool sees it,
+ * so a string that parses as a JSON string array is joined the same way; any
+ * other string is the literal criteria text. Any other explicitly passed type
+ * is a caller bug and fails loudly.
  */
 function readAcceptanceCriteria(args: Record<string, unknown>): string | undefined {
   const value = args.acceptanceCriteria
   if (value === undefined) return undefined
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    return trimmed === '' ? undefined : trimmed
-  }
-  if (Array.isArray(value)) {
-    const lines = value
-      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-      .filter((entry) => entry !== '')
-    return lines.length > 0 ? lines.join('\n') : undefined
-  }
+  if (typeof value === 'string') return criteriaFromString(value)
+  if (Array.isArray(value)) return criteriaFromArray(value)
   fail('invalid_argument', 'acceptanceCriteria must be a string (newline-separated) or an array of strings.')
+}
+
+function criteriaFromString(value: string): string | undefined {
+  const trimmed = value.trim()
+  if (trimmed === '') return undefined
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) return criteriaFromArray(parsed)
+    } catch {
+      // Not JSON after all — keep the literal text, e.g. "[重要] 标准".
+    }
+  }
+  return trimmed
+}
+
+function criteriaFromArray(value: unknown[]): string | undefined {
+  const lines = value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry) => entry !== '')
+  return lines.length > 0 ? lines.join('\n') : undefined
 }
 
 function readBoolean(args: Record<string, unknown>, key: string): boolean | undefined {
@@ -334,6 +350,10 @@ export function createGroupTaskController(
             ...chairSlugPayload,
             proposalId,
             decision,
+            // The chat tool is neither the UI panel nor a bare CLI call: record
+            // 'tool' so the proposal row separates an owner's own decision from
+            // one taken on the owner's behalf in chat.
+            source: 'tool',
           })))
         }
         case 'create_from_proposal': {
@@ -572,7 +592,7 @@ export function buildGroupTaskToolDefinition(
         goal: { type: 'string' },
         acceptanceCriteria: {
           anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
-          description: 'Measurable acceptance criteria: a newline-separated string or an array of strings.',
+          description: 'Measurable acceptance criteria: a newline-separated string or an array of strings. The host may serialize a non-string argument, so an array can arrive here as its JSON string form — both are accepted.',
         },
         plan: {
           type: 'object',

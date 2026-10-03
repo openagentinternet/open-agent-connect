@@ -261,6 +261,35 @@ test('grouptask pin/unpin/archive/unarchive map to boolean setters', async () =>
   ]);
 });
 
+test('grouptask staffing decide forwards a whitelisted --source and defaults to chat', async () => {
+  const calls = [];
+  const deps = { staffingDecide: async (input) => { calls.push(input); return commandSuccess({}); } };
+
+  const bare = await runGroupTask(['staffing', 'decide', '--chair', 'twin', '--proposal', '3', '--decision', 'confirm'], deps);
+  assert.equal(bare.exitCode, 0);
+  assert.deepEqual(calls.at(-1), { chairSlug: 'twin', proposalId: 3, decision: 'confirm', source: 'chat' });
+
+  for (const source of ['ui', 'tool']) {
+    const named = await runGroupTask(
+      ['staffing', 'decide', '--chair', 'twin', '--proposal', '3', '--decision', 'confirm', '--source', source],
+      deps,
+    );
+    assert.equal(named.exitCode, 0);
+    assert.equal(calls.at(-1).source, source, `--source ${source} reaches the handler`);
+  }
+
+  const unknown = await runGroupTask(
+    ['staffing', 'decide', '--chair', 'twin', '--proposal', '3', '--decision', 'confirm', '--source', 'engine'],
+    deps,
+  );
+  assert.equal(unknown.exitCode, 0);
+  assert.equal(calls.at(-1).source, 'chat', 'sources outside the whitelist fall back to chat');
+
+  const rejected = await runGroupTask(['staffing', 'decide', '--chair', 'twin', '--proposal', '3', '--decision', 'reject'], deps);
+  assert.equal(rejected.exitCode, 0);
+  assert.equal(calls.at(-1).decision, 'reject');
+});
+
 test('grouptask unknown subcommand fails cleanly', async () => {
   const { exitCode, result } = await runGroupTask(['bogus'], {});
   assert.notEqual(exitCode, 0);

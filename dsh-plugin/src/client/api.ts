@@ -916,7 +916,7 @@ export const api = {
   grouptaskStaffingDecide: async (
     chair: string,
     proposalId: number,
-    decision: 'confirm' | 'revise' | 'skip',
+    decision: 'confirm' | 'revise' | 'skip' | 'reject',
   ): Promise<CommandEnvelope> => postEnvelope('grouptask/staffing/decide', { chairSlug: chair, proposalId, decision, source: 'ui' }),
   grouptaskStaffingCreate: async (proposalId: number): Promise<{ taskId: number; pendingRemoteSeats: number; skippedWorkers: GroupTaskSkippedWorkerRow[] }> => {
     const data = await post<{ taskId?: unknown; pendingRemoteSeats?: unknown; skippedWorkers?: unknown }>(

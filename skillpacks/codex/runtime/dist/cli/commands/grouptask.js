@@ -439,9 +439,10 @@ async function runGroupTaskCommand(args, context) {
                 return (0, commandResult_1.commandFailed)('invalid_flag', '--decision must be one of: confirm, revise, skip, reject.');
             }
             // `source` records where the decision was made: the panel forwards 'ui'
-            // via --source; a bare CLI/chat call defaults to 'chat'.
+            // and the DSH chat tool forwards 'tool' via --source; a bare CLI call
+            // defaults to 'chat'.
             const sourceFlag = normalizeText((0, helpers_1.readFlagValue)(args, '--source'));
-            const source = sourceFlag === 'ui' || sourceFlag === 'chat' ? sourceFlag : 'chat';
+            const source = sourceFlag === 'ui' || sourceFlag === 'chat' || sourceFlag === 'tool' ? sourceFlag : 'chat';
             return handler({ chairSlug: chair, proposalId, decision, source });
         }
         if (sub === 'create') {

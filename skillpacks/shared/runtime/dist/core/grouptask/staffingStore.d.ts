@@ -15,8 +15,8 @@
 import type { MetabotPaths } from '../state/paths';
 import { type GroupTaskStaffingPlan, type GroupTaskStaffingProposalStatus } from './staffing';
 export type StaffingOwnerDecisionMarker = 'confirm' | 'revise' | 'skip' | 'reject';
-/** Where an owner decision came from (UI card, chat verdict, engine gate). */
-export type StaffingDecisionSource = 'ui' | 'chat' | 'chat_reply' | 'engine';
+/** Where an owner decision came from (UI card, chat verdict, agent tool, engine gate). */
+export type StaffingDecisionSource = 'ui' | 'chat' | 'chat_reply' | 'engine' | 'tool';
 export interface GroupTaskStaffingProposalRecord {
     id: number;
     chairSlug: string;

@@ -572,6 +572,9 @@ function GroupList({
                 <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void runAction(() => grouptask.staffingDecide(pendingSlate.chairSlug, pendingSlate.id, 'skip')) }}>
                   {t('gtStaffingSkip')}
                 </Button>
+                <Button type="button" variant="outline" size="sm" className="oac-danger-outline" disabled={busy} onClick={() => { void runAction(() => grouptask.staffingDecide(pendingSlate.chairSlug, pendingSlate.id, 'reject')) }}>
+                  {t('gtStaffingReject')}
+                </Button>
               </>
             ) : (
               <Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => { void runAction(() => grouptask.staffingCreate(pendingSlate.id)) }}>

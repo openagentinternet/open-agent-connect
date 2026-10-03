@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -294,4 +294,47 @@ test('listStaffingProposals returns fresh proposals for the chair', async () => 
   const rows = await listStaffingProposals(ctx);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].chairSlug, 'twin-bot');
+});
+
+test('staffing store normalizes the decision-source whitelist (agent-invoked tool included)', async () => {
+  const { createStaffingStore } = require('../../dist/core/grouptask/staffingStore.js');
+  const systemHome = mkdtempTempRootSync('metabot-gt-staffing-source-');
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'twin-bot');
+  mkdirSync(homeDir, { recursive: true });
+  const store = createStaffingStore(resolveMetabotPaths(homeDir));
+  mkdirSync(path.dirname(store.filePath), { recursive: true });
+  const row = (id, decisionSource) => ({
+    id,
+    chairSlug: 'twin-bot',
+    sourceSessionId: null,
+    title: `t${id}`,
+    goal: 'g',
+    acceptanceCriteria: null,
+    plan: validPlan,
+    status: 'confirmed',
+    skipAuthorized: false,
+    ownerDecision: 'confirm',
+    decisionSource,
+    decidedBy: 'twin-bot',
+    triggeringWish: '做个任务',
+    createdTaskId: null,
+    createdAt: id,
+    confirmedAt: null,
+    updatedAt: id,
+  });
+  writeFileSync(store.filePath, JSON.stringify({
+    seq: 3,
+    proposals: [row(1, 'tool'), row(2, 'ui'), row(3, 'bogus-surface')],
+  }));
+
+  // The agent-invoked decide tool names itself 'tool'; an unknown surface is
+  // dropped rather than persisted verbatim.
+  assert.equal((await store.getProposal(1)).decisionSource, 'tool');
+  assert.equal((await store.getProposal(2)).decisionSource, 'ui');
+  assert.equal((await store.getProposal(3)).decisionSource, null);
+
+  // A decision written through the store keeps the new source on read-back.
+  const decided = await store.setOwnerDecision(1, 'confirm', { source: 'tool', decidedBy: 'twin-bot' });
+  assert.equal(decided.decisionSource, 'tool');
+  assert.equal((await store.getProposal(1)).decisionSource, 'tool');
 });

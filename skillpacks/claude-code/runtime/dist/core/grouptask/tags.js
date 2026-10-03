@@ -72,7 +72,14 @@ const WORKING_NOTE_MAX_CHARS = 120;
 // Deliverable parsing (line-scoped, strict URI rules)
 // ---------------------------------------------------------------------------
 const CORRECTION_RE = /更正|修正|纠正|勘误|correction|corrected|revise[ds]?\b/iu;
-const URI_TOKEN_RE = /(metaapp:\/\/\S+|metafile:\/\/\S+|https?:\/\/\S+|\b[0-9a-f]{64}i\d+\b)/giu;
+/**
+ * A pin-scheme URI must be followed by an id-ish ASCII token to count as a
+ * URI: a bare scheme mentioned in prose ("无 pin:// 也无 metafile://，仅本地文件")
+ * is text, not an artifact claim, and must not pass as an unvalidated URI.
+ * A bare 64-hex sha256 checksum is NOT a pin id (the pin form needs the "i<n>"
+ * suffix) and never matches, so a report citing a hash stays a text note.
+ */
+const URI_TOKEN_RE = /(metaapp:\/\/[A-Za-z0-9][^\s]*|metafile:\/\/[A-Za-z0-9][^\s]*|https?:\/\/\S+|\b[0-9a-f]{64}i\d+\b)/giu;
 function trimTrailingPunctuation(token) {
     return token.replace(/[)\].,;:!?、。》】]+$/u, '');
 }
@@ -116,8 +123,12 @@ function classifyUriToken(raw) {
  * Extract deliverable candidates from a message. Line-scoped: each line whose
  * [DELIVERABLE] tag sits at the protocol position (line start, markdown
  * wrapping allowed) yields one candidate per tag occurrence, its payload being
- * the text after that tag. Lines with a URI-shaped token that fails validation
- * are dropped (fabrication guard); URI-free payloads become text deliverables.
+ * the text after that tag. The first URI-shaped token that validates decides
+ * the kind and uri; a payload whose URI tokens ALL fail validation still yields
+ * a text candidate (with the rejected token in `unparsedUri`) instead of being
+ * dropped — a swallowed line left the ledger empty and the owner blind (round-3
+ * smoke test: a local delivery line citing a sha256 was lost for mentioning
+ * "no pin://, no metafile://").
  */
 function parseDeliverableCandidates(content) {
     const candidates = [];
@@ -135,14 +146,29 @@ function parseDeliverableCandidates(content) {
             const correction = CORRECTION_RE.test(line);
             URI_TOKEN_RE.lastIndex = 0;
             const uriTokens = payload.match(URI_TOKEN_RE) ?? [];
-            if (uriTokens.length === 0) {
-                candidates.push({ kind: 'text', uri: null, payload, correction });
+            let classified = null;
+            for (const token of uriTokens) {
+                classified = classifyUriToken(token);
+                if (classified)
+                    break;
+            }
+            if (!classified) {
+                candidates.push({
+                    kind: 'text',
+                    uri: null,
+                    payload,
+                    correction,
+                    unparsedUri: uriTokens[0] ?? null,
+                });
                 continue;
             }
-            const classified = classifyUriToken(uriTokens[0]);
-            if (!classified)
-                continue;
-            candidates.push({ kind: classified.kind, uri: classified.uri, payload, correction });
+            candidates.push({
+                kind: classified.kind,
+                uri: classified.uri,
+                payload,
+                correction,
+                unparsedUri: null,
+            });
         }
     }
     return candidates;

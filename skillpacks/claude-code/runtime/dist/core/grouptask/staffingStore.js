@@ -223,6 +223,7 @@ function normalizeProposalRecord(value) {
         || record.decisionSource === 'chat'
         || record.decisionSource === 'chat_reply'
         || record.decisionSource === 'engine'
+        || record.decisionSource === 'tool'
         ? record.decisionSource
         : null;
     const toNumber = (input) => (typeof input === 'number' && Number.isFinite(input) ? input : null);

@@ -52,6 +52,23 @@ function readStringArray(value) {
         return [];
     return value.map((entry) => normalizeText(entry)).filter(Boolean);
 }
+/**
+ * Acceptance criteria arrive as a newline-separated string or a string array
+ * (the tool layer joins arrays before dispatch, but a direct HTTP client may
+ * still send one). Any other explicitly passed type is rejected instead of
+ * degrading to empty through normalizeText. `null`/absent mean "not set".
+ */
+function readAcceptanceCriteria(value) {
+    if (value === undefined || value === null)
+        return null;
+    if (typeof value === 'string')
+        return normalizeText(value) || null;
+    if (Array.isArray(value)) {
+        const lines = value.map((entry) => normalizeText(entry)).filter(Boolean);
+        return lines.length > 0 ? lines.join('\n') : null;
+    }
+    throw new service_1.GroupTaskServiceError('invalid_argument', 'acceptanceCriteria must be a string (newline-separated) or an array of strings.');
+}
 function readTaskRef(input) {
     const chair = normalizeText(input.chair) || normalizeText(input.chairSlug);
     if (!chair)
@@ -211,11 +228,12 @@ function createGroupTaskDaemonHandlers(input) {
     }
     return {
         create: async (body) => run(async () => {
+            const acceptanceCriteria = readAcceptanceCriteria(body.acceptanceCriteria);
             const workerSlugs = readStringArray(body.workerSlugs);
             const created = await (0, service_1.createGroupTask)(ctx, {
                 title: normalizeText(body.title),
                 goal: normalizeText(body.goal),
-                acceptanceCriteria: normalizeText(body.acceptanceCriteria) || null,
+                acceptanceCriteria,
                 workerSlugs,
                 chairSlug: normalizeText(body.chairSlug) || undefined,
                 createdBy: body.createdBy === 'twinbot' ? 'twinbot' : 'user',
@@ -457,6 +475,7 @@ function createGroupTaskDaemonHandlers(input) {
             });
         }),
         staffingPropose: async (body) => run(async () => {
+            const acceptanceCriteria = readAcceptanceCriteria(body.acceptanceCriteria);
             const title = normalizeText(body.title);
             const goal = normalizeText(body.goal);
             if (!title || !goal) {
@@ -471,7 +490,7 @@ function createGroupTaskDaemonHandlers(input) {
                 chairSlug: normalizeText(body.chairSlug) || undefined,
                 title,
                 goal,
-                acceptanceCriteria: normalizeText(body.acceptanceCriteria) || null,
+                acceptanceCriteria,
                 plan,
                 triggeringWish: normalizeText(body.triggeringWish) || undefined,
                 sourceSessionId: normalizeText(body.sourceSessionId) || null,
@@ -494,11 +513,18 @@ function createGroupTaskDaemonHandlers(input) {
             if (decision !== 'confirm' && decision !== 'revise' && decision !== 'skip' && decision !== 'reject') {
                 throw new service_1.GroupTaskServiceError('invalid_decision', "decision must be 'confirm', 'revise', 'skip', or 'reject'");
             }
-            // Decision provenance (I1-a): the UI panel and the chat/CLI path both land
-            // here, so the caller names itself; any other/missing source records null.
+            // Decision provenance (I1-a): the UI panel, a bare CLI/chat call, and the
+            // DSH chat tool all land here, so the caller names itself; any other or
+            // missing source records null. The cast keeps this handler compiling when
+            // the storage union lags behind the daemon whitelist.
             const sourceRaw = normalizeText(body.source);
-            const source = sourceRaw === 'ui' || sourceRaw === 'chat' ? sourceRaw : null;
-            const decidedBy = normalizeText(body.decidedBy) || null;
+            const source = (sourceRaw === 'ui' || sourceRaw === 'chat' || sourceRaw === 'tool'
+                ? sourceRaw
+                : null);
+            // Actor provenance: an explicit decidedBy wins; the panel is the owner
+            // acting in person, while chat/CLI/tool decisions are taken by the chair
+            // Bot on the owner's behalf.
+            const decidedBy = normalizeText(body.decidedBy) || (source === 'ui' ? 'owner' : chair);
             return {
                 proposal: await (0, staffingService_1.recordStaffingOwnerDecision)(ctx, chair, proposalId, decision, {
                     ...(source ? { source } : {}),
