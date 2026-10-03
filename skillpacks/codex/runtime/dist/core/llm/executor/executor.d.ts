@@ -9,11 +9,18 @@ interface LlmExecutorOptions {
     env?: NodeJS.ProcessEnv;
     backends: Record<string, LlmBackendFactory>;
     sessionManager?: SessionManager;
+    /**
+     * Root for per-provider isolated execution homes (bot turns stay out of the
+     * user's platform session history). Defaults to a `provider-homes` sibling
+     * of `sessionsRoot`.
+     */
+    providerHomesRoot?: string;
 }
 export declare class LlmExecutor {
     private readonly sessionsRoot;
     private readonly transcriptsRoot;
     private readonly skillsRoot;
+    private readonly providerHomesRoot;
     private readonly systemHomeDir?;
     private readonly env?;
     private readonly backends;

@@ -61,6 +61,14 @@ exports.PLATFORM_DEFINITIONS = [
                     seedPaths: ['.credentials.json', 'settings.json'],
                 },
             },
+            // Claude Code records every thread under $CLAUDE_CONFIG_DIR/projects and
+            // lists them in its session picker; managed executions redirect the
+            // config dir so bot turns stay out of it.
+            executionHome: {
+                envName: 'CLAUDE_CONFIG_DIR',
+                defaultSourceHome: '.claude',
+                seedPaths: ['.credentials.json', 'settings.json', 'CLAUDE.md', 'skills', 'agents', 'commands'],
+            },
         },
         skills: {
             roots: [
@@ -92,6 +100,14 @@ exports.PLATFORM_DEFINITIONS = [
                     defaultSourceHome: '.codex',
                     seedPaths: ['auth.json', 'config.toml'],
                 },
+            },
+            // Codex stores rollout sessions under $CODEX_HOME/sessions; managed
+            // executions redirect CODEX_HOME so bot turns stay out of the user's
+            // session history.
+            executionHome: {
+                envName: 'CODEX_HOME',
+                defaultSourceHome: '.codex',
+                seedPaths: ['auth.json', 'config.toml'],
             },
         },
         skills: {
@@ -291,6 +307,27 @@ exports.PLATFORM_DEFINITIONS = [
                         '.kimi-code/server.token',
                     ],
                 },
+            },
+            // Kimi Code resolves its data dir as $KIMI_CODE_HOME (falling back to
+            // ~/.kimi-code) and the desktop app lists every session stored there.
+            // Managed executions redirect KIMI_CODE_HOME only (HOME stays intact so
+            // shell tools keep working), seeded with the user's auth, config, MCP,
+            // plugin, skill, and workspace-trust entries for behavior parity.
+            executionHome: {
+                envName: 'KIMI_CODE_HOME',
+                defaultSourceHome: '.kimi-code',
+                seedPaths: [
+                    'config.toml',
+                    'credentials',
+                    'oauth',
+                    'device_id',
+                    'region',
+                    'server.token',
+                    'mcp.json',
+                    'plugins',
+                    'skills',
+                    'workspace-trust',
+                ],
             },
         },
         skills: {

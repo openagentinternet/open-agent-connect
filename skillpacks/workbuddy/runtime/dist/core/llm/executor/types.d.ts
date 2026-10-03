@@ -80,6 +80,7 @@ export interface LlmSessionRecord {
     model?: string;
     cwd?: string;
     providerSessionId?: string;
+    providerStateHome?: string;
     resumeSessionId?: string;
     result?: LlmExecutionResult;
     createdAt: string;

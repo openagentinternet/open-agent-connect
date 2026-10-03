@@ -12,6 +12,7 @@ const session_manager_1 = require("./session-manager");
 const skill_injector_1 = require("./skill-injector");
 const platformRegistry_1 = require("../../platform/platformRegistry");
 const providerProcessEnv_1 = require("../providerProcessEnv");
+const providerExecutionHome_1 = require("./providerExecutionHome");
 const STRICT_ISOLATION_PLATFORM_HOME_FILES = {
     'claude-code': ['config.json', 'settings.json'],
     codex: ['auth.json', 'config.toml'],
@@ -370,6 +371,7 @@ class LlmExecutor {
     sessionsRoot;
     transcriptsRoot;
     skillsRoot;
+    providerHomesRoot;
     systemHomeDir;
     env;
     backends;
@@ -380,6 +382,8 @@ class LlmExecutor {
         this.sessionsRoot = options.sessionsRoot;
         this.transcriptsRoot = options.transcriptsRoot;
         this.skillsRoot = options.skillsRoot;
+        this.providerHomesRoot = options.providerHomesRoot
+            ?? node_path_1.default.join(node_path_1.default.dirname(options.sessionsRoot), 'provider-homes');
         this.systemHomeDir = options.systemHomeDir;
         this.env = options.env;
         this.backends = options.backends;
@@ -515,9 +519,33 @@ class LlmExecutor {
                 : { env: baseProcessEnv };
             if (processEnv.error)
                 throw new Error(processEnv.error);
+            // Keep managed bot turns out of the user's platform session history:
+            // redirect the CLI's state home when the platform declares a policy.
+            // Strict skill isolation already runs against an isolated HOME, so the
+            // scope's platform-home env vars stay authoritative there.
+            const executionHome = isolationScope
+                ? null
+                : await (0, providerExecutionHome_1.prepareProviderExecutionHome)({
+                    provider: request.runtime.provider,
+                    homesRoot: this.providerHomesRoot,
+                    baseEnv: processEnv.env,
+                    requestEnv: request.env,
+                    resumeSessionId: request.resumeSessionId,
+                });
+            if (executionHome) {
+                processEnv.env = { ...processEnv.env, ...executionHome.env };
+                for (const warning of executionHome.warnings) {
+                    this.pushEvent(sessionId, { type: 'log', level: 'warning', message: warning });
+                }
+            }
             const backendEnv = mergeStringEnvValues(processEnv.env);
             const backendRequest = { ...request, cwd, env: backendEnv };
-            await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
+            await this.sessionManager.update(sessionId, {
+                status: 'running',
+                startedAt,
+                cwd,
+                providerStateHome: executionHome?.home,
+            });
             if (request.skills && request.skills.length > 0) {
                 const injection = await (0, skill_injector_1.injectSkills)({
                     skills: request.skills,

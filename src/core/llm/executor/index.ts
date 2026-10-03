@@ -24,4 +24,8 @@ export { createPiBackend, piBackendFactory } from './backends/pi';
 export { createZCodeBackend, zcodeBackendFactory } from './backends/zcode';
 export { createRegistryBackendFactories } from './backends/registry';
 export { createFileSessionManager, isSafeLlmSessionId, type SessionManager } from './session-manager';
+export {
+  prepareProviderExecutionHome,
+  type ProviderExecutionHomePreparation,
+} from './providerExecutionHome';
 export { injectSkills, resolveProviderSkillRoot, type SkillInjectionResult, type SkillInjectorInput } from './skill-injector';
