@@ -967,7 +967,7 @@ export const TRAFFIC_CSS = `
 .oac-kb-toggle[data-on='true'] { background: var(--dsw-alias-state-business-primary); }
 .oac-kb-toggle-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--dsw-alias-label-primary-foreground); transition: left .15s ease; }
 .oac-kb-toggle[data-on='true'] .oac-kb-toggle-knob { left: 16px; }
-.oac-kb-notice { font-size: 12px; border-radius: 8px; padding: 6px 10px; }
+.oac-kb-notice { font-size: 12px; border-radius: 8px; padding: 6px 10px; white-space: pre-line; }
 .oac-kb-notice[data-kind='success'] { color: var(--dsw-alias-state-success-primary); background: rgba(34, 197, 94, .1); }
 .oac-kb-notice[data-kind='error'] { color: var(--dsw-alias-state-error-primary); background: rgba(239, 68, 68, .1); }
 .oac-kb-danger-btn { color: var(--dsw-alias-state-error-primary); }

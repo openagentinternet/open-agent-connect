@@ -1807,16 +1807,33 @@ export async function kbRemove(from: string, id: string): Promise<void> {
   await post('kb/remove', { from, id })
 }
 
-export type KbLearnSummary = { added: number; updated: number; removed: number }
+export type KbLearnSummary = {
+  added: number
+  updated: number
+  removed: number
+  /** Raw docs whose extraction failed this pass (first 20, with reasons). */
+  failed?: Array<{ file: string; reason: string }>
+  failedTotal?: number
+}
 
 export async function kbLearn(from: string, id?: string, full?: boolean): Promise<KbLearnSummary | null> {
   const data = recordOf(await post<unknown>('kb/learn', { from, ...(id ? { id } : {}), ...(full ? { full: true } : {}) }))
   const summary = recordOf(recordOf(data.knowledgeBase).learnSummary)
   if (!Object.keys(summary).length) return null
+  const failedRaw = Array.isArray(summary.failed) ? summary.failed : []
   return {
     added: Math.max(0, toNumber(summary.added)),
     updated: Math.max(0, toNumber(summary.updated)),
     removed: Math.max(0, toNumber(summary.removed)),
+    ...(failedRaw.length
+      ? {
+        failed: failedRaw.map((row) => {
+          const entry = recordOf(row)
+          return { file: String(entry.file ?? '?'), reason: String(entry.reason ?? '') }
+        }),
+      }
+      : {}),
+    ...(toNumber(summary.failedTotal) > 0 ? { failedTotal: Math.max(0, toNumber(summary.failedTotal)) } : {}),
   }
 }
 
@@ -1832,7 +1849,7 @@ export async function kbOpenDir(from: string, id: string): Promise<void> {
 }
 
 /** Raw-byte KB document import (the browser form of IDBots' importFiles picker). */
-export async function kbImport(from: string, id: string, file: File): Promise<number> {
+export async function kbImport(from: string, id: string, file: File): Promise<{ imported: number; skipped: number }> {
   const params = new URLSearchParams({ from, id, filename: file.name })
   const response = await fetch(`/oac/api/kb/import?${params.toString()}`, {
     method: 'POST',
@@ -1840,11 +1857,11 @@ export async function kbImport(from: string, id: string, file: File): Promise<nu
     headers: { 'content-type': 'application/octet-stream' },
     body: await file.arrayBuffer(),
   })
-  const json = await response.json() as Envelope & { data?: { imported?: unknown } }
+  const json = await response.json() as Envelope & { data?: { imported?: unknown; skipped?: unknown } }
   if (json.ok === false || json.state === 'failed') {
     throw new OacApiError(json.code ?? 'failed', json.message ?? json.error ?? 'import failed')
   }
-  return Math.max(0, toNumber(json.data?.imported))
+  return { imported: Math.max(0, toNumber(json.data?.imported)), skipped: Math.max(0, toNumber(json.data?.skipped)) }
 }
 
 export async function studyList(from: string): Promise<StudyJob[]> {

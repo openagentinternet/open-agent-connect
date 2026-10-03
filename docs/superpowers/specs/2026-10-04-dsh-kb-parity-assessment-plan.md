@@ -4,6 +4,21 @@ Date: 2026-10-04
 Branch: `feat/dsh-kb-parity-2026-10-04`
 Reference implementation: IDBots (`/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots`)
 
+> **Decisions resolved (2026-10-04, owner).** (1) Study budget default aligns
+> to IDBots: 50. (2) The manual study-run trigger ships as
+> `metabot knowledge-base study run [--wait]` + the `metaweb_study_run` chat
+> tool + a `/ui/kb` Run-now button, executing in the daemon with the window
+> ignored. (3) The content gate stays as OAC has it (tools always mounted;
+> honest empty results). (4) `kb/import` caps at 100 MB per file and
+> same-name imports get IDBots-style `-2`/`-3` suffixes.
+>
+> **Phase 1 + 2 landed on this branch** (same day): P1-1 local-date stamp,
+> P1-2 crash recovery before the window gate (plus the in-flight registry so
+> sweeps never touch runs executing in-process), P1-3 real PDF/DOCX fixture
+> tests, `learnSummary.failed` end-to-end (core → CLI → tools → Knowledge
+> tab → /ui/kb), import suffixing + imported/skipped reporting, the 100 MB
+> import cap, budget default 50, and the dead budget-counter removal.
+
 ## Goal
 
 Step 1 of the knowledge-base (KB) roadmap: bring OAC's KB feature to the same

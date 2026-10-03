@@ -228,12 +228,28 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
     void kbLearn(bot.slug, kb.id, full)
       .then((summary) => {
         loadKbs(bot.slug)
-        showNotice(kb.id, {
-          kind: 'success',
-          text: summary
-            ? interpolate(t('kbLearnSummary'), summary)
-            : t('kbLearnNow'),
-        })
+        if (!summary) {
+          showNotice(kb.id, { kind: 'success', text: t('kbLearnNow') })
+          return
+        }
+        // IDBots-parity presentation: extraction failures flip the notice to
+        // an error and name the failing files — a corpus of unreadable docs
+        // must never learn "successfully" in silence.
+        const failedTotal = summary.failedTotal ?? summary.failed?.length ?? 0
+        if (failedTotal > 0) {
+          const lines = (summary.failed ?? []).map((row) => `${row.file}: ${row.reason}`)
+          showNotice(kb.id, {
+            kind: 'error',
+            text: [
+              interpolate(t('kbLearnSummary'), summary),
+              interpolate(t('kbLearnFailedFiles'), { count: failedTotal }),
+              ...lines,
+              ...(failedTotal > lines.length ? [interpolate(t('kbLearnFailedMore'), { count: failedTotal - lines.length })] : []),
+            ].join('\n'),
+          })
+          return
+        }
+        showNotice(kb.id, { kind: 'success', text: interpolate(t('kbLearnSummary'), summary) })
       })
       .catch((cause) => showNotice(kb.id, { kind: 'error', text: errorText(cause) || t('kbLearnFailed') }))
       .finally(() => {
@@ -257,15 +273,18 @@ export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }
     setImportingIds((prev) => new Set(prev).add(kb.id))
     void (async () => {
       let imported = 0
+      let skipped = 0
       let firstError = ''
       for (const file of picked) {
         try {
-          imported += await kbImport(bot.slug, kb.id, file)
+          const result = await kbImport(bot.slug, kb.id, file)
+          imported += result.imported
+          skipped += result.skipped
         } catch (cause) {
+          skipped += 1
           if (!firstError) firstError = errorText(cause)
         }
       }
-      const skipped = picked.length - imported
       showNotice(kb.id, {
         kind: imported > 0 ? 'success' : 'error',
         text: imported > 0

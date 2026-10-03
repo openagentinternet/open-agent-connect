@@ -45,7 +45,11 @@ type KbServiceLike = {
     getKnowledgeBase(id: string): Promise<Record<string, unknown> | null>
     listKnowledgeBases(): Promise<Array<Record<string, unknown>>>
   }
-  importFiles(slug: string, knowledgeBaseId: string, filePaths: string[]): Promise<number>
+  importFiles(slug: string, knowledgeBaseId: string, filePaths: string[]): Promise<{
+    imported: number
+    skipped: number
+    files: string[]
+  }>
 }
 
 function success(data: unknown): MetabotCommandResult {
@@ -274,8 +278,13 @@ export async function dispatchKbRoutes(
  * Raw-byte document import for one KB (`POST /oac/api/kb/import?from=&id=&filename=`,
  * body = file bytes). The bytes land in a temp file (oac-dsh-payload
  * convention, unlinked after the run) and the core importFiles copies them
- * into the KB's raw corpus; indexing stays an explicit Learn click.
+ * into the KB's raw corpus (same-name files get `-2`/`-3` suffixes, never
+ * overwritten). Indexing stays an explicit Learn click.
  */
+/** Per-file upload cap: the DSH host is a long-lived process; refusing a
+ * multi-hundred-MB upload before it buffers beats failing a learn later. */
+export const KB_IMPORT_MAX_BYTES = 100 * 1024 * 1024
+
 export async function importKbFile(
   from: string,
   knowledgeBaseId: string,
@@ -285,6 +294,9 @@ export async function importKbFile(
   if (!from) return failure('missing_from', 'from is required')
   if (!knowledgeBaseId) return failure('missing_id', 'id is required')
   if (bytes.length === 0) return failure('empty_body', 'import body is empty')
+  if (bytes.length > KB_IMPORT_MAX_BYTES) {
+    return failure('file_too_large', `"${basename(filename || 'document.bin')}" is ${(bytes.length / (1024 * 1024)).toFixed(0)} MB — the import cap is 100 MB.`)
+  }
   const homeDir = await localActorHomeDir(from)
   if (!homeDir) return failure('kb_unavailable', 'knowledge bases are only manageable locally')
   const service = kbServiceFor(homeDir)
@@ -298,9 +310,9 @@ export async function importKbFile(
   const path = join(dir, safeName)
   await writeFile(path, bytes)
   try {
-    const imported = await service.importFiles(slug, knowledgeBaseId, [path])
-    if (!imported) return failure('unsupported_format', `"${safeName}" is not a supported document format.`)
-    return { ok: true, state: 'success', data: { imported, knowledgeBaseId } }
+    const result = await service.importFiles(slug, knowledgeBaseId, [path])
+    if (!result.imported) return failure('unsupported_format', `"${safeName}" is not a supported document format.`)
+    return { ok: true, state: 'success', data: { imported: result.imported, skipped: result.skipped, files: result.files, knowledgeBaseId } }
   } catch (error) {
     return failure('import_failed', error instanceof Error ? error.message : String(error))
   } finally {

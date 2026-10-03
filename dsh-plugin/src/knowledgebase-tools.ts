@@ -6,6 +6,7 @@
  * against the session Bot's profile paths.
  */
 import { core, twinFallbackSlug } from './local-read.js'
+import { runMetabot } from './cli-bridge.js'
 import { qaSurfAliasDisable, qaSurfAliasEnqueue } from './surf-tools.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 import { actorHomeDir, oacSlugOf } from './browser-tools.js'
@@ -284,7 +285,30 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
           const landing = session.viaFallback
             ? ` on the machine-default Bot "${session.slug}" (this session has no OAC Bot of its own)`
             : ''
-          return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks indexed${landing}.`
+          // IDBots-parity failure surfacing: raw docs whose extraction failed
+          // are named with their reason, so an unreadable corpus never learns
+          // "successfully" with 0 docs in silence.
+          const summary = (learned as {
+            learnSummary?: {
+              failed?: Array<{ file?: unknown; reason?: unknown }>
+              failedTotal?: unknown
+            }
+          }).learnSummary ?? undefined
+          const failedTotal = typeof summary?.failedTotal === 'number' ? summary.failedTotal : 0
+          const failed = Array.isArray(summary?.failed) ? summary.failed : []
+          const failedLines = failedTotal > 0
+            ? [
+              '',
+              `WARNING: ${failedTotal} raw document(s) failed to extract and are NOT indexed:`,
+              ...failed.map((row) => `- ${String(row.file ?? '?')}: ${String(row.reason ?? 'extraction failed')}`),
+              ...(failedTotal > failed.length ? [`- …and ${failedTotal - failed.length} more`] : []),
+              'Fix or remove these files and run knowledge_base_learn again.',
+            ]
+            : []
+          return [
+            `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks indexed${landing}.`,
+            ...failedLines,
+          ].join('\n')
         } catch (error) {
           return toolError('knowledge_base_learn', error)
         }
@@ -652,6 +676,47 @@ export function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host:
           ].join('\n')
         } catch (error) {
           return toolError('metaweb_study_retry', error)
+        }
+      },
+    },
+    {
+      name: 'metaweb_study_run',
+      description:
+        'Run one study job RIGHT NOW instead of waiting for the nightly window (00:00-06:00) — the manual '
+        + 'trigger for testing or impromptu learning. Pass a jobId from metaweb_study_status, or a topic '
+        + 'substring to pick among jobs (pending first, then failed — a failed job is retried automatically, '
+        + 'and a done job re-runs honestly); with no arguments the oldest pending job runs. The study session '
+        + 'runs in the daemon background; call metaweb_study_status afterwards for the outcome.',
+      parameters: {
+        type: 'object',
+        properties: {
+          jobId: { type: 'string', description: 'One job id from metaweb_study_status.' },
+          topic: { type: 'string', description: 'Run the first job whose topic contains this text.' },
+        },
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 30_000,
+      execute: async (args, exec) => {
+        const session = await sessionOf(input, exec)
+        if (!session) return toolError('metaweb_study_run', NO_SESSION)
+        const run = input.run ?? ((argv: string[], options?: { timeoutMs?: number }) => runMetabot(argv, options))
+        const argv = ['knowledge-base', 'study', 'run', '--from', session.slug]
+        if (textArg(args, 'jobId')) argv.push('--job-id', textArg(args, 'jobId'))
+        if (textArg(args, 'topic')) argv.push('--topic', textArg(args, 'topic'))
+        try {
+          // CLI-first: the daemon owns the study executor (passive-LLM chain
+          // + tool wiring), so the tool starts the run through the CLI verb
+          // and lets the caller poll metaweb_study_status for the outcome.
+          const result = await run(argv, { timeoutMs: 25_000 })
+          if (!result.ok) return `metaweb_study_run failed: ${result.message}`
+          const data = (result.data ?? {}) as { jobId?: unknown; topic?: unknown }
+          return [
+            `Study job "${String(data.topic ?? '')}" (${String(data.jobId ?? '')}) is now running.`,
+            'It searches MetaWeb, reads pins, and saves what is worth keeping into the knowledge base (per-run pin budget).',
+            'Check metaweb_study_status in a few minutes for the summary.',
+          ].join('\n')
+        } catch (error) {
+          return toolError('metaweb_study_run', error)
         }
       },
     },
