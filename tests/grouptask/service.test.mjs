@@ -313,6 +313,27 @@ test('getGroupTaskDetail backfills messages and flags untrusted senders', async 
   assert.ok(worker.lastWorkingAt != null);
 });
 
+test('listGroupTaskMessages reports a sync watermark so an empty cache is not mistaken for empty history', async () => {
+  const { ctx, indexer } = createFakeContext('metabot-gts-msg-watermark-');
+  const { task } = await createGroupTask(ctx, { title: 'Watermark', goal: 'G' });
+
+  const fresh = await service.listGroupTaskMessages(ctx, 'twin-bot', task.id, { sync: false });
+  assert.deepEqual(fresh.messages, []);
+  assert.equal(fresh.total, 0);
+  assert.equal(fresh.syncedAt, null, 'never-synced cache is distinguishable from a synced-empty one');
+  assert.equal(fresh.lastProcessedIndex, -1);
+
+  indexer.state.history = [{
+    index: 0, txId: 'tx-0', pinId: 'hpin-0', groupId: task.groupId,
+    globalMetaId: 'IDTWIN', metaId: 'meta-0', content: 'hello group',
+    contentType: 'text/plain', encryption: '0', timestamp: 1_700_000_000,
+    userInfo: { name: 'sender-0' },
+  }];
+  const synced = await service.listGroupTaskMessages(ctx, 'twin-bot', task.id);
+  assert.equal(synced.total, 1);
+  assert.ok(synced.syncedAt > 0, 'cache write time surfaced after a sync');
+});
+
 // ---------------------------------------------------------------------------
 // Messaging
 // ---------------------------------------------------------------------------
@@ -412,6 +433,37 @@ test('closeGroupTask broadcasts the verdict as the group final message (OT-06 R1
   const chairProfile = await ctx.getProfile('twin-bot');
   const store2 = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
   assert.equal((await store2.getTaskById(task.id)).status, 'done');
+});
+
+test('closeGroupTask(done) accepts delivered rows only; unverified rows stay pending', async () => {
+  const { ctx, pins, profiles } = createFakeContext('metabot-gts-close-pending-');
+  const { task } = await createGroupTask(ctx, { title: 'T', goal: 'G', workerSlugs: ['worker-1'] });
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const { decryptGroupContent } = require('../../dist/core/appSession/groupChat.js');
+  const store = createGroupTaskStore(resolveMetabotPaths(profiles[0].homeDir));
+  const delivered = await store.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-d', authorGlobalMetaId: 'IDWORKER1', kind: 'pin', uri: 'pin://abc',
+  });
+  await store.updateDeliverableVerification(delivered.id, { sources: [] }, 'confirmed', 'delivered');
+  const pending = await store.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-p', authorGlobalMetaId: 'IDWORKER1', kind: 'text', uri: null,
+  });
+  const pinsBefore = pins.length;
+
+  await closeGroupTask(ctx, 'twin-bot', task.id, { status: 'done', rating: 5 });
+
+  const rows = await store.listDeliverables(task.id);
+  assert.equal(rows.find((row) => row.id === delivered.id).status, 'accepted',
+    'chain-confirmed rows are accepted by the owner close');
+  assert.equal(rows.find((row) => row.id === pending.id).status, 'pending',
+    'unverified rows are never stamped accepted');
+
+  assert.equal(pins.length, pinsBefore + 1);
+  const payload = JSON.parse(pins.at(-1).payload);
+  const text = decryptGroupContent(String(payload.content ?? ''), String(payload.groupId ?? ''));
+  assert.match(text, /1 deliverable remained unverified and stay pending/,
+    'the closing notice says what stayed unverified');
 });
 
 test('reopenGroupTask only works from review and rejects pending deliverables', async () => {

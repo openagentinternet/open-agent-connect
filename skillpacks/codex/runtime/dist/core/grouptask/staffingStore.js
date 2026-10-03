@@ -109,6 +109,9 @@ function createStaffingStore(paths) {
                 status: input.skipAuthorized ? 'skip_authorized' : 'pending',
                 skipAuthorized: input.skipAuthorized,
                 ownerDecision: null,
+                decisionSource: null,
+                decidedBy: null,
+                triggeringWish: input.triggeringWish?.trim() || null,
                 createdTaskId: null,
                 createdAt: now,
                 confirmedAt: null,
@@ -158,13 +161,15 @@ function createStaffingStore(paths) {
             await writeState(state);
             return record;
         }),
-        setOwnerDecision: (id, decision) => enqueue(async () => {
+        setOwnerDecision: (id, decision, opts) => enqueue(async () => {
             const state = await readState();
             const record = requireProposal(state, id);
             if (record.status === 'consumed' || record.status === 'cancelled') {
                 throw new StaffingStoreError('proposal_not_decidable', `Staffing proposal ${id} is ${record.status} and can no longer be decided`);
             }
             record.ownerDecision = decision;
+            record.decisionSource = opts?.source ?? null;
+            record.decidedBy = opts?.decidedBy?.trim() || null;
             const now = Date.now();
             if (decision === 'confirm') {
                 record.status = 'confirmed';
@@ -172,6 +177,9 @@ function createStaffingStore(paths) {
             }
             else if (decision === 'skip') {
                 record.status = 'skip_authorized';
+            }
+            else if (decision === 'reject') {
+                record.status = 'rejected';
             }
             else {
                 // 'revise' reopens the slate for a fresh proposal round.
@@ -202,12 +210,20 @@ function normalizeProposalRecord(value) {
         || record.status === 'skip_authorized'
         || record.status === 'consumed'
         || record.status === 'cancelled'
+        || record.status === 'rejected'
         ? record.status
         : 'pending';
     const ownerDecision = record.ownerDecision === 'confirm'
         || record.ownerDecision === 'revise'
         || record.ownerDecision === 'skip'
+        || record.ownerDecision === 'reject'
         ? record.ownerDecision
+        : null;
+    const decisionSource = record.decisionSource === 'ui'
+        || record.decisionSource === 'chat'
+        || record.decisionSource === 'chat_reply'
+        || record.decisionSource === 'engine'
+        ? record.decisionSource
         : null;
     const toNumber = (input) => (typeof input === 'number' && Number.isFinite(input) ? input : null);
     return {
@@ -221,6 +237,11 @@ function normalizeProposalRecord(value) {
         status,
         skipAuthorized: record.skipAuthorized === true,
         ownerDecision,
+        decisionSource,
+        decidedBy: typeof record.decidedBy === 'string' && record.decidedBy.trim() ? record.decidedBy : null,
+        triggeringWish: typeof record.triggeringWish === 'string' && record.triggeringWish.trim()
+            ? record.triggeringWish
+            : null,
         createdTaskId: toNumber(record.createdTaskId),
         createdAt: toNumber(record.createdAt) ?? 0,
         confirmedAt: toNumber(record.confirmedAt),
@@ -235,6 +256,8 @@ function staffingProposalUsableAt(record, nowMs) {
         return { usable: false, reason: 'consumed' };
     if (record.status === 'cancelled')
         return { usable: false, reason: 'cancelled' };
+    if (record.status === 'rejected')
+        return { usable: false, reason: 'rejected' };
     if ((0, staffing_1.isStaffingProposalExpired)(record.createdAt, nowMs))
         return { usable: false, reason: 'expired' };
     return { usable: true, reason: 'ok' };

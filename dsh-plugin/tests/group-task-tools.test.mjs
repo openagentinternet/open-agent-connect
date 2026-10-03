@@ -220,6 +220,50 @@ test('propose states a missing acceptanceCriteria instead of leaving it implicit
   assert.match(output, /acceptanceCriteria: \(none\) — the task will have no acceptance criteria/)
 })
 
+test('acceptanceCriteria accepts a string array and joins it newline-separated', async () => {
+  const { calls, run } = fakeRun((args) => ({
+    ok: true,
+    state: 'success',
+    data: args[1] === 'staffing'
+      ? { proposal: { id: 7, acceptanceCriteria: '应用可打开\n可点击链接' }, slateText: 'slate', ownerConfirmRequired: true }
+      : { chairSlug: 'alice', task: { id: 5, groupId: 'g-1', title: 'T', status: 'planning' } },
+  }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  await controller.run('propose', {
+    title: 'T',
+    goal: 'G',
+    plan: { stages: [], seats: [] },
+    acceptanceCriteria: ['  应用可打开 ', '可点击链接'],
+  })
+  const proposeCall = calls.find((args) => args[2] === 'propose')
+  assert.equal(flagValue(proposeCall, '--acceptance'), '应用可打开\n可点击链接', 'the array is trimmed and joined')
+
+  await controller.run('create', { title: 'T', goal: 'G', acceptanceCriteria: ['a', 'b'] })
+  const createCall = calls.find((args) => args[1] === 'create')
+  assert.equal(flagValue(createCall, '--acceptance'), 'a\nb')
+})
+
+test('acceptanceCriteria rejects an object instead of silently dropping it', async () => {
+  const { run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  await assert.rejects(
+    controller.run('propose', { title: 'T', goal: 'G', plan: { stages: [], seats: [] }, acceptanceCriteria: { items: ['a'] } }),
+    /invalid_argument: acceptanceCriteria must be a string/,
+  )
+  await assert.rejects(
+    controller.run('create', { title: 'T', goal: 'G', acceptanceCriteria: 42 }),
+    /invalid_argument: acceptanceCriteria must be a string/,
+  )
+})
+
+test('decide accepts the explicit reject decision', async () => {
+  const { calls, run } = fakeRun(() => ({ ok: true, state: 'success', data: { proposal: { id: 7 } } }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  await controller.run('decide', { proposalId: 7, decision: 'reject' })
+  const decideCall = calls.find((args) => args[2] === 'decide')
+  assert.equal(flagValue(decideCall, '--decision'), 'reject')
+})
+
 test('create_from_proposal warns when the created task carries no acceptanceCriteria', async () => {
   const { run } = fakeRun(() => ({
     ok: true,

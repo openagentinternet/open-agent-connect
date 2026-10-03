@@ -48,6 +48,19 @@ test('bare English instead/drop are not automatic revise', () => {
   assert.equal(classifyOwnerStaffingReply('drop the seat'), 'revise');
 });
 
+test('classifyOwnerStaffingReply: high-confidence vetoes reject; questions never do', () => {
+  assert.equal(classifyOwnerStaffingReply('不需要开群任务'), 'reject');
+  assert.equal(classifyOwnerStaffingReply('别开这个群了'), 'reject');
+  assert.equal(classifyOwnerStaffingReply('取消这个提案'), 'reject');
+  assert.equal(classifyOwnerStaffingReply("don't create the group"), 'reject');
+  assert.equal(classifyOwnerStaffingReply('no need to start it'), 'reject');
+  // Interrogative sweeps are questions, not verdicts.
+  assert.equal(classifyOwnerStaffingReply('不需要开群任务吗？'), 'unknown');
+  assert.notEqual(classifyOwnerStaffingReply('不需要换人吗？'), 'reject');
+  // Keep-roster still wins over the veto sweep.
+  assert.equal(classifyOwnerStaffingReply('好的，不换人'), 'confirm');
+});
+
 test('a skip phrase after propose authorizes create without a new propose', () => {
   assert.deepEqual(
     resolveStaffingOwnerGate({
@@ -72,6 +85,23 @@ test('last decisive owner reply wins: skip then 换人 is revise', () => {
       repliesAfterPropose: ['不用确认直接开', '换人'],
     }),
     { allowed: false, decision: 'owner_revise' },
+  );
+});
+
+test('a veto reply rejects the slate; a later confirm still wins', () => {
+  assert.deepEqual(
+    resolveStaffingOwnerGate({
+      triggeringWish: '帮我开个群任务做技能介绍',
+      repliesAfterPropose: ['不需要开群任务'],
+    }),
+    { allowed: false, decision: 'owner_rejected' },
+  );
+  assert.deepEqual(
+    resolveStaffingOwnerGate({
+      triggeringWish: '帮我开个群任务做技能介绍',
+      repliesAfterPropose: ['不需要开群任务', '确认人选'],
+    }),
+    { allowed: true, decision: 'owner_confirmed' },
   );
 });
 

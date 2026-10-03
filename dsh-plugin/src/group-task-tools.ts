@@ -34,7 +34,7 @@ Do NOT open one for single-step jobs (do them yourself or use local_worker_deleg
 1. Enrich the wish into a \`title\`, a concrete \`goal\`, and measurable \`acceptanceCriteria\`. Never copy the wish verbatim; research is a basic capability of every seat, not a seat of its own. Write acceptance criteria that demand SERVE-THE-DISH deliverables: the owner verifies by CLICKING a link in the UI, never by downloading files — app work must end with a published \`metaapp://\` link (publishing is part of the task, never deferred to the owner), text becomes \`pin://\` notes, \`metafile://\` is only for binaries.
 2. Decompose into coarse seats — one Bot per seat. Seat roles: \`content\`, \`design\` (images and video), \`engineering\` (code, MetaApp, on-chain publish), \`promotion\`, \`domain\` (requires \`domainLabel\`, e.g. legal). Typical team ≤5 including you as chair; hard cap 8.
 3. For each seat call \`{action:"search_candidates", seat}\` once (match-first; local Workers are a tie-break, not a gate), then \`{action:"propose", title, goal, plan, acceptanceCriteria}\`. The plan is {stages:[{id,title,seatRole,dependsOn[]}], seats:[{role, candidateName, candidateSlug?, candidateGlobalMetaId?, source:"local"|"remote", reason, domainLabel?, backupName?}]}. A local seat must name an AVAILABLE local Bot (Bots page → My Bots toggle on AND a DSH LLM pair configured) — propose refuses slugs that are unknown or unavailable, so only pick candidates search_candidates returned; never seat a Bot you merely remember.
-4. The propose result carries \`slateText\` — show it to the owner in the owner's language (pass \`language\`), then WAIT. The owner confirms in chat → \`{action:"decide", proposalId, decision:"confirm"}\`; asks for changes → "revise", then propose again; wants staffing skipped → "skip".
+4. The propose result carries \`slateText\` — show it to the owner in the owner's language (pass \`language\`), then WAIT. The owner confirms in chat → \`{action:"decide", proposalId, decision:"confirm"}\`; asks for changes → "revise", then propose again; wants staffing skipped → "skip"; declines the proposal outright → "reject".
 5. After a confirm decision call \`{action:"create_from_proposal", proposalId}\`. Auto-start waiver: when the triggering wish itself said to just start (直接开始 / 直接开 / "just start" / "no need to confirm"), you may create immediately — pass the original wish text as \`wish\` on propose so the gate records it.
 6. create_from_proposal returns the task (taskId, groupId) and \`pendingRemoteSeats\`. One Bot can hold several seats — invite each remote BOT exactly ONCE, by its GlobalMetaId; a single invite covers all its seats (duplicate invites are refused: invite_pending / already_member). Invites expire in 10 minutes and the daemon must be alive when one arrives. Then report the group's title, roster, and stage plan to the owner and let the engine run. When the result lists \`skippedWorkers\`, those local seats were dropped as unavailable — name them to the owner and note the group runs short those seats.
 
@@ -86,6 +86,28 @@ export interface GroupTaskController {
 function readString(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key]
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+/**
+ * Acceptance criteria arrive as a newline-separated string OR a string array —
+ * models reliably hand back an array (the sibling `local_worker_delegate`
+ * parameter is typed as one), so an array must be joined, never dropped.
+ * Any other explicitly passed type is a caller bug and fails loudly.
+ */
+function readAcceptanceCriteria(args: Record<string, unknown>): string | undefined {
+  const value = args.acceptanceCriteria
+  if (value === undefined) return undefined
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed === '' ? undefined : trimmed
+  }
+  if (Array.isArray(value)) {
+    const lines = value
+      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter((entry) => entry !== '')
+    return lines.length > 0 ? lines.join('\n') : undefined
+  }
+  fail('invalid_argument', 'acceptanceCriteria must be a string (newline-separated) or an array of strings.')
 }
 
 function readBoolean(args: Record<string, unknown>, key: string): boolean | undefined {
@@ -262,7 +284,7 @@ export function createGroupTaskController(
           const title = readString(args, 'title')
           const goal = readString(args, 'goal')
           if (!title || !goal) fail('missing_fields', 'title and goal are required.')
-          const acceptanceCriteria = readString(args, 'acceptanceCriteria')
+          const acceptanceCriteria = readAcceptanceCriteria(args)
           const workerSlugs = readStringList(args, 'workerSlugs')
           return formatCreated(dataOf(await dispatch('grouptask/create', {
             title,
@@ -284,7 +306,7 @@ export function createGroupTaskController(
               + 'Build it from your search_candidates results — one seat entry per seat.',
             )
           }
-          const acceptanceCriteria = readString(args, 'acceptanceCriteria')
+          const acceptanceCriteria = readAcceptanceCriteria(args)
           const wish = readString(args, 'wish')
           const language = readString(args, 'language')
           return formatPropose(dataOf(await dispatch('grouptask/staffing/propose', {
@@ -303,8 +325,8 @@ export function createGroupTaskController(
           const proposalId = readNumber(args, 'proposalId')
           const decision = readString(args, 'decision')
           if (!proposalId) fail('missing_proposal', 'proposalId is required.')
-          if (decision !== 'confirm' && decision !== 'revise' && decision !== 'skip') {
-            fail('invalid_decision', "decision must be 'confirm', 'revise', or 'skip'.")
+          if (decision !== 'confirm' && decision !== 'revise' && decision !== 'skip' && decision !== 'reject') {
+            fail('invalid_decision', "decision must be 'confirm', 'revise', 'skip', or 'reject'.")
           }
           return json(dataOf(await dispatch('grouptask/staffing/decide', {
             ...chairSlugPayload,
@@ -546,7 +568,10 @@ export function buildGroupTaskToolDefinition(
         chair: { type: 'string', description: 'Chair Bot slug; defaults to you (the Twin).' },
         title: { type: 'string' },
         goal: { type: 'string' },
-        acceptanceCriteria: { type: 'string', description: 'Measurable acceptance criteria, newline-separated.' },
+        acceptanceCriteria: {
+          anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description: 'Measurable acceptance criteria: a newline-separated string or an array of strings.',
+        },
         plan: {
           type: 'object',
           description: 'Staffing plan {stages:[{id,title,seatRole,dependsOn[]}], seats:[{role,candidateName,candidateSlug?,candidateGlobalMetaId?,source,reason,domainLabel?,backupName?}]}.',
@@ -554,7 +579,7 @@ export function buildGroupTaskToolDefinition(
         wish: { type: 'string', description: 'The original wish text on propose (drives the skip-confirm gate).' },
         language: { type: 'string', enum: ['zh', 'en'], description: 'Slate language on propose.' },
         proposalId: { type: 'integer', description: 'Staffing proposal id (from propose).' },
-        decision: { type: 'string', enum: ['confirm', 'revise', 'skip'] },
+        decision: { type: 'string', enum: ['confirm', 'revise', 'skip', 'reject'], description: "Owner decision on the slate: 'confirm' to proceed, 'revise' to ask for a new slate, 'skip' to bypass the gate, 'reject' to decline the proposal outright." },
         tab: { type: 'string', enum: ['active', 'done', 'cancelled', 'all'], description: 'list filter; default active.' },
         view: { type: 'string', enum: ['summary', 'full'] },
         limit: { type: 'integer' },

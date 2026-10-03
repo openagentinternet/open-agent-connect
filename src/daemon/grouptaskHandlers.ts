@@ -616,11 +616,19 @@ export function createGroupTaskDaemonHandlers(
         throw new GroupTaskServiceError('missing_proposal', 'proposalId must be a positive integer');
       }
       const decision = normalizeText(body.decision);
-      if (decision !== 'confirm' && decision !== 'revise' && decision !== 'skip') {
-        throw new GroupTaskServiceError('invalid_decision', "decision must be 'confirm', 'revise', or 'skip'");
+      if (decision !== 'confirm' && decision !== 'revise' && decision !== 'skip' && decision !== 'reject') {
+        throw new GroupTaskServiceError('invalid_decision', "decision must be 'confirm', 'revise', 'skip', or 'reject'");
       }
+      // Decision provenance (I1-a): the UI panel and the chat/CLI path both land
+      // here, so the caller names itself; any other/missing source records null.
+      const sourceRaw = normalizeText(body.source);
+      const source = sourceRaw === 'ui' || sourceRaw === 'chat' ? sourceRaw : null;
+      const decidedBy = normalizeText(body.decidedBy) || null;
       return {
-        proposal: await recordStaffingOwnerDecision(ctx, chair, proposalId, decision),
+        proposal: await recordStaffingOwnerDecision(ctx, chair, proposalId, decision, {
+          ...(source ? { source } : {}),
+          ...(decidedBy ? { decidedBy } : {}),
+        }),
       };
     }),
 

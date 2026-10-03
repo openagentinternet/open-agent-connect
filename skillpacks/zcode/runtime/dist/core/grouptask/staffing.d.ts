@@ -16,8 +16,8 @@ export declare const GROUP_TASK_SEAT_ROLES: readonly ["content", "design", "engi
 export type GroupTaskSeatRole = (typeof GROUP_TASK_SEAT_ROLES)[number];
 export declare const GROUP_TASK_TYPICAL_TEAM_SIZE = 5;
 export declare const GROUP_TASK_HARD_TEAM_SIZE = 8;
-export type GroupTaskStaffingProposalStatus = 'pending' | 'confirmed' | 'skip_authorized' | 'consumed' | 'cancelled';
-export type GroupTaskStaffingOwnerDecision = 'skip_authorized' | 'owner_confirmed' | 'owner_revise' | 'awaiting_owner';
+export type GroupTaskStaffingProposalStatus = 'pending' | 'confirmed' | 'skip_authorized' | 'consumed' | 'cancelled' | 'rejected';
+export type GroupTaskStaffingOwnerDecision = 'skip_authorized' | 'owner_confirmed' | 'owner_revise' | 'owner_rejected' | 'awaiting_owner';
 export interface GroupTaskStaffingStage {
     id: string;
     title: string;
@@ -51,7 +51,7 @@ export interface StaffingPlanValidation {
     teamSize: number;
 }
 export declare class GroupTaskStaffingError extends Error {
-    readonly code: 'STAFFING_PLAN_INVALID' | 'OWNER_CONFIRM_REQUIRED' | 'OWNER_REVISE_REQUIRED' | 'PROPOSAL_NOT_FOUND' | 'PROPOSAL_NOT_USABLE' | 'ROSTER_CAP_EXCEEDED' | 'SOURCE_SESSION_REQUIRED';
+    readonly code: 'STAFFING_PLAN_INVALID' | 'OWNER_CONFIRM_REQUIRED' | 'OWNER_REVISE_REQUIRED' | 'OWNER_REJECTED' | 'PROPOSAL_NOT_FOUND' | 'PROPOSAL_NOT_USABLE' | 'ROSTER_CAP_EXCEEDED' | 'SOURCE_SESSION_REQUIRED';
     constructor(code: GroupTaskStaffingError['code'], message: string);
 }
 /** Pending / confirmed / skip-authorized slates expire after 24h. */
@@ -59,7 +59,7 @@ export declare const STAFFING_PROPOSAL_TTL_MS: number;
 export declare function normalizeStaffingPlan(raw: unknown): GroupTaskStaffingPlan;
 export declare function validateStaffingPlan(plan: GroupTaskStaffingPlan): StaffingPlanValidation;
 export declare function detectSkipConfirmInWish(text: string): boolean;
-export declare function classifyOwnerStaffingReply(text: string): 'confirm' | 'revise' | 'unknown';
+export declare function classifyOwnerStaffingReply(text: string): 'confirm' | 'revise' | 'reject' | 'unknown';
 export declare function pickTriggeringWishText(messages: StaffingSessionMessage[], atOrBeforeMs: number): string;
 export declare function isStaffingProposalExpired(createdAt: number, nowMs: number): boolean;
 export declare function resolveStaffingOwnerGate(input: {

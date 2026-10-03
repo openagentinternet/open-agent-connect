@@ -624,6 +624,8 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-staffing { display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-fill-floating-secondary, transparent); }
 .oac-gt-staffing-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
 .oac-gt-staffing-seat { display: flex; align-items: center; gap: 6px; font-size: 12px; padding-left: 4px; }
+.oac-gt-staffing-context { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.oac-gt-staffing-consequences { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-secondary); }
 .oac-gt-staffing-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .oac-gt-collabs-title { padding: 4px 12px 6px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .02em; color: var(--dsw-alias-label-tertiary); text-transform: uppercase; }
 .oac-gt-guest-invite { cursor: default; opacity: .75; }

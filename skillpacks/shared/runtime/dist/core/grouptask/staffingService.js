@@ -62,6 +62,7 @@ async function proposeGroupTaskStaffing(ctx, input, now = Date.now) {
         acceptanceCriteria: input.acceptanceCriteria ?? null,
         plan,
         skipAuthorized,
+        triggeringWish: triggeringWish || null,
     });
     const ownerConfirmRequired = !skipAuthorized;
     const slateText = (0, staffing_1.buildStaffingSlateText)({
@@ -74,9 +75,9 @@ async function proposeGroupTaskStaffing(ctx, input, now = Date.now) {
     });
     return { proposal, slateText, ownerConfirmRequired, validation };
 }
-async function recordStaffingOwnerDecision(ctx, chairSlug, proposalId, decision) {
+async function recordStaffingOwnerDecision(ctx, chairSlug, proposalId, decision, opts) {
     const chair = await (0, service_1.requireProfile)(ctx, chairSlug);
-    return (0, service_1.staffingStoreFor)(ctx, chair).setOwnerDecision(proposalId, decision);
+    return (0, service_1.staffingStoreFor)(ctx, chair).setOwnerDecision(proposalId, decision, opts);
 }
 async function evaluateStaffingOwnerGate(ctx, input) {
     const now = input.now ?? Date.now;
@@ -94,8 +95,13 @@ async function evaluateStaffingOwnerGate(ctx, input) {
     if (proposal.ownerDecision === 'revise') {
         return { allowed: false, decision: 'owner_revise', proposal };
     }
+    if (proposal.ownerDecision === 'reject') {
+        return { allowed: false, decision: 'owner_rejected', proposal };
+    }
     // 2. Chat replies after the propose (last-intent gate), when a transcript
-    //    is available (CLI/session-driven flows).
+    //    is available (CLI/session-driven flows). A verdict the gate reads here
+    //    used to be computed and discarded; persist it (source + who) so the
+    //    decision leaves a trace and later evaluations see the same answer.
     if (input.sessionMessages?.length) {
         const { triggeringWish, repliesAfterPropose } = (0, staffing_1.splitSessionMessagesForStaffingGate)(input.sessionMessages, proposal.createdAt);
         const gate = (0, staffing_1.resolveStaffingOwnerGate)({
@@ -103,6 +109,18 @@ async function evaluateStaffingOwnerGate(ctx, input) {
             repliesAfterPropose,
             persistedSkip: proposal.skipAuthorized,
         });
+        if (gate.decision === 'owner_confirmed') {
+            const persisted = await (0, service_1.staffingStoreFor)(ctx, chair)
+                .setOwnerDecision(input.proposalId, 'confirm', { source: 'chat_reply' })
+                .catch(() => proposal);
+            return { ...gate, proposal: persisted };
+        }
+        if (gate.decision === 'owner_rejected') {
+            const persisted = await (0, service_1.staffingStoreFor)(ctx, chair)
+                .setOwnerDecision(input.proposalId, 'reject', { source: 'chat_reply' })
+                .catch(() => proposal);
+            return { ...gate, proposal: persisted };
+        }
         return { ...gate, proposal };
     }
     // 3. Fall back to the persisted skip flag from the triggering wish.
@@ -115,10 +133,16 @@ async function createGroupTaskFromProposal(ctx, input) {
     const now = input.now ?? Date.now;
     const gate = await evaluateStaffingOwnerGate(ctx, input);
     if (!gate.allowed) {
-        const code = gate.decision === 'owner_revise' ? 'OWNER_REVISE_REQUIRED' : 'OWNER_CONFIRM_REQUIRED';
+        const code = gate.decision === 'owner_revise'
+            ? 'OWNER_REVISE_REQUIRED'
+            : gate.decision === 'owner_rejected'
+                ? 'OWNER_REJECTED'
+                : 'OWNER_CONFIRM_REQUIRED';
         throw new staffing_1.GroupTaskStaffingError(code, gate.decision === 'owner_revise'
             ? 'The owner asked for a revised roster before creating the group task.'
-            : 'Owner confirmation is required before creating the group task.');
+            : gate.decision === 'owner_rejected'
+                ? 'The owner declined this group task; the proposal stays rejected.'
+                : 'Owner confirmation is required before creating the group task.');
     }
     const plan = gate.proposal.plan;
     (0, staffing_1.assertCreateRosterCap)(plan.seats.length);
@@ -165,7 +189,9 @@ async function listStaffingProposals(ctx, chairSlug) {
         : await (0, service_1.resolveChairProfile)(ctx);
     const now = Date.now();
     const rows = await (0, service_1.staffingStoreFor)(ctx, chair).listProposals();
-    return rows.filter((row) => !(0, staffing_1.isStaffingProposalExpired)(row.createdAt, now) || row.createdTaskId !== null);
+    // Rejected proposals are settled: they drop off the list like expired ones.
+    return rows.filter((row) => row.status !== 'rejected'
+        && (!(0, staffing_1.isStaffingProposalExpired)(row.createdAt, now) || row.createdTaskId !== null));
 }
 async function requireUsableProposal(ctx, chair, proposalId, nowMs) {
     const store = (0, service_1.staffingStoreFor)(ctx, await (0, service_1.requireProfile)(ctx, chair.slug));

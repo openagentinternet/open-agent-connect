@@ -462,9 +462,15 @@ export type GroupTaskStaffingProposalRow = {
   chairSlug: string
   title: string
   goal: string
-  status: 'pending' | 'confirmed' | 'skip_authorized' | 'consumed' | 'cancelled'
+  status: 'pending' | 'confirmed' | 'skip_authorized' | 'consumed' | 'cancelled' | 'rejected'
   skipAuthorized: boolean
   ownerDecision: string | null
+  /** DSH session that spoke the wish; the source-session relay returns there. */
+  sourceSessionId: string | null
+  /** The acceptance contract carried by the proposal (null when none was set). */
+  acceptanceCriteria: string | null
+  /** The original wish text that triggered the proposal (null when not recorded). */
+  triggeringWish: string | null
   createdTaskId: number | null
   createdAt: number
   seats: Array<{
@@ -903,13 +909,15 @@ export const api = {
   grouptaskStaffingList: async (): Promise<GroupTaskStaffingProposalRow[]> => {
     const data = await post<{ proposals?: unknown }>('grouptask/staffing/list', {})
     const rows = Array.isArray(data.proposals) ? data.proposals : []
-    return rows.map((row) => normalizeStaffingProposal(row))
+    return rows
+      .map((row) => normalizeStaffingProposal(row))
+      .filter((row): row is GroupTaskStaffingProposalRow => row !== null)
   },
   grouptaskStaffingDecide: async (
     chair: string,
     proposalId: number,
     decision: 'confirm' | 'revise' | 'skip',
-  ): Promise<CommandEnvelope> => postEnvelope('grouptask/staffing/decide', { chairSlug: chair, proposalId, decision }),
+  ): Promise<CommandEnvelope> => postEnvelope('grouptask/staffing/decide', { chairSlug: chair, proposalId, decision, source: 'ui' }),
   grouptaskStaffingCreate: async (proposalId: number): Promise<{ taskId: number; pendingRemoteSeats: number; skippedWorkers: GroupTaskSkippedWorkerRow[] }> => {
     const data = await post<{ taskId?: unknown; pendingRemoteSeats?: unknown; skippedWorkers?: unknown }>(
       'grouptask/staffing/create',
@@ -1244,7 +1252,7 @@ function normalizeGroupTaskMemberPreview(value: unknown): GroupTaskMemberPreview
   }
 }
 
-function normalizeStaffingProposal(value: unknown): GroupTaskStaffingProposalRow {
+function normalizeStaffingProposal(value: unknown): GroupTaskStaffingProposalRow | null {
   const record = recordOf(value)
   const plan = recordOf(record.plan)
   const statusText = textOf(record.status)
@@ -1252,8 +1260,17 @@ function normalizeStaffingProposal(value: unknown): GroupTaskStaffingProposalRow
     || statusText === 'skip_authorized'
     || statusText === 'consumed'
     || statusText === 'cancelled'
+    || statusText === 'rejected'
     ? statusText
-    : 'pending'
+    : statusText === 'pending'
+      ? 'pending'
+      // Unknown statuses are never silently rendered as pending: drop the row
+      // and surface the contract drift instead of showing a wrong slate state.
+      : null
+  if (status === null) {
+    console.warn(`[oac] grouptask staffing list: unknown proposal status "${statusText}" — row skipped`)
+    return null
+  }
   return {
     id: Math.trunc(toNumber(record.id)),
     chairSlug: textOf(record.chairSlug),
@@ -1262,6 +1279,9 @@ function normalizeStaffingProposal(value: unknown): GroupTaskStaffingProposalRow
     status,
     skipAuthorized: record.skipAuthorized === true,
     ownerDecision: textOf(record.ownerDecision) || null,
+    sourceSessionId: textOf(record.sourceSessionId) || null,
+    acceptanceCriteria: textOf(record.acceptanceCriteria) || null,
+    triggeringWish: textOf(record.triggeringWish) || null,
     createdTaskId: record.createdTaskId == null ? null : Math.trunc(toNumber(record.createdTaskId)) || null,
     createdAt: toNumber(record.createdAt),
     seats: Array.isArray(plan.seats)

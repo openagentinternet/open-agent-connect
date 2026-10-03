@@ -86,8 +86,13 @@ export function applyGroupTaskRelayDrain(
   const run = options.run ?? runMetabotPinned
   const tickMs = options.tickMs ?? DEFAULT_TICK_MS
   const daemonAlive = options.daemonAlive ?? daemonAliveByHttp
+  // Pending rows are stored RAW, not pre-rendered: a row drained while a task
+  // was still running must still gain the delayed-event prefix if a later
+  // drain reports that same task closed before the origin session came back.
   /** Rows that could not be delivered live, keyed by origin session id. */
-  const pendingBySession = new Map<string, string[]>()
+  const pendingBySession = new Map<string, GroupTaskRelayRow[]>()
+  /** Latest task state seen at drain time, keyed by `<chair>:<taskId>`. */
+  const lastStatusByTask = new Map<string, { taskStatus: string | null; closedAt: number | null }>()
   /** Delivered-row dedupe across scheduler ticks and pre-step races. */
   const deliveredKeys = new Set<string>()
 
@@ -107,7 +112,7 @@ export function applyGroupTaskRelayDrain(
       }
     }
     const list = pendingBySession.get(row.sessionId) ?? []
-    list.push(text)
+    list.push(row)
     pendingBySession.set(row.sessionId, list)
     return false
   }
@@ -131,7 +136,17 @@ export function applyGroupTaskRelayDrain(
     })
     if (!result.ok) return 0
     const rows = (result.data as { relayed?: GroupTaskRelayRow[] } | undefined)?.relayed ?? []
-    for (const row of rows) deliver(row)
+    for (const row of rows) {
+      // Each row is a snapshot of its task's state at drain time; remember the
+      // newest one so a queued row can be re-judged when the origin returns.
+      if (row.taskStatus !== undefined) {
+        lastStatusByTask.set(`${row.chairSlug ?? ''}:${row.taskId}`, {
+          taskStatus: row.taskStatus ?? null,
+          closedAt: typeof row.closedAt === 'number' ? row.closedAt : null,
+        })
+      }
+      deliver(row)
+    }
     return rows.length
   }
 
@@ -150,7 +165,16 @@ export function applyGroupTaskRelayDrain(
           const pending = pendingBySession.get(sessionId)
           if (!pending || pending.length === 0) return decision
           pendingBySession.delete(sessionId)
-          const text = pending.join('\n\n')
+          // Re-render each queued row against the latest known task state, so
+          // a milestone queued while running reads as history once the task closed.
+          const text = pending
+            .map((item) => {
+              const known = lastStatusByTask.get(`${item.chairSlug ?? ''}:${item.taskId}`)
+              return known
+                ? relayTextOf({ ...item, taskStatus: known.taskStatus, closedAt: known.closedAt })
+                : relayTextOf(item)
+            })
+            .join('\n\n')
           return {
             kind: 'enter',
             messages: [...decision.messages, {

@@ -248,16 +248,45 @@ test('engine: worker [DELIVERABLE] records rows and pulls a chair verification t
   assert.equal((await h.chairStore.listDeliverables(task.id)).length, 1);
 });
 
+test('engine: a message delivering a URI artifact drops its sibling text summary', async () => {
+  const h = createHarness('metabot-gt-engine-deliver-text-');
+  const task = await h.seedTask('executing');
+  h.pushHistory('IDWORKER1', [
+    '[DELIVERABLE] https://example.com/report done',
+    '[DELIVERABLE] 报告要点：三个结论',
+  ].join('\n'));
+  h.llmTurns.push('[NO_REPLY]');
+  await h.engine.tick();
+
+  const rows = await h.chairStore.listDeliverables(task.id);
+  assert.equal(rows.length, 1, 'the URI artifact is the only deliverable on that message pin');
+  assert.equal(rows[0].kind, 'link');
+
+  // A standalone text note (no URI sibling) is still recorded as a text row.
+  h.pushHistory('IDWORKER1', '[DELIVERABLE] 只有一句话的总结');
+  h.llmTurns.push('[NO_REPLY]');
+  await h.engine.tick();
+  const after = await h.chairStore.listDeliverables(task.id);
+  assert.equal(after.length, 2);
+  assert.equal(after[1].kind, 'text');
+  assert.equal(after[1].uri, null);
+});
+
 test('engine: chair [STATUS:REVIEW] closes checkpoints and persists the acceptance summary (no host post)', async () => {
   const h = createHarness('metabot-gt-engine-review-');
   const task = await h.seedTask('executing');
   await h.chairStore.addDeliverable({
     taskId: task.id, msgPinId: 'pin-x', authorGlobalMetaId: 'IDWORKER1', kind: 'link', uri: 'https://example.com/r',
   });
-  // A local-only row (no on-chain uri) must be warned about, not silently
-  // presented as an ordinary unverified deliverable.
+  // A URI-free row is a text note, not a local file; a bare local path is a
+  // local file. Each must be cautioned about in its own words, and neither
+  // may be silently presented as an ordinary unverified deliverable.
   await h.chairStore.addDeliverable({
     taskId: task.id, msgPinId: 'pin-local', authorGlobalMetaId: 'IDWORKER1', kind: 'text', uri: null,
+  });
+  await h.chairStore.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-file', authorGlobalMetaId: 'IDWORKER1',
+    kind: 'text', uri: '/tmp/report.pdf',
   });
   h.pushHistory('IDTWIN', 'All acceptance criteria met. [STATUS:REVIEW]');
 
@@ -267,13 +296,18 @@ test('engine: chair [STATUS:REVIEW] closes checkpoints and persists the acceptan
   assert.equal(updated.status, 'review');
   const summary = await h.chairStore.getLatestAcceptanceSummary(task.id);
   assert.ok(summary, 'acceptance summary persisted');
-  assert.equal(summary.deliverables.length, 2);
+  assert.equal(summary.deliverables.length, 3);
   assert.ok(summary.conclusion.includes('All acceptance criteria met'));
   assert.ok(Array.isArray(summary.warnings), 'ledger warnings persisted on the summary');
   assert.ok(summary.warnings.some((warning) => warning.includes('local files')),
-    `local-only caution present: ${JSON.stringify(summary.warnings)}`);
+    `local-file caution present: ${JSON.stringify(summary.warnings)}`);
+  assert.ok(summary.warnings.some((warning) => warning.includes('text notes')),
+    `text-note caution present: ${JSON.stringify(summary.warnings)}`);
   assert.ok(summary.warnings.some((warning) => warning.includes('not confirmed on-chain')),
     `unconfirmed caution present: ${JSON.stringify(summary.warnings)}`);
+  // H2: the ledger row's author GlobalMetaID resolves to the roster name.
+  const linked = summary.deliverables.find((row) => row.uri === 'https://example.com/r');
+  assert.equal(linked.authorName, 'worker-1', 'authorName resolved from the roster, not hard-null');
   // Single-commander: review entry posts NOTHING into the group — the chair's
   // own [STATUS:REVIEW] message is the wrap-up; the owner hears privately.
   assert.equal(h.pins.length, 0, 'no host review summary post (single-commander)');

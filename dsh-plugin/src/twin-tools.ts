@@ -880,7 +880,7 @@ export function buildTwinToolDefinitions(
     },
     {
       name: 'local_worker_delegate',
-      description: 'Delegate one bounded step to a local Worker Bot. Opens one clearly named [编排任务] Worker conversation, runs the step there, keeps that conversation visible, and returns the Worker handoff to the originating Twin conversation.',
+      description: 'Delegate one bounded step to a local Worker Bot. Opens one clearly named [编排任务] Worker conversation, runs the step there, keeps that conversation visible, and returns the Worker handoff to the originating Twin conversation. On timeout the receipt carries the Worker session id plus the task/step/attempt ids, the last assistant output when the Worker streamed any (truncated), and the suggested next inspection step.',
       parameters: {
         type: 'object',
         properties: {

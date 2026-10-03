@@ -108,6 +108,37 @@ test('a relay row drained after its task closed is delivered as a delayed event'
   second.stop()
 })
 
+test('a row queued while the task ran gains the delayed prefix when a later drain closes it', async () => {
+  const { ctx, preStepHandlers } = fakeCtx()
+  const createdAt = Date.now()
+  const queued = row({
+    id: 9,
+    taskStatus: 'executing',
+    closedAt: null,
+    createdAt,
+    kind: 'dispatch',
+    text: 'Work is underway.',
+  })
+  let relayed = [queued]
+  const drainer = plugin.applyGroupTaskRelayDrain(ctx, {
+    daemonAlive: async () => true,
+    run: async () => ({ ok: true, data: { relayed } }),
+  })
+  // First drain: the origin session is closed, so the row waits (task still running).
+  await drainer.drainOnce()
+
+  // A later drain reports the SAME task closed before the session came back.
+  const closedAt = createdAt + 1_000
+  relayed = [row({ id: 10, taskStatus: 'done', closedAt, createdAt: createdAt + 10 })]
+  await drainer.drainOnce()
+
+  const decision = await preStepThrough(preStepHandlers[0], { session: { id: 'sess-origin' } })
+  const text = decision.messages.at(-1).content[0].text
+  assert.match(text, /^\[delayed event — task 42 is now done\]/, 'the queued row is re-judged at flush time')
+  assert.match(text, /\[Group Task\] 发布 MetaApp/, 'the original queued text is preserved')
+  drainer.stop()
+})
+
 test('relay drain survives CLI failures and ignores foreign sessions', async () => {
   const { ctx, preStepHandlers } = fakeCtx()
   let fail = true

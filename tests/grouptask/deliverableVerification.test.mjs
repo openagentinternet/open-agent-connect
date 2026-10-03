@@ -78,3 +78,34 @@ test('verifyTaskDeliverables flips confirmation, delivers pending, keeps errors'
   const again = await verifyTaskDeliverables(store, task.id, async () => 'found', { now: () => 2_000 });
   assert.equal(again.checked, 1);
 });
+
+test('verifyTaskDeliverables never confirms a URI-free row off its carrier message pin', async () => {
+  const systemHome = mkdtempTempRootSync('metabot-gt-verify-nouri-');
+  const homeDir = path.join(systemHome, '.metabot', 'profiles', 'chair');
+  mkdirSync(homeDir, { recursive: true });
+  const store = createGroupTaskStore(resolveMetabotPaths(homeDir));
+  const task = await store.createTask({
+    groupId: 'g-verify-nouri', title: 'T', goal: 'G', chairSlug: 'chair', createdBy: 'user',
+  });
+  // The carrier pin is a real chain pin, but the deliverable itself has no URI.
+  const carrierPin = 'd'.repeat(64) + 'i0';
+  const textRow = await store.addDeliverable({
+    taskId: task.id, msgPinId: carrierPin, authorGlobalMetaId: 'IDW', kind: 'text', uri: null,
+  });
+  const localRow = await store.addDeliverable({
+    taskId: task.id, msgPinId: 'm-local', authorGlobalMetaId: 'IDW', kind: 'text', uri: '/tmp/report.pdf',
+  });
+  let calls = 0;
+  const report = await verifyTaskDeliverables(store, task.id, async () => {
+    calls += 1;
+    return 'found';
+  });
+  assert.equal(calls, 0, 'a URI-free row is never checked against a chain pin');
+  assert.deepEqual(report, { checked: 0, confirmed: 0, stillUnconfirmed: 0 });
+
+  const rows = await store.listDeliverables(task.id);
+  const textAfter = rows.find((row) => row.id === textRow.id);
+  assert.equal(textAfter.confirmation, 'unconfirmed', 'carrier pin does not confirm the deliverable');
+  assert.equal(textAfter.status, 'pending', 'local/text rows never flip to delivered');
+  assert.equal(rows.find((row) => row.id === localRow.id).status, 'pending');
+});

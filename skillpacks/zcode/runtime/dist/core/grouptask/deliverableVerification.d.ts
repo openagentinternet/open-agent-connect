@@ -26,6 +26,11 @@ export interface DeliverableVerificationReport {
  * `confirmation` to confirmed and `pending` rows to `delivered` (IDBots
  * parity: verification is what "delivers" a deliverable); errors keep the
  * row unconfirmed for the next re-verification pass.
+ *
+ * On-chain confirmation is keyed on the deliverable's OWN URI: the message
+ * pin that carried the line proves the line was posted, not that the artifact
+ * itself exists on-chain. A URI-free row (text note or local file) therefore
+ * stays `unconfirmed` / `pending` — never "confirmed" off its carrier pin.
  */
 export declare function verifyTaskDeliverables(store: GroupTaskStore, taskId: number, verifier: PinVerifier, options?: {
     now?: () => number;

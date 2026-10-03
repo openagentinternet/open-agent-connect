@@ -11,7 +11,7 @@
  * as `pendingRemoteSeats` for OpenTeam invites.
  */
 import { validateStaffingPlan, type GroupTaskStaffingOwnerDecision, type GroupTaskStaffingSeat, type StaffingSessionMessage } from './staffing';
-import { type GroupTaskStaffingProposalRecord, type StaffingOwnerDecisionMarker } from './staffingStore';
+import { type GroupTaskStaffingProposalRecord, type StaffingDecisionSource, type StaffingOwnerDecisionMarker } from './staffingStore';
 import { createGroupTask, GroupTaskServiceError, type GroupTaskServiceContext } from './service';
 export interface ProposeStaffingInput {
     chairSlug?: string;
@@ -31,7 +31,10 @@ export interface ProposeStaffingResult {
     validation: ReturnType<typeof validateStaffingPlan>;
 }
 export declare function proposeGroupTaskStaffing(ctx: GroupTaskServiceContext, input: ProposeStaffingInput, now?: () => number): Promise<ProposeStaffingResult>;
-export declare function recordStaffingOwnerDecision(ctx: GroupTaskServiceContext, chairSlug: string, proposalId: number, decision: StaffingOwnerDecisionMarker): Promise<GroupTaskStaffingProposalRecord>;
+export declare function recordStaffingOwnerDecision(ctx: GroupTaskServiceContext, chairSlug: string, proposalId: number, decision: StaffingOwnerDecisionMarker, opts?: {
+    source?: StaffingDecisionSource;
+    decidedBy?: string | null;
+}): Promise<GroupTaskStaffingProposalRecord>;
 export interface EvaluateStaffingGateInput {
     chairSlug?: string;
     proposalId: number;

@@ -36,6 +36,7 @@ import {
   type GroupTaskMemberSummary,
   type GroupTaskMemberWorkStatus,
   type GroupTaskMessage,
+  type GroupTaskMessagesView,
   type GroupTaskPendingDeliverable,
   type GroupTaskRecord,
   type GroupTaskRelayKind,
@@ -802,18 +803,25 @@ export async function listGroupTaskMessages(
   chairSlug: string,
   taskId: number,
   opts?: { limit?: number; beforeIndex?: number; sync?: boolean },
-): Promise<{ messages: GroupTaskMessage[]; total: number }> {
+): Promise<GroupTaskMessagesView> {
   const chair = await requireProfile(ctx, chairSlug);
   const store = storeFor(ctx, chair);
   const task = await requireTask(store, taskId);
-  if (!task.groupId) return { messages: [], total: 0 };
+  if (!task.groupId) {
+    return { messages: [], total: 0, syncedAt: null, lastProcessedIndex: task.lastProcessedIndex };
+  }
   if (opts?.sync !== false) {
     await syncGroupTaskMessages(ctx, store, task);
   }
-  return store.listMessages(task.groupId, {
+  const page = await store.listMessages(task.groupId, {
     limit: opts?.limit,
     beforeIndex: opts?.beforeIndex,
   });
+  return {
+    ...page,
+    syncedAt: await store.getMessagesSyncedAt(task.groupId),
+    lastProcessedIndex: task.lastProcessedIndex,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +923,18 @@ export async function closeGroupTask(
   if (task.status === 'done' || task.status === 'cancelled') {
     throw new GroupTaskServiceError('task_terminal', `Group task ${taskId} is already ${task.status}`);
   }
+  // An owner close accepts only chain-confirmed (delivered) rows: an
+  // unverified pending row must never be stamped accepted — the ledger would
+  // then claim a verification that never happened. Count the rows that stay
+  // pending so the closing notice can say so explicitly.
+  const unverifiedPendingCount = opts.status === 'done'
+    ? (await store.listDeliverables(taskId).catch(() => []))
+      .filter((row) => row.status === 'pending').length
+    : 0;
+  const pendingCloseNote = unverifiedPendingCount > 0
+    ? `${unverifiedPendingCount} deliverable${unverifiedPendingCount === 1 ? '' : 's'} remained unverified `
+      + 'and stay pending — accept them individually once their pins confirm on-chain.'
+    : null;
   // OT-06 R18: the acceptance verdict is broadcast as the group's FINAL
   // message — members learn the outcome without polling a frozen group (the
   // task-213 workers never heard anything after close). Authored by the
@@ -928,6 +948,7 @@ export async function closeGroupTask(
     const comment = opts.ratingComment?.trim();
     const content = `[GROUP_TASK_NOTICE:closed] The owner has closed this task (${verdict}).`
       + (comment ? `\n${comment}` : '')
+      + (pendingCloseNote ? `\n${pendingCloseNote}` : '')
       + '\nThank you all for the work — the group is read-only from this point on.';
     await postGroupTaskMessage(ctx, chairSlug, taskId, {
       asSlug: chairSlug,
@@ -962,8 +983,8 @@ export async function closeGroupTask(
     await store.updateTaskRating(taskId, opts.rating, opts.ratingComment);
   }
   if (closed.status === 'done') {
-    // T2 verdict: owner acceptance marks every non-rejected row accepted.
-    await store.updateDeliverablesStatusByTask(taskId, 'pending', 'accepted').catch(() => 0);
+    // T2 verdict: an owner close accepts chain-confirmed rows only. Pending
+    // (unverified) rows stay pending; cancelled closes promote nothing.
     await store.updateDeliverablesStatusByTask(taskId, 'delivered', 'accepted').catch(() => 0);
   }
   try {
@@ -989,6 +1010,7 @@ export async function closeGroupTask(
     `Task closed as ${opts.status}`
     + (opts.rating ? ` · owner rating ${opts.rating}/5` : '')
     + (opts.ratingComment ? ` · "${opts.ratingComment}"` : '')
+    + (pendingCloseNote ? ` · ${pendingCloseNote}` : '')
     // The close already made the group read-only (post is refused afterwards),
     // so never ask the origin session to do the impossible: state the terminal
     // outcome as a fact, not an instruction.

@@ -1148,6 +1148,7 @@ export function GroupTaskView({
     : null
 
   const pendingSlate = staffing?.find((row) => row.createdTaskId === null
+    && row.status !== 'rejected'
     && (row.status === 'pending' || row.status === 'confirmed' || row.status === 'skip_authorized')) ?? null
 
   return (
@@ -1196,8 +1197,22 @@ export function GroupTaskView({
               <div className="oac-gt-staffing-title">
                 <span>{t('gtStaffingTitle')}</span>
                 <span className="oac-a2a-row-name">{pendingSlate.title}</span>
+                {pendingSlate.ownerDecision === 'revise'
+                  ? <span className="oac-gt-badge">{t('gtStaffingRevised')}</span>
+                  : null}
                 {pendingSlate.status !== 'pending'
                   ? <span className="oac-gt-badge oac-gt-status-executing">{t('gtStaffingReady')}</span>
+                  : null}
+              </div>
+              <div className="oac-gt-staffing-context">
+                <span className="oac-a2a-row-text">
+                  {t('gtStaffingSource')}: {t('gtStaffingSourceValue', {
+                    chair: pendingSlate.chairSlug,
+                    session: pendingSlate.sourceSessionId ?? '—',
+                  })}
+                </span>
+                {pendingSlate.triggeringWish
+                  ? <span className="oac-a2a-row-text">{t('gtStaffingWish')}: {pendingSlate.triggeringWish}</span>
                   : null}
               </div>
               {pendingSlate.seats.map((seat) => (
@@ -1208,6 +1223,11 @@ export function GroupTaskView({
                   {seat.reason ? <span className="oac-a2a-row-text">· {seat.reason}</span> : null}
                 </div>
               ))}
+              <p className="oac-a2a-row-text oac-gt-staffing-consequences">
+                {t('gtStaffingConsequences', {
+                  count: pendingSlate.seats.filter((seat) => seat.source !== 'remote').length,
+                })}
+              </p>
               <div className="oac-gt-staffing-actions">
                 {pendingSlate.status === 'pending'
                   ? (
