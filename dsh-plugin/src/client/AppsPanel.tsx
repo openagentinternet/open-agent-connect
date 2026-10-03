@@ -103,6 +103,18 @@ function correctNextCursor(rawNext: string, total: number, count: number): strin
   return rawNext
 }
 
+/**
+ * The section stays mounted across visits, so a failed initial load never
+ * refetches on its own — the raw CLI error and the empty list just sit there.
+ * The common failure is a transient daemon-replacement window (every
+ * `dsh web` boot swaps the daemon; panel CLI calls racing it fail with e.g.
+ * the daemon-ownership error) that settles within seconds. Retry the initial
+ * loads a bounded number of times with backoff; never unbounded — each retry
+ * is a CLI call that can attempt a daemon start.
+ */
+const LOCAL_LOAD_RETRIES = 4
+const LOCAL_RETRY_BASE_MS = 3_000
+
 export function AppsPanel({
   bots,
   list,
@@ -144,6 +156,30 @@ export function AppsPanel({
   const [copied, setCopied] = useState('')
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const chainSourceRef = useRef<EventSource | null>(null)
+  // Bounded auto-retry for the initial loads (see LOCAL_LOAD_RETRIES).
+  const [retryTick, setRetryTick] = useState(0)
+  const retryAttemptsRef = useRef(0)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scheduleLoadRetry = (): void => {
+    if (retryAttemptsRef.current >= LOCAL_LOAD_RETRIES) return
+    const delay = LOCAL_RETRY_BASE_MS * 2 ** retryAttemptsRef.current
+    retryAttemptsRef.current += 1
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null
+      setRetryTick((value) => value + 1)
+    }, delay)
+  }
+
+  useEffect(() => () => {
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+  }, [])
+
+  // A fresh Bot selection opens a fresh retry window.
+  useEffect(() => {
+    retryAttemptsRef.current = 0
+  }, [from])
 
   const closeChainSource = (): void => {
     chainSourceRef.current?.close()
@@ -162,10 +198,14 @@ export function AppsPanel({
         // twin-first, available-only order), else the first available Bot.
         setFrom((value) => value || pickDefaultAvailableBotSlug(rows))
       },
-      (cause: unknown) => { if (current) setError(`Bots: ${errorText(cause)}`) },
+      (cause: unknown) => {
+        if (!current) return
+        setError(`Bots: ${errorText(cause)}`)
+        scheduleLoadRetry()
+      },
     )
     return () => { current = false }
-  }, [bots])
+  }, [bots, retryTick])
 
   useEffect(() => {
     if (!from) return
@@ -185,10 +225,11 @@ export function AppsPanel({
         if (!current) return
         setError(errorText(cause))
         setLoading(false)
+        scheduleLoadRetry()
       },
     )
     return () => { current = false; setLoading(false) }
-  }, [from, list])
+  }, [from, list, retryTick])
 
   const flashCopied = (key: string): void => {
     setCopied(key)
