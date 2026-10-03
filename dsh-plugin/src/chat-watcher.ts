@@ -23,10 +23,16 @@ const PRIVATE_DEBOUNCE_MS = 500
 const GROUP_DEBOUNCE_MS = 800
 const HEARTBEAT_MS = 25_000
 
-/** `chat-<local-prefix>-<peer-prefix>.json` under `<slug>/.runtime/a2a/`. */
-const PRIVATE_FILE = /^([^/]+)\/\.runtime\/a2a\/chat-[^/]+\.json$/
+/**
+ * `chat-<local-prefix>-<peer-prefix>.json` under `<slug>/.runtime/A2A/` —
+ * the core's `a2aRoot` (state/paths.ts) is the uppercase dir and has never
+ * had a lowercase variant, so the filter matches either case instead of
+ * pinning one. Exported for the unread tests: a case-pinned filter silently
+ * drops every private store event and the 线上对话 badge never lights.
+ */
+export const PRIVATE_FILE = /^([^/]+)\/\.runtime\/a2a\/chat-[^/]+\.json$/i
 /** Any synced grouptask store file under `<slug>/.runtime/grouptask/`. */
-const GROUP_FILE = /^([^/]+)\/\.runtime\/grouptask\/./
+export const GROUP_FILE = /^([^/]+)\/\.runtime\/grouptask\/./
 
 type TaskSummaryRow = { chairSlug: string; id: number; updatedAt: number }
 
@@ -164,7 +170,7 @@ export function streamAllChatEvents(req: PluginHttpRequest, res: PluginHttpRespo
       try {
         for (const entry of readdirSync(profilesRoot, { withFileTypes: true })) {
           if (!entry.isDirectory()) continue
-          for (const area of ['.runtime/a2a', '.runtime/grouptask', '.runtime/grouptask/messages']) {
+          for (const area of ['.runtime/A2A', '.runtime/grouptask', '.runtime/grouptask/messages']) {
             watchDir(join(profilesRoot, entry.name, area), `${entry.name}/${area}`, false)
           }
         }

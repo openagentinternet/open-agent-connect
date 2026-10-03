@@ -87,6 +87,9 @@ test('chat watcher is push-only: no polling loop, store paths filtered by patter
   assert.match(watcher, /group-task-update/)
   assert.ok(watcher.includes('\\.runtime\\/a2a\\/chat-'), 'a2a store path filter present')
   assert.ok(watcher.includes('\\.runtime\\/grouptask\\/'), 'grouptask store path filter present')
+  // The non-recursive fallback must watch the store dirs under their real
+  // on-disk names (the core's a2aRoot is the uppercase A2A).
+  assert.ok(watcher.includes("'.runtime/A2A'"), 'fallback watches the uppercase a2a store dir')
   // The watcher must resolve the profiles root through the core layout:
   // normalizeSystemHomeDir returns the SYSTEM home — joining 'profiles' onto
   // it watches a directory that does not exist (round-1 live bug).
@@ -96,6 +99,19 @@ test('chat watcher is push-only: no polling loop, store paths filtered by patter
   assert.match(watcher, /groupPrimed/)
   // The 2026-09-07 polling badge must stay dead.
   assert.doesNotMatch(watcher, /setInterval\(\s*\(\)\s*=>\s*\{\s*void poll/)
+})
+
+test('watch filters classify the real on-disk store paths (uppercase core a2aRoot)', () => {
+  // The core writes private conversations to <slug>/.runtime/A2A/chat-*.json
+  // (state/paths.ts a2aRoot, uppercase since the first store commit). A
+  // case-pinned lowercase filter dropped every private store event, so the
+  // 线上对话 tab badge never lit while 群任务 (lowercase grouptask dir) did.
+  assert.equal(plugin.PRIVATE_FILE.exec('bob/.runtime/A2A/chat-id1-id2.json')?.[1], 'bob')
+  assert.ok(plugin.PRIVATE_FILE.test('bob/.runtime/a2a/chat-id1-id2.json'), 'lowercase variant still matches')
+  assert.ok(!plugin.PRIVATE_FILE.test('bob/.runtime/A2A/other.json'), 'non-chat files stay out')
+  assert.ok(!plugin.PRIVATE_FILE.test('bob/.runtime/A2A/chat-id1-id2.json.bak'), 'suffix variants stay out')
+  assert.ok(plugin.GROUP_FILE.test('bob/.runtime/grouptask/state.json'))
+  assert.ok(!plugin.GROUP_FILE.test('bob/.runtime/grouptasks/state.json'), 'similar dirs stay out')
 })
 
 test('localProfilesRoot resolves through resolveMetabotManagerLayout, never a bare home join', async () => {
