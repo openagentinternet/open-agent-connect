@@ -631,6 +631,10 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-guest-invite { cursor: default; opacity: .75; }
 .oac-gt-invite-toggle { margin-left: 10px; text-transform: none; letter-spacing: normal; }
 .oac-gt-placeholder { flex: 1; display: flex; align-items: center; justify-content: center; }
+/* Crash report (A2AOverlay boundary): the note plus the error message itself,
+   wrapped and capped so even a long stack line stays readable. */
+.oac-gt-placeholder.oac-panel-crash { flex-direction: column; gap: 4px; padding: 0 24px; text-align: center; }
+.oac-panel-crash-detail { max-width: 560px; max-height: 160px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 16px; word-break: break-all; text-align: left; user-select: text; }
 .oac-gt-head { justify-content: space-between; gap: 12px; }
 .oac-gt-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .oac-gt-head-main strong { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
