@@ -18,6 +18,7 @@ async function startServer() {
     studyList: [],
     studyEnqueue: [],
     studyRetry: [],
+    studyRun: [],
   };
   const server = createHttpServer({
     kb: {
@@ -31,6 +32,7 @@ async function startServer() {
       studyList: async (input) => { calls.studyList.push(input); return commandSuccess({ jobs: [] }); },
       studyEnqueue: async (input) => { calls.studyEnqueue.push(input); return commandSuccess({ job: { id: 'study-1' }, created: true }); },
       studyRetry: async (input) => { calls.studyRetry.push(input); return commandSuccess({ retried: [], count: 0 }); },
+      studyRun: async (input) => { calls.studyRun.push(input); return commandSuccess({ started: true, jobId: 'study-1', topic: 't' }); },
     },
   });
   await new Promise((resolve, reject) => {
@@ -79,6 +81,7 @@ test('POST kb management verbs forward the JSON body to handlers', async (t) => 
     ['/api/kb/learn', 'learn', { from: 'alice', id: 'kb-1', full: true }],
     ['/api/kb/study/enqueue', 'studyEnqueue', { from: 'alice', topic: 'metaweb protocols', budgetPins: 10 }],
     ['/api/kb/study/retry', 'studyRetry', { from: 'alice', jobId: 'study-1' }],
+    ['/api/kb/study/run', 'studyRun', { from: 'alice', jobId: 'study-1' }],
   ];
 
   for (const [path, key, body] of checks) {

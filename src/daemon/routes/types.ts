@@ -414,6 +414,7 @@ export interface MetabotDaemonHttpHandlers {
     studyList?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     studyEnqueue?: (input: { from?: string; topic: string; budgetPins?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     studyRetry?: (input: { from?: string; jobId?: string; topic?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    studyRun?: (input: { from?: string; jobId?: string; topic?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

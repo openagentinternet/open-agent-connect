@@ -11,7 +11,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { MetabotPaths } from '../state/paths';
 
-export const DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 20;
+export const DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 50;
 export const MAX_STUDY_RUNS_PER_JOB = 10;
 export const MAX_STUDY_CONSECUTIVE_FAILURES = 3;
 /**
@@ -140,7 +140,12 @@ export interface StudyJobStore {
    * `retried: false` when the job exists but is not failed.
    */
   retryStudyJob(id: string): Promise<{ job: StudyJobRecord; retried: boolean } | null>;
-  resetRunningToPending(now: number, excludeId?: string): Promise<number>;
+  /**
+   * Requeue stale `running` rows (crash recovery). Rows whose id is in
+   * `excludeIds` (runs currently executing in this process) stay untouched;
+   * everything else goes back to pending. Returns the number of rows changed.
+   */
+  resetRunningToPending(now: number, options?: { excludeIds?: string[] }): Promise<number>;
 }
 
 export function createStudyJobStore(paths: MetabotPaths): StudyJobStore {
@@ -372,11 +377,12 @@ export function createStudyJobStore(paths: MetabotPaths): StudyJobStore {
       return { job, retried: true };
     }),
 
-    resetRunningToPending: (now, excludeId) => enqueue(async () => {
+    resetRunningToPending: (now, options) => enqueue(async () => {
+      const exclude = new Set(options?.excludeIds ?? []);
       const state = await readFile();
       let changed = 0;
       for (const job of state.jobs) {
-        if (job.status !== 'running' || job.id === excludeId) continue;
+        if (job.status !== 'running' || exclude.has(job.id)) continue;
         job.status = 'pending';
         job.updatedAt = now;
         changed += 1;
@@ -551,25 +557,34 @@ export interface StudyDrainDeps {
 }
 
 /**
- * One study tick: inside the nightly window, drain the oldest pending job.
- * Crash recovery re-arms stale `running` rows first; a run either completes
- * (report parsed, KB writes happened through the tools during the turn) or
- * fails the job. Returns the id of the job attempted, or null.
+ * Study runs currently executing in THIS process (nightly tick and manual
+ * runs register here). The crash-recovery sweep never touches these rows, so
+ * a manual run cannot flip a nightly tick's in-flight job back to pending
+ * (and vice versa); after a daemon restart the set is empty and every stale
+ * `running` row is swept — the crash-recovery contract.
  */
-export async function runStudyTick(
+const inFlightStudyRuns = new Set<string>();
+
+/**
+ * Mark, run, and settle one job (shared by the nightly tick and manual
+ * runs). Claims the job in the in-flight registry FIRST (synchronous check +
+ * add, so two concurrent manual runs of the same job cannot both pass),
+ * then marks it running, executes the turn, and settles the row. Returns
+ * the settled job record.
+ */
+async function executeStudyJob(
   store: StudyJobStore,
   deps: StudyDrainDeps,
-): Promise<string | null> {
+  job: StudyJobRecord,
+): Promise<StudyJobRecord> {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => undefined);
-  const nowDate = new Date(now());
-  if (!inStudyWindow(nowDate)) return null;
-  await store.resetRunningToPending(now());
-  const pending = await store.listPending();
-  const job = pending[0];
-  if (!job) return null;
-  await store.markRunning(job.id);
+  if (inFlightStudyRuns.has(job.id)) {
+    throw new StudyRunError('study_job_already_running', `Study job ${job.id} ("${job.topic}") is already running.`);
+  }
+  inFlightStudyRuns.add(job.id);
   try {
+    await store.markRunning(job.id);
     const reply = await deps.runStudyTurn({
       slug: job.metabotSlug,
       kind: job.kind,
@@ -581,20 +596,136 @@ export async function runStudyTick(
     const report = parseStudyRunReport(reply);
     const known = new Set(job.processedPinIds);
     const newPins = report.processedPinIds.filter((pin) => !known.has(pin));
-    await store.completeRun({
+    const settled = await store.completeRun({
       id: job.id,
       processedPinIds: report.processedPinIds,
       summary: report.summary,
       learnedSomethingNew: newPins.length > 0,
     });
     log(`[Study] Job ${job.id} ("${job.topic}") run complete: ${newPins.length} new pin(s)`);
-    return job.id;
+    return settled ?? job;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await store.failRun(job.id, message);
+    const settled = await store.failRun(job.id, message);
     log(`[Study] Job ${job.id} failed: ${message}`);
-    return job.id;
+    return settled ?? job;
+  } finally {
+    inFlightStudyRuns.delete(job.id);
   }
+}
+
+/**
+ * One study tick: drain the oldest pending job inside the nightly window.
+ * Crash recovery re-arms stale `running` rows FIRST — before the window
+ * gate, so a run a daemon restart killed mid-flight never sits in `running`
+ * until the next night (~18h of wrong status); only rows not executing in
+ * this process are swept. Returns the id of the job attempted, or null.
+ */
+export async function runStudyTick(
+  store: StudyJobStore,
+  deps: StudyDrainDeps,
+): Promise<string | null> {
+  const now = deps.now ?? Date.now;
+  await store.resetRunningToPending(now(), { excludeIds: [...inFlightStudyRuns] });
+  const nowDate = new Date(now());
+  if (!inStudyWindow(nowDate)) return null;
+  const pending = await store.listPending();
+  const job = pending[0];
+  if (!job) return null;
+  await executeStudyJob(store, deps, job);
+  return job.id;
+}
+
+export class StudyRunError extends Error {
+  constructor(readonly code: 'study_job_not_found' | 'study_job_already_running' | 'no_pending_study_job', message: string) {
+    super(message);
+    this.name = 'StudyRunError';
+  }
+}
+
+/**
+ * Resolve the job a manual run should execute, NOW, regardless of the
+ * nightly window (the daylight-testing surface behind `metabot
+ * knowledge-base study run` and the `metaweb_study_run` tool). Selection:
+ * an explicit jobId wins (any status except running); else the first job
+ * whose topic contains `topic` (case-insensitive substring, like retry),
+ * preferring pending over failed over done; else the oldest pending job.
+ * A FAILED job is requeued first (a manual run implies retry); a DONE job
+ * re-runs honestly. Crash recovery sweeps stale `running` rows (excluding
+ * runs executing in this process) before selection. Throws StudyRunError
+ * when nothing is runnable.
+ */
+export async function resolveStudyJobForRun(
+  store: StudyJobStore,
+  selector: { metabotSlug?: string; jobId?: string; topic?: string } = {},
+): Promise<StudyJobRecord> {
+  const now = Date.now;
+  await store.resetRunningToPending(now(), { excludeIds: [...inFlightStudyRuns] });
+
+  let job: StudyJobRecord | null = null;
+  if (selector.jobId?.trim()) {
+    job = await store.getStudyJob(selector.jobId.trim());
+    if (!job || (selector.metabotSlug && job.metabotSlug !== selector.metabotSlug)) {
+      throw new StudyRunError('study_job_not_found', `No study job with id "${selector.jobId.trim()}" for this bot.`);
+    }
+  } else {
+    const all = await store.listStudyJobs(selector.metabotSlug);
+    const topic = selector.topic?.trim().toLowerCase() ?? '';
+    const matchable = topic
+      ? all.filter((row) => row.topic.toLowerCase().includes(topic))
+      : all;
+    const pick = (statuses: StudyJobStatus[]): StudyJobRecord | null => {
+      const rows = matchable
+        .filter((row) => statuses.includes(row.status))
+        .sort((left, right) => (left.createdAt - right.createdAt) || left.id.localeCompare(right.id));
+      return rows[0] ?? null;
+    };
+    job = pick(['pending']) ?? pick(['failed']) ?? pick(['done']);
+    if (!job) {
+      // Post-sweep, a still-`running` row is by definition executing in this
+      // process (the crash sweep re-armed everything else) — refuse it
+      // explicitly instead of reporting a vague "nothing runnable".
+      const running = matchable.find((row) => row.status === 'running');
+      if (running) {
+        throw new StudyRunError('study_job_already_running', `Study job ${running.id} ("${running.topic}") is already running.`);
+      }
+      const label = topic ? `matching "${selector.topic!.trim()}"` : 'at all';
+      throw new StudyRunError('no_pending_study_job', `This bot has no runnable study job ${label}. Enqueue one first (metaweb_study_enqueue).`);
+    }
+  }
+
+  if (inFlightStudyRuns.has(job.id) || job.status === 'running') {
+    throw new StudyRunError('study_job_already_running', `Study job ${job.id} ("${job.topic}") is already running.`);
+  }
+  if (job.status === 'failed') {
+    const retried = await store.retryStudyJob(job.id);
+    if (retried?.retried) job = retried.job;
+  }
+  return job;
+}
+
+/**
+ * Claim and execute one resolved job; resolves when the run settles (safe
+ * to `void` for fire-and-forget manual runs — the job row is the state).
+ */
+export async function startStudyJobRun(
+  store: StudyJobStore,
+  deps: StudyDrainDeps,
+  job: StudyJobRecord,
+): Promise<StudyJobRecord> {
+  const log = deps.log ?? (() => undefined);
+  log(`[Study] Manual run requested for job ${job.id} ("${job.topic}") — running now, outside the nightly window.`);
+  return executeStudyJob(store, deps, job);
+}
+
+/** Convenience: resolve + run to completion (tests, CLI --wait flows). */
+export async function runStudyJobNow(
+  store: StudyJobStore,
+  deps: StudyDrainDeps,
+  selector: { metabotSlug?: string; jobId?: string; topic?: string } = {},
+): Promise<StudyJobRecord> {
+  const job = await resolveStudyJobForRun(store, selector);
+  return startStudyJobRun(store, deps, job);
 }
 
 // ---------------------------------------------------------------------------
@@ -736,7 +867,6 @@ export async function runStudyTurnWithTools(
   // they need more tool steps than a topic read-and-save pass.
   const maxSteps = deps.maxSteps ?? (deps.kind === 'qa-surf' ? QA_SURF_TURN_MAX_TOOL_STEPS : STUDY_TURN_MAX_TOOL_STEPS);
   const maxResultChars = deps.maxResultChars ?? 12_000;
-  const budget = { savedDocs: 0 };
   const allowlist = deps.kind === 'qa-surf' ? QA_SURF_TOOL_ALLOWLIST : STUDY_TOOL_ALLOWLIST;
 
   const tools: StudyToolSet = {
@@ -754,10 +884,7 @@ export async function runStudyTurnWithTools(
     getQuestionAnswers: deps.tools.getQuestionAnswers,
     postSimpleAnswer: deps.tools.postSimpleAnswer,
     likePin: deps.tools.likePin,
-    addDocument: async (args) => {
-      budget.savedDocs += 1;
-      return deps.tools.addDocument(args);
-    },
+    addDocument: deps.tools.addDocument,
   };
 
   const history: Array<{ role: 'user' | 'assistant'; content: string }> = [

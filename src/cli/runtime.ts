@@ -240,6 +240,7 @@ import { retireQaSurfJobsForSurf } from '../core/knowledgebase/studyJobs';
 import {
   createKnowledgeBaseService,
 } from '../core/knowledgebase/service';
+import { localDateIso } from '../core/knowledgebase/store';
 import {
   createStudyJobStore,
   runStudyTick,
@@ -247,7 +248,7 @@ import {
   STUDY_TICK_INTERVAL_MINUTES,
   StudyJobStoreError,
 } from '../core/knowledgebase/studyJobs';
-import { retryFailedStudyJobs } from '../daemon/kbHandlers';
+import { retryFailedStudyJobs, setActiveStudyTurnRunner } from '../daemon/kbHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -5986,6 +5987,16 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if ('failure' in outcome) return outcome.failure;
         return commandSuccess({ retried: outcome.retried, count: outcome.retried.length });
       },
+      // Manual run of one study job NOW — daemon-owned (the daemon holds the
+      // passive-LLM chain + tool wiring), window ignored. The route returns
+      // as soon as the job is claimed; the command's --wait polls the local
+      // study store until the job settles (see commands/knowledge-base.ts).
+      studyRun: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/kb/study/run',
+        typeof input.from === 'string' ? input.from : undefined,
+        input as Record<string, unknown>,
+      ),
     },
     surf: {
       status: async (input) => {
@@ -6719,7 +6730,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       },
       learnKnowledgeBase: async () => {
         const learned = await kbService.learnKnowledgeBase(surfContext.botSlug);
-        return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
+        const failedTotal = learned.learnSummary?.failedTotal ?? 0;
+        return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`
+          + (failedTotal > 0 ? ` (${failedTotal} raw doc(s) failed to extract — check the learn summary)` : '');
       },
       saveProcedure: async (input: { title: string; steps: string[]; pitfalls?: string[]; triggerText?: string; sourcePinIds?: string[] }) => {
         const { procedure, created } = await procedures.upsertProcedure({
@@ -7525,6 +7538,273 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     }
     return store;
   };
+  // The unattended study turn executor, single-sourced: the nightly tick
+  // and the daemon kb group's manual `study run` surface both drain through
+  // this closure. Registered for the kb group through the active-runner
+  // bridge (same lazy pattern as the host LLM executor bridge) because the
+  // daemon handlers are built before this scheduler block exists.
+  const runStudyTurnForBot = async ({ slug, kind, prompt, budgetPins }: {
+    slug: string;
+    kind?: import('../core/knowledgebase/studyJobs.js').StudyJobKind;
+    prompt: string;
+    budgetPins: number;
+  }): Promise<string> => {
+    const homeDir = (await getMetabotProfile(systemHomeDir, slug))?.homeDir ?? '';
+    const profilePaths = resolveMetabotPaths(homeDir);
+    const runtimeResolver = createLlmRuntimeResolver({
+      runtimeStore: createLlmRuntimeStore(profilePaths),
+      bindingStore: createLlmBindingStore(profilePaths),
+      getPreferredRuntimeId: async () => {
+        try {
+          const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+          const data = JSON.parse(raw) as { runtimeId?: string | null };
+          return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+        } catch {
+          return null;
+        }
+      },
+    });
+    // Persona + experience hot layer: nightly study/QA-surf prompts
+    // judge everything against the bot's role — the persona must
+    // actually BE in the prompt.
+    const studySystemPrompt = await buildPersonaSessionSystemPrompt(profilePaths, {
+      scenario: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
+    });
+    const llm = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
+      const historyText = history
+        .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
+        .join('\n\n---\n\n');
+      // Unified passive-LLM priority: DSH pair first, then local chain.
+      const hostText = await createHostFirstCompletion({
+        dshLlmPath: profilePaths.dshLlmPath,
+      })({ botSlug: slug, system: studySystemPrompt, user: historyText });
+      if (hostText !== null) return hostText;
+      const result = await runLlmPromptWithRuntimeFallback({
+        runtimeResolver,
+        llmExecutor,
+        metaBotSlug: slug,
+        prompt: historyText,
+        systemPrompt: studySystemPrompt,
+        timeoutMs: 30 * 60_000,
+        pollIntervalMs: 5_000,
+      });
+      if (result.status !== 'completed') {
+        throw new Error(result.error || `Study turn ended with status ${result.status}`);
+      }
+      return result.output;
+    };
+    // Real tools with the pin budget enforced at the executor seam.
+    let savedDocs = 0;
+    const kbService = createKnowledgeBaseService(profilePaths);
+    const studyProcedures = createProcedureStore(profilePaths);
+    const studyKnowledge = createKnowledgeStore(profilePaths);
+    return await runStudyTurnWithTools(prompt, {
+      kind,
+      runLlm: llm,
+      tools: {
+        searchMetaweb: async ({ query }) => {
+          const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+          const page = await searchMetaweb({ q: query }, baseUrl ? { baseUrl } : undefined);
+          const { formatMetawebSearchBullets } = await import('../core/metaweb/format.js');
+          return formatMetawebSearchBullets(page.items)
+            || 'No results. Retry with other keywords (bilingual).';
+        },
+        readMetawebPin: async ({ pinId }) => {
+          const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+          const pin = await readMetawebPin(pinId, baseUrl ? { baseUrl } : undefined);
+          // Best-effort chain-history read record; never delays or
+          // fails the study turn (recordMetawebPinRead also swallows).
+          void recordMetawebPinRead(profilePaths, pin, 'study_job').catch(() => undefined);
+          const { formatMetawebPinDetail } = await import('../core/metaweb/format.js');
+          return formatMetawebPinDetail(pin);
+        },
+        addDocument: async ({ title, content, pinId }) => {
+          if (savedDocs >= budgetPins) {
+            return `Pin budget reached (${budgetPins}). Stop saving; emit the final report.`;
+          }
+          const saved = await kbService.addDocument(slug, {
+            title,
+            content,
+            sourceType: 'metaweb',
+            ...(pinId ? { pinId } : {}),
+          });
+          savedDocs += 1;
+          await kbService.learnKnowledgeBase(slug).catch(() => undefined);
+          return `Saved as ${saved.relPath} (budget ${savedDocs}/${budgetPins}).`;
+        },
+        learnKnowledgeBase: async () => {
+          const learned = await kbService.learnKnowledgeBase(slug);
+          const failedTotal = learned.learnSummary?.failedTotal ?? 0;
+          return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`
+            + (failedTotal > 0 ? ` (${failedTotal} raw doc(s) failed to extract — check the learn summary)` : '');
+        },
+        listKnowledgeBases: async () => {
+          const rows = (await kbService.store.listKnowledgeBases())
+            .filter((row) => row.metabotSlug === slug);
+          if (!rows.length) return 'No knowledge bases yet.';
+          return rows.map((row) => `- "${row.name}"${row.isDefault ? ' (default)' : ''} `
+            + `docs=${row.docCount} chunks=${row.chunkCount}`
+            + `${row.description ? ` — ${row.description}` : ''}`).join('\n');
+        },
+        queryKnowledgeBases: async ({ query, knowledgeBaseId }) => {
+          const results = await kbService.queryKnowledgeBase(slug, query, {
+            ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
+          });
+          if (!results.length) return 'No hits.';
+          return results.map((result) => result.hits.map((hit) =>
+            `- [${result.knowledgeBaseName}] ${hit.title}#${hit.ord} (score ${hit.score})\n  ${hit.snippet}`
+          ).join('\n')).join('\n');
+        },
+        saveProcedure: async (input) => {
+          const { procedure, created } = await studyProcedures.upsertProcedure({
+            title: input.title,
+            steps: input.steps,
+            ...(input.pitfalls?.length ? { pitfalls: input.pitfalls } : {}),
+            ...(input.triggerText ? { triggerText: input.triggerText } : {}),
+            ...(input.sourcePinIds?.length ? { sourcePinIds: input.sourcePinIds } : {}),
+            origin: 'agent',
+          });
+          return `${created ? 'Saved' : 'Updated'} procedure "${procedure.title}" `
+            + `v${procedure.version} (${procedure.steps.length} steps).`;
+        },
+        recallProcedures: async ({ query }) => {
+          const rows = await studyProcedures.listProcedures({ status: 'active' });
+          const scored = scoreProceduresForQuery(rows, query).slice(0, 5);
+          if (!scored.length) return 'No matching procedures.';
+          return scored.map(({ procedure, score }) =>
+            `- ${procedure.title} (${score})\n  ${procedure.steps.join(' → ')}`
+            + (procedure.pitfalls.length ? `\n  Pitfalls: ${procedure.pitfalls.join('; ')}` : '')
+          ).join('\n');
+        },
+        upsertKnowledge: async ({ topic, summary, kind }) => {
+          const validKind: KnowledgeKind | undefined = kind && (KNOWLEDGE_KINDS as readonly string[]).includes(kind)
+            ? kind as KnowledgeKind
+            : undefined;
+          const result = await studyKnowledge.upsertKnowledge({
+            topic,
+            summary,
+            ...(validKind ? { kind: validKind } : {}),
+            origin: 'agent',
+          });
+          return formatKnowledgeUpsertResult({
+            topic: result.entry.topic,
+            created: result.created,
+            revised: result.revised,
+            version: result.entry.version,
+            kind: result.entry.kind,
+          });
+        },
+        recallKnowledge: async (input) => {
+          const rows = await studyKnowledge.searchKnowledge({
+            ...(input.query ? { query: input.query } : {}),
+            ...(input.kind && (KNOWLEDGE_KINDS as readonly string[]).includes(input.kind)
+              ? { kind: input.kind as KnowledgeKind }
+              : {}),
+            limit: 5,
+            touchLastUsed: true,
+          });
+          if (!rows.length) return 'No matching knowledge.';
+          return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
+        },
+        // Q&A surfing seams (qa-surf jobs only): recall runs against
+        // the Q&A index, writes go through the in-process daemon
+        // handlers (already-answered check + ledger included).
+        searchQa: kind === 'qa-surf'
+          ? async ({ query, tags, answered, sort, size, cursor }) => {
+            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+            const page = await qaSearch({
+              q: query,
+              ...(tags?.length ? { tags } : {}),
+              ...(answered === true || answered === false ? { answered } : {}),
+              ...(sort === 'newest' ? { sort: 'newest' as const } : {}),
+              ...(size ? { size } : {}),
+              ...(cursor ? { cursor } : {}),
+            }, baseUrl ? { baseUrl } : undefined);
+            const bullets = formatQaQuestionBullets(page.items);
+            if (!bullets) {
+              return `No on-chain Q&A matched "${query}". Do NOT invent questions or answers.`;
+            }
+            const sections = [
+              `${page.items.length} on-chain question(s) matching "${query}":`,
+              bullets,
+            ];
+            if (page.hasMore && page.nextCursor) {
+              sections.push(`More results: call search_qa again with cursor="${page.nextCursor}".`);
+            }
+            return sections.join('\n');
+          }
+          : undefined,
+        listLatestQuestions: kind === 'qa-surf'
+          ? async ({ tags, minAnswers, maxAnswers, sort, size, cursor }) => {
+            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+            const page = await qaLatestQuestions({
+              ...(tags?.length ? { tags } : {}),
+              ...(minAnswers != null ? { minAnswers } : {}),
+              ...(maxAnswers != null ? { maxAnswers } : {}),
+              ...(sort === 'hot' ? { sort: 'hot' as const } : {}),
+              ...(size ? { size } : {}),
+              ...(cursor ? { cursor } : {}),
+            }, baseUrl ? { baseUrl } : undefined);
+            const bullets = formatQaQuestionBullets(page.items);
+            if (!bullets) return 'No on-chain questions matched this filter.';
+            const sections = [
+              `${page.items.length} on-chain question(s):`,
+              bullets,
+            ];
+            if (page.hasMore && page.nextCursor) {
+              sections.push(`More questions: call list_latest_questions again with cursor="${page.nextCursor}".`);
+            }
+            return sections.join('\n');
+          }
+          : undefined,
+        getQuestionAnswers: kind === 'qa-surf'
+          ? async ({ questionPinId, publisher, size, cursor }) => {
+            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+            const detail = await qaQuestionDetail(questionPinId, baseUrl ? { baseUrl } : undefined);
+            return formatQaQuestionDetail({ question: detail.question, answers: detail.answers });
+          }
+          : undefined,
+        postSimpleAnswer: kind === 'qa-surf'
+          ? async ({ answerTo, content, tags }) => {
+            const answerHandler = handlers.qanda?.answer;
+            if (!answerHandler) throw new Error('qanda answer handler is not configured.');
+            const result = await answerHandler({
+              from: slug,
+              answerTo,
+              content,
+              ...(tags?.length ? { tags } : {}),
+            });
+            if (!result.ok) {
+              throw new Error(result.message || 'answer publish failed');
+            }
+            const data = (result.data ?? {}) as { notice?: string; formatted?: string };
+            if (typeof data.notice === 'string' && data.notice) {
+              return data.notice;
+            }
+            return typeof data.formatted === 'string' && data.formatted
+              ? data.formatted
+              : 'Answer published on-chain.';
+          }
+          : undefined,
+        likePin: kind === 'qa-surf'
+          ? async ({ pinId, isLike }) => {
+            const likeHandler = handlers.qanda?.like;
+            if (!likeHandler) throw new Error('qanda like handler is not configured.');
+            const result = await likeHandler({ from: slug, pinId, isLike });
+            if (!result.ok) {
+              throw new Error(result.message || 'reaction publish failed');
+            }
+            const data = (result.data ?? {}) as { formatted?: string };
+            return typeof data.formatted === 'string' && data.formatted
+              ? data.formatted
+              : 'Reaction published on-chain.';
+          }
+          : undefined,
+      },
+    });
+  };
+  setActiveStudyTurnRunner({ runStudyTurn: runStudyTurnForBot, storeFor: studyStoreFor });
+
   // Overlap guard: one study tick (up to a 30-minute LLM turn) must finish
   // before the next interval fire starts — otherwise the next tick's crash
   // recovery flips the in-flight `running` row back to pending and the same
@@ -7549,265 +7829,13 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
             const kbService = createKnowledgeBaseService(resolveMetabotPaths(profile.homeDir));
             for (const kb of await kbService.store.listDueForAutoLearn(new Date())) {
               await kbService.learnKnowledgeBase(profile.slug, kb.id).catch(() => undefined);
-              await kbService.store.markAutoLearned(kb.id, new Date().toISOString().slice(0, 10));
+              await kbService.store.markAutoLearned(kb.id, localDateIso(new Date()));
             }
           } catch {
             // Auto-learn failures never block the study drain.
           }
           await runStudyTick(studyStoreFor(profile.homeDir), {
-            runStudyTurn: async ({ slug, kind, prompt, budgetPins }) => {
-              const homeDir = (await getMetabotProfile(systemHomeDir, slug))?.homeDir ?? '';
-              const profilePaths = resolveMetabotPaths(homeDir);
-              const runtimeResolver = createLlmRuntimeResolver({
-                runtimeStore: createLlmRuntimeStore(profilePaths),
-                bindingStore: createLlmBindingStore(profilePaths),
-                getPreferredRuntimeId: async () => {
-                  try {
-                    const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
-                    const data = JSON.parse(raw) as { runtimeId?: string | null };
-                    return typeof data.runtimeId === 'string' ? data.runtimeId : null;
-                  } catch {
-                    return null;
-                  }
-                },
-              });
-              // Persona + experience hot layer: nightly study/QA-surf prompts
-              // judge everything against the bot's role — the persona must
-              // actually BE in the prompt.
-              const studySystemPrompt = await buildPersonaSessionSystemPrompt(profilePaths, {
-                scenario: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
-              });
-              const llm = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
-                const historyText = history
-                  .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
-                  .join('\n\n---\n\n');
-                // Unified passive-LLM priority: DSH pair first, then local chain.
-                const hostText = await createHostFirstCompletion({
-                  dshLlmPath: profilePaths.dshLlmPath,
-                })({ botSlug: slug, system: studySystemPrompt, user: historyText });
-                if (hostText !== null) return hostText;
-                const result = await runLlmPromptWithRuntimeFallback({
-                  runtimeResolver,
-                  llmExecutor,
-                  metaBotSlug: slug,
-                  prompt: historyText,
-                  systemPrompt: studySystemPrompt,
-                  timeoutMs: 30 * 60_000,
-                  pollIntervalMs: 5_000,
-                });
-                if (result.status !== 'completed') {
-                  throw new Error(result.error || `Study turn ended with status ${result.status}`);
-                }
-                return result.output;
-              };
-              // Real tools with the pin budget enforced at the executor seam.
-              let savedDocs = 0;
-              const kbService = createKnowledgeBaseService(profilePaths);
-              const studyProcedures = createProcedureStore(profilePaths);
-              const studyKnowledge = createKnowledgeStore(profilePaths);
-              return await runStudyTurnWithTools(prompt, {
-                kind,
-                runLlm: llm,
-                tools: {
-                  searchMetaweb: async ({ query }) => {
-                    const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                    const page = await searchMetaweb({ q: query }, baseUrl ? { baseUrl } : undefined);
-                    const { formatMetawebSearchBullets } = await import('../core/metaweb/format.js');
-                    return formatMetawebSearchBullets(page.items)
-                      || 'No results. Retry with other keywords (bilingual).';
-                  },
-                  readMetawebPin: async ({ pinId }) => {
-                    const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                    const pin = await readMetawebPin(pinId, baseUrl ? { baseUrl } : undefined);
-                    // Best-effort chain-history read record; never delays or
-                    // fails the study turn (recordMetawebPinRead also swallows).
-                    void recordMetawebPinRead(profilePaths, pin, 'study_job').catch(() => undefined);
-                    const { formatMetawebPinDetail } = await import('../core/metaweb/format.js');
-                    return formatMetawebPinDetail(pin);
-                  },
-                  addDocument: async ({ title, content, pinId }) => {
-                    if (savedDocs >= budgetPins) {
-                      return `Pin budget reached (${budgetPins}). Stop saving; emit the final report.`;
-                    }
-                    const saved = await kbService.addDocument(slug, {
-                      title,
-                      content,
-                      sourceType: 'metaweb',
-                      ...(pinId ? { pinId } : {}),
-                    });
-                    savedDocs += 1;
-                    await kbService.learnKnowledgeBase(slug).catch(() => undefined);
-                    return `Saved as ${saved.relPath} (budget ${savedDocs}/${budgetPins}).`;
-                  },
-                  learnKnowledgeBase: async () => {
-                    const learned = await kbService.learnKnowledgeBase(slug);
-                    return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
-                  },
-                  listKnowledgeBases: async () => {
-                    const rows = (await kbService.store.listKnowledgeBases())
-                      .filter((row) => row.metabotSlug === slug);
-                    if (!rows.length) return 'No knowledge bases yet.';
-                    return rows.map((row) => `- "${row.name}"${row.isDefault ? ' (default)' : ''} `
-                      + `docs=${row.docCount} chunks=${row.chunkCount}`
-                      + `${row.description ? ` — ${row.description}` : ''}`).join('\n');
-                  },
-                  queryKnowledgeBases: async ({ query, knowledgeBaseId }) => {
-                    const results = await kbService.queryKnowledgeBase(slug, query, {
-                      ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
-                    });
-                    if (!results.length) return 'No hits.';
-                    return results.map((result) => result.hits.map((hit) =>
-                      `- [${result.knowledgeBaseName}] ${hit.title}#${hit.ord} (score ${hit.score})\n  ${hit.snippet}`
-                    ).join('\n')).join('\n');
-                  },
-                  saveProcedure: async (input) => {
-                    const { procedure, created } = await studyProcedures.upsertProcedure({
-                      title: input.title,
-                      steps: input.steps,
-                      ...(input.pitfalls?.length ? { pitfalls: input.pitfalls } : {}),
-                      ...(input.triggerText ? { triggerText: input.triggerText } : {}),
-                      ...(input.sourcePinIds?.length ? { sourcePinIds: input.sourcePinIds } : {}),
-                      origin: 'agent',
-                    });
-                    return `${created ? 'Saved' : 'Updated'} procedure "${procedure.title}" `
-                      + `v${procedure.version} (${procedure.steps.length} steps).`;
-                  },
-                  recallProcedures: async ({ query }) => {
-                    const rows = await studyProcedures.listProcedures({ status: 'active' });
-                    const scored = scoreProceduresForQuery(rows, query).slice(0, 5);
-                    if (!scored.length) return 'No matching procedures.';
-                    return scored.map(({ procedure, score }) =>
-                      `- ${procedure.title} (${score})\n  ${procedure.steps.join(' → ')}`
-                      + (procedure.pitfalls.length ? `\n  Pitfalls: ${procedure.pitfalls.join('; ')}` : '')
-                    ).join('\n');
-                  },
-                  upsertKnowledge: async ({ topic, summary, kind }) => {
-                    const validKind: KnowledgeKind | undefined = kind && (KNOWLEDGE_KINDS as readonly string[]).includes(kind)
-                      ? kind as KnowledgeKind
-                      : undefined;
-                    const result = await studyKnowledge.upsertKnowledge({
-                      topic,
-                      summary,
-                      ...(validKind ? { kind: validKind } : {}),
-                      origin: 'agent',
-                    });
-                    return formatKnowledgeUpsertResult({
-                      topic: result.entry.topic,
-                      created: result.created,
-                      revised: result.revised,
-                      version: result.entry.version,
-                      kind: result.entry.kind,
-                    });
-                  },
-                  recallKnowledge: async (input) => {
-                    const rows = await studyKnowledge.searchKnowledge({
-                      ...(input.query ? { query: input.query } : {}),
-                      ...(input.kind && (KNOWLEDGE_KINDS as readonly string[]).includes(input.kind)
-                        ? { kind: input.kind as KnowledgeKind }
-                        : {}),
-                      limit: 5,
-                      touchLastUsed: true,
-                    });
-                    if (!rows.length) return 'No matching knowledge.';
-                    return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
-                  },
-                  // Q&A surfing seams (qa-surf jobs only): recall runs against
-                  // the Q&A index, writes go through the in-process daemon
-                  // handlers (already-answered check + ledger included).
-                  searchQa: kind === 'qa-surf'
-                    ? async ({ query, tags, answered, sort, size, cursor }) => {
-                      const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                      const page = await qaSearch({
-                        q: query,
-                        ...(tags?.length ? { tags } : {}),
-                        ...(answered === true || answered === false ? { answered } : {}),
-                        ...(sort === 'newest' ? { sort: 'newest' as const } : {}),
-                        ...(size ? { size } : {}),
-                        ...(cursor ? { cursor } : {}),
-                      }, baseUrl ? { baseUrl } : undefined);
-                      const bullets = formatQaQuestionBullets(page.items);
-                      if (!bullets) {
-                        return `No on-chain Q&A matched "${query}". Do NOT invent questions or answers.`;
-                      }
-                      const sections = [
-                        `${page.items.length} on-chain question(s) matching "${query}":`,
-                        bullets,
-                      ];
-                      if (page.hasMore && page.nextCursor) {
-                        sections.push(`More results: call search_qa again with cursor="${page.nextCursor}".`);
-                      }
-                      return sections.join('\n');
-                    }
-                    : undefined,
-                  listLatestQuestions: kind === 'qa-surf'
-                    ? async ({ tags, minAnswers, maxAnswers, sort, size, cursor }) => {
-                      const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                      const page = await qaLatestQuestions({
-                        ...(tags?.length ? { tags } : {}),
-                        ...(minAnswers != null ? { minAnswers } : {}),
-                        ...(maxAnswers != null ? { maxAnswers } : {}),
-                        ...(sort === 'hot' ? { sort: 'hot' as const } : {}),
-                        ...(size ? { size } : {}),
-                        ...(cursor ? { cursor } : {}),
-                      }, baseUrl ? { baseUrl } : undefined);
-                      const bullets = formatQaQuestionBullets(page.items);
-                      if (!bullets) return 'No on-chain questions matched this filter.';
-                      const sections = [
-                        `${page.items.length} on-chain question(s):`,
-                        bullets,
-                      ];
-                      if (page.hasMore && page.nextCursor) {
-                        sections.push(`More questions: call list_latest_questions again with cursor="${page.nextCursor}".`);
-                      }
-                      return sections.join('\n');
-                    }
-                    : undefined,
-                  getQuestionAnswers: kind === 'qa-surf'
-                    ? async ({ questionPinId, publisher, size, cursor }) => {
-                      const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                      const detail = await qaQuestionDetail(questionPinId, baseUrl ? { baseUrl } : undefined);
-                      return formatQaQuestionDetail({ question: detail.question, answers: detail.answers });
-                    }
-                    : undefined,
-                  postSimpleAnswer: kind === 'qa-surf'
-                    ? async ({ answerTo, content, tags }) => {
-                      const answerHandler = handlers.qanda?.answer;
-                      if (!answerHandler) throw new Error('qanda answer handler is not configured.');
-                      const result = await answerHandler({
-                        from: slug,
-                        answerTo,
-                        content,
-                        ...(tags?.length ? { tags } : {}),
-                      });
-                      if (!result.ok) {
-                        throw new Error(result.message || 'answer publish failed');
-                      }
-                      const data = (result.data ?? {}) as { notice?: string; formatted?: string };
-                      if (typeof data.notice === 'string' && data.notice) {
-                        return data.notice;
-                      }
-                      return typeof data.formatted === 'string' && data.formatted
-                        ? data.formatted
-                        : 'Answer published on-chain.';
-                    }
-                    : undefined,
-                  likePin: kind === 'qa-surf'
-                    ? async ({ pinId, isLike }) => {
-                      const likeHandler = handlers.qanda?.like;
-                      if (!likeHandler) throw new Error('qanda like handler is not configured.');
-                      const result = await likeHandler({ from: slug, pinId, isLike });
-                      if (!result.ok) {
-                        throw new Error(result.message || 'reaction publish failed');
-                      }
-                      const data = (result.data ?? {}) as { formatted?: string };
-                      return typeof data.formatted === 'string' && data.formatted
-                        ? data.formatted
-                        : 'Reaction published on-chain.';
-                    }
-                    : undefined,
-                },
-              });
-            },
+            runStudyTurn: runStudyTurnForBot,
             log: (message) => {
               console.warn(message);
               groupTaskEngineLog(message);

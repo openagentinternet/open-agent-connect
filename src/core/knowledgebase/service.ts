@@ -40,6 +40,16 @@ export interface AddDocumentInput {
   tags?: string[];
 }
 
+/** What one importFiles batch did (IDBots importFiles parity). */
+export interface KbImportResult {
+  /** Files copied into the raw corpus (filename collisions get `-2`/`-3`… suffixes). */
+  imported: number;
+  /** Skipped files: unsupported extensions or copy failures. */
+  skipped: number;
+  /** Rel paths of the imported copies, in import order. */
+  files: string[];
+}
+
 export class KnowledgeBaseServiceError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
@@ -88,7 +98,7 @@ export interface KnowledgeBaseService {
     /** False when the post-save incremental index refresh failed — the raw document is still saved. */
     indexed: boolean;
   }>;
-  importFiles(metabotSlug: string, knowledgeBaseId: string | undefined, filePaths: string[]): Promise<number>;
+  importFiles(metabotSlug: string, knowledgeBaseId: string | undefined, filePaths: string[]): Promise<KbImportResult>;
 }
 
 export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseService {
@@ -145,7 +155,14 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
         await fs.mkdir(kb.rawDir, { recursive: true });
         const stats = await index.rebuild(kb.rawDir, () => Date.now(), { full: full === true });
         await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
-        learnSummary = { added: stats.added, updated: stats.updated, removed: stats.removed };
+        learnSummary = {
+          added: stats.added,
+          updated: stats.updated,
+          removed: stats.removed,
+          ...(stats.failedTotal > 0
+            ? { failed: stats.failed, failedTotal: stats.failedTotal }
+            : {}),
+        };
       });
       const updated = await store.getKnowledgeBase(kb.id);
       if (!updated) throw new KnowledgeBaseServiceError('kb_not_found', `Knowledge base ${kb.id} disappeared mid-learn.`);
@@ -214,20 +231,43 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
     importFiles: async (metabotSlug, knowledgeBaseId, filePaths) => {
       const kb = await requireKb(metabotSlug, knowledgeBaseId);
       let imported = 0;
+      let skipped = 0;
+      const files: string[] = [];
       for (const filePath of filePaths) {
         const ext = path.extname(filePath).toLowerCase();
-        if (!SUPPORTED_KB_EXTENSIONS.has(ext)) continue;
-        const target = path.join(kb.rawDir, path.basename(filePath));
+        if (!SUPPORTED_KB_EXTENSIONS.has(ext)) {
+          skipped += 1;
+          continue;
+        }
+        // Same-name imports never overwrite (IDBots parity): the first
+        // collision and every later one get `-2`, `-3`, … before the extension.
+        const base = path.basename(filePath);
+        const stem = base.slice(0, base.length - ext.length);
+        let target = path.join(kb.rawDir, base);
+        for (let suffix = 2; await exists(target); suffix += 1) {
+          target = path.join(kb.rawDir, `${stem}-${suffix}${ext}`);
+        }
         try {
           await fs.copyFile(filePath, target);
           imported += 1;
+          files.push(path.relative(kb.rawDir, target));
         } catch {
           // Individual import failures never abort the batch.
+          skipped += 1;
         }
       }
-      return imported;
+      return { imported, skipped, files };
     },
   };
+}
+
+async function exists(target: string): Promise<boolean> {
+  try {
+    await fs.stat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export { extractKbDocTitle };

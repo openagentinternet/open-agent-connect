@@ -103,6 +103,7 @@ test('runCli dispatches knowledge-base study subcommands to the study handlers',
       studyList: record('studyList'),
       studyEnqueue: record('studyEnqueue'),
       studyRetry: record('studyRetry'),
+      studyRun: record('studyRun'),
     },
   };
   const run = (args) => runCli(args, makeContext(dependencies));
@@ -114,16 +115,22 @@ test('runCli dispatches knowledge-base study subcommands to the study handlers',
   assert.equal(await run(['knowledge-base', 'study', 'retry', '--from', 'alice']), 0);
   assert.equal(await run(['knowledge-base', 'study', 'retry', '--job-id', 'study-1']), 0);
   assert.equal(await run(['knowledge-base', 'study', 'retry', '--topic', 'metaid']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'run', '--from', 'alice', '--topic', 'metaid']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'run', '--job-id', 'study-1']), 0);
+  assert.equal(await run(['knowledge-base', 'study', 'run']), 0, 'no selector runs the oldest pending job');
   assert.equal(await run(['knowledge-base', 'study', 'frobnicate']), 1, 'unknown study verb fails');
 
   assert.deepEqual(calls.map(([name]) => name), [
-    'studyEnqueue', 'studyList', 'studyRetry', 'studyRetry', 'studyRetry',
+    'studyEnqueue', 'studyList', 'studyRetry', 'studyRetry', 'studyRetry', 'studyRun', 'studyRun', 'studyRun',
   ]);
   assert.deepEqual(calls[0][1], { from: 'alice', topic: 'MetaID 协议', budgetPins: 10 });
   assert.deepEqual(calls[1][1], { from: 'alice' });
   assert.deepEqual(calls[2][1], { from: 'alice' });
   assert.deepEqual(calls[3][1], { from: undefined, jobId: 'study-1' });
   assert.deepEqual(calls[4][1], { from: undefined, topic: 'metaid' });
+  assert.deepEqual(calls[5][1], { from: 'alice', topic: 'metaid' });
+  assert.deepEqual(calls[6][1], { from: undefined, jobId: 'study-1' });
+  assert.deepEqual(calls[7][1], { from: undefined });
 });
 
 async function readHelpJson(args) {
@@ -191,7 +198,7 @@ test('knowledge-base subcommand help documents the flags the commands actually r
   assert.equal(query.includes('--query'), false);
 
   const study = (await readHelpJson(['knowledge-base', 'study'])).payload;
-  assert.equal(study.usage, 'metabot knowledge-base study <enqueue|status|retry> [--from <bot-slug>]');
+  assert.equal(study.usage, 'metabot knowledge-base study <enqueue|status|retry|run> [--from <bot-slug>]');
   assert.ok(
     study.successFields.includes('localUiUrl (study status only — the /ui/kb page; omitted when no daemon base URL is resolvable)'),
     'study help should document the localUiUrl on study status',

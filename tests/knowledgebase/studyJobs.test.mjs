@@ -13,6 +13,9 @@ const {
   inStudyWindow,
   buildStudySessionPrompt,
   parseStudyRunReport,
+  resolveStudyJobForRun,
+  runStudyJobNow,
+  StudyRunError,
   DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT,
   MAX_STUDY_RUNS_PER_JOB,
   MAX_STUDY_CONSECUTIVE_FAILURES,
@@ -107,7 +110,7 @@ test('crash recovery resets stale running rows; window and prompt/report shapes'
   const { job: b } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'B' });
   await jobs.markRunning(a.id);
   await jobs.markRunning(b.id);
-  const reset = await jobs.resetRunningToPending(Date.now(), a.id);
+  const reset = await jobs.resetRunningToPending(Date.now(), { excludeIds: [a.id] });
   assert.equal(reset, 1);
   assert.equal((await jobs.getStudyJob(a.id)).status, 'running', 'in-process job excluded');
   assert.equal((await jobs.getStudyJob(b.id)).status, 'pending');
@@ -119,7 +122,7 @@ test('crash recovery resets stale running rows; window and prompt/report shapes'
   assert.match(prompt, /unattended nightly study session/);
   assert.match(prompt, /bilingual keywords/);
   assert.match(prompt, /ONE ```json fence/);
-  assert.match(prompt, /at most 20 documents saved/);
+  assert.match(prompt, new RegExp(`at most ${DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT} documents saved`));
 
   const report = parseStudyRunReport([
     'I studied things.',
@@ -279,4 +282,127 @@ test('runStudyTick records a step-ceiling partial report end to end (D1-b)', asy
   assert.deepEqual(after.processedPinIds, ['p1']);
   assert.match(after.summary, /^\[partial\] collected one pin/);
   assert.equal(after.status, 'pending', 'a new pin in the partial report re-pends the job');
+});
+
+test('budget default aligns with IDBots (50 pins per night)', () => {
+  assert.equal(DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT, 50);
+});
+
+test('crash recovery runs BEFORE the window gate: a stale running row never waits for the next night', async () => {
+  const paths = makeProfile('metabot-study-crashorder-');
+  const jobs = createStudyJobStore(paths);
+  const { job } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'Crashed mid-flight' });
+  await jobs.markRunning(job.id);
+
+  const turns = [];
+  const attempted = await store.runStudyTick(jobs, {
+    runStudyTurn: async ({ prompt }) => {
+      turns.push(prompt);
+      return 'x';
+    },
+    now: () => new Date(2026, 7, 24, 9, 0).getTime(), // 9am — outside the window
+    log: () => undefined,
+  });
+  assert.equal(attempted, null, 'no drain outside the window');
+  assert.equal(turns.length, 0);
+  const swept = await jobs.getStudyJob(job.id);
+  assert.equal(swept.status, 'pending', 'the stale running row is re-armed immediately, not at the next night');
+});
+
+test('runStudyJobNow drains a pending job outside the window and settles it', async () => {
+  const paths = makeProfile('metabot-study-runnow-');
+  const jobs = createStudyJobStore(paths);
+  const { job } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'Run me now' });
+  const settled = await runStudyJobNow(jobs, {
+    runStudyTurn: async () => '```json\n{"processedPinIds":[],"summary":"manual run: nothing worth saving"}\n```',
+    now: () => new Date(2026, 7, 24, 14, 0).getTime(), // 2pm — outside the window
+    log: () => undefined,
+  }, { metabotSlug: 'bot-1' });
+  assert.equal(settled.id, job.id);
+  const after = await jobs.getStudyJob(job.id);
+  assert.equal(after.status, 'done', 'nothing-new completes the run');
+  assert.equal(after.runCount, 1);
+  assert.match(after.summary, /manual run/);
+});
+
+test('runStudyJobNow: explicit failed jobId requeues then runs; topic substring prefers pending', async () => {
+  const paths = makeProfile('metabot-study-runnow-failed-');
+  const jobs = createStudyJobStore(paths);
+  const { job: failedJob } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'will fail' });
+  await jobs.markRunning(failedJob.id);
+  await jobs.failRun(failedJob.id, 'boom');
+  const { job: pendingJob } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'will fail again but pending' });
+
+  // Explicit jobId on the failed job: requeued (counters cleared) and run now.
+  const settled = await runStudyJobNow(jobs, {
+    runStudyTurn: async () => '```json\n{"processedPinIds":[],"summary":"recovered"}\n```',
+    now: () => new Date(2026, 7, 24, 14, 0).getTime(),
+    log: () => undefined,
+  }, { metabotSlug: 'bot-1', jobId: failedJob.id });
+  assert.equal(settled.id, failedJob.id);
+  assert.equal((await jobs.getStudyJob(failedJob.id)).consecutiveFailures, 0);
+
+  // Topic substring: pending wins over done even when both match.
+  const picked = await resolveStudyJobForRun(jobs, { metabotSlug: 'bot-1', topic: 'will fail' });
+  assert.equal(picked.id, pendingJob.id);
+
+  // Unknown jobId → typed error.
+  await assert.rejects(
+    resolveStudyJobForRun(jobs, { metabotSlug: 'bot-1', jobId: 'study-missing' }),
+    (error) => error instanceof StudyRunError && error.code === 'study_job_not_found',
+  );
+});
+
+test('runStudyJobNow refuses a job already running in this process', async () => {
+  const paths = makeProfile('metabot-study-runnow-inflight-');
+  const jobs = createStudyJobStore(paths);
+  const { job } = await jobs.enqueueStudyJob({ metabotSlug: 'bot-1', topic: 'Long turn' });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const inFlight = runStudyJobNow(jobs, {
+    runStudyTurn: async () => {
+      await gate;
+      return '```json\n{"processedPinIds":[],"summary":"finished late"}\n```';
+    },
+    now: () => new Date(2026, 7, 24, 14, 0).getTime(),
+    log: () => undefined,
+  }, { metabotSlug: 'bot-1' });
+  try {
+    let row = await jobs.getStudyJob(job.id);
+    for (let i = 0; i < 50 && row.status !== 'running'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      row = await jobs.getStudyJob(job.id);
+    }
+    assert.equal(row.status, 'running');
+    await assert.rejects(
+      resolveStudyJobForRun(jobs, { metabotSlug: 'bot-1' }),
+      (error) => error instanceof StudyRunError && error.code === 'study_job_already_running',
+    );
+    // The nightly tick's crash-recovery sweep must not re-arm the in-flight
+    // run either (outside-window tick: sweep runs, drain does not).
+    const attempted = await store.runStudyTick(jobs, {
+      runStudyTurn: async () => 'x',
+      now: () => new Date(2026, 7, 24, 9, 0).getTime(),
+      log: () => undefined,
+    });
+    assert.equal(attempted, null);
+    assert.equal((await jobs.getStudyJob(job.id)).status, 'running', 'the sweep never touches the in-flight run');
+  } finally {
+    release();
+  }
+  const settled = await inFlight;
+  assert.equal(settled.status, 'done');
+});
+
+test('runStudyJobNow errors when nothing is runnable', async () => {
+  const paths = makeProfile('metabot-study-runnow-empty-');
+  const jobs = createStudyJobStore(paths);
+  await assert.rejects(
+    runStudyJobNow(jobs, {
+      runStudyTurn: async () => 'x',
+      now: () => new Date(2026, 7, 24, 14, 0).getTime(),
+      log: () => undefined,
+    }, { metabotSlug: 'bot-1' }),
+    (error) => error instanceof StudyRunError && error.code === 'no_pending_study_job',
+  );
 });
