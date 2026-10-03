@@ -190,7 +190,16 @@ Navigation arrives as one-shot targets on the panel store: an online row
 opens its thread, a task row opens that task, a collab row opens the guest
 transcript, and the 群任务 tab's + button opens the create-task modal (a
 grouptask target with an empty task key). Nothing auto-selects — with the
-lists on the left, the panel shows exactly what was clicked.
+lists on the left, the panel shows exactly what was clicked. A row click
+exits a kernel main panel (插件) only when one is actually active — the
+`selectPanel(null)` wrap closes both overlays and resets the tabs on every
+call, so an unconditional exit made each click pay a close/reset dance that
+must be re-armed by hand — and the panel body is crash-contained: a render
+error becomes a visible note and the next row click remounts the panel
+instead of the slot framework retiring the overlay entry (which would
+silently kill every later row click). Opening a thread or task also clears
+its unread dot (the target flow calls the unread controller's clear, and the
+thread/task on screen stays read through the live view).
 
 **Conversation-list tabs (本地对话 / 线上对话 / 群任务).** IDBots parity: the
 left conversation list carries a three-cell tab strip — 本地对话 (local DSH

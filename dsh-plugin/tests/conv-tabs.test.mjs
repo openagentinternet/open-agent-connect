@@ -73,6 +73,19 @@ test('the tab strip renders three tabs and hides the official region only via th
   assert.match(component, /resolveAvatarUrl/)
 })
 
+test('conv-tab rows show one time label: the row-top relative time, not the trail swap-label', async () => {
+  // The row top already carries oac-conv-row-time; the trail's relative time
+  // (the DSH hover-swap slot) rendered a second, duplicate label after it.
+  // The trail keeps only the hover "…" menu. The panel's own TaskListRow has
+  // no row-top time, so its trail label stays the single one there.
+  const component = await readFile(join(root, 'src/client/ConvTabs.tsx'), 'utf8')
+  assert.match(component, /oac-conv-row-time/)
+  assert.doesNotMatch(component, /time=\{row\.latestAt\}/)
+  assert.doesNotMatch(component, /time=\{task\.updatedAt\}/)
+  const view = await readFile(join(root, 'src/client/GroupTaskView.tsx'), 'utf8')
+  assert.match(view, /time=\{task\.updatedAt\}/)
+})
+
 test('the A2A panel store carries a one-shot navigation target', async () => {
   const store = await readFile(join(root, 'src/client/a2a-panel-store.ts'), 'utf8')
   assert.match(store, /openOn\(target: A2APanelTarget\)/)

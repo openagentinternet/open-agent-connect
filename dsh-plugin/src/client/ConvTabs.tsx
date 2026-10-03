@@ -310,10 +310,12 @@ function OnlineList({
               {unread.private[`${from}:${row.peerGlobalMetaId}`]
                 ? <span className="oac-unread-dot" aria-label={t('unread')} />
                 : null}
+              {/* No `time`: the row top already carries the relative label
+                  (oac-conv-row-time), so the trail's swap-label would double
+                  it — the trail renders the hover "…" only. */}
               <ConversationRowMenu
                 pinned={row.pinned}
                 copyId={row.conversationId}
-                time={row.latestAt}
                 onRename={() => {
                   setRenameTarget(row.peerGlobalMetaId)
                   setRenameDraft(row.displayName ?? '')
@@ -599,10 +601,12 @@ function GroupList({
                 </span>
               </span>
               {unread.group[key] ? <span className="oac-unread-dot" aria-label={t('unread')} /> : null}
+              {/* No `time`: the row top already carries the relative label
+                  (oac-conv-row-time), so the trail's swap-label would double
+                  it — the trail renders the hover "…" only. */}
               <ConversationRowMenu
                 pinned={task.pinned}
                 copyId={task.groupId || `#${task.id}`}
-                time={task.updatedAt}
                 disabled={busy}
                 onRename={() => {
                   setRenameDraft(task.displayName ?? task.title)

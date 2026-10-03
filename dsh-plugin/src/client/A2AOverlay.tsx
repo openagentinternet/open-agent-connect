@@ -15,7 +15,7 @@
  * kernel global panel is active or the right Sidebar is fullscreen (the
  * frame's `data-rightbar-fullscreen` attribute, pure CSS).
  */
-import type { ReactNode } from 'react'
+import { Component, type ReactNode } from 'react'
 import type { CommonKeyOf, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UsePanelInfo } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { A2AConversation, type A2AConversationInjected } from './A2AConversation.tsx'
@@ -35,11 +35,54 @@ export type A2AOverlayProps =
     usePanelInfo: UsePanelInfo
   }
 
+/**
+ * Crash containment for the panel body. The slot framework retires a crashed
+ * list entry from its cell for the rest of the registration's life — an
+ * uncaught render error inside the panel would silently kill every row
+ * click until the page reloads. This boundary keeps the entry alive: the
+ * error becomes a visible note, and the next navigation target (a new row
+ * click writes a fresh object) resets the boundary for a fresh mount.
+ */
+class OverlayPanelBoundary extends Component<
+  { resetKey: unknown; errorText: string; children: ReactNode },
+  { error: unknown }
+> {
+  state = { error: undefined as unknown }
+
+  static getDerivedStateFromError(error: unknown): { error: unknown } {
+    return { error }
+  }
+
+  componentDidCatch(cause: unknown): void {
+    console.error('[oac-dsh] A2A panel crashed:', cause)
+  }
+
+  componentDidUpdate(previous: { resetKey: unknown }): void {
+    if (previous.resetKey !== this.props.resetKey && this.state.error !== undefined) {
+      this.setState({ error: undefined })
+    }
+  }
+
+  render(): ReactNode {
+    if (this.state.error !== undefined) {
+      return (
+        <div className="oac-a2a-panel">
+          <div className="oac-gt-placeholder"><p className="oac-note error">{this.props.errorText}</p></div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export function A2AOverlay({ t, usePanelInfo, usePanel, ...face }: A2AOverlayProps): ReactNode {
   const open = usePanel((state) => state.open)
+  const target = usePanel((state) => state.target)
   return (
     <CenterOverlayFrame open={open} usePanelInfo={usePanelInfo}>
-      <A2AConversation {...face} usePanel={usePanel} t={t} />
+      <OverlayPanelBoundary resetKey={target} errorText={t('panelError')}>
+        <A2AConversation {...face} usePanel={usePanel} t={t} />
+      </OverlayPanelBoundary>
     </CenterOverlayFrame>
   )
 }

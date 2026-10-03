@@ -247,6 +247,32 @@ test('new-session and same-session navigation close the overlay via the selectPa
   assert.match(index, /delete \(layout as \{ selectPanel\?: unknown \}\)\.selectPanel/)
 })
 
+test('list-row clicks exit a main panel only when one is active, and openOn runs last', async () => {
+  // The selectPanel(null) wrap closes both overlays and force-resets the
+  // tabs to 本地对话 on EVERY call. An unconditional exit made every row
+  // click pay that close/reset dance and re-arm it by hand — pure churn
+  // while the conversation column is already active. The exit is guarded by
+  // the live activePanelId, and a2aPanel.openOn(target) runs last so the
+  // one-shot target is never eaten by the exit.
+  const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(index, /const openA2A = \(target: A2APanelTarget\): void => \{/)
+  assert.match(index, /ctx\.layout\.panelInfo\.getSnapshot\(\)\.activePanelId !== null/)
+  assert.match(index, /a2aPanel\.openOn\(target\)\s*\}/)
+})
+
+test('the A2A panel body is crash-contained and recovers on the next row click', async () => {
+  // The slot framework retires a crashed list entry from its cell for the
+  // rest of the registration's life — an uncaught render error inside the
+  // panel would silently kill every row click until the page reloads. The
+  // boundary keeps the entry alive, and a fresh navigation target (each
+  // click writes a new object) resets it for a fresh mount.
+  const overlay = await readFile(join(root, 'src/client/A2AOverlay.tsx'), 'utf8')
+  assert.match(overlay, /getDerivedStateFromError/)
+  assert.match(overlay, /componentDidCatch/)
+  assert.match(overlay, /resetKey=\{target\}/)
+  assert.match(overlay, /<CenterOverlayFrame open=\{open\} usePanelInfo=\{usePanelInfo\}>/)
+})
+
 test('list-row navigation exits an active main panel before opening the overlay', async () => {
   // The overlay renders nothing while a kernel main panel is active
   // (A2AOverlay gates on activePanelId === null), so a 线上对话 / 群任务 row
