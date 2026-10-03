@@ -17,6 +17,8 @@ import type { ConversationMessage, ConversationSummary, ConversationThread } fro
 import {
   applyGroupUpdate,
   applyPrivateLatest,
+  clearGroupMark,
+  clearPrivateMark,
   EMPTY_UNREAD,
   privateRowStatus,
   seedPrivateSeen,
@@ -90,21 +92,14 @@ export class A2AUnreadController {
 
   clearPrivateUnread(from: string, peer: string): void {
     if (!from || !peer) return
-    const key = `${from}:${peer}`
-    const state = this.store.getSnapshot()
-    if (!(key in state.private)) return
-    const next = { ...state, private: { ...state.private } }
-    delete next.private[key]
-    next.privateSeen[key] = Math.max(next.privateSeen[key] ?? 0, state.private[key] ?? 0)
+    const next = clearPrivateMark(this.store.getSnapshot(), `${from}:${peer}`)
+    if (next === null) return
     this.update(next)
   }
 
   clearGroupUnread(key: string): void {
-    const state = this.store.getSnapshot()
-    if (!(key in state.group)) return
-    const next = { ...state, group: { ...state.group } }
-    delete next.group[key]
-    next.groupSeen[key] = Math.max(next.groupSeen[key] ?? 0, state.group[key] ?? 0)
+    const next = clearGroupMark(this.store.getSnapshot(), key)
+    if (next === null) return
     this.update(next)
   }
 
