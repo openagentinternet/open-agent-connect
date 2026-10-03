@@ -254,6 +254,11 @@ test('engine: chair [STATUS:REVIEW] closes checkpoints and persists the acceptan
   await h.chairStore.addDeliverable({
     taskId: task.id, msgPinId: 'pin-x', authorGlobalMetaId: 'IDWORKER1', kind: 'link', uri: 'https://example.com/r',
   });
+  // A local-only row (no on-chain uri) must be warned about, not silently
+  // presented as an ordinary unverified deliverable.
+  await h.chairStore.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-local', authorGlobalMetaId: 'IDWORKER1', kind: 'text', uri: null,
+  });
   h.pushHistory('IDTWIN', 'All acceptance criteria met. [STATUS:REVIEW]');
 
   await h.engine.tick();
@@ -262,8 +267,13 @@ test('engine: chair [STATUS:REVIEW] closes checkpoints and persists the acceptan
   assert.equal(updated.status, 'review');
   const summary = await h.chairStore.getLatestAcceptanceSummary(task.id);
   assert.ok(summary, 'acceptance summary persisted');
-  assert.equal(summary.deliverables.length, 1);
+  assert.equal(summary.deliverables.length, 2);
   assert.ok(summary.conclusion.includes('All acceptance criteria met'));
+  assert.ok(Array.isArray(summary.warnings), 'ledger warnings persisted on the summary');
+  assert.ok(summary.warnings.some((warning) => warning.includes('local files')),
+    `local-only caution present: ${JSON.stringify(summary.warnings)}`);
+  assert.ok(summary.warnings.some((warning) => warning.includes('not confirmed on-chain')),
+    `unconfirmed caution present: ${JSON.stringify(summary.warnings)}`);
   // Single-commander: review entry posts NOTHING into the group — the chair's
   // own [STATUS:REVIEW] message is the wrap-up; the owner hears privately.
   assert.equal(h.pins.length, 0, 'no host review summary post (single-commander)');

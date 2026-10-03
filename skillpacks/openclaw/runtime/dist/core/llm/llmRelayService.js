@@ -78,10 +78,10 @@ exports.VISION_VIDEO_MAX_SECONDS = 180;
  * Prompt-level instructions cannot stop a stochastic ASR from merging
  * letter-by-letter speech ("O A C") into a plausible word (OOC / OASIS / OIC
  * on consecutive calls of the SAME audio). The pass below is deterministic
- * post-processing instead: suspect all-caps tokens get one format-constrained
- * confirmation call over the same audio (answer must be the letters or the
- * word itself), and an unresolved token marks the transcript low-confidence
- * instead of silently returning a corrupted acronym.
+ * post-processing instead: suspect letter tokens (all-caps or mixed-case) get
+ * one format-constrained confirmation call over the same audio (answer must be
+ * the letters or the word itself), and an unresolved token marks the
+ * transcript low-confidence instead of silently returning a corrupted acronym.
  */
 /** All-caps tokens this common are near-always real acronyms — never spend a confirmation call on them. */
 const SPELLED_LETTER_CONFIRM_SKIP = new Set([
@@ -92,16 +92,25 @@ const SPELLED_LETTER_CONFIRM_SKIP = new Set([
 ]);
 /** At most this many confirmation calls per transcription (daily-quota guard). */
 exports.MAX_SPELLED_LETTER_CONFIRMATIONS = 3;
+/** Ordinary capitalized words ("The", "Hello") — never spell-out suspects. */
+const ORDINARY_CAPITALIZED_WORD = /^[A-Z][a-z]+$/;
 /**
- * Suspect all-caps runs (2-5 letters) in one transcript, deduped, in order.
- * Hyphenated spelled forms (O-A-C) never match — they contain no 2+ letter
- * run — so a transcript that already kept the letters is left untouched.
+ * Suspect letter runs (2-5 letters) in one transcript, deduped, in order.
+ * ASR merges spelled sequences into all-caps tokens (OASIS) or mixed-case
+ * ones ("oC" for "O C"), so any token carrying an uppercase letter is a
+ * suspect except ordinary capitalized words like "The". Hyphenated spelled
+ * forms (O-A-C) never match — they contain no 2+ letter run — so a transcript
+ * that already kept the letters is left untouched.
  */
 function findSpelledLetterCandidates(content) {
     const seen = new Set();
     const candidates = [];
-    for (const match of content.matchAll(/\b[A-Z]{2,5}\b/g)) {
+    for (const match of content.matchAll(/\b[A-Za-z]{2,5}\b/g)) {
         const token = match[0];
+        if (!/[A-Z]/.test(token))
+            continue;
+        if (ORDINARY_CAPITALIZED_WORD.test(token))
+            continue;
         if (SPELLED_LETTER_CONFIRM_SKIP.has(token) || seen.has(token))
             continue;
         seen.add(token);
@@ -112,12 +121,19 @@ function findSpelledLetterCandidates(content) {
 /** The format-constrained confirmation prompt for one suspect token. */
 function buildSpelledLetterConfirmationPrompt(candidate) {
     return [
-        `这段音频的转写中包含一个不确定的大写片段 "${candidate}"。请只核对音频中该片段对应的发音：`,
+        `这段音频的转写中包含一个不确定的字母片段 "${candidate}"。请只核对音频中该片段对应的发音：`,
         '如果说话者是逐字母念出这组字母，只回答这些字母并用连字符连接（例如 O-A-C）；',
         '如果说话者念的就是这个完整单词/缩写，只回答该单词本身。',
         '不要输出其他任何内容。',
     ].join('');
 }
+/**
+ * The letter-by-letter preservation constraint. It is part of the default
+ * transcription prompt and is ALSO appended to any caller-supplied prompt:
+ * replacing it would let a caller prompt silently re-enable acronym merging.
+ */
+const SPELLED_LETTER_PROMPT_CONSTRAINT = '逐字母念出的字母序列按连字符保留（例如 "O A C" 转写为 O-A-C），绝不能把逐个念出的字母合并成新词。';
+const SPELLED_LETTER_DEFAULT_PROMPT = `请完整转写这段音频，保留原语言、标点和说话内容，不要总结。${SPELLED_LETTER_PROMPT_CONSTRAINT}`;
 /** Parse the confirmation answer: spelled letters win, an echoed word confirms, anything else is honest doubt. */
 function parseSpelledLetterConfirmation(answer, candidate) {
     const normalized = answer.trim().replace(/^[\s"'`「『“‘]+|[\s"'`」』”’。.!！?？,，;；:：]+$/g, '');
@@ -555,7 +571,7 @@ function createLlmRelayService(deps) {
     }
     /**
      * FIX-4: deterministic post-processing for letter-by-letter speech. Each
-     * suspect all-caps token gets one format-constrained confirmation call over
+     * suspect letter token gets one format-constrained confirmation call over
      * the same audio; a confirmed spelling replaces the merged word, and an
      * unresolved token marks the transcript low-confidence instead of passing
      * corruption off as a clean result.
@@ -579,10 +595,10 @@ function createLlmRelayService(deps) {
                 content = content.replace(new RegExp(`(?<![A-Za-z])${candidate}(?![A-Za-z])`, 'g'), parsed.text);
             }
             else if (parsed.kind === 'unstable') {
-                notes.push(`the all-caps sequence "${candidate}" was not stably recognized (also heard as "${parsed.heard}")`);
+                notes.push(`the letter sequence "${candidate}" was not stably recognized (also heard as "${parsed.heard}")`);
             }
             else if (parsed.kind === 'inconclusive') {
-                notes.push(`the all-caps sequence "${candidate}" could not be confirmed as a word or as spelled-out letters`);
+                notes.push(`the letter sequence "${candidate}" could not be confirmed as a word or as spelled-out letters`);
             }
         }
         if (notes.length === 0)
@@ -785,8 +801,12 @@ function createLlmRelayService(deps) {
             }
             // IDBots-parity default: full verbatim transcription, no summarizing.
             // Letter-by-letter spoken sequences (O A C) must survive as O-A-C —
-            // merging them into a new word (OOC) silently corrupts acronyms.
-            body.prompt = prompt || '请完整转写这段音频，保留原语言、标点和说话内容，不要总结。逐字母念出的字母序列按连字符保留（例如 "O A C" 转写为 O-A-C），绝不能把逐个念出的字母合并成新词。';
+            // merging them into a new word (OOC) silently corrupts acronyms. A
+            // caller-supplied prompt must not drop that constraint, so it is
+            // appended rather than replacing the default.
+            body.prompt = prompt
+                ? `${prompt}\n${SPELLED_LETTER_PROMPT_CONSTRAINT}`
+                : SPELLED_LETTER_DEFAULT_PROMPT;
             const result = await postRecognizeWithKeyRetry(body, 'vision relay returned no audio transcription');
             return await stabilizeSpelledLetters(result, body);
         },

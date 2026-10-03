@@ -168,6 +168,8 @@ test('get_question_answers uses the publisher-filtered answer list and maps 4040
     const host = fakeHost()
     plugin.bindQaToolInstall(host.ctx)
     const tool = host.tools.find((definition) => definition.name === 'get_question_answers')
+    assert.match(tool.description, /ranking reflects community likes\/dislikes only/i)
+    assert.match(tool.description, /does not mean the asker adopted or refuted/i)
 
     const result = await tool.execute({ question_pin_id: 'q1', publisher: 'gm-me', size: 10, cursor: 'x' }, {})
     assert.equal(fetchStub.calls.length, 2, 'detail + publisher-filtered answers')

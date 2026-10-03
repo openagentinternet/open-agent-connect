@@ -383,3 +383,34 @@ test('failed study jobs surface why + how to retry, and metaweb_study_retry requ
   const missing = await byName.get('metaweb_study_retry').execute({ jobId: 'study-nope' }, exec)
   assert.match(String(missing), /No study job with id "study-nope"/)
 })
+
+test('metaweb_study_status groups rows by status, failed first, not by createdAt (D1-a)', async () => {
+  const { homeDir, exec, resolve } = profileSetup('kb-study-groups-')
+  const bound = fakeHost()
+  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot', resolve)
+  const byName = new Map(bound.tools.map((tool) => [tool.name, tool]))
+
+  await byName.get('metaweb_study_enqueue').execute({ topic: 'failed topic' }, exec)
+  await byName.get('metaweb_study_enqueue').execute({ topic: 'pending topic' }, exec)
+  await byName.get('metaweb_study_enqueue').execute({ topic: 'done topic' }, exec)
+
+  const paths = localRead.core('core/state/paths.js').resolveMetabotPaths(homeDir)
+  const store = localRead.core('core/knowledgebase/studyJobs.js').createStudyJobStore(paths)
+  const jobs = await store.listStudyJobs('test-bot')
+  const failed = jobs.find((job) => job.topic === 'failed topic')
+  const done = jobs.find((job) => job.topic === 'done topic')
+  for (let index = 0; index < 3; index += 1) await store.failRun(failed.id, 'boom')
+  await store.completeRun({ id: done.id, processedPinIds: [], summary: 'nothing new', learnedSomethingNew: false })
+
+  const status = String(await byName.get('metaweb_study_status').execute({}, exec))
+  const failedIndex = status.indexOf('FAILED — needs attention')
+  const progressIndex = status.indexOf('IN PROGRESS')
+  const doneIndex = status.indexOf('DONE')
+  assert.ok(
+    failedIndex >= 0 && progressIndex > failedIndex && doneIndex > progressIndex,
+    `groups must order failed -> in progress -> done:\n${status}`,
+  )
+  assert.match(status, /FAILED — needs attention \(1\):[\s\S]*- "failed topic" \[failed\]/)
+  assert.match(status, /IN PROGRESS \(1\):[\s\S]*- "pending topic" \[pending\]/)
+  assert.match(status, /DONE \(1\):[\s\S]*- "done topic" \[done\]/)
+})

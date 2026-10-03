@@ -557,6 +557,68 @@ test('kickGroupTaskMember removes on-chain via chair, marks the row, confirms vi
   );
 });
 
+test('getGroupTaskDetail surfaces deliverables posted before the engine tick (G2)', async () => {
+  const { ctx } = createFakeContext('metabot-gt-pending-');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { task, chairSlug } = await createGroupTask(ctx, {
+    title: 'Pending deliverables',
+    goal: 'Do not hide the tick gap',
+    workerSlugs: ['worker-1'],
+  });
+  const chairProfile = await ctx.getProfile(chairSlug);
+  const store = createGroupTaskStore(resolveMetabotPaths(chairProfile.homeDir));
+  const record = await store.getTaskById(task.id);
+  const message = (overrides) => ({
+    index: 9,
+    pinId: 'pin-pending-9',
+    txId: 'tx-pending-9',
+    senderMetaId: 'meta-worker-1',
+    senderGlobalMetaId: 'IDWORKER1',
+    senderName: 'worker 1',
+    senderAvatar: null,
+    content: '[DELIVERABLE] https://example.com/report done',
+    contentType: 'text/plain',
+    chainTimestamp: Math.floor(Date.now() / 1000),
+    replyPin: null,
+    mention: [],
+    senderSuspect: false,
+    ...overrides,
+  });
+  await store.appendMessages(record.groupId, [
+    message({}),
+    // Chair-authored and suspect lines are not deliverables.
+    message({ index: 10, pinId: 'pin-chair-10', senderGlobalMetaId: 'IDTWIN', content: '[DELIVERABLE] https://example.com/chair' }),
+    message({ index: 11, pinId: 'pin-suspect-11', senderGlobalMetaId: 'IDSTRANGER', senderSuspect: true }),
+  ]);
+
+  const detail = await getGroupTaskDetail(ctx, chairSlug, task.id, { sync: false });
+  assert.equal(detail.deliverables.length, 0, 'the ledger has not been written by the tick yet');
+  assert.equal(detail.pendingDeliverables.length, 1, 'only the member deliverable is pending');
+  assert.equal(detail.pendingDeliverables[0].messageIndex, 9);
+  assert.equal(detail.pendingDeliverables[0].kind, 'link');
+  assert.equal(detail.pendingDeliverables[0].uri, 'https://example.com/report');
+  assert.equal(detail.pendingDeliverables[0].authorGlobalMetaId, 'IDWORKER1');
+  assert.equal(detail.pendingDeliverables[0].authorName, 'worker 1');
+});
+
+test('drainGroupTaskRelay annotates rows with the task status at drain time (G3)', async () => {
+  const { ctx } = createFakeContext('metabot-gt-relay-status-');
+  const { task, chairSlug } = await createGroupTask(ctx, {
+    title: 'Relay status',
+    goal: 'Mark delayed events',
+    workerSlugs: ['worker-1'],
+    sourceSessionId: 'sess-relay-status',
+  });
+  await closeGroupTask(ctx, chairSlug, task.id, { status: 'cancelled', reason: 'done testing' });
+
+  const rows = await service.drainGroupTaskRelay(ctx, chairSlug);
+  const closed = rows.find((row) => row.kind === 'closed');
+  assert.ok(closed, 'the close milestone was relayed');
+  assert.equal(closed.taskStatus, 'cancelled', 'drain reports the settled status');
+  assert.equal(typeof closed.closedAt, 'number', 'drain reports the close time for staleness checks');
+});
+
 // ---------------------------------------------------------------------------
 // Single-commander: supervision never posts; close cancels pending wakes
 // ---------------------------------------------------------------------------
@@ -578,19 +640,24 @@ test('supervise records signals and queues wakes but NEVER posts into the group 
 
   // pause: state gate set, signal recorded, no group post, relay emitted.
   const paused = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'pause' });
-  assert.equal(paused.notice, null);
+  assert.equal(paused.notice, `Dispatch paused for task ${task.id}.`);
   assert.equal(pins.length, pinCountAfterCreate, 'pause posted nothing');
   assert.equal((await store.getTaskById(task.id)).dispatchPausedAt != null, true);
+
+  // pause again is idempotent but never a silent no-op: the notice says so.
+  const pausedAgain = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'pause' });
+  assert.equal(pausedAgain.notice, `Dispatch is already paused for task ${task.id}.`);
 
   // resume: gate cleared, wake queued, no group post.
   const resumed = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'resume' });
   assert.equal(resumed.nudgeQueued, true);
+  assert.equal(resumed.notice, `Dispatch resumed for task ${task.id}; chair nudged.`);
   assert.equal(pins.length, pinCountAfterCreate, 'resume posted nothing');
   assert.ok(await store.kvGet(`group_task_nudge_request:${task.id}`), 'resume wake queued');
 
   // flag: ledger only.
   const flagged = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'flag', note: 'watch the scope' });
-  assert.equal(flagged.notice, null);
+  assert.equal(flagged.notice, `Flag recorded on the acceptance record for task ${task.id}.`);
   assert.equal(pins.length, pinCountAfterCreate, 'flag posted nothing');
   const signals = await store.listSupervisorSignals(task.id);
   assert.deepEqual(signals.map((signal) => signal.signalType), ['pause', 'resume', 'flag']);
@@ -627,6 +694,7 @@ test('supervise reports chairUnavailable for nudge/resume on a degraded chair ch
   });
   assert.equal(nudge.nudgeQueued, true, 'the signal is still queued');
   assert.equal(nudge.chairUnavailable, true, 'the degraded channel is surfaced explicitly');
+  assert.match(nudge.notice, /^Nudge queued for .+\.$/, 'the nudge result says who was nudged');
 
   await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'pause' });
   const resumed = await service.superviseGroupTask(ctx, chairSlug, task.id, { action: 'resume' });

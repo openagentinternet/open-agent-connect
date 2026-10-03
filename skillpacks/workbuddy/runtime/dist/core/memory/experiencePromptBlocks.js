@@ -265,8 +265,8 @@ function formatExperienceTimelineFallback(input) {
         return `- ${when} [${episode.episodeType}]: ${title}`;
     });
     return [
-        `No dream summaries were consolidated for ${input.dateFrom ?? 'this range'}${input.dateTo ? `..${input.dateTo}` : ''}, but the raw activity timeline shows ${input.episodes.length} episode(s):`,
+        `Raw activity timeline shows ${input.episodes.length} episode(s) for ${input.dateFrom ?? 'this range'}${input.dateTo ? `..${input.dateTo}` : ''} (dream summaries not yet consolidated; use granularity=day for consolidated summaries once available):`,
         ...lines,
-        'These episodes were not yet distilled into a daily summary; re-call later (after the nightly dream) or with granularity=day for a summarized view.',
+        'These raw episodes were not yet distilled into a daily summary; re-call later (after the nightly dream) for the consolidated view.',
     ].join('\n');
 }

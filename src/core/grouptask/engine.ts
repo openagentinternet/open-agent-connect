@@ -808,8 +808,20 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     return updated;
   }
 
-  /** IDBots parity label: verified on-chain, indexer lag, or unverified. */
-  function deliverableVerificationLabel(row: { confirmation: string; verification: string | null }): string {
+  /**
+   * IDBots parity label with a local/on-chain split: a text deliverable (no
+   * uri) or a bare local path never reached the chain, so it is `local-only`
+   * rather than an unverified chain artifact; everything else keeps the
+   * confirmed / pending-sync / unverified scale.
+   */
+  function deliverableVerificationLabel(row: {
+    kind: string | null;
+    uri: string | null;
+    confirmation: string;
+    verification: string | null;
+  }): string {
+    const uri = (row.uri ?? '').trim();
+    if (!uri || looksLikeLocalFilePath(uri)) return 'local-only';
     if (row.confirmation === 'confirmed') return 'on-chain ✓';
     if (row.verification && row.verification.includes('"not_found"')) return 'pending sync';
     return 'unverified';
@@ -873,6 +885,25 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     const planChanges = await store.listPlanChanges(task.id);
     let conclusion = fallbackConclusion(reviewMessage);
 
+    // Ledger cautions the owner must read before accepting: local-only rows
+    // never reached the chain, and unconfirmed rows are still being indexed.
+    const labels = deliverables.map((row) => deliverableVerificationLabel(row));
+    const warnings: string[] = [];
+    const localOnlyCount = labels.filter((label) => label === 'local-only').length;
+    if (localOnlyCount > 0) {
+      warnings.push(
+        `${localOnlyCount} deliverable${localOnlyCount === 1 ? '' : 's'} exist only as local files `
+        + '(no on-chain URI), so their content cannot be verified from the chain.',
+      );
+    }
+    const unsettledCount = labels.filter((label) => label === 'unverified' || label === 'pending sync').length;
+    if (unsettledCount > 0) {
+      warnings.push(
+        `${unsettledCount} deliverable${unsettledCount === 1 ? '' : 's'} are not confirmed on-chain yet `
+        + '(unverified or pending sync).',
+      );
+    }
+
     await store.addAcceptanceSummary({
       taskId: task.id,
       goal: task.goal,
@@ -897,6 +928,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       outcome: null,
       rating: null,
       ratingComment: null,
+      warnings,
       generatedBy: 'grouptask-engine',
       publishedGroupPinId: null,
     });

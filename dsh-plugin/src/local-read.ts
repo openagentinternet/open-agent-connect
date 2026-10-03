@@ -482,7 +482,11 @@ async function grouptaskServiceContext(): Promise<Record<string, unknown> | null
       .then((state) => (typeof state.identity?.metaId === 'string' ? state.identity.metaId : null))
       .catch(() => null),
     botType: profile.botType === 'twin' ? 'twin' : profile.botType === 'worker' ? 'worker' : null,
-    avatar: typeof profile.avatarDataUrl === 'string' ? profile.avatarDataUrl : null,
+    // OT-03 R9 parity with the daemon context: never inline the base64 avatar
+    // here — this ref feeds the detail/list payloads agents consume, and a
+    // 40-90KB data URL per member per call was a silent context tax. The panel
+    // resolves local Bot avatars client-side from the bots API.
+    avatar: null,
   })))
   if (!refs.some((ref) => ref.slug !== '')) return null
   return {

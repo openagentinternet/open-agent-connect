@@ -26,7 +26,11 @@ const node_crypto_1 = require("node:crypto");
 exports.DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 20;
 exports.MAX_STUDY_RUNS_PER_JOB = 10;
 exports.MAX_STUDY_CONSECUTIVE_FAILURES = 3;
-/** Tool-step cap for one nightly study turn (topic jobs) — after this the turn must have reported. */
+/**
+ * Tool-step cap for one nightly study turn (topic jobs). Hitting the cap does
+ * not fail the run: the loop takes one final no-tools report turn and marks
+ * the result partial (same graceful degradation as the surf loop).
+ */
 exports.STUDY_TURN_MAX_TOOL_STEPS = 12;
 /** Tool-step cap for one nightly Q&A-surf turn (surf sessions page feeds and answer questions). */
 exports.QA_SURF_TURN_MAX_TOOL_STEPS = 24;
@@ -455,17 +459,22 @@ function buildQaSurfSessionPrompt(job) {
 }
 /**
  * Parse the study run report: the LAST json fence wins; a prose-only reply
- * throws (the job fails rather than guessing).
+ * throws (the job fails rather than guessing). The executor loop hands back
+ * the normalized report as bare JSON while the model's raw reply carries a
+ * fence, so both shapes are accepted.
  */
 function parseStudyRunReport(reply) {
-    const fences = [...String(reply ?? '').matchAll(/```json\s*([\s\S]*?)```/gu)];
+    const text = String(reply ?? '');
+    const fences = [...text.matchAll(/```json\s*([\s\S]*?)```/gu)];
     const last = fences[fences.length - 1];
-    if (!last) {
+    const bare = text.trim();
+    const payload = last ? last[1] : (bare.startsWith('{') && bare.endsWith('}') ? bare : null);
+    if (payload === null) {
         throw new StudyJobStoreError('report_missing', 'Study run produced no json report fence.');
     }
     let parsed;
     try {
-        parsed = JSON.parse(last[1]);
+        parsed = JSON.parse(payload);
     }
     catch {
         throw new StudyJobStoreError('report_invalid', 'Study run json fence is not valid JSON.');
@@ -576,12 +585,42 @@ function parseStudyJsonFence(reply) {
         return null;
     }
 }
+/** The step-ceiling turn: tools are withdrawn, so the model must report what it has. */
+function buildStudyStepCeilingPrompt(maxSteps) {
+    return [
+        `Tool-step budget exhausted (${maxSteps} steps) — no further tool calls will run, so do not emit one.`,
+        'Reply now with exactly ONE ```json fence holding your final report:',
+        '```json',
+        '{"processedPinIds":["<pinId you already handled>", ...], "summary":"<what you found and saved>"}',
+        '```',
+        'Summarize the findings you already collected and start the summary with "PARTIAL:" — this pass ended early.',
+    ].join('\n');
+}
+/** Read a report out of a parsed fence (accepts the nested report and flat shapes). */
+function readStudyFinalReport(action) {
+    const nested = action.report;
+    const source = (nested && typeof nested === 'object' && !Array.isArray(nested))
+        ? nested
+        : action;
+    const summary = typeof source.summary === 'string' ? source.summary.trim() : '';
+    if (!summary)
+        return null;
+    const processedPinIds = Array.isArray(source.processedPinIds)
+        ? source.processedPinIds.map((pin) => String(pin ?? '').trim()).filter(Boolean)
+        : [];
+    return { processedPinIds, summary };
+}
+/** Prefix a partial report once, without clobbering a model that already said so. */
+function markPartialSummary(summary) {
+    return /^(?:\[\s*)?(?:partial|incomplete)\b/i.test(summary) ? summary : `[partial] ${summary}`;
+}
 /**
  * The study turn as a bounded tool loop with a HARD executor-side allowlist:
  * the model proposes one json tool call per step, the executor runs it (or
  * rejects it), and only allowlisted operations ever execute. Pin budget is
  * enforced by a counting wrapper around addDocument — prompt guidance alone
- * is not a budget. Returns the final report text.
+ * is not a budget. Returns the final report text; hitting the step cap takes
+ * one final no-tools report turn (marked partial) instead of failing the run.
  */
 async function runStudyTurnWithTools(prompt, deps) {
     // Surf sessions page the feed, open questions, answer, react, and save —
@@ -798,5 +837,21 @@ async function runStudyTurnWithTools(prompt, deps) {
                 : result,
         });
     }
-    throw new StudyJobStoreError('study_steps_exhausted', `Study turn exceeded ${maxSteps} tool steps without a final report.`);
+    // Step ceiling hit without a final report: mirror the surf loop's graceful
+    // degradation. One last turn runs with the tools withdrawn — whatever was
+    // collected so far lands as a report marked partial, and only a model that
+    // still refuses to report fails the run.
+    const finalReply = await deps.runLlm([
+        ...history,
+        { role: 'user', content: buildStudyStepCeilingPrompt(maxSteps) },
+    ]);
+    const finalAction = parseStudyJsonFence(finalReply);
+    const finalReport = finalAction ? readStudyFinalReport(finalAction) : null;
+    if (finalReport) {
+        return JSON.stringify({
+            processedPinIds: finalReport.processedPinIds,
+            summary: markPartialSummary(finalReport.summary),
+        });
+    }
+    throw new StudyJobStoreError('study_steps_exhausted', `Study turn exceeded ${maxSteps} tool steps without a final report (a no-tools report turn was requested and still produced none).`);
 }

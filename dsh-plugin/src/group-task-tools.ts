@@ -147,6 +147,11 @@ function formatCreated(data: Record<string, unknown>): string {
     `Group task "${String(task.title)}" created: task ${String(task.id)}, group ${String(task.groupId)}, status ${String(task.status)}.`,
     `${String(data.chairSlug)} chairs it. The engine posts the kickoff and runs planning within seconds; follow with {action:"detail", taskId:${String(task.id)}}.`,
   ]
+  // Acceptance criteria are the review contract: when none reached the task,
+  // say it outright so the caller can reopen with one before the work lands.
+  if (!String(task.acceptanceCriteria ?? '').trim()) {
+    lines.push('Warning: no acceptanceCriteria was set on this task — review will have no contract to check the deliverables against.')
+  }
   const remoteSeats = (data.pendingRemoteSeats ?? []) as Array<Record<string, unknown>>
   if (remoteSeats.length > 0) {
     // OT-02: one Bot can hold several seats — group by Bot so the guidance
@@ -178,11 +183,16 @@ function formatCreated(data: Record<string, unknown>): string {
 
 function formatPropose(data: Record<string, unknown>): string {
   const proposal = (data.proposal ?? {}) as Record<string, unknown>
+  // Echo the acceptance criteria so the caller can verify on the spot that the
+  // proposal carries the contract (and that the seat plan is not silently
+  // missing it). A missing criteria is stated, never implied.
+  const acceptanceCriteria = String(proposal.acceptanceCriteria ?? '').trim()
   return [
     String(data.slateText ?? ''),
     '',
     `proposalId: ${String(proposal.id)}`,
     `ownerConfirmRequired: ${String(data.ownerConfirmRequired)}`,
+    `acceptanceCriteria: ${acceptanceCriteria || '(none) — the task will have no acceptance criteria'}`,
   ].join('\n')
 }
 
@@ -268,7 +278,11 @@ export function createGroupTaskController(
           const plan = args.plan
           if (!title || !goal) fail('missing_fields', 'title and goal are required.')
           if (!plan || (typeof plan === 'object' && Object.keys(plan).length === 0)) {
-            fail('missing_plan', 'plan ({stages, seats}) is required — run search_candidates per seat first.')
+            fail(
+              'missing_plan',
+              'the plan ({stages, seats}) argument is missing. '
+              + 'Build it from your search_candidates results — one seat entry per seat.',
+            )
           }
           const acceptanceCriteria = readString(args, 'acceptanceCriteria')
           const wish = readString(args, 'wish')

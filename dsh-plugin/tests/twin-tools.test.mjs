@@ -148,9 +148,11 @@ function fakeDsh(handoffText, options = {}) {
           const text = handoffText !== null && typeof handoffText === 'object' ? handoffText[preset] : handoffText
           const events = text === 'turn_error'
             ? [{ type: 'turn/end', data: { reason: { kind: 'error', error: { message: 'agent "x" has no provider/model: set AgentOptions.provider and AgentOptions.model' } } } }]
-            : text && text !== 'never'
-              ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]
-              : []
+            : text === 'hang_after_partial'
+              ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'partial result streamed before the hang' }] } } }]
+              : text && text !== 'never'
+                ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]
+                : []
           const session = { id: createOptions.sessionId }
           return {
             agent: {
@@ -161,7 +163,7 @@ function fakeDsh(handoffText, options = {}) {
                 // The turn's events stream in while it runs, after followup.
                 for (const event of events) fireSessionEvent(session, event)
               },
-              whenIdle: () => text === 'never' ? new Promise(() => {}) : Promise.resolve(),
+              whenIdle: () => text === 'never' || text === 'hang_after_partial' ? new Promise(() => {}) : Promise.resolve(),
               cancel: (reason) => cancelled.push(reason),
               session,
             },
@@ -276,6 +278,24 @@ test('delegate times out a wedged worker and marks the attempt timed_out', async
     .filter((entry) => Array.isArray(entry) && entry[0] === 'payload' && entry[1]?.attemptStatus)
     .map((entry) => entry[1])
   assert.equal(attemptUpdates[0].attemptStatus, 'timed_out')
+  // the timeout receipt carries where the wedged session lives and next steps
+  assert.match(result.message, /worker step timed out after 0s/)
+  assert.match(result.message, new RegExp(`dshSessionId: ${dsh.created[0].sessionId}`))
+  assert.match(result.message, /taskId: task_1/)
+  assert.match(result.message, /stepId: step_1/)
+  assert.match(result.message, /attemptId: att_1/)
+  assert.match(result.message, /oac_session_read_latest/)
+  assert.match(result.message, /twin_task_status/)
+})
+
+test('a timeout receipt includes the partial assistant output streamed before the hang', async () => {
+  const { run } = runScript()
+  const dsh = fakeDsh('hang_after_partial')
+  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run, stepTimeoutMs: 50 })
+  const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'worker_timed_out')
+  assert.match(result.message, /last assistant output: partial result streamed before the hang/)
 })
 
 test('backlog pending notifications are silenced, never injected into whichever session appears', async () => {
@@ -514,6 +534,54 @@ test('stopLiveSession points at taskId+stepId for in-flight delegated sessions',
   await pending
 })
 
+test('stopLiveSession reports a session with no cancellable turn instead of a false success', async () => {
+  const { run } = runScript()
+  const orchestrator = plugin.createTwinOrchestrator({}, 'alice', { run })
+  plugin.liveOacAgents.set('bob', { ctx: {}, session: { id: 'sess-bob' } })
+  const result = await orchestrator.stopLiveSession('bob')
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'stop_unavailable')
+  assert.match(result.message, /no cancellable turn/)
+  plugin.liveOacAgents.delete('bob')
+})
+
+test('worker_session_stop receipt names the stopped worker and session', async () => {
+  const { run } = runScript()
+  const orchestrator = plugin.createTwinOrchestrator({}, 'alice', { run })
+  const tools = plugin.buildTwinToolDefinitions(orchestrator, 'alice', run)
+  const stop = tools.find((tool) => tool.name === 'worker_session_stop')
+  plugin.liveOacAgents.set('bob', { ctx: {}, session: { id: 'sess-bob' }, cancel: () => {} })
+  const text = await stop.execute({ target: 'bob' }, {})
+  assert.equal(text, 'Worker session stopped: bob (session sess-bob).')
+  plugin.liveOacAgents.delete('bob')
+})
+
+test('twin_task_status forwards a validated status filter to the CLI', async () => {
+  const calls = []
+  const run = async (args) => {
+    calls.push(args)
+    return { ok: true, state: 'success', data: { tasks: [{ id: 'task_1', title: '发布清单', status: 'running' }] } }
+  }
+  const orchestrator = plugin.createTwinOrchestrator({}, 'alice', { run })
+  const tools = plugin.buildTwinToolDefinitions(orchestrator, 'alice', run)
+  const status = tools.find((tool) => tool.name === 'twin_task_status')
+
+  const text = await status.execute({ status: 'running' }, {})
+  assert.deepEqual(calls.at(-1), ['twin', 'tasks', 'list', '--from', 'alice', '--status', 'running'])
+  assert.match(text, /\[running\] 发布清单/)
+
+  // an unknown status fails loudly instead of silently returning the unfiltered list
+  calls.length = 0
+  await assert.rejects(
+    () => status.execute({ status: 'sideways' }, {}),
+    /Invalid status "sideways".*planning, running, review, completed, failed, cancelled/,
+  )
+  assert.equal(calls.length, 0)
+
+  await status.execute({}, {})
+  assert.deepEqual(calls.at(-1), ['twin', 'tasks', 'list', '--from', 'alice'])
+})
+
 test('stopAttempt cancels the in-flight attempt through the agent and keeps the session alive', async () => {
   const tasks = [{
     id: 'task_1',
@@ -535,6 +603,11 @@ test('stopAttempt cancels the in-flight attempt through the agent and keeps the 
   await waitFor(() => dsh.followedUp.length > 0)
   const stop = await orchestrator.stopAttempt('task_1', 'step_1')
   assert.equal(stop.ok, true)
+  // the stop receipt carries the stopped target, not just a boolean
+  assert.equal(stop.data.taskId, 'task_1')
+  assert.equal(stop.data.stepId, 'step_1')
+  assert.equal(stop.data.workerSlug, 'bob')
+  assert.equal(stop.data.sessionId, dsh.created[0].sessionId)
   const settled = await pending
   assert.equal(settled.ok, false)
   assert.equal(settled.code, 'attempt_superseded')

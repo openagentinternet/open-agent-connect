@@ -482,6 +482,49 @@ async function syncGroupTaskMessages(ctx, store, task) {
             + `${error instanceof Error ? error.message : String(error)}`);
     }
 }
+/** Cap for the read-only pending-deliverable scan (newest window). */
+const PENDING_DELIVERABLE_SCAN_LIMIT = 500;
+/**
+ * Read-only [DELIVERABLE] scan of messages the engine cursor has not consumed
+ * yet. Mirrors the engine's accounting filters — non-chair, non-suspect sender
+ * with a chain pin — using the same `parseDeliverableCandidates` parser, so the
+ * detail view can say "posted, not yet in the ledger" instead of showing an
+ * empty deliverables list until the next 5s tick.
+ */
+function collectPendingDeliverables(task, messages, members, nameForGmid) {
+    if (!task.groupId)
+        return [];
+    const chairGmid = (task.chairGlobalMetaId ?? '').trim().toLowerCase();
+    const memberGmids = new Set(members
+        .map((member) => (member.globalMetaId ?? '').trim().toLowerCase())
+        .filter((gmid) => gmid.length > 0));
+    const pending = [];
+    for (const message of messages) {
+        if (message.index <= task.lastProcessedIndex)
+            continue;
+        if (message.senderSuspect || !message.pinId)
+            continue;
+        const gmid = (message.senderGlobalMetaId ?? '').trim().toLowerCase();
+        if (!gmid || gmid === chairGmid || !memberGmids.has(gmid))
+            continue;
+        const candidates = (0, tags_1.parseDeliverableCandidates)(message.content);
+        if (candidates.length === 0)
+            continue;
+        for (const candidate of candidates) {
+            pending.push({
+                messageIndex: message.index,
+                msgPinId: message.pinId,
+                authorGlobalMetaId: message.senderGlobalMetaId,
+                authorName: nameForGmid(message.senderGlobalMetaId) ?? message.senderName,
+                kind: candidate.kind,
+                uri: candidate.uri,
+                payload: candidate.payload,
+                chainTimestamp: message.chainTimestamp,
+            });
+        }
+    }
+    return pending;
+}
 async function getGroupTaskDetail(ctx, chairSlug, taskId, opts) {
     const chair = await requireProfile(ctx, chairSlug);
     const store = storeFor(ctx, chair);
@@ -555,10 +598,34 @@ async function getGroupTaskDetail(ctx, chairSlug, taskId, opts) {
     const messagesPage = task.groupId
         ? await store.listMessages(task.groupId, { limit: view === 'full' ? 50 : 5 })
         : { messages: [], total: 0 };
+    // Messages past the engine cursor may already carry [DELIVERABLE] lines the
+    // 5s tick has not accounted for; surface them read-only so the detail view
+    // never reads as "nothing delivered" during that window.
+    let pendingDeliverables = [];
+    if (task.groupId) {
+        try {
+            const scan = await store.listMessages(task.groupId, { limit: PENDING_DELIVERABLE_SCAN_LIMIT });
+            const nameByGmid = new Map();
+            for (const member of members) {
+                const gmid = (member.globalMetaId ?? '').trim().toLowerCase();
+                if (!gmid)
+                    continue;
+                const profile = member.slug ? profileBySlug.get(member.slug) : undefined;
+                const name = (profile?.name ?? member.displayName ?? '').trim();
+                if (name)
+                    nameByGmid.set(gmid, name);
+            }
+            pendingDeliverables = collectPendingDeliverables(task, scan.messages, members, (gmid) => (gmid ? nameByGmid.get(gmid.trim().toLowerCase()) ?? null : null));
+        }
+        catch {
+            // Best-effort read aid: a scan failure never fails the detail call.
+        }
+    }
     return {
         ...task,
         members: memberSummaries,
         deliverables,
+        pendingDeliverables,
         transitions: await store.listTransitions(taskId),
         integrityEvents: await store.listIntegrityEvents(taskId),
         messages: messagesPage.messages,
@@ -718,7 +785,12 @@ async function closeGroupTask(ctx, chairSlug, taskId, opts) {
     await emitGroupTaskRelay(ctx, chair, closed, 'closed', `Task closed as ${opts.status}`
         + (opts.rating ? ` · owner rating ${opts.rating}/5` : '')
         + (opts.ratingComment ? ` · "${opts.ratingComment}"` : '')
-        + (opts.status === 'done' ? ' — thank the members and wrap up.' : ''));
+        // The close already made the group read-only (post is refused afterwards),
+        // so never ask the origin session to do the impossible: state the terminal
+        // outcome as a fact, not an instruction.
+        + (opts.status === 'done'
+            ? ' — the task is now done and the group is read-only; no further messages can be posted.'
+            : ''));
     return getGroupTaskDetail(ctx, chairSlug, taskId, { sync: false });
 }
 /**
@@ -806,9 +878,25 @@ async function drainGroupTaskRelay(ctx, chairSlug) {
     const drained = [];
     for (const profile of profiles) {
         try {
+            const store = storeFor(ctx, profile);
+            const taskMeta = new Map();
             const rows = await relayStoreFor(ctx, profile).drain();
-            for (const row of rows)
-                drained.push({ ...row, chairSlug: profile.slug });
+            for (const row of rows) {
+                if (!taskMeta.has(row.taskId)) {
+                    const task = await store.getTaskById(row.taskId).catch(() => null);
+                    taskMeta.set(row.taskId, {
+                        status: task?.status ?? null,
+                        closedAt: task?.closedAt ?? null,
+                    });
+                }
+                const meta = taskMeta.get(row.taskId);
+                drained.push({
+                    ...row,
+                    chairSlug: profile.slug,
+                    taskStatus: meta.status,
+                    closedAt: meta.closedAt,
+                });
+            }
         }
         catch (error) {
             logOf(ctx)(`[GroupTask] Relay drain failed for profile ${profile.slug}: `
@@ -838,16 +926,25 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
     }
     if (action === 'pause') {
         if (task.dispatchPausedAt != null) {
-            return { task, action, notice: null, nudgeQueued: false };
+            return {
+                task, action, nudgeQueued: false,
+                notice: `Dispatch is already paused for task ${taskId}.`,
+            };
         }
         const updated = await store.setTaskDispatchPaused(taskId, Date.now());
         await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
         await emitGroupTaskRelay(ctx, chair, updated, 'paused', 'The owner paused this task; dispatch is suspended.');
-        return { task: updated, action, notice: null, nudgeQueued: false };
+        return {
+            task: updated, action, nudgeQueued: false,
+            notice: `Dispatch paused for task ${taskId}.`,
+        };
     }
     if (action === 'resume') {
         if (task.dispatchPausedAt == null) {
-            return { task, action, notice: null, nudgeQueued: false };
+            return {
+                task, action, nudgeQueued: false,
+                notice: `Dispatch is already running for task ${taskId}.`,
+            };
         }
         const updated = await store.setTaskDispatchPaused(taskId, null);
         await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
@@ -859,7 +956,8 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
         }));
         await emitGroupTaskRelay(ctx, chair, updated, 'resumed', 'The owner resumed this task; work continues.');
         return {
-            task: updated, action, notice: null, nudgeQueued: true,
+            task: updated, action, nudgeQueued: true,
+            notice: `Dispatch resumed for task ${taskId}; chair nudged.`,
             chairUnavailable: updated.chairDegradedAt != null,
         };
     }
@@ -884,7 +982,14 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
             memberName: member?.displayName ?? null,
             note: input.note?.trim() || '',
         });
-        return { task, action, notice: null, nudgeQueued: false };
+        const flagTarget = member
+            ? (member.displayName ?? member.slug ?? member.globalMetaId ?? '').trim()
+            : '';
+        return {
+            task, action, nudgeQueued: false,
+            notice: `Flag recorded on the acceptance record for task ${taskId}`
+                + (flagTarget ? ` (member ${flagTarget}).` : '.'),
+        };
     }
     // nudge: default target = the least-recently-active non-standby worker.
     const target = member ?? members
@@ -912,7 +1017,8 @@ async function superviseGroupTask(ctx, chairSlug, taskId, input) {
     };
     await store.kvSet(`${exports.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`, JSON.stringify(nudge));
     return {
-        task, action, notice: null, nudgeQueued: true,
+        task, action, nudgeQueued: true,
+        notice: `Nudge queued for ${nudge.name}.`,
         chairUnavailable: task.chairDegradedAt != null,
     };
 }

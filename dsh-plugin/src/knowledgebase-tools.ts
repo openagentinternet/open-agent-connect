@@ -480,9 +480,10 @@ export function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host:
         + 'the nightly window (00:00-06:00), saving up to budgetPins metaweb documents per night and distilling '
         + 'reusable procedures. NOT for tasks the user wants right now — say you will study it over coming '
         + 'nights and answer from what accumulated. Use for long-horizon learning the user assigns. '
-        + 'Limits: one nightly run is capped at 12 tool steps (24 for recurring Q&A surfing) and must end with '
-        + 'a final report; a job that fails 3 nights in a row stops as [failed] — metaweb_study_status then says '
-        + 'why, and metaweb_study_retry puts it back into the queue.',
+        + 'Limits: one nightly run is capped at 12 tool steps (24 for recurring Q&A surfing); hitting the cap '
+        + 'still ends the night with a partial report instead of failing the job. A job that fails 3 nights in '
+        + 'a row stops as [failed] — metaweb_study_status then says why, and metaweb_study_retry puts it back '
+        + 'into the queue.',
       parameters: {
         type: 'object',
         properties: {
@@ -573,15 +574,29 @@ export function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host:
           const header = failedCount > 0
             ? [`${failedCount} study job(s) have FAILED — each failed row below says why and how to retry (metaweb_study_retry).`]
             : []
-          const body = rows.map((job) => [
-            `- "${job.topic}"${job.kind === 'qa-surf' ? ' [recurring Q&A surfing]' : ''} [${job.status}] runs: ${job.runCount}, failures: ${job.consecutiveFailures}`,
-            `  ${job.kind === 'qa-surf' ? 'pins handled' : 'pins'}: ${Array.isArray(job.processedPinIds) ? job.processedPinIds.length : 0}/${job.budgetPins} per night`,
-            job.summary ? `  last: ${String(job.summary).slice(0, 200)}` : '',
-            job.error ? `  error: ${job.error}` : '',
-            job.status === 'failed'
-              ? `  → failed after ${job.consecutiveFailures} consecutive nightly failures. Retry with metaweb_study_retry (jobId: ${job.id}) — the job goes back into the nightly queue.`
-              : '',
-          ].filter(Boolean).join('\n')).join('\n')
+          // The store lists by createdAt only, so a failed job can sit between
+          // healthy ones. Group by status here (failed first) so what needs
+          // attention is never buried mid-list; the store order stays as-is.
+          const groups = [
+            { label: 'FAILED — needs attention', jobs: rows.filter((job) => job.status === 'failed') },
+            { label: 'IN PROGRESS', jobs: rows.filter((job) => job.status === 'running' || job.status === 'pending') },
+            { label: 'DONE', jobs: rows.filter((job) => job.status === 'done') },
+          ]
+          const body = groups
+            .filter((group) => group.jobs.length > 0)
+            .map((group) => [
+              `${group.label} (${group.jobs.length}):`,
+              ...group.jobs.map((job) => [
+                `- "${job.topic}"${job.kind === 'qa-surf' ? ' [recurring Q&A surfing]' : ''} [${job.status}] runs: ${job.runCount}, failures: ${job.consecutiveFailures}`,
+                `  ${job.kind === 'qa-surf' ? 'pins handled' : 'pins'}: ${Array.isArray(job.processedPinIds) ? job.processedPinIds.length : 0}/${job.budgetPins} per night`,
+                job.summary ? `  last: ${String(job.summary).slice(0, 200)}` : '',
+                job.error ? `  error: ${job.error}` : '',
+                job.status === 'failed'
+                  ? `  → failed after ${job.consecutiveFailures} consecutive nightly failures. Retry with metaweb_study_retry (jobId: ${job.id}) — the job goes back into the nightly queue.`
+                  : '',
+              ].filter(Boolean).join('\n')),
+            ].join('\n'))
+            .join('\n\n')
           return [...header, body].join('\n')
         } catch (error) {
           return toolError('metaweb_study_status', error)
