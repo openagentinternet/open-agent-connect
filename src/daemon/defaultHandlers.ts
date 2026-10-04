@@ -17307,31 +17307,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ? normalizeText(state.identity.chatPublicKey) || privateChatIdentity.chatPublicKey
           : '';
         if (!peerChatPublicKey) {
-          // Reuse the peer chat public key already cached in the local A2A
-          // conversation history before hitting the chain endpoints.
-          const cachedConversation = await createA2AConversationStore({
-            paths: actor.runtimeStateStore.paths,
-            local: {
-              globalMetaId: state.identity.globalMetaId,
-              name: state.identity.name,
-              chatPublicKey: state.identity.chatPublicKey,
-            },
-            peer: { globalMetaId: request.peer },
-          }).readConversation().catch(() => null);
-          peerChatPublicKey = normalizeText(cachedConversation?.peer?.chatPublicKey) || '';
-        }
-        if (!peerChatPublicKey) {
+          // Always prefer the chain-registered chat public key for the peer.
+          // The local conversation cache is only a fallback for chain outages:
+          // cached keys may have been written from untrusted message fields,
+          // and a poisoned cache would re-attribute forged history messages.
           const outcome = await lookupPeerChatPublicKey(request.peer, {
             chainApiBaseUrl: input.chainApiBaseUrl,
           });
           if (outcome.status === 'found') {
             peerChatPublicKey = outcome.chatPublicKey;
           } else if (outcome.status === 'unreachable') {
-            return commandFailed(
-              'peer_chat_public_key_lookup_unreachable',
-              'Could not reach the chat public key lookup service to resolve the target. This is usually a temporary network or gateway issue; please retry shortly.',
-              { data: { target: request.peer, errors: outcome.errors } },
-            );
+            const cachedConversation = await createA2AConversationStore({
+              paths: actor.runtimeStateStore.paths,
+              local: {
+                globalMetaId: state.identity.globalMetaId,
+                name: state.identity.name,
+                chatPublicKey: state.identity.chatPublicKey,
+              },
+              peer: { globalMetaId: request.peer },
+            }).readConversation().catch(() => null);
+            peerChatPublicKey = normalizeText(cachedConversation?.peer?.chatPublicKey) || '';
+            if (!peerChatPublicKey) {
+              return commandFailed(
+                'peer_chat_public_key_lookup_unreachable',
+                'Could not reach the chat public key lookup service to resolve the target. This is usually a temporary network or gateway issue; please retry shortly.',
+                { data: { target: request.peer, errors: outcome.errors } },
+              );
+            }
           }
         }
         if (!peerChatPublicKey) {
@@ -17390,32 +17392,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
           peerChatPublicKey = state.identity.chatPublicKey;
         }
         if (!peerChatPublicKey) {
-          // Prefer a peer chat public key already verified and cached in the
-          // local A2A conversation history. This lets a send succeed even when
-          // the chain public-key endpoints are temporarily unreachable.
-          const cachedConversation = await createA2AConversationStore({
-            paths: actor.runtimeStateStore.paths,
-            local: {
-              globalMetaId: state.identity.globalMetaId,
-              name: state.identity.name,
-              chatPublicKey: state.identity.chatPublicKey,
-            },
-            peer: { globalMetaId: request.to },
-          }).readConversation().catch(() => null);
-          peerChatPublicKey = normalizeText(cachedConversation?.peer?.chatPublicKey) || '';
-        }
-        if (!peerChatPublicKey) {
+          // Always prefer the chain-registered chat public key for the
+          // recipient. The local conversation cache is only a fallback for
+          // chain outages: cached keys may have been written from untrusted
+          // message fields, and a poisoned key would redirect this encrypted
+          // message to an attacker's key.
           const outcome = await lookupPeerChatPublicKey(request.to, {
             chainApiBaseUrl: input.chainApiBaseUrl,
           });
           if (outcome.status === 'found') {
             peerChatPublicKey = outcome.chatPublicKey;
           } else if (outcome.status === 'unreachable') {
-            return commandFailed(
-              'peer_chat_public_key_lookup_unreachable',
-              'Could not reach the chat public key lookup service to resolve the target. This is usually a temporary network or gateway issue; please retry shortly.',
-              { data: { target: request.to, errors: outcome.errors } },
-            );
+            const cachedConversation = await createA2AConversationStore({
+              paths: actor.runtimeStateStore.paths,
+              local: {
+                globalMetaId: state.identity.globalMetaId,
+                name: state.identity.name,
+                chatPublicKey: state.identity.chatPublicKey,
+              },
+              peer: { globalMetaId: request.to },
+            }).readConversation().catch(() => null);
+            peerChatPublicKey = normalizeText(cachedConversation?.peer?.chatPublicKey) || '';
+            if (!peerChatPublicKey) {
+              return commandFailed(
+                'peer_chat_public_key_lookup_unreachable',
+                'Could not reach the chat public key lookup service to resolve the target. This is usually a temporary network or gateway issue; please retry shortly.',
+                { data: { target: request.to, errors: outcome.errors } },
+              );
+            }
           }
         }
         if (!peerChatPublicKey) {

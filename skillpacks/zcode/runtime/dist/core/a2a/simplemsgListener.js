@@ -154,14 +154,30 @@ function createProfileSimplemsgListener(input) {
         const messagePinId = (0, privateChatListener_1.pinIdFromPrivateChatSocketMessage)(message);
         if (!deduplicateByPinId(seenPinIds, messagePinId))
             return;
-        let peerChatPublicKey = normalizeText(message.fromUserInfo?.chatPublicKey) || null;
-        if (!peerChatPublicKey && input.resolvePeerChatPublicKey) {
+        let peerChatPublicKey = null;
+        if (input.resolvePeerChatPublicKey) {
             try {
-                peerChatPublicKey = await input.resolvePeerChatPublicKey(fromGlobalMetaId);
+                // The sender's chat public key is only ever taken from the trusted
+                // resolver (chain-registered key for the claimed globalMetaId). The
+                // message's own fromUserInfo.chatPublicKey is attacker-controlled:
+                // using it would let anyone forge this sender's identity.
+                peerChatPublicKey = normalizeText(await input.resolvePeerChatPublicKey(fromGlobalMetaId)) || null;
             }
             catch {
-                // Peer key lookup is best-effort; decryption will skip if it is unavailable.
+                // Peer key lookup is best-effort; the message is dropped when the
+                // sender's key cannot be verified.
+                peerChatPublicKey = null;
             }
+        }
+        if (!peerChatPublicKey) {
+            // The sender identity cannot be authenticated — drop, keep the drop
+            // observable, and allow a redelivery (e.g. after reconnect) to succeed
+            // once the key becomes resolvable.
+            if (messagePinId) {
+                seenPinIds.delete(messagePinId);
+            }
+            input.onError?.(new Error(`dropped simplemsg push with unverifiable sender identity (pinId: ${messagePinId ?? 'unknown'}, from: ${fromGlobalMetaId})`));
+            return;
         }
         const plaintext = (0, privateChatListener_1.decryptPrivateChatSocketMessage)(message, input.identity, peerChatPublicKey);
         if (!plaintext) {

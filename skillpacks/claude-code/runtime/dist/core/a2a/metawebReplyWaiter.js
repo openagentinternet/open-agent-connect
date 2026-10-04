@@ -122,8 +122,11 @@ function matchesExpectedPeer(message, input) {
         && normalizeText(message.toGlobalMetaId) === normalizeText(input.callerGlobalMetaId));
 }
 function decryptInboundPlaintext(message, input) {
-    const peerChatPublicKey = normalizeText(message.fromUserInfo?.chatPublicKey)
-        || normalizeText(input.providerChatPublicKey);
+    // Fail closed on the expected provider key only: the reply must decrypt
+    // against the chat public key the caller itself resolved for this provider.
+    // A chat public key carried inside the inbound message is
+    // attacker-controlled and must never be trusted.
+    const peerChatPublicKey = normalizeText(input.providerChatPublicKey);
     if (!peerChatPublicKey) {
         return null;
     }
@@ -143,6 +146,10 @@ function decryptInboundPlaintext(message, input) {
                 replyPinId: normalizeText(message.replyPin),
             },
         });
+        // An unencrypted payload carries no proof it came from the provider.
+        if (!normalizeText(received.sharedSecret)) {
+            return null;
+        }
         return normalizeText(received.plaintext) || null;
     }
     catch {

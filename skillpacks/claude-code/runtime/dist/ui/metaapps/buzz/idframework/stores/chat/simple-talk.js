@@ -341,25 +341,22 @@ export class SimpleTalkStore {
     if (!peer || peer === this.selfGlobalMetaId) {
       peer = this._resolvePeerGlobalMetaId(message);
     }
-    const inlinePubkey = this._resolveChatPublicKey(message, peer);
-    const cacheKey = peer || (inlinePubkey ? `pubkey:${inlinePubkey}` : '');
-    if (!cacheKey) return '';
-    if (this.sharedSecretCache.has(cacheKey)) return this.sharedSecretCache.get(cacheKey);
-    let pubkey = inlinePubkey;
-    if (!pubkey && peer) {
-      if (!window.IDFramework || typeof window.IDFramework.dispatch !== 'function') return '';
-      const userInfo = await window.IDFramework.dispatch('fetchUserInfo', { globalMetaId: peer });
-      pubkey = String(
-        (userInfo && (userInfo.chatpubkey || userInfo.chatPubkey || userInfo.chatPublicKey)) || ''
-      ).trim();
-    }
+    if (!peer) return '';
+    if (this.sharedSecretCache.has(peer)) return this.sharedSecretCache.get(peer);
+    // Sender authentication: only the chain-registered chat public key for
+    // the claimed peer identity may be used. Keys carried inside the message
+    // are attacker-controlled and would let anyone forge this peer.
+    if (!window.IDFramework || typeof window.IDFramework.dispatch !== 'function') return '';
+    const userInfo = await window.IDFramework.dispatch('fetchUserInfo', { globalMetaId: peer });
+    const pubkey = String(
+      (userInfo && (userInfo.chatpubkey || userInfo.chatPubkey || userInfo.chatPublicKey)) || ''
+    ).trim();
     if (!pubkey) return '';
     if (!window.metaidwallet || !window.metaidwallet.common || typeof window.metaidwallet.common.ecdh !== 'function') return '';
     const ecdh = await window.metaidwallet.common.ecdh({ externalPubKey: pubkey });
     const secret = ecdh && ecdh.sharedSecret ? String(ecdh.sharedSecret) : '';
     if (secret) {
-      this.sharedSecretCache.set(cacheKey, secret);
-      if (peer && cacheKey !== peer) this.sharedSecretCache.set(peer, secret);
+      this.sharedSecretCache.set(peer, secret);
     }
     return secret;
   }
@@ -558,30 +555,6 @@ export class SimpleTalkStore {
     return this._toText(this.context.targetGlobalMetaId);
   }
 
-  _resolveChatPublicKey(message, peerGlobalMetaId) {
-    const peer = this._toText(peerGlobalMetaId);
-    const roots = this._messageRoots(message);
-    const preferred = [];
-    const fallback = [];
-
-    roots.forEach((root) => {
-      const directPubkey = this._extractChatPublicKey(root);
-      if (directPubkey) fallback.push(directPubkey);
-      [root.userInfo, root.fromUserInfo, root.toUserInfo, root.createUserInfo].forEach((info) => {
-        const pubkey = this._extractChatPublicKey(info);
-        if (!pubkey) return;
-        const globalMetaId = this._extractUserGlobalMetaId(info);
-        if (peer && globalMetaId && globalMetaId === peer) {
-          preferred.push(pubkey);
-          return;
-        }
-        fallback.push(pubkey);
-      });
-    });
-
-    return preferred[0] || fallback[0] || '';
-  }
-
   _messageRoots(message) {
     const root = message && typeof message === 'object' ? message : {};
     const raw = root.raw && typeof root.raw === 'object'
@@ -593,11 +566,6 @@ export class SimpleTalkStore {
   _extractUserGlobalMetaId(userInfo) {
     if (!userInfo || typeof userInfo !== 'object') return '';
     return this._toText(userInfo.globalMetaId || userInfo.globalmetaid || '');
-  }
-
-  _extractChatPublicKey(root) {
-    if (!root || typeof root !== 'object') return '';
-    return this._toText(root.chatPublicKey || root.chatPubKey || root.chatpubkey || root.pubkey || '');
   }
 
   _toText(value) {

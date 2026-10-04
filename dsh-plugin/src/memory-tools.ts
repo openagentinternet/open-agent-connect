@@ -12,6 +12,7 @@ import { runMetabot } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { twinFallbackSlug } from './local-read.js'
 import { oacSlugOf } from './browser-tools.js'
+import { withA2aReplyGuard } from './a2a-reply-guard.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 
 /** Memory Strategy section, ported from IDBots and adapted to this toolset. */
@@ -486,7 +487,7 @@ export function buildGlobalKnowledgeToolDefinitions(input: GlobalKnowledgeToolDe
 export function bindGlobalKnowledgeToolInstall(ctx: HostContext): void {
   for (const definition of buildGlobalKnowledgeToolDefinitions({ host: ctx })) {
     try {
-      ctx.tools?.register(definition)
+      ctx.tools?.register(withA2aReplyGuard(definition))
     } catch (error) {
       if (!/already.*(registered|exists)|duplicate/i.test(error instanceof Error ? error.message : String(error))) {
         ctx.logger?.warn?.(`[oac-dsh] global knowledge tool install failed: ${error instanceof Error ? error.message : String(error)}`)

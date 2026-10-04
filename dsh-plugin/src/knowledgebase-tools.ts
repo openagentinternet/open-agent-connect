@@ -8,6 +8,7 @@
 import { core, twinFallbackSlug } from './local-read.js'
 import { runMetabot } from './cli-bridge.js'
 import { qaSurfAliasDisable, qaSurfAliasEnqueue } from './surf-tools.js'
+import { withA2aReplyGuard } from './a2a-reply-guard.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 import { actorHomeDir, oacSlugOf } from './browser-tools.js'
 
@@ -740,7 +741,7 @@ export function bindKnowledgeBaseToolInstall(
     ...buildStudyToolDefinitions({ host: ctx, fallbackSlug, resolveHomeDir }),
   ]) {
     try {
-      ctx.tools?.register(definition)
+      ctx.tools?.register(withA2aReplyGuard(definition))
     } catch (error) {
       if (!isDuplicateToolError(error)) {
         ctx.logger?.warn?.(`[oac-dsh] knowledge base tool install failed: ${error instanceof Error ? error.message : String(error)}`)

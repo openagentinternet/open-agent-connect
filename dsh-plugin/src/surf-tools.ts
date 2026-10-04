@@ -12,6 +12,7 @@ import { core, twinFallbackSlug } from './local-read.js'
 import { runMetabot } from './cli-bridge.js'
 import type { RunFn } from './cli-payload.js'
 import { actorHomeDir, oacSlugOf } from './browser-tools.js'
+import { withA2aReplyGuard } from './a2a-reply-guard.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 
 const START_TIMEOUT_MS = 60_000
@@ -258,7 +259,7 @@ export function bindSurfToolInstall(ctx: HostContext): void {
     resolveFallbackSlug: twinFallbackSlug,
   })) {
     try {
-      ctx.tools?.register(definition)
+      ctx.tools?.register(withA2aReplyGuard(definition))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (!/duplicate/i.test(message)) {

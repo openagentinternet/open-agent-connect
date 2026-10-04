@@ -387,6 +387,7 @@ test('simplemsg listener decrypts inbound ciphertext into per-peer A2A storage a
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
     socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
   });
   await manager.start();
 
@@ -423,6 +424,67 @@ test('simplemsg listener decrypts inbound ciphertext into per-peer A2A storage a
   assert.equal(Object.hasOwn(conversation.messages[0].raw, 'content'), false);
 });
 
+test('simplemsg listener drops forged sender identities that only carry attacker keys', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const localKeys = createIdentityPair();
+  const vendorKeys = createIdentityPair();
+  const attackerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const vendorGlobalMetaId = 'idq1vendor00000000000000000000000000';
+  const { homeDir } = await createProfile(systemHomeDir, {
+    name: 'Local Bot',
+    slug: 'local-bot',
+    globalMetaId: localGlobalMetaId,
+    keys: localKeys,
+  });
+
+  const errors = [];
+  const delivered = [];
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    // The chain-registered key for the claimed vendor identity is the
+    // vendor's own — not the attacker key carried inside the message.
+    resolvePeerChatPublicKey: async () => vendorKeys.publicKeyHex,
+    onMessage: async (profile, message) => {
+      delivered.push(message);
+    },
+    onError: (error) => errors.push(error),
+  });
+  await manager.start();
+
+  // The attacker encrypts with their own key but claims to be the vendor.
+  const forged = buildEncryptedSocketPayload({
+    fromGlobalMetaId: vendorGlobalMetaId,
+    fromKeys: attackerKeys,
+    toGlobalMetaId: localGlobalMetaId,
+    toChatPublicKey: localKeys.publicKeyHex,
+    content: 'forged vendor message',
+    pinId: 'incoming-pin-forged',
+  });
+  await harness.sockets[0].emitServer('WS_SERVER_NOTIFY_PRIVATE_CHAT', forged);
+
+  const conversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: localGlobalMetaId,
+      chatPublicKey: localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: vendorGlobalMetaId,
+      chatPublicKey: vendorKeys.publicKeyHex,
+    },
+  }).readConversation();
+
+  assert.equal(conversation.messages.length, 0);
+  assert.equal(delivered.length, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /dropped undecryptable simplemsg push/);
+  assert.match(errors[0].message, /incoming-pin-forged/);
+});
+
 test('simplemsg listener prefers the sender GlobalMetaID from user info over an address-shaped top-level field', async (t) => {
   const systemHomeDir = await createSystemHome(t);
   const localKeys = createIdentityPair();
@@ -441,6 +503,7 @@ test('simplemsg listener prefers the sender GlobalMetaID from user info over an 
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
     socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
   });
   await manager.start();
 
@@ -491,6 +554,7 @@ test('simplemsg listener ignores messages addressed to another local profile', a
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
     socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
   });
   await manager.start();
 
@@ -537,6 +601,7 @@ test('simplemsg listener normalizes Unix-second socket timestamps to millisecond
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
     socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
   });
   await manager.start();
 
@@ -604,7 +669,7 @@ test('simplemsg listener reports undecryptable pushes and processes their redeli
   await harness.sockets[0].emitServer('WS_SERVER_NOTIFY_PRIVATE_CHAT', payload);
 
   assert.equal(errors.length, 1);
-  assert.match(errors[0].message, /dropped undecryptable simplemsg push/);
+  assert.match(errors[0].message, /unverifiable sender identity/);
   assert.match(errors[0].message, /incoming-pin-redelivered/);
 
   const store = createA2AConversationStore({
@@ -651,6 +716,7 @@ test('simplemsg listener reports persistence failures and still delivers the inb
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
     socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
     persister: async () => {
       throw new Error('disk full');
     },
@@ -697,6 +763,7 @@ test('simplemsg listener accepts socket messages without an explicit recipient o
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
     socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
   });
   await manager.start();
 

@@ -587,6 +587,11 @@ function decryptMessageContent(input: {
         replyPinId: input.replyPin,
       },
     });
+    // An unencrypted row performs no ECDH and carries no proof of who wrote
+    // it; surface it as undecryptable rather than as a trusted message.
+    if (!normalizeText(decrypted.sharedSecret)) {
+      return UNABLE_TO_DECRYPT_TEXT;
+    }
     return decrypted.plaintext;
   } catch {
     return UNABLE_TO_DECRYPT_TEXT;
