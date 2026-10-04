@@ -98,12 +98,19 @@ function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profi
 function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?local='+encodeURIComponent(profile.globalMetaId)}
 function setSelectedBotDefault(toggle){
   var profile=selectedProfile();if(!profile||!profile.slug)return;
-  if(toggle&&(toggle.disabled||toggle.classList.contains('on')||toggle.classList.contains('loading')))return;
+  if(toggle&&(toggle.disabled||toggle.classList.contains('loading')))return;
   var slug=profile.slug;
+  // Two-way switch: Off promotes this Bot to the machine's one Twin; On
+  // demotes it back to worker and leaves the machine twin-less until
+  // another Bot is promoted deliberately.
+  var wasTwin=profile.botType==='twin';
   if(toggle)toggle.classList.toggle('loading',true);
   var status=q('[data-default-bot-status]');if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
-  return api('/api/bot/profiles/'+encodeURIComponent(slug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({botType:'twin'})}).then(function(){
-    state.profiles.forEach(function(p){p.isActive=p.slug===slug});
+  return api('/api/bot/profiles/'+encodeURIComponent(slug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({botType:wasTwin?'worker':'twin'})}).then(function(){
+    state.profiles.forEach(function(p){
+      if(wasTwin){p.botType='worker';p.isActive=false}
+      else{p.isActive=p.slug===slug;if(p.botType==='twin')p.botType='worker'}
+    });
     renderMetabotList();
     renderDetailHeader(selectedProfile());
     var done=q('[data-default-bot-status]');if(done){done.textContent=uiText('bot.defaultBotSaved','Twin Bot updated.');done.className='save-status success'}
@@ -353,7 +360,7 @@ function noLlmLabelMarkup(profile){
   return '<span class="metabot-no-llm-label" title="'+esc(title)+'" aria-label="'+esc(title)+'">'+esc(uiText('bot.llmNotReadyLabel','LLM NOT READY'))+'</span>';
 }
 function defaultBotLabelMarkup(profile){
-  if(!profile||profile.isActive!==true)return '';
+  if(!profile||profile.botType!=='twin')return '';
   if(state.profiles.length<2)return '';
   var title=uiText('bot.isDefaultBot','This is the Twin Bot');
   return '<span class="metabot-default-label" title="'+esc(title)+'" aria-label="'+esc(title)+'">'+esc(uiText('bot.defaultBadge','Twin Bot'))+'</span>';
@@ -1053,17 +1060,18 @@ function orderedMetabotProfiles(){
   });
 }
 
-// At most one Bot per machine may be the Twin. Once any Bot is presented as
-// the Twin (isActive is derived live from the twin role), the set-as-Twin
-// toggle leaves every edit page — promoting a Bot is a serious, deliberate
-// act and must not be one accidental click away. The toggle only offers
-// itself while the machine is twin-less; the list badge keeps identifying
-// the sitting Twin.
+// At most one Bot per machine may be the Twin. While the machine is
+// twin-less, every edit page offers the set-as-Twin toggle; once a Twin
+// exists the toggle stays only on the Twin's own page, where it reads On
+// and demotes back to worker. Every other page hides it so promoting a Bot
+// stays a serious, deliberate act. Twin-ness keys on botType — the same
+// role state the daemon's twin resolver reads — never on isActive, which
+// the list endpoint falls back to the startup-home Bot when twin-less.
 function machineHasTwinBot(){
-  return state.profiles.some(function(p){return Boolean(p)&&(p.isActive===true||p.botType==='twin')});
+  return state.profiles.some(function(p){return Boolean(p)&&p.botType==='twin'});
 }
-function twinToggleVisible(){
-  return state.profiles.length>=2&&!machineHasTwinBot();
+function twinToggleVisibleFor(profile){
+  return Boolean(profile)&&(!machineHasTwinBot()||profile.botType==='twin');
 }
 
 function renderMetabotList(){
@@ -1103,20 +1111,19 @@ function renderBotHero(profile){
   var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri);copyUri.setAttribute('aria-label',uiText('bot.copyHomepageUri','Copy Homepage URI'));copyUri.setAttribute('title',uiText('bot.copyHomepageUri','Copy Homepage URI'))}
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!globalMetaId;
   var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!globalMetaId;
-  var defaultControl=q('[data-default-bot-control]');if(defaultControl)defaultControl.hidden=!twinToggleVisible();
+  var defaultControl=q('[data-default-bot-control]');if(defaultControl)defaultControl.hidden=!twinToggleVisibleFor(profile);
   var defaultToggle=q('[data-default-bot-toggle]');
   if(defaultToggle){
-    var isDefault=profile.isActive===true;
-    defaultToggle.classList.toggle('on',isDefault);
+    var isTwin=profile.botType==='twin';
+    defaultToggle.classList.toggle('on',isTwin);
     defaultToggle.classList.toggle('loading',false);
-    defaultToggle.disabled=isDefault;
-    defaultToggle.setAttribute('aria-checked',isDefault?'true':'false');
-    var defaultTitle=isDefault?uiText('bot.isDefaultBot','This is the Twin Bot'):uiText('bot.setAsDefault','Set as Twin Bot');
+    defaultToggle.setAttribute('aria-checked',isTwin?'true':'false');
+    var defaultTitle=isTwin?uiText('bot.isDefaultBot','This is the Twin Bot'):uiText('bot.setAsDefault','Set as Twin Bot');
     defaultToggle.setAttribute('aria-label',defaultTitle);
     defaultToggle.setAttribute('title',defaultTitle);
-    var defaultText=queryWithin(defaultToggle,'.toggle-text');if(defaultText)defaultText.textContent=isDefault?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off');
+    var defaultText=queryWithin(defaultToggle,'.toggle-text');if(defaultText)defaultText.textContent=isTwin?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off');
   }
-  var defaultStatus=q('[data-default-bot-status]');if(defaultStatus){defaultStatus.textContent='';defaultStatus.className='save-status';defaultStatus.hidden=!twinToggleVisible()}
+  var defaultStatus=q('[data-default-bot-status]');if(defaultStatus){defaultStatus.textContent='';defaultStatus.className='save-status';defaultStatus.hidden=!twinToggleVisibleFor(profile)}
 }
 function renderBotSetupAlert(profile){
   var alert=q('[data-bot-setup-alert]');if(!alert)return;
