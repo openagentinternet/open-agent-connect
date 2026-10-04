@@ -188,6 +188,39 @@ function validatePayloadMatchesOrder(input) {
     }
     return { ok: true };
 }
+/**
+ * The refund request pin must be authored ON-CHAIN by the buyer identity the
+ * order records. Every payload field (buyerGlobalMetaId included) is
+ * attacker-controlled text; the pin author is the cryptographic signer as
+ * reported by the indexer. Without this check, anyone can clone a public
+ * order's fields, attach their own refund address, and collect the refund.
+ */
+function checkRefundRequestPinAuthor(input) {
+    const buyerGlobalMetaId = normalizeText(input.order.buyerGlobalMetaId);
+    if (!buyerGlobalMetaId) {
+        return {
+            ok: false,
+            code: 'refund_request_buyer_unknown',
+            message: 'Seller order is missing the buyer identity, so refund authorship cannot be verified.',
+        };
+    }
+    const authorGlobalMetaId = normalizeText(input.author?.globalMetaId);
+    if (!authorGlobalMetaId) {
+        return {
+            ok: false,
+            code: 'refund_request_author_unknown',
+            message: 'Refund request pin author could not be determined from the chain record; refusing settlement.',
+        };
+    }
+    if (authorGlobalMetaId.toLowerCase() !== buyerGlobalMetaId.toLowerCase()) {
+        return {
+            ok: false,
+            code: 'refund_request_author_mismatch',
+            message: 'Refund request pin was authored by a different identity than the order buyer; refusing settlement.',
+        };
+    }
+    return { ok: true };
+}
 function buildRefundFinalizePayload(input) {
     return {
         version: '1.0.0',
@@ -394,6 +427,21 @@ async function processSellerRefundSettlement(input) {
             order,
             code: validation.code,
             message: validation.message,
+            now: attemptedAt,
+        });
+    }
+    // The payload fields all match public order data; only the pin's on-chain
+    // author (its signer) proves the BUYER actually published this request.
+    const authorCheck = checkRefundRequestPinAuthor({
+        author: refundRequestDetail.author,
+        order,
+    });
+    if (!authorCheck.ok) {
+        return blockSettlement({
+            state: input.state,
+            order,
+            code: authorCheck.code,
+            message: authorCheck.message,
             now: attemptedAt,
         });
     }

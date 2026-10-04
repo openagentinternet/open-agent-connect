@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
@@ -671,6 +671,57 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
   assert.match(result.message, /temporarily unavailable/);
 });
 
+test('default file upload handlers ignore a caller-supplied confirmExternalUpload boolean (H3)', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-upload-no-self-consent-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'No Self Consent Bot');
+  // A file OUTSIDE the Bot home (sibling temp root).
+  const outsideRoot = path.join(homeDir, '..', `${path.basename(homeDir)}-secret`);
+  await mkdir(outsideRoot, { recursive: true });
+  const secretPath = path.join(outsideRoot, 'secret.txt');
+  await writeFile(secretPath, 'TOP SECRET', 'utf8');
+  t.after(async () => {
+    await rm(outsideRoot, { recursive: true, force: true });
+  });
+  let uploads = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      uploads += 1;
+      throw new Error('no chain write may happen for a refused upload');
+    }),
+    providerLargeFileUploader: {
+      upload: async () => {
+        uploads += 1;
+        throw new Error('no upload may happen for a refused path');
+      },
+    },
+    getDaemonRecord: () => null,
+  });
+
+  // The caller self-authorizes with a plain boolean — this must be ignored.
+  const largeResult = await handlers.file.uploadLarge({
+    filePath: secretPath,
+    confirmExternalUpload: true,
+    network: 'mvc',
+  });
+  assert.equal(largeResult.ok, false);
+  assert.match(largeResult.message, /outside the Bot workspace/);
+
+  const smallResult = await handlers.file.upload({
+    filePath: secretPath,
+    confirmExternalUpload: true,
+    network: 'mvc',
+  });
+  assert.equal(smallResult.ok, false);
+  assert.match(smallResult.message, /outside the Bot workspace/);
+  assert.equal(uploads, 0, 'nothing left the machine');
+});
+
 test('default file.uploadLarge returns sponsor feeAssist metadata on direct MVC success when enabled', async (t) => {
   const homeDir = await createProfileHome('metabot-default-large-upload-sponsor-enabled-');
   t.after(async () => {
@@ -1261,6 +1312,51 @@ test('default metaapp.publishProject preserves whitelisted feeAssist data on upl
   assert.equal(result.code, 'metaapp_upload_failed');
   assert.deepEqual(result.data.feeAssist, feeAssist);
   assert.equal('ignored' in result.data, false);
+});
+
+test('default metaapp.publishProject refuses a project directory outside the Bot workspace', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-metaapp-outside-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'MetaApp Outside Bot');
+  // A project directory that is NOT inside the Bot home (a sibling temp root).
+  const outsideRoot = path.join(homeDir, '..', `${path.basename(homeDir)}-outside`);
+  await mkdir(path.join(outsideRoot, 'dist'), { recursive: true });
+  await writeFile(path.join(outsideRoot, 'dist', 'index.html'), '<h1>secrets</h1>', 'utf8');
+  t.after(async () => {
+    await rm(outsideRoot, { recursive: true, force: true });
+  });
+  let chainWrites = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      chainWrites += 1;
+      throw new Error('chain write must not run for an outside-workspace project');
+    }),
+    getDaemonRecord: () => null,
+  });
+
+  const publishResult = await handlers.metaapp.publishProject({
+    projectDir: outsideRoot,
+    confirm: true,
+    network: 'mvc',
+  });
+  assert.equal(publishResult.ok, false);
+  assert.equal(publishResult.code, 'metaapp_project_dir_outside_workspace');
+  assert.match(publishResult.message, /outside the Bot workspace/);
+
+  const updateResult = await handlers.metaapp.updateProject({
+    projectDir: outsideRoot,
+    targetPinId: `${'b'.repeat(64)}i0`,
+    confirm: true,
+    network: 'mvc',
+  });
+  assert.equal(updateResult.ok, false);
+  assert.equal(updateResult.code, 'metaapp_project_dir_outside_workspace');
+  assert.equal(chainWrites, 0);
 });
 
 test('default LLM handlers use the twin profile when actor selectors are omitted', async (t) => {

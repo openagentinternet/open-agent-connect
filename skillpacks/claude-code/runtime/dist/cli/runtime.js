@@ -144,6 +144,7 @@ const format_4 = require("../core/surf/format");
 const failure_1 = require("../core/surf/failure");
 const studyJobs_1 = require("../core/knowledgebase/studyJobs");
 const service_2 = require("../core/knowledgebase/service");
+const store_4 = require("../core/knowledgebase/store");
 const studyJobs_2 = require("../core/knowledgebase/studyJobs");
 const kbHandlers_1 = require("../daemon/kbHandlers");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
@@ -194,6 +195,13 @@ const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_PROVIDER_LLM_REPLY_ENV = 'METABOT_TEST_FAKE_PROVIDER_LLM_REPLY';
 const TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV = 'METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
+/** Who asked for this daemon serve process — recorded in the lifecycle journal. */
+const DAEMON_START_TRIGGER_ENV = 'METABOT_DAEMON_START_TRIGGER';
+/** Pid of the crashed daemon this serve process replaces (respawn marker). */
+const DAEMON_REPLACED_PID_ENV = 'METABOT_DAEMON_REPLACED_PID';
+const DAEMON_LOG_MAX_BYTES = 5 * 1024 * 1024;
+/** How often the serving daemon re-enforces the startup-log cap (writer side). */
+const DAEMON_LOG_CAP_INTERVAL_MS = 60 * 60 * 1000;
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
@@ -1084,7 +1092,7 @@ function daemonConfigMatchesContext(daemonRecord, context) {
 async function stopRunningDaemon(input) {
     const { daemonRecord, lockPath } = input;
     if (!Number.isFinite(daemonRecord.pid) || daemonRecord.pid <= 0) {
-        return 'already_stopped';
+        return 'found_dead';
     }
     const ownership = await verifyDaemonProcessOwnership({ daemonRecord, lockPath });
     if (ownership === 'dead') {
@@ -1092,7 +1100,7 @@ async function stopRunningDaemon(input) {
         if (!portReleased) {
             throw new Error(`Daemon process ${daemonRecord.pid} is already gone, but ${daemonRecord.host || DEFAULT_DAEMON_HOST}:${daemonRecord.port} is still occupied.`);
         }
-        return 'already_stopped';
+        return 'found_dead';
     }
     if (ownership !== 'verified') {
         throw new DaemonOwnershipVerificationError(daemonRecord.pid, lockPath);
@@ -1103,7 +1111,7 @@ async function stopRunningDaemon(input) {
     catch (error) {
         const code = error.code;
         if (code === 'ESRCH') {
-            return 'already_stopped';
+            return 'found_dead';
         }
         throw error;
     }
@@ -1214,71 +1222,136 @@ async function ensureDaemonBaseUrl(context, options = {}) {
     }
     const daemonRecord = await resolveDaemonRecord(context);
     if (daemonRecord) {
-        const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(normalizeSystemHomeDir(context.env, context.cwd));
         if (daemonRecord.baseUrl
             && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)) {
             if (daemonConfigMatchesContext(daemonRecord, context)) {
                 return daemonRecord.baseUrl;
             }
         }
-        await stopRunningDaemon({ daemonRecord, lockPath: daemonPaths.daemonLockPath });
-        return startDetachedDaemon(context, options);
+        // No explicit stop here: startDetachedDaemon re-reads the same record and
+        // owns the whole stop-or-replace transition (including the crash journal).
     }
     return startDetachedDaemon(context, options);
 }
+/**
+ * The single CLI-side daemon lifecycle transition point. Stops (or detects a
+ * crashed) tracked daemon, spawns the detached serve child with its stderr
+ * captured to the daemon log, and appends start/crash/respawn lifecycle
+ * events so `daemon status` can reconstruct what happened.
+ */
 async function startDetachedDaemon(context, options = {}) {
     const homeDir = normalizeHomeDir(context.env, context.cwd, options);
     const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-    const store = (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir);
+    const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir);
+    const store = (0, daemonStateStore_1.createDaemonStateStore)(daemonPaths);
     const expectedConfigHash = buildDaemonConfigHash(context.env);
-    const persistedRecord = await store.readDaemon();
-    if (!persistedRecord) {
-        await migrateLegacyProfileDaemons(systemHomeDir);
-    }
-    const installation = await selectDaemonInstallation(context);
-    const preferredPort = installation.port;
-    if (persistedRecord) {
-        const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir);
-        if (persistedRecord.baseUrl
-            && await isDaemonReachable(persistedRecord.baseUrl, persistedRecord.ownerId)) {
-            if (daemonConfigMatchesContext(persistedRecord, context)) {
-                return persistedRecord.baseUrl;
+    const appendLifecycleEvent = async (event) => {
+        try {
+            await store.appendDaemonEvent(event);
+        }
+        catch (error) {
+            // Journaling must never block a start; the timeout diagnostics still
+            // report the state files directly.
+            console.warn('[daemon lifecycle journal]', error instanceof Error ? error.message : String(error));
+        }
+    };
+    try {
+        const persistedRecord = await store.readDaemon();
+        if (!persistedRecord) {
+            await migrateLegacyProfileDaemons(systemHomeDir);
+        }
+        const installation = await selectDaemonInstallation(context);
+        const preferredPort = installation.port;
+        let replacedCrashedPid = null;
+        if (persistedRecord) {
+            if (persistedRecord.baseUrl
+                && await isDaemonReachable(persistedRecord.baseUrl, persistedRecord.ownerId)) {
+                if (daemonConfigMatchesContext(persistedRecord, context)) {
+                    return persistedRecord.baseUrl;
+                }
+            }
+            const stopOutcome = await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: daemonPaths.daemonLockPath });
+            if (stopOutcome === 'found_dead') {
+                // The tracked daemon died without a clean shutdown (its record
+                // survived) — journal the crash; the fresh serve below journals the
+                // respawn.
+                replacedCrashedPid = persistedRecord.pid;
+                await appendLifecycleEvent({
+                    at: Date.now(),
+                    event: 'crash',
+                    pid: persistedRecord.pid,
+                    trigger: options.startTrigger ?? 'cli:auto-start',
+                    detail: `tracked daemon record survived its process (baseUrl=${persistedRecord.baseUrl})`,
+                });
             }
         }
-        await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: daemonPaths.daemonLockPath });
-    }
-    if (!persistedRecord && !await isPortBindable(installation.host, installation.port)) {
-        throw new Error(`daemon_port_in_use: the configured daemon endpoint ${installation.host}:${installation.port} is occupied. Use an explicit port migration to change it.`);
-    }
-    await store.clearDaemon();
-    const child = (0, node_child_process_1.spawn)(process.execPath, [resolveCliEntrypoint(), 'daemon', 'serve'], {
-        cwd: systemHomeDir,
-        detached: true,
-        stdio: 'ignore',
-        env: {
-            ...context.env,
-            HOME: systemHomeDir,
-            METABOT_HOME: homeDir,
-            ...(options.allowUnindexedExplicitHome ? { [ALLOW_UNINDEXED_HOME_ENV]: '1' } : {}),
-            [DAEMON_PREFERRED_PORT_ENV]: String(preferredPort),
-        },
-    });
-    child.unref();
-    const startedAt = Date.now();
-    while ((Date.now() - startedAt) < DEFAULT_DAEMON_START_TIMEOUT_MS) {
-        const daemonRecord = await store.readDaemon();
-        if (daemonRecord?.baseUrl
-            && normalizeEnvText(daemonRecord.configHash) === expectedConfigHash
-            && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)) {
-            return daemonRecord.baseUrl;
+        if (!persistedRecord && !await isPortBindable(installation.host, installation.port)) {
+            throw new Error(`daemon_port_in_use: the configured daemon endpoint ${installation.host}:${installation.port} is occupied. Use an explicit port migration to change it.`);
         }
-        await sleep(DAEMON_START_POLL_INTERVAL_MS);
+        await store.clearDaemon();
+        // Cap the startup log so a repeatedly-crashing daemon cannot grow it
+        // without bound.
+        const logStat = await node_fs_1.default.promises.stat(daemonPaths.daemonLogPath).catch(() => null);
+        if (logStat && logStat.size > DAEMON_LOG_MAX_BYTES) {
+            await node_fs_1.default.promises.writeFile(daemonPaths.daemonLogPath, '', 'utf8');
+        }
+        const logHandle = await node_fs_1.default.promises.open(daemonPaths.daemonLogPath, 'a');
+        // The startup log can mention peer/task ids — owner-only, like the secret
+        // stores (also repairs pre-existing world-readable logs).
+        await node_fs_1.default.promises.chmod(daemonPaths.daemonLogPath, 0o600).catch(() => undefined);
+        const childCause = { spawnError: null, exitCode: null, signal: null };
+        let child;
+        try {
+            child = (0, node_child_process_1.spawn)(process.execPath, [resolveCliEntrypoint(), 'daemon', 'serve'], {
+                cwd: systemHomeDir,
+                detached: true,
+                // stderr (and only stderr) is the daemon's own crash output — keep
+                // it on disk so a failed start can name the real cause.
+                stdio: ['ignore', 'ignore', logHandle.fd],
+                env: {
+                    ...context.env,
+                    HOME: systemHomeDir,
+                    METABOT_HOME: homeDir,
+                    ...(options.allowUnindexedExplicitHome ? { [ALLOW_UNINDEXED_HOME_ENV]: '1' } : {}),
+                    [DAEMON_PREFERRED_PORT_ENV]: String(preferredPort),
+                    [DAEMON_START_TRIGGER_ENV]: options.startTrigger ?? 'cli:auto-start',
+                    ...(replacedCrashedPid != null ? { [DAEMON_REPLACED_PID_ENV]: String(replacedCrashedPid) } : {}),
+                },
+            });
+            child.on('error', (error) => {
+                childCause.spawnError = error instanceof Error ? error.message : String(error);
+            });
+            child.on('exit', (code, signal) => {
+                childCause.exitCode = code;
+                childCause.signal = signal;
+            });
+        }
+        finally {
+            await logHandle.close();
+        }
+        child.unref();
+        const startedAt = Date.now();
+        while ((Date.now() - startedAt) < DEFAULT_DAEMON_START_TIMEOUT_MS) {
+            const daemonRecord = await store.readDaemon();
+            if (daemonRecord?.baseUrl
+                && normalizeEnvText(daemonRecord.configHash) === expectedConfigHash
+                && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)) {
+                return daemonRecord.baseUrl;
+            }
+            await sleep(DAEMON_START_POLL_INTERVAL_MS);
+        }
+        const diagnostics = await (0, daemonStartupDiagnostics_1.collectDaemonStartupDiagnostics)({
+            systemHomeDir,
+            preferredPort,
+        });
+        throw new Error((0, daemonStartupDiagnostics_1.formatDaemonStartupTimeoutMessage)(diagnostics, childCause));
     }
-    const diagnostics = await (0, daemonStartupDiagnostics_1.collectDaemonStartupDiagnostics)({
-        systemHomeDir,
-        preferredPort,
-    });
-    throw new Error((0, daemonStartupDiagnostics_1.formatDaemonStartupTimeoutMessage)(diagnostics));
+    catch (error) {
+        if ((0, daemonStartupDiagnostics_1.isPermissionDeniedErrno)(error)) {
+            throw new Error(await (0, daemonStartupDiagnostics_1.formatPermissionDeniedStartupError)(error));
+        }
+        throw error;
+    }
 }
 async function requestJson(context, method, routePath, body, options = {}) {
     const baseUrl = await ensureDaemonBaseUrl(context, options);
@@ -2002,7 +2075,7 @@ async function runHostPersonaProjection(operation) {
     }
 }
 async function runDaemonStartCommand(context) {
-    const baseUrl = await ensureDaemonBaseUrl(context);
+    const baseUrl = await ensureDaemonBaseUrl(context, { startTrigger: 'cli:daemon-start' });
     const daemonRecord = await resolveDaemonRecord(context);
     const parsed = new URL(baseUrl);
     return (0, commandResult_1.commandSuccess)({
@@ -2029,7 +2102,7 @@ async function runDaemonStopCommand(context) {
         return (0, commandResult_1.commandSuccess)({
             pid,
             stopped: stopped === 'stopped',
-            alreadyStopped: stopped === 'already_stopped',
+            alreadyStopped: stopped === 'found_dead',
         });
     }
     catch (error) {
@@ -2038,6 +2111,65 @@ async function runDaemonStopCommand(context) {
         }
         const code = error.code;
         return (0, commandResult_1.commandFailed)('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
+    }
+}
+/**
+ * `metabot daemon status`: the single read-only view over the daemon's
+ * tracked state. Works without a running daemon — that is the point: it
+ * reports the tracked record, whether its process is still alive, and the
+ * recent lifecycle journal (start/stop/crash/respawn).
+ */
+async function runDaemonStatusCommand(context) {
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir);
+    const daemonStore = (0, daemonStateStore_1.createDaemonStateStore)(daemonPaths);
+    try {
+        const record = await daemonStore.readDaemon();
+        const recordState = (0, daemonStartupDiagnostics_1.classifyDaemonRecordState)(record);
+        const lockInfo = await readDaemonLockInfo(daemonPaths.daemonLockPath);
+        if (recordState === 'stale' && record) {
+            // Record the observed crash once per dead pid so status output and the
+            // journal agree without spamming duplicates on repeated reads.
+            const recentEvents = await daemonStore.readDaemonEvents(50);
+            const alreadyJournaled = recentEvents.some((event) => event.event === 'crash' && event.pid === record.pid);
+            if (!alreadyJournaled) {
+                await daemonStore.appendDaemonEvent({
+                    at: Date.now(),
+                    event: 'crash',
+                    pid: record.pid,
+                    trigger: 'cli:status-check',
+                    detail: `tracked daemon record survived its process (baseUrl=${record.baseUrl})`,
+                }).catch(() => undefined);
+            }
+        }
+        return (0, commandResult_1.commandSuccess)({
+            state: recordState,
+            trackedProcessAlive: recordState === 'alive' ? true : recordState === 'stale' ? false : null,
+            daemon: record
+                ? {
+                    pid: record.pid,
+                    baseUrl: record.baseUrl,
+                    host: record.host,
+                    port: record.port,
+                    startedAt: record.startedAt,
+                    oacVersion: record.oacVersion,
+                    supervisor: record.supervisor,
+                }
+                : null,
+            configMatchesCurrentInstall: record
+                ? normalizeEnvText(record.configHash) === buildDaemonConfigHash(context.env)
+                : null,
+            lock: lockInfo,
+            eventLogPath: daemonPaths.daemonEventsPath,
+            startupLogPath: daemonPaths.daemonLogPath,
+            recentEvents: await daemonStore.readDaemonEvents(10),
+        });
+    }
+    catch (error) {
+        if ((0, daemonStartupDiagnostics_1.isPermissionDeniedErrno)(error)) {
+            return (0, commandResult_1.commandFailed)('daemon_status_read_failed', await (0, daemonStartupDiagnostics_1.formatPermissionDeniedStartupError)(error));
+        }
+        return (0, commandResult_1.commandFailed)('daemon_status_read_failed', error instanceof Error ? error.message : String(error));
     }
 }
 function createDefaultCliDependencies(context) {
@@ -2966,6 +3098,7 @@ function createDefaultCliDependencies(context) {
         daemon: {
             start: () => runDaemonStartCommand(context),
             stop: () => runDaemonStopCommand(context),
+            status: () => runDaemonStatusCommand(context),
             restart: async () => {
                 const stopResult = await runDaemonStopCommand(context);
                 // Restart tolerates "nothing was running"; any real stop failure
@@ -3074,6 +3207,11 @@ function createDefaultCliDependencies(context) {
                     profiles,
                 });
             },
+        },
+        user: {
+            // The publish happens daemon-side (signer + traffic sponsor hook live
+            // there); the CLI only forwards the parsed update input.
+            update: async (input) => requestJson(context, 'POST', '/api/user/update', input),
         },
         network: {
             listServices: async (input) => {
@@ -4733,7 +4871,7 @@ function createDefaultCliDependencies(context) {
                 return requestJson(context, 'PUT', `/api/bot/profiles/${encodeURIComponent(slug)}/config`, body);
             },
             getWallet: async (input) => requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/wallet`),
-            getBackup: async (input) => requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/backup`),
+            getBackup: async (input) => requestJson(context, 'POST', `/api/bot/profiles/${encodeURIComponent(input.slug)}/backup`),
             retryProfileSetup: async (input) => requestJson(context, 'POST', `/api/bot/profiles/${encodeURIComponent(input.slug)}/setup/retry`),
             listRuntimes: async (input = {}) => {
                 const query = new URLSearchParams();
@@ -4924,6 +5062,11 @@ function createDefaultCliDependencies(context) {
                     return outcome.failure;
                 return (0, commandResult_1.commandSuccess)({ retried: outcome.retried, count: outcome.retried.length });
             },
+            // Manual run of one study job NOW — daemon-owned (the daemon holds the
+            // passive-LLM chain + tool wiring), window ignored. The route returns
+            // as soon as the job is claimed; the command's --wait polls the local
+            // study store until the job settles (see commands/knowledge-base.ts).
+            studyRun: async (input) => requestJsonForSelectedActor('POST', '/api/kb/study/run', typeof input.from === 'string' ? input.from : undefined, input),
         },
         surf: {
             status: async (input) => {
@@ -5208,6 +5351,7 @@ function mergeCliDependencies(context) {
         daemon: { ...defaults.daemon, ...provided.daemon },
         doctor: { ...defaults.doctor, ...provided.doctor },
         identity: { ...defaults.identity, ...provided.identity },
+        user: { ...defaults.user, ...provided.user },
         network: { ...defaults.network, ...provided.network },
         services: { ...defaults.services, ...provided.services },
         provider: { ...defaults.provider, ...provided.provider },
@@ -5630,7 +5774,9 @@ async function serveCliDaemonProcess(context) {
             },
             learnKnowledgeBase: async () => {
                 const learned = await kbService.learnKnowledgeBase(surfContext.botSlug);
-                return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
+                const failedTotal = learned.learnSummary?.failedTotal ?? 0;
+                return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`
+                    + (failedTotal > 0 ? ` (${failedTotal} raw doc(s) failed to extract — check the learn summary)` : '');
             },
             saveProcedure: async (input) => {
                 const { procedure, created } = await procedures.upsertProcedure({
@@ -5848,6 +5994,21 @@ async function serveCliDaemonProcess(context) {
         startedAt: Date.now(),
         configHash: buildDaemonConfigHash(context.env),
     });
+    // Lifecycle journal: this serve process records its own start (or respawn
+    // when it replaces a crashed daemon) so `daemon status` can reconstruct the
+    // history without ps/lsof archaeology.
+    const serveStartTrigger = normalizeEnvText(process.env[DAEMON_START_TRIGGER_ENV]) || 'serve';
+    const replacedPidRaw = Number(process.env[DAEMON_REPLACED_PID_ENV]);
+    const serveReplacedPid = Number.isInteger(replacedPidRaw) && replacedPidRaw > 0 ? replacedPidRaw : null;
+    await daemonStore.appendDaemonEvent({
+        at: Date.now(),
+        event: serveReplacedPid ? 'respawn' : 'start',
+        pid: process.pid,
+        trigger: serveStartTrigger,
+        detail: serveReplacedPid ? `replaced crashed daemon pid ${serveReplacedPid}` : null,
+    }).catch((error) => {
+        console.warn('[daemon lifecycle journal]', error instanceof Error ? error.message : String(error));
+    });
     const onlineServiceCacheStore = (0, onlineServiceCache_1.createOnlineServiceCacheStore)(paths);
     const ratingDetailStateStore = (0, ratingDetailState_1.createRatingDetailStateStore)(paths);
     const refreshOnlineServiceCache = async () => {
@@ -5886,6 +6047,34 @@ async function serveCliDaemonProcess(context) {
         void sweepProviderWorkspaces();
     }, providerWorkspaceCleanup_1.PROVIDER_RUN_WORKSPACE_SWEEP_INTERVAL_MS);
     providerWorkspaceSweepInterval.unref?.();
+    // Enforce the startup-log cap from the writer side: the parent CLI only
+    // re-checks at the next start, so a long-running daemon would otherwise sit
+    // past the cap for its whole uptime. stderr is appended through an O_APPEND
+    // fd, so an external truncate-and-rewrite is safe mid-stream.
+    const capDaemonStartupLog = async () => {
+        const stat = await node_fs_1.default.promises.stat(daemonPaths.daemonLogPath).catch(() => null);
+        if (!stat || stat.size <= DAEMON_LOG_MAX_BYTES)
+            return;
+        const handle = await node_fs_1.default.promises.open(daemonPaths.daemonLogPath, 'r').catch(() => null);
+        if (!handle)
+            return;
+        try {
+            const keepBytes = Math.floor(DAEMON_LOG_MAX_BYTES / 2);
+            const buffer = Buffer.alloc(keepBytes);
+            const { bytesRead } = await handle.read(buffer, 0, keepBytes, stat.size - keepBytes);
+            await node_fs_1.default.promises.writeFile(daemonPaths.daemonLogPath, buffer.subarray(0, bytesRead));
+        }
+        catch {
+            // Best-effort housekeeping; never disturb the serving daemon.
+        }
+        finally {
+            await handle.close().catch(() => undefined);
+        }
+    };
+    const daemonStartupLogCapInterval = setInterval(() => {
+        void capDaemonStartupLog();
+    }, DAEMON_LOG_CAP_INTERVAL_MS);
+    daemonStartupLogCapInterval.unref?.();
     const serviceRefundSyncLoop = createServiceRefundSyncLoop({
         syncRefunds: async () => {
             const result = await handlers.services?.syncRefunds?.({});
@@ -6379,11 +6568,285 @@ async function serveCliDaemonProcess(context) {
         }
         return store;
     };
+    // The unattended study turn executor, single-sourced: the nightly tick
+    // and the daemon kb group's manual `study run` surface both drain through
+    // this closure. Registered for the kb group through the active-runner
+    // bridge (same lazy pattern as the host LLM executor bridge) because the
+    // daemon handlers are built before this scheduler block exists.
+    const runStudyTurnForBot = async ({ slug, kind, prompt, budgetPins }) => {
+        const homeDir = (await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug))?.homeDir ?? '';
+        const profilePaths = (0, paths_1.resolveMetabotPaths)(homeDir);
+        const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+            runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths),
+            bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(profilePaths),
+            getPreferredRuntimeId: async () => {
+                try {
+                    const raw = await node_fs_1.default.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                    const data = JSON.parse(raw);
+                    return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                }
+                catch {
+                    return null;
+                }
+            },
+        });
+        // Persona + experience hot layer: nightly study/QA-surf prompts
+        // judge everything against the bot's role — the persona must
+        // actually BE in the prompt.
+        const studySystemPrompt = await (0, sessionSystemPrompt_1.buildPersonaSessionSystemPrompt)(profilePaths, {
+            scenario: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
+        });
+        const llm = async (history) => {
+            const historyText = history
+                .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
+                .join('\n\n---\n\n');
+            // Unified passive-LLM priority: DSH pair first, then local chain.
+            const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
+                dshLlmPath: profilePaths.dshLlmPath,
+            })({ botSlug: slug, system: studySystemPrompt, user: historyText });
+            if (hostText !== null)
+                return hostText;
+            const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                runtimeResolver,
+                llmExecutor,
+                metaBotSlug: slug,
+                prompt: historyText,
+                systemPrompt: studySystemPrompt,
+                timeoutMs: 30 * 60_000,
+                pollIntervalMs: 5_000,
+            });
+            if (result.status !== 'completed') {
+                throw new Error(result.error || `Study turn ended with status ${result.status}`);
+            }
+            return result.output;
+        };
+        // Real tools with the pin budget enforced at the executor seam.
+        let savedDocs = 0;
+        const kbService = (0, service_2.createKnowledgeBaseService)(profilePaths);
+        const studyProcedures = (0, procedureStore_1.createProcedureStore)(profilePaths);
+        const studyKnowledge = (0, knowledgeStore_1.createKnowledgeStore)(profilePaths);
+        return await (0, studyJobs_2.runStudyTurnWithTools)(prompt, {
+            kind,
+            runLlm: llm,
+            tools: {
+                searchMetaweb: async ({ query }) => {
+                    const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                    const page = await (0, search_1.searchMetaweb)({ q: query }, baseUrl ? { baseUrl } : undefined);
+                    const { formatMetawebSearchBullets } = await Promise.resolve().then(() => __importStar(require('../core/metaweb/format.js')));
+                    return formatMetawebSearchBullets(page.items)
+                        || 'No results. Retry with other keywords (bilingual).';
+                },
+                readMetawebPin: async ({ pinId }) => {
+                    const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                    const pin = await (0, pinRead_1.readMetawebPin)(pinId, baseUrl ? { baseUrl } : undefined);
+                    // Best-effort chain-history read record; never delays or
+                    // fails the study turn (recordMetawebPinRead also swallows).
+                    void (0, readLedger_1.recordMetawebPinRead)(profilePaths, pin, 'study_job').catch(() => undefined);
+                    const { formatMetawebPinDetail } = await Promise.resolve().then(() => __importStar(require('../core/metaweb/format.js')));
+                    return formatMetawebPinDetail(pin);
+                },
+                addDocument: async ({ title, content, pinId }) => {
+                    if (savedDocs >= budgetPins) {
+                        return `Pin budget reached (${budgetPins}). Stop saving; emit the final report.`;
+                    }
+                    const saved = await kbService.addDocument(slug, {
+                        title,
+                        content,
+                        sourceType: 'metaweb',
+                        ...(pinId ? { pinId } : {}),
+                    });
+                    savedDocs += 1;
+                    // No learn here: addDocument already indexes the save through the
+                    // single-doc upsert (a full incremental learn per save made each
+                    // nightly save O(corpus)). knowledge_base_learn remains available
+                    // to the model for corpus imports/edits and full rebuilds.
+                    return `Saved as ${saved.relPath} (budget ${savedDocs}/${budgetPins}).`;
+                },
+                learnKnowledgeBase: async () => {
+                    const learned = await kbService.learnKnowledgeBase(slug);
+                    const failedTotal = learned.learnSummary?.failedTotal ?? 0;
+                    return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`
+                        + (failedTotal > 0 ? ` (${failedTotal} raw doc(s) failed to extract — check the learn summary)` : '');
+                },
+                listKnowledgeBases: async () => {
+                    const rows = (await kbService.store.listKnowledgeBases())
+                        .filter((row) => row.metabotSlug === slug);
+                    if (!rows.length)
+                        return 'No knowledge bases yet.';
+                    return rows.map((row) => `- "${row.name}"${row.isDefault ? ' (default)' : ''} `
+                        + `docs=${row.docCount} chunks=${row.chunkCount}`
+                        + `${row.description ? ` — ${row.description}` : ''}`).join('\n');
+                },
+                queryKnowledgeBases: async ({ query, knowledgeBaseId }) => {
+                    const results = await kbService.queryKnowledgeBase(slug, query, {
+                        ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
+                    });
+                    if (!results.length)
+                        return 'No hits.';
+                    return results.map((result) => result.hits.map((hit) => `- [${result.knowledgeBaseName}] ${hit.title}#${hit.ord} (score ${hit.score})\n  ${hit.snippet}`).join('\n')).join('\n');
+                },
+                saveProcedure: async (input) => {
+                    const { procedure, created } = await studyProcedures.upsertProcedure({
+                        title: input.title,
+                        steps: input.steps,
+                        ...(input.pitfalls?.length ? { pitfalls: input.pitfalls } : {}),
+                        ...(input.triggerText ? { triggerText: input.triggerText } : {}),
+                        ...(input.sourcePinIds?.length ? { sourcePinIds: input.sourcePinIds } : {}),
+                        origin: 'agent',
+                    });
+                    return `${created ? 'Saved' : 'Updated'} procedure "${procedure.title}" `
+                        + `v${procedure.version} (${procedure.steps.length} steps).`;
+                },
+                recallProcedures: async ({ query }) => {
+                    const rows = await studyProcedures.listProcedures({ status: 'active' });
+                    const scored = (0, procedureStore_1.scoreProceduresForQuery)(rows, query).slice(0, 5);
+                    if (!scored.length)
+                        return 'No matching procedures.';
+                    return scored.map(({ procedure, score }) => `- ${procedure.title} (${score})\n  ${procedure.steps.join(' → ')}`
+                        + (procedure.pitfalls.length ? `\n  Pitfalls: ${procedure.pitfalls.join('; ')}` : '')).join('\n');
+                },
+                upsertKnowledge: async ({ topic, summary, kind }) => {
+                    const validKind = kind && knowledgeStore_1.KNOWLEDGE_KINDS.includes(kind)
+                        ? kind
+                        : undefined;
+                    const result = await studyKnowledge.upsertKnowledge({
+                        topic,
+                        summary,
+                        ...(validKind ? { kind: validKind } : {}),
+                        origin: 'agent',
+                    });
+                    return (0, knowledgePromptBlocks_1.formatKnowledgeUpsertResult)({
+                        topic: result.entry.topic,
+                        created: result.created,
+                        revised: result.revised,
+                        version: result.entry.version,
+                        kind: result.entry.kind,
+                    });
+                },
+                recallKnowledge: async (input) => {
+                    const rows = await studyKnowledge.searchKnowledge({
+                        ...(input.query ? { query: input.query } : {}),
+                        ...(input.kind && knowledgeStore_1.KNOWLEDGE_KINDS.includes(input.kind)
+                            ? { kind: input.kind }
+                            : {}),
+                        limit: 5,
+                        touchLastUsed: true,
+                    });
+                    if (!rows.length)
+                        return 'No matching knowledge.';
+                    return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
+                },
+                // Q&A surfing seams (qa-surf jobs only): recall runs against
+                // the Q&A index, writes go through the in-process daemon
+                // handlers (already-answered check + ledger included).
+                searchQa: kind === 'qa-surf'
+                    ? async ({ query, tags, answered, sort, size, cursor }) => {
+                        const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                        const page = await (0, recall_1.qaSearch)({
+                            q: query,
+                            ...(tags?.length ? { tags } : {}),
+                            ...(answered === true || answered === false ? { answered } : {}),
+                            ...(sort === 'newest' ? { sort: 'newest' } : {}),
+                            ...(size ? { size } : {}),
+                            ...(cursor ? { cursor } : {}),
+                        }, baseUrl ? { baseUrl } : undefined);
+                        const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
+                        if (!bullets) {
+                            return `No on-chain Q&A matched "${query}". Do NOT invent questions or answers.`;
+                        }
+                        const sections = [
+                            `${page.items.length} on-chain question(s) matching "${query}":`,
+                            bullets,
+                        ];
+                        if (page.hasMore && page.nextCursor) {
+                            sections.push(`More results: call search_qa again with cursor="${page.nextCursor}".`);
+                        }
+                        return sections.join('\n');
+                    }
+                    : undefined,
+                listLatestQuestions: kind === 'qa-surf'
+                    ? async ({ tags, minAnswers, maxAnswers, sort, size, cursor }) => {
+                        const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                        const page = await (0, recall_1.qaLatestQuestions)({
+                            ...(tags?.length ? { tags } : {}),
+                            ...(minAnswers != null ? { minAnswers } : {}),
+                            ...(maxAnswers != null ? { maxAnswers } : {}),
+                            ...(sort === 'hot' ? { sort: 'hot' } : {}),
+                            ...(size ? { size } : {}),
+                            ...(cursor ? { cursor } : {}),
+                        }, baseUrl ? { baseUrl } : undefined);
+                        const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
+                        if (!bullets)
+                            return 'No on-chain questions matched this filter.';
+                        const sections = [
+                            `${page.items.length} on-chain question(s):`,
+                            bullets,
+                        ];
+                        if (page.hasMore && page.nextCursor) {
+                            sections.push(`More questions: call list_latest_questions again with cursor="${page.nextCursor}".`);
+                        }
+                        return sections.join('\n');
+                    }
+                    : undefined,
+                getQuestionAnswers: kind === 'qa-surf'
+                    ? async ({ questionPinId, publisher, size, cursor }) => {
+                        const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                        const detail = await (0, recall_1.qaQuestionDetail)(questionPinId, baseUrl ? { baseUrl } : undefined);
+                        return (0, format_2.formatQaQuestionDetail)({ question: detail.question, answers: detail.answers });
+                    }
+                    : undefined,
+                postSimpleAnswer: kind === 'qa-surf'
+                    ? async ({ answerTo, content, tags }) => {
+                        const answerHandler = handlers.qanda?.answer;
+                        if (!answerHandler)
+                            throw new Error('qanda answer handler is not configured.');
+                        const result = await answerHandler({
+                            from: slug,
+                            answerTo,
+                            content,
+                            ...(tags?.length ? { tags } : {}),
+                        });
+                        if (!result.ok) {
+                            throw new Error(result.message || 'answer publish failed');
+                        }
+                        const data = (result.data ?? {});
+                        if (typeof data.notice === 'string' && data.notice) {
+                            return data.notice;
+                        }
+                        return typeof data.formatted === 'string' && data.formatted
+                            ? data.formatted
+                            : 'Answer published on-chain.';
+                    }
+                    : undefined,
+                likePin: kind === 'qa-surf'
+                    ? async ({ pinId, isLike }) => {
+                        const likeHandler = handlers.qanda?.like;
+                        if (!likeHandler)
+                            throw new Error('qanda like handler is not configured.');
+                        const result = await likeHandler({ from: slug, pinId, isLike });
+                        if (!result.ok) {
+                            throw new Error(result.message || 'reaction publish failed');
+                        }
+                        const data = (result.data ?? {});
+                        return typeof data.formatted === 'string' && data.formatted
+                            ? data.formatted
+                            : 'Reaction published on-chain.';
+                    }
+                    : undefined,
+            },
+        });
+    };
+    (0, kbHandlers_1.setActiveStudyTurnRunner)({ runStudyTurn: runStudyTurnForBot, storeFor: studyStoreFor });
     // Overlap guard: one study tick (up to a 30-minute LLM turn) must finish
     // before the next interval fire starts — otherwise the next tick's crash
     // recovery flips the in-flight `running` row back to pending and the same
     // job runs twice (double pin budget, duplicate KB writes).
     let studyTickInFlight = false;
+    // Fairness cursor (#13): each tick starts at the profile where the previous
+    // one stopped, so a slow first Bot (bounded per-turn by the study watchdog)
+    // and the tick budget below rotate the serving order instead of always
+    // starving the tail of the list past the window.
+    let studyTickStartIndex = 0;
     const studyTimer = setInterval(() => {
         if (studyTickInFlight) {
             groupTaskEngineLog('[Study] tick skipped: previous tick still running');
@@ -6393,287 +6856,63 @@ async function serveCliDaemonProcess(context) {
         void (async () => {
             try {
                 const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
-                for (const profile of profiles) {
+                if (!profiles.length)
+                    return;
+                const tickDeadline = Date.now() + studyJobs_2.STUDY_TICK_BUDGET_MS;
+                for (const profile of (0, studyJobs_2.rotateForTick)(profiles, studyTickStartIndex)) {
+                    // Tick budget (#13): stop before starting another profile's
+                    // auto-learn/turn. The cursor advances past every processed
+                    // profile, so on a break it points at the first profile after the
+                    // last processed one — unserved work (and any skipped-unavailable
+                    // rows before it, which cost nothing to re-skip) leads the next
+                    // tick.
+                    if (Date.now() >= tickDeadline)
+                        break;
                     // Toggle-off Bots (Settings availability switch) skip the nightly
                     // KB auto-learn and the study drain too.
                     if (profile.isAvailable === false)
                         continue;
+                    // Pre-flight gate (#13): a profile with no usable LLM at all (no
+                    // DSH pair + no connected host executor, and no local runtime) is
+                    // skipped instead of burning its per-call timeout at the front of
+                    // the queue every night. Uncertain cases run — see
+                    // profileHasStudyLlm for the exact policy.
+                    const profilePaths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
+                    const [dshPairConfigured, runtimes] = await Promise.all([
+                        node_fs_1.default.promises.access(profilePaths.dshLlmPath).then(() => true, () => false),
+                        (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths).read()
+                            .then((state) => state.runtimes ?? [])
+                            .catch(() => []),
+                    ]);
+                    if (!(0, studyJobs_2.profileHasStudyLlm)({
+                        dshPairConfigured,
+                        connectedExecutors: hostLlmExecutorBridge.connectedExecutors(),
+                        runtimes,
+                    })) {
+                        groupTaskEngineLog(`[Study] skipping profile "${profile.slug}": no usable LLM (no DSH pair with a connected host executor, no local runtime).`);
+                        continue;
+                    }
                     // Nightly KB auto-learn (imported/raw files indexed once per local
                     // day in the window) rides the same tick as the study drain.
                     try {
-                        const kbService = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
+                        const kbService = (0, service_2.createKnowledgeBaseService)(profilePaths);
                         for (const kb of await kbService.store.listDueForAutoLearn(new Date())) {
                             await kbService.learnKnowledgeBase(profile.slug, kb.id).catch(() => undefined);
-                            await kbService.store.markAutoLearned(kb.id, new Date().toISOString().slice(0, 10));
+                            await kbService.store.markAutoLearned(kb.id, (0, store_4.localDateIso)(new Date()));
                         }
                     }
                     catch {
                         // Auto-learn failures never block the study drain.
                     }
                     await (0, studyJobs_2.runStudyTick)(studyStoreFor(profile.homeDir), {
-                        runStudyTurn: async ({ slug, kind, prompt, budgetPins }) => {
-                            const homeDir = (await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug))?.homeDir ?? '';
-                            const profilePaths = (0, paths_1.resolveMetabotPaths)(homeDir);
-                            const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
-                                runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths),
-                                bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(profilePaths),
-                                getPreferredRuntimeId: async () => {
-                                    try {
-                                        const raw = await node_fs_1.default.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
-                                        const data = JSON.parse(raw);
-                                        return typeof data.runtimeId === 'string' ? data.runtimeId : null;
-                                    }
-                                    catch {
-                                        return null;
-                                    }
-                                },
-                            });
-                            // Persona + experience hot layer: nightly study/QA-surf prompts
-                            // judge everything against the bot's role — the persona must
-                            // actually BE in the prompt.
-                            const studySystemPrompt = await (0, sessionSystemPrompt_1.buildPersonaSessionSystemPrompt)(profilePaths, {
-                                scenario: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
-                            });
-                            const llm = async (history) => {
-                                const historyText = history
-                                    .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
-                                    .join('\n\n---\n\n');
-                                // Unified passive-LLM priority: DSH pair first, then local chain.
-                                const hostText = await (0, hostLlmExecutorBridge_1.createHostFirstCompletion)({
-                                    dshLlmPath: profilePaths.dshLlmPath,
-                                })({ botSlug: slug, system: studySystemPrompt, user: historyText });
-                                if (hostText !== null)
-                                    return hostText;
-                                const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
-                                    runtimeResolver,
-                                    llmExecutor,
-                                    metaBotSlug: slug,
-                                    prompt: historyText,
-                                    systemPrompt: studySystemPrompt,
-                                    timeoutMs: 30 * 60_000,
-                                    pollIntervalMs: 5_000,
-                                });
-                                if (result.status !== 'completed') {
-                                    throw new Error(result.error || `Study turn ended with status ${result.status}`);
-                                }
-                                return result.output;
-                            };
-                            // Real tools with the pin budget enforced at the executor seam.
-                            let savedDocs = 0;
-                            const kbService = (0, service_2.createKnowledgeBaseService)(profilePaths);
-                            const studyProcedures = (0, procedureStore_1.createProcedureStore)(profilePaths);
-                            const studyKnowledge = (0, knowledgeStore_1.createKnowledgeStore)(profilePaths);
-                            return await (0, studyJobs_2.runStudyTurnWithTools)(prompt, {
-                                kind,
-                                runLlm: llm,
-                                tools: {
-                                    searchMetaweb: async ({ query }) => {
-                                        const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                                        const page = await (0, search_1.searchMetaweb)({ q: query }, baseUrl ? { baseUrl } : undefined);
-                                        const { formatMetawebSearchBullets } = await Promise.resolve().then(() => __importStar(require('../core/metaweb/format.js')));
-                                        return formatMetawebSearchBullets(page.items)
-                                            || 'No results. Retry with other keywords (bilingual).';
-                                    },
-                                    readMetawebPin: async ({ pinId }) => {
-                                        const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                                        const pin = await (0, pinRead_1.readMetawebPin)(pinId, baseUrl ? { baseUrl } : undefined);
-                                        // Best-effort chain-history read record; never delays or
-                                        // fails the study turn (recordMetawebPinRead also swallows).
-                                        void (0, readLedger_1.recordMetawebPinRead)(profilePaths, pin, 'study_job').catch(() => undefined);
-                                        const { formatMetawebPinDetail } = await Promise.resolve().then(() => __importStar(require('../core/metaweb/format.js')));
-                                        return formatMetawebPinDetail(pin);
-                                    },
-                                    addDocument: async ({ title, content, pinId }) => {
-                                        if (savedDocs >= budgetPins) {
-                                            return `Pin budget reached (${budgetPins}). Stop saving; emit the final report.`;
-                                        }
-                                        const saved = await kbService.addDocument(slug, {
-                                            title,
-                                            content,
-                                            sourceType: 'metaweb',
-                                            ...(pinId ? { pinId } : {}),
-                                        });
-                                        savedDocs += 1;
-                                        await kbService.learnKnowledgeBase(slug).catch(() => undefined);
-                                        return `Saved as ${saved.relPath} (budget ${savedDocs}/${budgetPins}).`;
-                                    },
-                                    learnKnowledgeBase: async () => {
-                                        const learned = await kbService.learnKnowledgeBase(slug);
-                                        return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
-                                    },
-                                    listKnowledgeBases: async () => {
-                                        const rows = (await kbService.store.listKnowledgeBases())
-                                            .filter((row) => row.metabotSlug === slug);
-                                        if (!rows.length)
-                                            return 'No knowledge bases yet.';
-                                        return rows.map((row) => `- "${row.name}"${row.isDefault ? ' (default)' : ''} `
-                                            + `docs=${row.docCount} chunks=${row.chunkCount}`
-                                            + `${row.description ? ` — ${row.description}` : ''}`).join('\n');
-                                    },
-                                    queryKnowledgeBases: async ({ query, knowledgeBaseId }) => {
-                                        const results = await kbService.queryKnowledgeBase(slug, query, {
-                                            ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
-                                        });
-                                        if (!results.length)
-                                            return 'No hits.';
-                                        return results.map((result) => result.hits.map((hit) => `- [${result.knowledgeBaseName}] ${hit.title}#${hit.ord} (score ${hit.score})\n  ${hit.snippet}`).join('\n')).join('\n');
-                                    },
-                                    saveProcedure: async (input) => {
-                                        const { procedure, created } = await studyProcedures.upsertProcedure({
-                                            title: input.title,
-                                            steps: input.steps,
-                                            ...(input.pitfalls?.length ? { pitfalls: input.pitfalls } : {}),
-                                            ...(input.triggerText ? { triggerText: input.triggerText } : {}),
-                                            ...(input.sourcePinIds?.length ? { sourcePinIds: input.sourcePinIds } : {}),
-                                            origin: 'agent',
-                                        });
-                                        return `${created ? 'Saved' : 'Updated'} procedure "${procedure.title}" `
-                                            + `v${procedure.version} (${procedure.steps.length} steps).`;
-                                    },
-                                    recallProcedures: async ({ query }) => {
-                                        const rows = await studyProcedures.listProcedures({ status: 'active' });
-                                        const scored = (0, procedureStore_1.scoreProceduresForQuery)(rows, query).slice(0, 5);
-                                        if (!scored.length)
-                                            return 'No matching procedures.';
-                                        return scored.map(({ procedure, score }) => `- ${procedure.title} (${score})\n  ${procedure.steps.join(' → ')}`
-                                            + (procedure.pitfalls.length ? `\n  Pitfalls: ${procedure.pitfalls.join('; ')}` : '')).join('\n');
-                                    },
-                                    upsertKnowledge: async ({ topic, summary, kind }) => {
-                                        const validKind = kind && knowledgeStore_1.KNOWLEDGE_KINDS.includes(kind)
-                                            ? kind
-                                            : undefined;
-                                        const result = await studyKnowledge.upsertKnowledge({
-                                            topic,
-                                            summary,
-                                            ...(validKind ? { kind: validKind } : {}),
-                                            origin: 'agent',
-                                        });
-                                        return (0, knowledgePromptBlocks_1.formatKnowledgeUpsertResult)({
-                                            topic: result.entry.topic,
-                                            created: result.created,
-                                            revised: result.revised,
-                                            version: result.entry.version,
-                                            kind: result.entry.kind,
-                                        });
-                                    },
-                                    recallKnowledge: async (input) => {
-                                        const rows = await studyKnowledge.searchKnowledge({
-                                            ...(input.query ? { query: input.query } : {}),
-                                            ...(input.kind && knowledgeStore_1.KNOWLEDGE_KINDS.includes(input.kind)
-                                                ? { kind: input.kind }
-                                                : {}),
-                                            limit: 5,
-                                            touchLastUsed: true,
-                                        });
-                                        if (!rows.length)
-                                            return 'No matching knowledge.';
-                                        return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
-                                    },
-                                    // Q&A surfing seams (qa-surf jobs only): recall runs against
-                                    // the Q&A index, writes go through the in-process daemon
-                                    // handlers (already-answered check + ledger included).
-                                    searchQa: kind === 'qa-surf'
-                                        ? async ({ query, tags, answered, sort, size, cursor }) => {
-                                            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                                            const page = await (0, recall_1.qaSearch)({
-                                                q: query,
-                                                ...(tags?.length ? { tags } : {}),
-                                                ...(answered === true || answered === false ? { answered } : {}),
-                                                ...(sort === 'newest' ? { sort: 'newest' } : {}),
-                                                ...(size ? { size } : {}),
-                                                ...(cursor ? { cursor } : {}),
-                                            }, baseUrl ? { baseUrl } : undefined);
-                                            const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
-                                            if (!bullets) {
-                                                return `No on-chain Q&A matched "${query}". Do NOT invent questions or answers.`;
-                                            }
-                                            const sections = [
-                                                `${page.items.length} on-chain question(s) matching "${query}":`,
-                                                bullets,
-                                            ];
-                                            if (page.hasMore && page.nextCursor) {
-                                                sections.push(`More results: call search_qa again with cursor="${page.nextCursor}".`);
-                                            }
-                                            return sections.join('\n');
-                                        }
-                                        : undefined,
-                                    listLatestQuestions: kind === 'qa-surf'
-                                        ? async ({ tags, minAnswers, maxAnswers, sort, size, cursor }) => {
-                                            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                                            const page = await (0, recall_1.qaLatestQuestions)({
-                                                ...(tags?.length ? { tags } : {}),
-                                                ...(minAnswers != null ? { minAnswers } : {}),
-                                                ...(maxAnswers != null ? { maxAnswers } : {}),
-                                                ...(sort === 'hot' ? { sort: 'hot' } : {}),
-                                                ...(size ? { size } : {}),
-                                                ...(cursor ? { cursor } : {}),
-                                            }, baseUrl ? { baseUrl } : undefined);
-                                            const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
-                                            if (!bullets)
-                                                return 'No on-chain questions matched this filter.';
-                                            const sections = [
-                                                `${page.items.length} on-chain question(s):`,
-                                                bullets,
-                                            ];
-                                            if (page.hasMore && page.nextCursor) {
-                                                sections.push(`More questions: call list_latest_questions again with cursor="${page.nextCursor}".`);
-                                            }
-                                            return sections.join('\n');
-                                        }
-                                        : undefined,
-                                    getQuestionAnswers: kind === 'qa-surf'
-                                        ? async ({ questionPinId, publisher, size, cursor }) => {
-                                            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
-                                            const detail = await (0, recall_1.qaQuestionDetail)(questionPinId, baseUrl ? { baseUrl } : undefined);
-                                            return (0, format_2.formatQaQuestionDetail)({ question: detail.question, answers: detail.answers });
-                                        }
-                                        : undefined,
-                                    postSimpleAnswer: kind === 'qa-surf'
-                                        ? async ({ answerTo, content, tags }) => {
-                                            const answerHandler = handlers.qanda?.answer;
-                                            if (!answerHandler)
-                                                throw new Error('qanda answer handler is not configured.');
-                                            const result = await answerHandler({
-                                                from: slug,
-                                                answerTo,
-                                                content,
-                                                ...(tags?.length ? { tags } : {}),
-                                            });
-                                            if (!result.ok) {
-                                                throw new Error(result.message || 'answer publish failed');
-                                            }
-                                            const data = (result.data ?? {});
-                                            if (typeof data.notice === 'string' && data.notice) {
-                                                return data.notice;
-                                            }
-                                            return typeof data.formatted === 'string' && data.formatted
-                                                ? data.formatted
-                                                : 'Answer published on-chain.';
-                                        }
-                                        : undefined,
-                                    likePin: kind === 'qa-surf'
-                                        ? async ({ pinId, isLike }) => {
-                                            const likeHandler = handlers.qanda?.like;
-                                            if (!likeHandler)
-                                                throw new Error('qanda like handler is not configured.');
-                                            const result = await likeHandler({ from: slug, pinId, isLike });
-                                            if (!result.ok) {
-                                                throw new Error(result.message || 'reaction publish failed');
-                                            }
-                                            const data = (result.data ?? {});
-                                            return typeof data.formatted === 'string' && data.formatted
-                                                ? data.formatted
-                                                : 'Reaction published on-chain.';
-                                        }
-                                        : undefined,
-                                },
-                            });
-                        },
+                        runStudyTurn: runStudyTurnForBot,
                         log: (message) => {
                             console.warn(message);
                             groupTaskEngineLog(message);
                         },
                     }).catch(() => undefined);
+                    // Processed → the next tick starts after this profile.
+                    studyTickStartIndex = (studyTickStartIndex + 1) % profiles.length;
                 }
             }
             catch {
@@ -6900,10 +7139,17 @@ async function serveCliDaemonProcess(context) {
         await refreshA2ASimplemsgListenerAfterIdentityRegistration();
     }
     let shuttingDown = false;
-    const shutdown = async (exitCode) => {
+    const shutdown = async (exitCode, cause) => {
         if (shuttingDown)
             return;
         shuttingDown = true;
+        await daemonStore.appendDaemonEvent({
+            at: Date.now(),
+            event: 'stop',
+            pid: process.pid,
+            trigger: cause,
+            detail: null,
+        }).catch(() => undefined);
         simplemsgPresenceWatchdog.stop();
         simplemsgListener.stop();
         chatAutoReplyBackfill.stop();
@@ -6940,15 +7186,15 @@ async function serveCliDaemonProcess(context) {
         }
         process.exit(exitCode);
     };
-    process.on('SIGTERM', () => { void shutdown(0); });
-    process.on('SIGINT', () => { void shutdown(0); });
+    process.on('SIGTERM', () => { void shutdown(0, 'signal:SIGTERM'); });
+    process.on('SIGINT', () => { void shutdown(0, 'signal:SIGINT'); });
     process.on('uncaughtException', (error) => {
         console.error(error);
-        void shutdown(1);
+        void shutdown(1, 'uncaughtException');
     });
     process.on('unhandledRejection', (error) => {
         console.error(error);
-        void shutdown(1);
+        void shutdown(1, 'unhandledRejection');
     });
     return new Promise(() => { });
 }

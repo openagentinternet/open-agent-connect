@@ -1837,7 +1837,7 @@ function openBackupPanel(){
   var profile=selectedProfile();if(!profile)return;
   var token=beginSensitiveModal('backup',profile.slug);
   openDynamicModal(uiText('bot.backupMnemonic','Backup Mnemonic'),'<div class="modal-body"><div class="modal-note">'+esc(uiText('bot.loadingBackupPhrase','Loading backup phrase...'))+'</div></div>');
-  api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/backup').then(function(r){
+  api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/backup',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){
     if(!isSensitiveModalCurrent(token,profile.slug))return;
     openDynamicModal(uiText('bot.backupMnemonic','Backup Mnemonic'),backupBodyMarkup(r.data&&r.data.backup||{}),{boxClass:'modal-box-wide'});
   }).catch(function(error){if(!isSensitiveModalCurrent(token,profile.slug))return;openDynamicModal(uiText('bot.backupMnemonic','Backup Mnemonic'),'<div class="modal-body"><div class="save-status error">'+esc(error.message)+'</div></div><div class="modal-actions"><button class="btn" data-act="modal-close">'+esc(uiText('bot.close','Close'))+'</button></div>')});

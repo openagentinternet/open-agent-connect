@@ -164,6 +164,10 @@ async function settle(input = {}) {
       pinId: 'refund-request-pin-1',
       path: SERVICE_REFUND_REQUEST_PATH,
       content: JSON.stringify(input.payload ?? createRefundRequestPayload(input.payloadOverrides)),
+      // The genuine buyer's pin is authored (signed) by the buyer identity.
+      author: input.author !== undefined
+        ? input.author
+        : { globalMetaId: 'idq1buyer', metaid: '', address: 'buyer-mvc-address' },
     })),
     executeRefundTransfer: input.executeRefundTransfer ?? (async (transfer) => {
       transferCalls.push(transfer);
@@ -205,6 +209,30 @@ test('processSellerRefundSettlement performs paid transfer, writes finalization,
   assert.equal(result.nextState.sellerOrders.every((entry) => entry.refundFinalizePinId === 'refund-finalize-pin-1'), true);
   assert.equal(result.nextState.traces[0].order.status, 'refunded');
   assert.equal(result.nextState.traces[0].order.refundFinalizePinId, 'refund-finalize-pin-1');
+});
+
+test('processSellerRefundSettlement refuses a refund request pin not authored by the buyer (H7)', async () => {
+  // An attacker clones the public order fields (txid, service pin, buyer id,
+  // amount) into their own pin with THEIR OWN refund address. The pin author
+  // is the attacker, not the buyer — settlement must stop before any transfer.
+  const { result, transferCalls, finalizeWrites } = await settle({
+    author: { globalMetaId: 'idq1attacker', metaid: '', address: 'attacker-address' },
+    payloadOverrides: { refundToAddress: 'attacker-mvc-address' },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'manual_action_required');
+  assert.equal(result.code, 'refund_request_author_mismatch');
+  assert.equal(transferCalls.length, 0, 'no refund transfer may be attempted');
+  assert.equal(finalizeWrites.length, 0, 'no finalize pin may be written');
+});
+
+test('processSellerRefundSettlement refuses when the pin author is unknown (H7)', async () => {
+  const { result, transferCalls } = await settle({ author: null });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'refund_request_author_unknown');
+  assert.equal(transferCalls.length, 0);
 });
 
 test('processSellerRefundSettlement finalizes with the refund request service pin after service republish', async () => {

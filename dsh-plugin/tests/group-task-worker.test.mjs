@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const plugin = await import('../lib/index.js')
+const remoteContentGuard = await import('../lib/remote-content-guard.js')
 
 function claim(overrides = {}) {
   return {
@@ -114,6 +115,7 @@ function harness(options = {}) {
             session,
           }
           registryAgents.set(agent.id, agent)
+          created.push({ agent })
           return { agent, dispose: async () => {} }
         },
         get: (id) => registryAgents.get(id),
@@ -138,6 +140,11 @@ test('worker session: claim → sub-session → handoff submitted on-chain (no h
   // The sub-session carries the worker preset + its own LLM pair.
   const create = h.created.find((entry) => entry.create)?.create
   assert.equal(create.meta.agentPreset, 'oac-carol')
+  assert.equal(create.meta.oacOrigin, 'group-task-worker')
+  // H8: the worker session is remote-content-driven for its whole lifetime.
+  const workerAgent = h.created.find((entry) => entry.agent)?.agent
+  assert.ok(workerAgent, 'harness captures the worker agent')
+  assert.equal(remoteContentGuard.isRemoteContentAgent(workerAgent), true, 'worker agent is marked remote-content (privacy tools refuse)')
   assert.deepEqual(create.agentOptions, { provider: 'deepseek', model: 'deepseek-chat' })
   assert.ok(create, 'session created')
   // The work wrapper carries the goal, roster, log, target, and handoff contract.
@@ -147,12 +154,15 @@ test('worker session: claim → sub-session → handoff submitted on-chain (no h
   assert.match(wrapper.content[0].text, /发布 MetaApp/)
   assert.match(wrapper.content[0].text, /@Carol 请做封面/)
   assert.match(wrapper.content[0].text, /\[DELIVERABLE\] lines/)
+  // H8: group-log content is fenced as untrusted data.
+  assert.match(wrapper.content[0].text, /<untrusted_group_message>/)
   // The handoff is submitted with the session id and posted by the daemon.
   assert.equal(h.submits.length, 1)
   assert.equal(h.submits[0].requestId, 9)
   assert.match(h.submits[0].handoff, /封面做好了 \[DELIVERABLE\] metaapp:\/\/pin-1/)
   assert.ok(h.submits[0].dshSessionId)
   runner.stop()
+  assert.equal(remoteContentGuard.isRemoteContentAgent(workerAgent), false, 'runner.stop() unmarks the worker session')
 })
 
 test('worker session: mid-turn group_chat sends post as the worker; empty final reply settles as delivered', async () => {

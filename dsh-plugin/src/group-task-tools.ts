@@ -23,6 +23,7 @@ import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { approvalOf, sessionApprovalPolicy } from './browser-tools.js'
 import type { RunFn } from './cli-payload.js'
 import type { HostAgentLike, HostApproval, HostApprovalOutcome, HostContext, HostToolDefinition } from './context-types.js'
+import { withRemoteContentGuard } from './remote-content-guard.js'
 
 /** Group-task SOP for the Twin, ported from the IDBots metabot-group-task SKILL.md. */
 export const GROUP_TASK_SOP_TEXT = `## Group Tasks (multi-bot on-chain group tasks)
@@ -671,6 +672,6 @@ export function installGroupTaskOnAgent(
   // compositions mount user-approval.
   const approval = approvalOf(agent.ctx as unknown as HostContext)
   agent.ctx.tools?.register(
-    buildGroupTaskToolDefinition(createGroupTaskController(twinSlug, options), { approval }),
+    withRemoteContentGuard(buildGroupTaskToolDefinition(createGroupTaskController(twinSlug, options), { approval })),
   )
 }

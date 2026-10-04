@@ -16,7 +16,7 @@
  */
 import path from 'node:path'
 import { core } from './local-read.js'
-import { withA2aReplyGuard } from './a2a-reply-guard.js'
+import { withRemoteContentGuard } from './remote-content-guard.js'
 import type { HostContext, HostToolDefinition } from './context-types.js'
 
 export interface MediaDescriptionControl {
@@ -163,7 +163,7 @@ export function bindMediaDescriptionTools(ctx: HostContext, controlFactory: () =
     async describeAudio() { throw new Error('media description is unavailable: the OAC CLI installation could not be resolved (reinstall open-agent-connect or set OAC_METABOT_CLI_PATH)') },
   }
   for (const definition of buildMediaDescriptionToolDefinitions(control)) {
-    try { ctx.tools?.register(withA2aReplyGuard(definition)) } catch (error) {
+    try { ctx.tools?.register(withRemoteContentGuard(definition)) } catch (error) {
       if (!(error instanceof Error && /already.*(registered|exists)|duplicate/i.test(error.message))) ctx.logger?.warn?.(`[oac-dsh] media tool install failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }

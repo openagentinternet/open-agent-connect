@@ -229,8 +229,10 @@ async function serveRawFileUploadRoute(context: Parameters<RouteHandler>[0], isL
       fileName,
       contentType,
       // The staged temp file holds bytes the user just submitted through this
-      // very request: the workspace gate treats them as owner-consented.
-      confirmExternalUpload: true,
+      // very request: the workspace gate treats them as owner-consented. The
+      // consent travels as an in-process callback — request JSON cannot carry
+      // functions, so HTTP callers can never self-authorize this way.
+      confirmExternalUpload: async () => true,
     };
     if (from) {
       input.from = from;

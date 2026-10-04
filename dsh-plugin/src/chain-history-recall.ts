@@ -17,6 +17,7 @@ import { runMetabot } from './cli-bridge.js'
 import type { RunFn } from './cli-payload.js'
 import { oacSlugOf } from './browser-tools.js'
 import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
+import { withRemoteContentGuard } from './remote-content-guard.js'
 
 export type ChainHistoryRecallKind = 'write' | 'read'
 
@@ -274,6 +275,6 @@ export function installChainHistoryRecallOnAgent(
   run: RunFn = runMetabot,
 ): void {
   for (const definition of buildChainHistoryRecallToolDefinitions({ host, hostAgent: agent, run })) {
-    agent.ctx.tools?.register(definition)
+    agent.ctx.tools?.register(withRemoteContentGuard(definition))
   }
 }

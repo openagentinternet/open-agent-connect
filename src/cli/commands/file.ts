@@ -85,7 +85,6 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
       filePath: resolveMaybeRelativePath(requestDir, request.filePath) ?? request.filePath,
       ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
       ...(from ? { from } : {}),
-      ...(hasFlag(commandArgs, '--confirm-external-upload') ? { confirmExternalUpload: true } : {}),
     };
     return handler(resolvedRequest);
   }
@@ -133,7 +132,6 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
       ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
       ...(from ? { from } : {}),
       ...(hasFlag(commandArgs, '--verify') ? { verify: true } : {}),
-      ...(hasFlag(commandArgs, '--confirm-external-upload') ? { confirmExternalUpload: true } : {}),
     });
   }
 
@@ -145,7 +143,6 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
     ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
     ...(from ? { from } : {}),
     ...(hasFlag(commandArgs, '--verify') ? { verify: true } : {}),
-    ...(hasFlag(commandArgs, '--confirm-external-upload') ? { confirmExternalUpload: true } : {}),
   };
   return handler(resolvedRequest);
 }

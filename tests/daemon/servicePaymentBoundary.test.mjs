@@ -115,6 +115,9 @@ async function createRefundChainServer(t) {
       payload = {
         data: {
           path: entry.path,
+          // The indexer attributes each pin to its on-chain signer; request
+          // pins in this harness are signed by the buyer identity.
+          ...(entry.authorGlobalMetaId ? { globalMetaId: entry.authorGlobalMetaId } : {}),
           contentSummary: JSON.stringify(entry.payload),
         },
       };
@@ -145,6 +148,10 @@ async function createRefundChainServer(t) {
         pinId,
         path: '/protocols/service-refund-request',
         payload,
+        // In this harness the buyer signs their own refund request pin.
+        authorGlobalMetaId: payload && typeof payload === 'object'
+          ? payload.buyerGlobalMetaId
+          : undefined,
       });
     },
     addFinalization(pinId, payload) {

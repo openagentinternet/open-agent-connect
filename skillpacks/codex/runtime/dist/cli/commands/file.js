@@ -80,7 +80,6 @@ async function runFileCommand(args, context) {
             filePath: resolveMaybeRelativePath(requestDir, request.filePath) ?? request.filePath,
             ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
             ...(from ? { from } : {}),
-            ...((0, helpers_1.hasFlag)(commandArgs, '--confirm-external-upload') ? { confirmExternalUpload: true } : {}),
         };
         return handler(resolvedRequest);
     }
@@ -123,7 +122,6 @@ async function runFileCommand(args, context) {
             ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
             ...(from ? { from } : {}),
             ...((0, helpers_1.hasFlag)(commandArgs, '--verify') ? { verify: true } : {}),
-            ...((0, helpers_1.hasFlag)(commandArgs, '--confirm-external-upload') ? { confirmExternalUpload: true } : {}),
         });
     }
     const request = await (0, helpers_1.readJsonFile)(context, requestFile);
@@ -134,7 +132,6 @@ async function runFileCommand(args, context) {
         ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
         ...(from ? { from } : {}),
         ...((0, helpers_1.hasFlag)(commandArgs, '--verify') ? { verify: true } : {}),
-        ...((0, helpers_1.hasFlag)(commandArgs, '--confirm-external-upload') ? { confirmExternalUpload: true } : {}),
     };
     return handler(resolvedRequest);
 }

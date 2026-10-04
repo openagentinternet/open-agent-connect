@@ -15,6 +15,7 @@ import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { core } from './local-read.js'
 import type { HostAgentLike, HostApproval, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 import { agentSessionCwd, approvalOf, oacSlugOf } from './browser-tools.js'
+import { stageExternalFilesIntoWorkspace, type StagedExternalFiles } from './file-upload.js'
 import { isPathInsideDir } from './oac-core-gate.js'
 
 const PUBLISH_TIMEOUT_MS = 240_000
@@ -120,6 +121,8 @@ export function buildQaToolDefinitions(input: {
   run?: RunFn
   /** Session workspace resolver; absent = every local file counts as external. */
   getWorkspaceDir?: (exec: HostToolExec) => string | undefined
+  /** Test seam; production stages approved files into the Bot workspace. */
+  stageExternalFiles?: (from: string, paths: string[]) => Promise<StagedExternalFiles>
 }): HostToolDefinition[] {
   const { host, hostAgent } = input
   const approval = input.approval ?? approvalOf(host)
@@ -137,12 +140,17 @@ export function buildQaToolDefinitions(input: {
   }
 
   /** External-file approval gate (post_simplenote pattern): in-workspace files
-   * publish freely; anything else needs one owner confirmation for the batch. */
+   * publish freely; anything else needs one owner confirmation for the batch.
+   * Approved files are copied into the Bot workspace by the host — the daemon
+   * no longer honors a caller-supplied consent flag (H3), so staging is what
+   * lets the publish pass the fail-closed workspace gate. Returns an error
+   * string on refusal, a staging handle after approval, or null when no
+   * external files are involved. */
   const guardExternalFiles = async (
     exec: HostToolExec,
     toolName: string,
     candidates: string[],
-  ): Promise<string | null> => {
+  ): Promise<string | StagedExternalFiles | null> => {
     const localPaths = candidates.filter((item) => path.isAbsolute(item) && !isMetafileUri(item))
     const relative = candidates.filter((item) => !path.isAbsolute(item) && !isMetafileUri(item))
     if (relative.length > 0) {
@@ -159,7 +167,7 @@ export function buildQaToolDefinitions(input: {
     }
     const agent = exec.agent ?? hostAgent
     const reason = [
-      + 'Publish these files on-chain as attachments? This makes them public and irreversible.',
+      'Publish these files on-chain as attachments? This makes them public and irreversible.',
       ...external.map((file) => `- ${file}`),
     ].join('\n')
     const outcome = await approval.request({
@@ -172,7 +180,15 @@ export function buildQaToolDefinitions(input: {
     if (outcome !== 'allowed-once') {
       return `Owner declined to upload files outside the session workspace (${outcome}). Do not retry the same path — when approval prompts are disabled or the owner declines, outside-workspace files cannot upload. Next step: copy the file into the session workspace (a gitignored sub-directory keeps the tree clean) and retry with the new ABSOLUTE path.`
     }
-    return null
+    const slug = actorSlug(exec)
+    if (!slug) {
+      return `${toolName}: the acting Bot could not be resolved, so the approved files cannot be staged into its workspace. Copy them into the Bot workspace manually and retry with the new paths.`
+    }
+    try {
+      return await (input.stageExternalFiles ?? stageExternalFilesIntoWorkspace)(slug, external)
+    } catch (error) {
+      return `${toolName}: could not stage the approved files into the Bot workspace: ${error instanceof Error ? error.message : String(error)}`
+    }
   }
 
   const postSimpleQuestion: HostToolDefinition = {
@@ -211,37 +227,43 @@ export function buildQaToolDefinitions(input: {
         return 'post_simplequestion requires `title` (non-empty). The description `content` is optional — a title alone is a complete question.'
       }
       const candidates = stringListArg(args, 'attachments') ?? []
-      const gateFailure = await guardExternalFiles(exec, 'post_simplequestion', candidates)
-      if (gateFailure) return gateFailure
+      const gateResult = await guardExternalFiles(exec, 'post_simplequestion', candidates)
+      if (typeof gateResult === 'string') return gateResult
+      const staged = gateResult
       if (args.network != null && args.network !== 'mvc' && args.network !== 'doge' && args.network !== 'btc') {
         return `Invalid network "${args.network}" — must be one of mvc, doge, btc.`
       }
       const slug = actorSlug(exec)
-      const result = await runMetabotWithPayloadFile(
-        ['qanda', 'question', ...(slug ? ['--from', slug] : [])],
-        {
-          title,
-          ...(textArg(args, 'content') ? { content: textArg(args, 'content') } : {}),
-          ...(textArg(args, 'content_type') ? { content_type: textArg(args, 'content_type') } : {}),
-          ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
-          ...(stringListArg(args, 'attachments') ? { attachments: stringListArg(args, 'attachments') } : {}),
-          ...(args.network === 'mvc' || args.network === 'doge' || args.network === 'btc' ? { network: args.network } : {}),
-          confirmExternalUpload: true,
-        },
-        '--request-file',
-        [],
-        run,
-        { timeoutMs: PUBLISH_TIMEOUT_MS },
-      )
-      if (!result.ok) {
-        return `Question publish failed: ${result.message ?? result.code ?? 'unknown error'}`
+      try {
+        const result = await runMetabotWithPayloadFile(
+          ['qanda', 'question', ...(slug ? ['--from', slug] : [])],
+          {
+            title,
+            ...(textArg(args, 'content') ? { content: textArg(args, 'content') } : {}),
+            ...(textArg(args, 'content_type') ? { content_type: textArg(args, 'content_type') } : {}),
+            ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
+            ...(stringListArg(args, 'attachments')
+              ? { attachments: stringListArg(args, 'attachments')!.map((item) => staged?.pathByOriginal.get(item) ?? item) }
+              : {}),
+            ...(args.network === 'mvc' || args.network === 'doge' || args.network === 'btc' ? { network: args.network } : {}),
+          },
+          '--request-file',
+          [],
+          run,
+          { timeoutMs: PUBLISH_TIMEOUT_MS },
+        )
+        if (!result.ok) {
+          return `Question publish failed: ${result.message ?? result.code ?? 'unknown error'}`
+        }
+        const data = (result.data ?? {}) as { formatted?: string; pinId?: string; localUiUrl?: string }
+        const lines = [typeof data.formatted === 'string' && data.formatted ? data.formatted : 'Question published on-chain.']
+        if (data.localUiUrl && data.pinId) {
+          lines.push(`You can open it for the user with bot_browser_open_uri on "pin://${data.pinId}".`)
+        }
+        return lines.join('\n')
+      } finally {
+        await staged?.cleanup()
       }
-      const data = (result.data ?? {}) as { formatted?: string; pinId?: string; localUiUrl?: string }
-      const lines = [typeof data.formatted === 'string' && data.formatted ? data.formatted : 'Question published on-chain.']
-      if (data.localUiUrl && data.pinId) {
-        lines.push(`You can open it for the user with bot_browser_open_uri on "pin://${data.pinId}".`)
-      }
-      return lines.join('\n')
     },
   }
 
@@ -279,47 +301,53 @@ export function buildQaToolDefinitions(input: {
         return 'post_simpleanswer requires both `answer_to` (pinId of the question pin) and `content` (non-empty).'
       }
       const candidates = stringListArg(args, 'attachments') ?? []
-      const gateFailure = await guardExternalFiles(exec, 'post_simpleanswer', candidates)
-      if (gateFailure) return gateFailure
+      const gateResult = await guardExternalFiles(exec, 'post_simpleanswer', candidates)
+      if (typeof gateResult === 'string') return gateResult
+      const staged = gateResult
       if (args.network != null && args.network !== 'mvc' && args.network !== 'doge' && args.network !== 'btc') {
         return `Invalid network "${args.network}" — must be one of mvc, doge, btc.`
       }
       const slug = actorSlug(exec)
-      const result = await runMetabotWithPayloadFile(
-        ['qanda', 'answer', ...(slug ? ['--from', slug] : [])],
-        {
-          answer_to: answerTo,
-          content,
-          ...(textArg(args, 'content_type') ? { content_type: textArg(args, 'content_type') } : {}),
-          ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
-          ...(stringListArg(args, 'attachments') ? { attachments: stringListArg(args, 'attachments') } : {}),
-          ...(args.allow_repeat === true ? { allow_repeat: true } : {}),
-          ...(args.network === 'mvc' || args.network === 'doge' || args.network === 'btc' ? { network: args.network } : {}),
-          confirmExternalUpload: true,
-        },
-        '--request-file',
-        [],
-        run,
-        { timeoutMs: PUBLISH_TIMEOUT_MS },
-      )
-      if (!result.ok) {
-        return `Answer publish failed: ${result.message ?? result.code ?? 'unknown error'}`
+      try {
+        const result = await runMetabotWithPayloadFile(
+          ['qanda', 'answer', ...(slug ? ['--from', slug] : [])],
+          {
+            answer_to: answerTo,
+            content,
+            ...(textArg(args, 'content_type') ? { content_type: textArg(args, 'content_type') } : {}),
+            ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
+            ...(stringListArg(args, 'attachments')
+              ? { attachments: stringListArg(args, 'attachments')!.map((item) => staged?.pathByOriginal.get(item) ?? item) }
+              : {}),
+            ...(args.allow_repeat === true ? { allow_repeat: true } : {}),
+            ...(args.network === 'mvc' || args.network === 'doge' || args.network === 'btc' ? { network: args.network } : {}),
+          },
+          '--request-file',
+          [],
+          run,
+          { timeoutMs: PUBLISH_TIMEOUT_MS },
+        )
+        if (!result.ok) {
+          return `Answer publish failed: ${result.message ?? result.code ?? 'unknown error'}`
+        }
+        const data = (result.data ?? {}) as {
+          formatted?: string
+          notice?: string
+          published?: boolean
+          pinId?: string
+          localUiUrl?: string
+        }
+        if (data.published === false && typeof data.notice === 'string') {
+          return data.notice
+        }
+        const lines = [typeof data.formatted === 'string' && data.formatted ? data.formatted : 'Answer published on-chain.']
+        if (data.localUiUrl) {
+          lines.push(`You can open the question page for the user with bot_browser_open_uri on "pin://${answerTo}".`)
+        }
+        return lines.join('\n')
+      } finally {
+        await staged?.cleanup()
       }
-      const data = (result.data ?? {}) as {
-        formatted?: string
-        notice?: string
-        published?: boolean
-        pinId?: string
-        localUiUrl?: string
-      }
-      if (data.published === false && typeof data.notice === 'string') {
-        return data.notice
-      }
-      const lines = [typeof data.formatted === 'string' && data.formatted ? data.formatted : 'Answer published on-chain.']
-      if (data.localUiUrl) {
-        lines.push(`You can open the question page for the user with bot_browser_open_uri on "pin://${answerTo}".`)
-      }
-      return lines.join('\n')
     },
   }
 

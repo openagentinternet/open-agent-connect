@@ -5,6 +5,17 @@ export interface RefundRequestPinDetail {
     pinId: string;
     path?: string | null;
     content: unknown;
+    /**
+     * The pin's on-chain author as reported by the indexer (cryptographically
+     * the pin signer). Settlement requires this to match the order's buyer —
+     * the payload's buyerGlobalMetaId alone is attacker-controlled text.
+     */
+    author?: {
+        globalMetaId?: string | null;
+        metaid?: string | null;
+        metaId?: string | null;
+        address?: string | null;
+    } | null;
 }
 export interface RefundTransferInput {
     order: SellerOrderRecord;

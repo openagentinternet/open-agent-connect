@@ -276,7 +276,8 @@ import {
   type MetaprotocolNetwork,
 } from '../core/metaprotocol/publish';
 import { MetaprotocolResolveError } from '../core/metaprotocol/registry';
-import { createProfileScopedUpload } from '../core/files/profileUploadGate';
+import { createProfileScopedUpload, UploadOutsideWorkspaceError } from '../core/files/profileUploadGate';
+import { isPathInsideDir } from '../core/files/chainUploadGate';
 import { ChainBroadcastUnknownError } from '../core/signing/localMnemonicSigner';
 import {
   createChainWriteAttemptStore,
@@ -488,6 +489,56 @@ function readErrorCode(error: unknown, fallback: string): string {
 function readKnownLargeFileUploadErrorCode(error: unknown): string {
   const code = readErrorCode(error, '');
   return KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES.has(code) || code.startsWith('mvc_fee_assist_') ? code : '';
+}
+
+/**
+ * External-upload consent is honored only as an in-process callback (the
+ * daemon's own raw-bytes upload route sets one for the file it just staged).
+ * Request bodies cross HTTP as JSON, which cannot carry functions — so a
+ * caller-supplied `confirmExternalUpload: true` boolean is ignored on
+ * purpose: letting the caller self-authorize would defeat the workspace gate
+ * (arbitrary local file read + irreversible on-chain publish).
+ */
+function readInternalUploadConsent(
+  value: unknown,
+): ((input: { slug: string; filePath: string }) => Promise<boolean> | boolean) | undefined {
+  return typeof value === 'function'
+    ? value as (input: { slug: string; filePath: string }) => Promise<boolean> | boolean
+    : undefined;
+}
+
+/**
+ * MetaApp project publishing reads the whole project directory and puts it
+ * on-chain irreversibly, so the directory must live inside the acting Bot's
+ * own workspace. The daemon has no interactive surface to consent to
+ * anything else, and a caller-supplied path is attacker-controlled.
+ */
+function checkMetaAppProjectDirContained(
+  rawInput: Record<string, unknown>,
+  actorHomeDir: string,
+): ReturnType<typeof commandFailed> | null {
+  const requested = typeof rawInput.projectDir === 'string' ? rawInput.projectDir.trim() : '';
+  const resolved = path.resolve(requested || '.');
+  if (!isPathInsideDir(resolved, actorHomeDir)) {
+    return commandFailed(
+      'metaapp_project_dir_outside_workspace',
+      `Refused to publish a project from outside the Bot workspace: ${resolved}. `
+      + 'On-chain publishing is irreversible; move or copy the project into the Bot workspace '
+      + `(${actorHomeDir}) and retry.`,
+    );
+  }
+  const manifestFile = typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile.trim() : '';
+  if (manifestFile) {
+    const resolvedManifest = path.resolve(manifestFile);
+    if (!isPathInsideDir(resolvedManifest, actorHomeDir)) {
+      return commandFailed(
+        'metaapp_project_dir_outside_workspace',
+        `Refused to read a manifest from outside the Bot workspace: ${resolvedManifest}. `
+        + 'Keep the manifest file inside the project directory.',
+      );
+    }
+  }
+  return null;
 }
 
 function readLargeFileUploadFailureData(error: unknown): Record<string, unknown> | undefined {
@@ -2225,7 +2276,12 @@ function selectProtocolPinContent(payload: unknown): unknown {
 async function fetchProtocolPinDetail(inputFetch: {
   pinId: string;
   chainApiBaseUrl?: string;
-}): Promise<{ pinId: string; path: string | null; content: unknown }> {
+}): Promise<{
+  pinId: string;
+  path: string | null;
+  content: unknown;
+  author: { globalMetaId: string; metaid: string; address: string } | null;
+}> {
   const pinId = normalizeText(inputFetch.pinId);
   if (!pinId) {
     throw new Error('pin_id_missing: Refund request pin id is required.');
@@ -2237,10 +2293,20 @@ async function fetchProtocolPinDetail(inputFetch: {
   const payload = await response.json() as unknown;
   const root = readObject(payload) ?? {};
   const data = readObject(root.data) ?? {};
+  const authorGlobalMetaId = normalizeText(data.globalMetaId)
+    || normalizeText(data.global_metaid)
+    || normalizeText(data.globalMetaID);
+  const authorMetaid = normalizeText(data.metaid) || normalizeText(data.metaId);
+  const authorAddress = normalizeText(data.address);
   return {
     pinId,
     path: normalizeText(data.path) || normalizeText(root.path) || null,
     content: selectProtocolPinContent(payload),
+    // The pin author is the on-chain signer identity — the settlement gate
+    // compares it against the order buyer before any refund leaves the wallet.
+    author: authorGlobalMetaId || authorMetaid || authorAddress
+      ? { globalMetaId: authorGlobalMetaId, metaid: authorMetaid, address: authorAddress }
+      : null,
   };
 }
 
@@ -8881,6 +8947,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       pinId: string;
       path: string;
       content: Record<string, unknown>;
+      author: { globalMetaId: string; metaid: string; address: string };
     };
   }> {
     if (!isSellerOrderEligibleForLocalBuyerRefundRequest(inputRefund.order)) {
@@ -9012,6 +9079,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
               pinId: refundRequestPinId,
               path: SERVICE_REFUND_REQUEST_PATH,
               content: refundRequestPayload,
+              // The local buyer wrote this pin with its own identity, so the
+              // author is known without a chain round trip.
+              author: {
+                globalMetaId: buyerGlobalMetaId,
+                metaid: normalizeText(buyerIdentity.metaId),
+                address: normalizeText(buyerIdentity.mvcAddress),
+              },
             },
           }
           : {}),
@@ -13592,6 +13666,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
         }
+        // Publishing reads the whole project directory and puts it on-chain
+        // irreversibly, so the directory must live inside the acting Bot's
+        // own workspace — never an arbitrary path from the caller.
+        const projectDirCheck = checkMetaAppProjectDirContained(rawInput, actor.homeDir);
+        if (projectDirCheck) {
+          return projectDirCheck;
+        }
 
         const cache = createMetaAppLocalCacheStore(actor.homeDir);
         const opId = normalizeText(rawInput.opId);
@@ -13684,6 +13765,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
+        }
+        const projectDirCheck = checkMetaAppProjectDirContained(rawInput, actor.homeDir);
+        if (projectDirCheck) {
+          return projectDirCheck;
         }
 
         const cache = createMetaAppLocalCacheStore(actor.homeDir);
@@ -14027,10 +14112,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const buzzAttachments = readStringArray(rawInput.attachments);
+          // Fail-closed workspace gate (same rule as the other chain-write
+          // routes): a local file may leave the machine only from inside the
+          // acting Bot's home; no request field can consent otherwise.
+          for (const filePath of buzzAttachments) {
+            if (path.isAbsolute(filePath) && !isPathInsideDir(filePath, actor.homeDir)) {
+              throw new UploadOutsideWorkspaceError(filePath, normalizeText(rawInput.from) || 'actor');
+            }
+          }
           const buzzContentHash = stableChainWriteHash('buzz', [
             normalizeText(rawInput.content),
             network,
-            ...readStringArray(rawInput.attachments),
+            ...buzzAttachments,
           ]);
           const priorBuzzAttempt = await createChainWriteAttemptStore(normalizedSystemHomeDir)
             .findRecent(buzzContentHash).catch(() => null);
@@ -14045,7 +14139,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const result = await postBuzzToChain({
             content: normalizeText(rawInput.content),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
-            attachments: readStringArray(rawInput.attachments),
+            attachments: buzzAttachments,
             quotePin: typeof rawInput.quotePin === 'string' ? rawInput.quotePin : undefined,
             network,
             signer: actor.signer,
@@ -14071,8 +14165,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
       },
-    },
-    simplenote: {
+    },    simplenote: {
       post: async (rawInput) => {
         const actor = await resolveActorWriteContext(rawInput.from);
         if ('failure' in actor) {
@@ -14084,14 +14177,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         try {
           const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
-          // Workspace-scoped gate: in-workspace files publish freely; anything
-          // else requires the explicit owner-consent flag in the request
-          // (interactive hosts like the DSH tool set it after their approval
-          // dialog; the loopback fence cannot gate local processes).
+          // Workspace-scoped gate, fail-closed: in-workspace files publish
+          // freely; consent for anything else is honored only as an
+          // in-process callback (never from the request body).
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const noteContentHash = stableChainWriteHash('simplenote', [
             normalizeText(rawInput.title),
@@ -14171,7 +14263,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const result = await publishSimpleQuestion(
             actor.signer,
@@ -14248,7 +14340,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const result = await publishSimpleAnswer(
             actor.signer,
@@ -17716,7 +17808,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const result = await gatedUpload({
             slug: normalizeText(rawInput.from) || 'actor',
@@ -17750,7 +17842,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           // (or consented) files, same rule as the direct route.
           const gateCheck = await createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
             // Probe-only invocation: refuses out-of-workspace paths before the
             // heavy upload machinery starts.
             upload: async () => ({ metafileUri: '', pinId: '' }),

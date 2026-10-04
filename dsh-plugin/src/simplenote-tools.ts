@@ -10,6 +10,7 @@ import path from 'node:path'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import type { HostAgentLike, HostApproval, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 import { agentSessionCwd, approvalOf, oacSlugOf } from './browser-tools.js'
+import { stageExternalFilesIntoWorkspace, type StagedExternalFiles } from './file-upload.js'
 import { isPathInsideDir } from './oac-core-gate.js'
 
 const PUBLISH_TIMEOUT_MS = 240_000
@@ -37,6 +38,8 @@ export function buildSimpleNoteToolDefinitions(input: {
   run?: RunFn
   /** Session workspace resolver; absent = every local file counts as external. */
   getWorkspaceDir?: (exec: HostToolExec) => string | undefined
+  /** Test seam; production stages approved files into the Bot workspace. */
+  stageExternalFiles?: (from: string, paths: string[]) => Promise<StagedExternalFiles>
 }): HostToolDefinition[] {
   const { host, hostAgent } = input
   const approval = input.approval ?? approvalOf(host)
@@ -96,7 +99,9 @@ export function buildSimpleNoteToolDefinitions(input: {
       }
 
       // Gate: local absolute paths that are not metafile:// URIs must be
-      // inside the workspace, or the owner approves them in one batch.
+      // inside the workspace, or the owner approves them in one batch —
+      // after which the HOST stages the copies into the Bot workspace (the
+      // daemon no longer honors a caller-supplied consent flag, H3).
       const candidates = [textArg(args, 'cover'), ...(stringListArg(args, 'attachments') ?? [])].filter(Boolean)
       const localPaths = candidates.filter((item) => path.isAbsolute(item) && !isMetafileUri(item))
       const relative = candidates.filter((item) => !path.isAbsolute(item) && !isMetafileUri(item))
@@ -105,6 +110,7 @@ export function buildSimpleNoteToolDefinitions(input: {
       }
       const workspaceDir = input.getWorkspaceDir?.(exec)
       const external = localPaths.filter((item) => !workspaceDir || !isPathInsideDir(item, workspaceDir))
+      let staged: StagedExternalFiles | null = null
       if (external.length > 0) {
         if (!approval) {
           return 'Publish refused: DSH approval is not available in this composition, so files outside the session workspace cannot be confirmed for on-chain upload.'
@@ -124,44 +130,57 @@ export function buildSimpleNoteToolDefinitions(input: {
         if (outcome !== 'allowed-once') {
           return `Owner declined to upload files outside the session workspace (${outcome}). Do not retry the same path — when approval prompts are disabled or the owner declines, outside-workspace files cannot upload. Next step: copy the file into the session workspace (a gitignored sub-directory keeps the tree clean) and retry with the new ABSOLUTE path.`
         }
+        const slugForStaging = actorSlug(exec)
+        if (!slugForStaging) {
+          return 'post_simplenote: the acting Bot could not be resolved, so the approved files cannot be staged into its workspace. Copy them into the Bot workspace manually and retry with the new paths.'
+        }
+        try {
+          staged = await (input.stageExternalFiles ?? stageExternalFilesIntoWorkspace)(slugForStaging, external)
+        } catch (error) {
+          return `post_simplenote: could not stage the approved files into the Bot workspace: ${error instanceof Error ? error.message : String(error)}`
+        }
       }
 
       if (args.network != null && args.network !== 'mvc' && args.network !== 'doge' && args.network !== 'btc') {
         return `Invalid network "${args.network}" — must be one of mvc, doge, btc.`
       }
       const slug = actorSlug(exec)
-      // The native approval above (or workspace containment) covered the
-      // external-file decision, so the daemon-side gate gets the consent flag.
-      const result = await runMetabotWithPayloadFile(
-        ['simplenote', 'post', ...(slug ? ['--from', slug] : [])],
-        {
-          title,
-          content,
-          confirmExternalUpload: true,
-          ...(textArg(args, 'subtitle') ? { subtitle: textArg(args, 'subtitle') } : {}),
-          ...(textArg(args, 'cover') ? { cover: textArg(args, 'cover') } : {}),
-          ...(stringListArg(args, 'attachments') ? { attachments: stringListArg(args, 'attachments') } : {}),
-          ...(textArg(args, 'content_type') ? { content_type: textArg(args, 'content_type') } : {}),
-          ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
-          ...(args.network === 'mvc' || args.network === 'doge' || args.network === 'btc' ? { network: args.network } : {}),
-        },
-        '--request-file',
-        [],
-        run,
-      )
-      if (!result.ok) {
-        return `Note publish failed: ${result.message ?? result.code ?? 'unknown error'}`
+      const mapStaged = (item: string): string => staged?.pathByOriginal.get(item) ?? item
+      try {
+        const result = await runMetabotWithPayloadFile(
+          ['simplenote', 'post', ...(slug ? ['--from', slug] : [])],
+          {
+            title,
+            content,
+            ...(textArg(args, 'subtitle') ? { subtitle: textArg(args, 'subtitle') } : {}),
+            ...(textArg(args, 'cover') ? { cover: mapStaged(textArg(args, 'cover')) } : {}),
+            ...(stringListArg(args, 'attachments')
+              ? { attachments: stringListArg(args, 'attachments')!.map(mapStaged) }
+              : {}),
+            ...(textArg(args, 'content_type') ? { content_type: textArg(args, 'content_type') } : {}),
+            ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
+            ...(args.network === 'mvc' || args.network === 'doge' || args.network === 'btc' ? { network: args.network } : {}),
+          },
+          '--request-file',
+          [],
+          run,
+        )
+        if (!result.ok) {
+          return `Note publish failed: ${result.message ?? result.code ?? 'unknown error'}`
+        }
+        const data = (result.data ?? {}) as {
+          formatted?: string
+          pinId?: string
+          localUiUrl?: string
+        }
+        const lines = [typeof data.formatted === 'string' && data.formatted ? data.formatted : 'Note published on-chain.']
+        if (data.localUiUrl && data.pinId) {
+          lines.push(`You can open it for the user with bot_browser_open_uri on "pin://${data.pinId}".`)
+        }
+        return lines.join('\n')
+      } finally {
+        await staged?.cleanup()
       }
-      const data = (result.data ?? {}) as {
-        formatted?: string
-        pinId?: string
-        localUiUrl?: string
-      }
-      const lines = [typeof data.formatted === 'string' && data.formatted ? data.formatted : 'Note published on-chain.']
-      if (data.localUiUrl && data.pinId) {
-        lines.push(`You can open it for the user with bot_browser_open_uri on "pin://${data.pinId}".`)
-      }
-      return lines.join('\n')
     },
   }
 

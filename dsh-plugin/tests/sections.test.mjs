@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { access, readFile } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
 import test from 'node:test'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -164,21 +165,37 @@ test('metaapp publish and update append --op-id only when opId is present', asyn
   assert.equal(blankOp.calls[0].includes('--op-id'), false)
 })
 
-test('uploadFileBytes hands raw bytes to file upload-large and cleans up the temp file', async () => {
+test('uploadFileBytes stages raw bytes inside the Bot workspace and cleans up (H3: no consent flag)', async () => {
+  // Deterministic isolated home: OAC_DSH_NO_LOCAL_READ forces actorHomeDir's
+  // homedir()-based fallback, and HOME itself is redirected to a temp root.
+  const fakeHome = mkdtempSync(join(tmpdir(), 'oac-dsh-home-'))
+  const originalHome = process.env.HOME
+  const originalNoLocalRead = process.env.OAC_DSH_NO_LOCAL_READ
+  process.env.HOME = fakeHome
+  process.env.OAC_DSH_NO_LOCAL_READ = '1'
   const calls = []
-  const result = await plugin.uploadFileBytes('alice', Buffer.from('hello world'), 'text/plain', async (args) => {
-    calls.push(args)
-    return { ok: true, state: 'success', data: { metafileUri: 'metafile://' + 'aa'.repeat(32) + 'i0' } }
-  })
-  assert.equal(result.ok, true)
-  assert.equal(result.data.metafileUri, 'metafile://' + 'aa'.repeat(32) + 'i0')
-  assert.deepEqual(calls[0].slice(0, 5), ['file', 'upload-large', '--from', 'alice', '--file'])
-  assert.deepEqual(calls[0].slice(-2), ['--content-type', 'text/plain'])
-  const fileFlag = calls[0].indexOf('--file')
-  const tempPath = calls[0][fileFlag + 1]
-  assert.equal(typeof tempPath, 'string')
-  assert.ok(tempPath.startsWith(join(tmpdir(), 'oac-dsh-upload-')))
-  await assert.rejects(access(tempPath))
+  try {
+    const result = await plugin.uploadFileBytes('alice', Buffer.from('hello world'), 'text/plain', async (args) => {
+      calls.push(args)
+      return { ok: true, state: 'success', data: { metafileUri: 'metafile://' + 'aa'.repeat(32) + 'i0' } }
+    })
+    assert.equal(result.ok, true)
+    assert.equal(result.data.metafileUri, 'metafile://' + 'aa'.repeat(32) + 'i0')
+    assert.deepEqual(calls[0].slice(0, 5), ['file', 'upload-large', '--from', 'alice', '--file'])
+    assert.deepEqual(calls[0].slice(-2), ['--content-type', 'text/plain'])
+    assert.equal(calls[0].includes('--confirm-external-upload'), false, 'no caller-side consent flag (H3)')
+    const fileFlag = calls[0].indexOf('--file')
+    const tempPath = calls[0][fileFlag + 1]
+    assert.equal(typeof tempPath, 'string')
+    const expectedRoot = join(fakeHome, '.metabot', 'profiles', 'alice', 'workspace', '.upload-staging')
+    assert.ok(tempPath.startsWith(expectedRoot), `staged inside the Bot workspace: ${tempPath}`)
+    await assert.rejects(access(tempPath), 'staged file is cleaned up')
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME
+    else process.env.HOME = originalHome
+    if (originalNoLocalRead === undefined) delete process.env.OAC_DSH_NO_LOCAL_READ
+    else process.env.OAC_DSH_NO_LOCAL_READ = originalNoLocalRead
+  }
 })
 
 test('unknown section method returns undefined so bots routes stay on dispatchPost', async () => {

@@ -6,9 +6,15 @@
  * workspace (memory layer root) — the Bot's own working directory. Anything
  * else (.env, ~/.ssh, arbitrary absolute paths — including paths a remote
  * group member injected into a guest reply) is refused before any bytes
- * leave the machine. Hosts with an interactive surface (the DSH native
- * tools) ask the owner instead; they pass `confirmExternalUpload: true`
- * after approval so the daemon-side gate can honor the decision.
+ * leave the machine.
+ *
+ * `confirmExternalUpload` is honored only as an in-process callback: the
+ * daemon's raw-bytes upload route sets one for the temp file it just staged
+ * from the request body (those bytes are caller-supplied by construction).
+ * The plain boolean form still exists for direct in-process embedders, but
+ * daemon HTTP handlers must never forward a request-body boolean here — a
+ * caller self-authorizing `confirmExternalUpload: true` would defeat the
+ * gate entirely (H3).
  */
 import type { Signer } from '../signing/signer';
 export type GatedUploadFn = (input: {
