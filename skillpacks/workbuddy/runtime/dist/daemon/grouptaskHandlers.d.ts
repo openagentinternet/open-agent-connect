@@ -7,8 +7,9 @@
  */
 import { type MetabotCommandResult } from '../core/contracts/commandResult';
 import { type GroupTaskServiceContext } from '../core/grouptask/service';
+import type { PinVerifier } from '../core/grouptask/deliverableVerification';
 import type { GroupTaskTransportOptions } from '../core/grouptask/transport';
-import { type ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
+import type { ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { Signer } from '../core/signing/signer';
 export interface GroupTaskDaemonHandlers {
@@ -54,6 +55,8 @@ export interface CreateGroupTaskDaemonHandlersInput {
     resolveSponsorWritePin?: ResolveSponsorWritePin;
     /** Peer chat pubkey resolver; enables OpenTeam private-message envelopes. */
     resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+    /** Deliverable pin verifier; enables the final verification pass at close. */
+    verifyPin?: PinVerifier;
     transport?: GroupTaskTransportOptions;
     log?: (message: string) => void;
 }

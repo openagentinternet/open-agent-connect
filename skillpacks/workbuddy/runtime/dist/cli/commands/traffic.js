@@ -92,5 +92,5 @@ async function runTrafficCommand(args, context) {
         }
         return (0, commandResult_1.commandFailed)('invalid_argument', `Unknown api-base action: ${action}. Expected "get", "set <url>", or "reset".`);
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`traffic ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`traffic ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

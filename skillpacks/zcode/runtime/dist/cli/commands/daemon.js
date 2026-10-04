@@ -18,6 +18,13 @@ async function runDaemonCommand(args, context) {
         }
         return handler();
     }
+    if (args[0] === 'status') {
+        const handler = context.dependencies.daemon?.status;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Daemon status handler is not configured.');
+        }
+        return handler();
+    }
     if (args[0] === 'restart') {
         const handler = context.dependencies.daemon?.restart;
         if (!handler) {
@@ -25,5 +32,5 @@ async function runDaemonCommand(args, context) {
         }
         return handler();
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`daemon ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`daemon ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

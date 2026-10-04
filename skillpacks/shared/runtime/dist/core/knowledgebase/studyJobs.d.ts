@@ -6,7 +6,7 @@
  * the tool allowlist applied by the caller (no skill turns on OAC).
  */
 import type { MetabotPaths } from '../state/paths';
-export declare const DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 20;
+export declare const DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT = 50;
 export declare const MAX_STUDY_RUNS_PER_JOB = 10;
 export declare const MAX_STUDY_CONSECUTIVE_FAILURES = 3;
 /**
@@ -17,6 +17,23 @@ export declare const MAX_STUDY_CONSECUTIVE_FAILURES = 3;
 export declare const STUDY_TURN_MAX_TOOL_STEPS = 12;
 /** Tool-step cap for one nightly Q&A-surf turn (surf sessions page feeds and answer questions). */
 export declare const QA_SURF_TURN_MAX_TOOL_STEPS = 24;
+/**
+ * Wall-clock watchdog for one study turn (#13): the step caps alone bound a
+ * turn at steps × per-call LLM timeout (up to 6-12 h worst case), so one slow
+ * runtime could hold the nightly tick — and with it every other Bot's drain —
+ * for the whole window. A turn exceeding this budget breaks out to the same
+ * no-tools final-report turn as the step ceiling (marked partial). IDBots
+ * bounds its study sessions at 30 minutes; 35 gives the loop one extra
+ * margin, mirroring the surf watchdog's ballpark.
+ */
+export declare const STUDY_TURN_WALL_CLOCK_MS: number;
+/**
+ * Wall-clock budget for one nightly study tick (#13): the per-profile loop
+ * stops after this long and the remaining profiles rotate to the head of the
+ * next tick (see rotateForTick), so a slow first Bot can never systematically
+ * starve the tail of the list. Bounds one tick at ~3 study turns.
+ */
+export declare const STUDY_TICK_BUDGET_MS: number;
 /** Nightly drain window, local hours [0, 6). */
 export declare const STUDY_WINDOW: {
     readonly startHour: 0;
@@ -88,7 +105,14 @@ export interface StudyJobStore {
         job: StudyJobRecord;
         retried: boolean;
     } | null>;
-    resetRunningToPending(now: number, excludeId?: string): Promise<number>;
+    /**
+     * Requeue stale `running` rows (crash recovery). Rows whose id is in
+     * `excludeIds` (runs currently executing in this process) stay untouched;
+     * everything else goes back to pending. Returns the number of rows changed.
+     */
+    resetRunningToPending(now: number, options?: {
+        excludeIds?: string[];
+    }): Promise<number>;
 }
 export declare function createStudyJobStore(paths: MetabotPaths): StudyJobStore;
 /** True inside the nightly drain window (local hours 0-6). */
@@ -134,12 +158,45 @@ export interface StudyDrainDeps {
     log?: (message: string) => void;
 }
 /**
- * One study tick: inside the nightly window, drain the oldest pending job.
- * Crash recovery re-arms stale `running` rows first; a run either completes
- * (report parsed, KB writes happened through the tools during the turn) or
- * fails the job. Returns the id of the job attempted, or null.
+ * One study tick: drain the oldest pending job inside the nightly window.
+ * Crash recovery re-arms stale `running` rows FIRST — before the window
+ * gate, so a run a daemon restart killed mid-flight never sits in `running`
+ * until the next night (~18h of wrong status); only rows not executing in
+ * this process are swept. Returns the id of the job attempted, or null.
  */
 export declare function runStudyTick(store: StudyJobStore, deps: StudyDrainDeps): Promise<string | null>;
+export declare class StudyRunError extends Error {
+    readonly code: 'study_job_not_found' | 'study_job_already_running' | 'no_pending_study_job';
+    constructor(code: 'study_job_not_found' | 'study_job_already_running' | 'no_pending_study_job', message: string);
+}
+/**
+ * Resolve the job a manual run should execute, NOW, regardless of the
+ * nightly window (the daylight-testing surface behind `metabot
+ * knowledge-base study run` and the `metaweb_study_run` tool). Selection:
+ * an explicit jobId wins (any status except running); else the first job
+ * whose topic contains `topic` (case-insensitive substring, like retry),
+ * preferring pending over failed over done; else the oldest pending job.
+ * A FAILED job is requeued first (a manual run implies retry); a DONE job
+ * re-runs honestly. Crash recovery sweeps stale `running` rows (excluding
+ * runs executing in this process) before selection. Throws StudyRunError
+ * when nothing is runnable.
+ */
+export declare function resolveStudyJobForRun(store: StudyJobStore, selector?: {
+    metabotSlug?: string;
+    jobId?: string;
+    topic?: string;
+}): Promise<StudyJobRecord>;
+/**
+ * Claim and execute one resolved job; resolves when the run settles (safe
+ * to `void` for fire-and-forget manual runs — the job row is the state).
+ */
+export declare function startStudyJobRun(store: StudyJobStore, deps: StudyDrainDeps, job: StudyJobRecord): Promise<StudyJobRecord>;
+/** Convenience: resolve + run to completion (tests, CLI --wait flows). */
+export declare function runStudyJobNow(store: StudyJobStore, deps: StudyDrainDeps, selector?: {
+    metabotSlug?: string;
+    jobId?: string;
+    topic?: string;
+}): Promise<StudyJobRecord>;
 export interface StudyToolSet {
     searchMetaweb(args: {
         query: string;
@@ -222,13 +279,42 @@ export interface StudyLoopDeps {
     maxResultChars?: number;
     /** 'qa-surf' selects the Q&A surfing allowlist (default: the topic set). */
     kind?: StudyJobKind;
+    /**
+     * Wall-clock watchdog for the whole turn (#13). When the budget is spent
+     * the loop stops starting new steps and takes the no-tools final-report
+     * path (marked partial). Default STUDY_TURN_WALL_CLOCK_MS.
+     */
+    wallClockMs?: number;
 }
 /**
  * The study turn as a bounded tool loop with a HARD executor-side allowlist:
  * the model proposes one json tool call per step, the executor runs it (or
  * rejects it), and only allowlisted operations ever execute. Pin budget is
  * enforced by a counting wrapper around addDocument — prompt guidance alone
- * is not a budget. Returns the final report text; hitting the step cap takes
- * one final no-tools report turn (marked partial) instead of failing the run.
+ * is not a budget. Returns the final report text; hitting the step cap OR the
+ * wall-clock watchdog takes one final no-tools report turn (marked partial)
+ * instead of failing the run.
  */
 export declare function runStudyTurnWithTools(prompt: string, deps: StudyLoopDeps): Promise<string>;
+/**
+ * Rotate the profile list so a tick starts at `startIndex` and wraps around
+ * (#13): with a tick budget cutting the loop short, the profiles that missed
+ * out begin the NEXT tick instead of always sitting at the tail of the list.
+ */
+export declare function rotateForTick<T>(items: T[], startIndex: number): T[];
+/**
+ * Conservative pre-flight gate for the nightly study drain (#13): skip a
+ * profile only when it has NO usable LLM at all — no DSH pair (and no host
+ * executor connected to serve it) AND no local runtime row that is not
+ * marked unavailable. Uncertain cases run and rely on the turn watchdog /
+ * per-call timeouts, so the gate can never silently disable a Bot that would
+ * have studied fine. Without the gate such a Bot burns its per-call timeout
+ * at the front of the queue every night until 3-strikes parks the job.
+ */
+export declare function profileHasStudyLlm(input: {
+    dshPairConfigured: boolean;
+    connectedExecutors: number;
+    runtimes: Array<{
+        health?: string;
+    }>;
+}): boolean;

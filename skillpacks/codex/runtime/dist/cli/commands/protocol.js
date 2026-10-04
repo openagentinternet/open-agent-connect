@@ -99,5 +99,5 @@ async function runProtocolCommand(args, context) {
     if (subcommand === undefined) {
         return (0, commandResult_1.commandFailed)('missing_subcommand', 'Usage: metabot protocol <list|read|versions|check|publish|update> …');
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`protocol ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`protocol ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

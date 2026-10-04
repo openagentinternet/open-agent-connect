@@ -51,6 +51,7 @@ const openteam_1 = require("./openteam");
 const transport_1 = require("./transport");
 const backfill_1 = require("./backfill");
 const tags_1 = require("./tags");
+const deliverableVerification_1 = require("./deliverableVerification");
 const types_1 = require("./types");
 class GroupTaskServiceError extends Error {
     code;
@@ -718,17 +719,35 @@ async function closeGroupTask(ctx, chairSlug, taskId, opts) {
     if (task.status === 'done' || task.status === 'cancelled') {
         throw new GroupTaskServiceError('task_terminal', `Group task ${taskId} is already ${task.status}`);
     }
-    // An owner close accepts only chain-confirmed (delivered) rows: an
-    // unverified pending row must never be stamped accepted — the ledger would
-    // then claim a verification that never happened. Count the rows that stay
-    // pending so the closing notice can say so explicitly.
-    const unverifiedPendingCount = opts.status === 'done'
-        ? (await store.listDeliverables(taskId).catch(() => []))
-            .filter((row) => row.status === 'pending').length
-        : 0;
+    // A done close settles deliverables BEFORE the verdict note is composed:
+    // 1. one final verification pass, because the engine's 10-minute re-verify
+    //    loop stops at close and pins confirmed inside the last indexer-lag
+    //    window would otherwise stay pending forever;
+    // 2. rows that can never carry a chain pin (text notes, plain links) are
+    //    accepted by the owner close itself — the close is the only acceptance
+    //    verdict such a row can ever receive;
+    // 3. chain-shaped rows still pending afterwards stay pending (an unverified
+    //    row must never be stamped accepted — the ledger would then claim a
+    //    verification that never happened) and are counted for the note.
+    let unverifiedPendingCount = 0;
+    if (opts.status === 'done') {
+        if (ctx.verifyPin) {
+            await (0, deliverableVerification_1.verifyTaskDeliverables)(store, taskId, ctx.verifyPin, { log: logOf(ctx) }).catch(() => undefined);
+        }
+        const pendingRows = (await store.listDeliverables(taskId).catch(() => []))
+            .filter((row) => row.status === 'pending');
+        for (const row of pendingRows) {
+            if ((0, deliverableVerification_1.extractDeliverablePinId)(row.uri)) {
+                unverifiedPendingCount += 1;
+            }
+            else {
+                await store.updateDeliverableStatus(row.id, 'accepted').catch(() => null);
+            }
+        }
+    }
     const pendingCloseNote = unverifiedPendingCount > 0
-        ? `${unverifiedPendingCount} deliverable${unverifiedPendingCount === 1 ? '' : 's'} remained unverified `
-            + 'and stay pending — accept them individually once their pins confirm on-chain.'
+        ? `${unverifiedPendingCount} deliverable${unverifiedPendingCount === 1 ? '' : 's'} could not be verified `
+            + 'on-chain and stay pending.'
         : null;
     // OT-06 R18: the acceptance verdict is broadcast as the group's FINAL
     // message — members learn the outcome without polling a frozen group (the
@@ -778,8 +797,9 @@ async function closeGroupTask(ctx, chairSlug, taskId, opts) {
         await store.updateTaskRating(taskId, opts.rating, opts.ratingComment);
     }
     if (closed.status === 'done') {
-        // T2 verdict: an owner close accepts chain-confirmed rows only. Pending
-        // (unverified) rows stay pending; cancelled closes promote nothing.
+        // T2 verdict: chain-confirmed (delivered) rows are accepted by the owner
+        // close — including rows the final verification pass just settled above.
+        // Pending chain-shaped rows stay pending; cancelled closes promote nothing.
         await store.updateDeliverablesStatusByTask(taskId, 'delivered', 'accepted').catch(() => 0);
     }
     try {

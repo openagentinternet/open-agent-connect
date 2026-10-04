@@ -214,7 +214,70 @@ async function runKnowledgeBaseCommand(args, context) {
                 ...(topic !== null ? { topic: topic.trim() } : {}),
             });
         }
+        if (verb === 'run') {
+            const handler = requireKbHandler(context, 'studyRun');
+            if (isFailure(handler))
+                return handler;
+            const jobId = (0, helpers_1.readFlagValue)(args, '--job-id');
+            const topic = (0, helpers_1.readFlagValue)(args, '--topic');
+            if (jobId !== null && jobId.trim() === '')
+                return (0, helpers_1.commandMissingFlag)('--job-id');
+            if (topic !== null && topic.trim() === '')
+                return (0, helpers_1.commandMissingFlag)('--topic');
+            const start = await handler({
+                from,
+                ...(jobId !== null ? { jobId: jobId.trim() } : {}),
+                ...(topic !== null ? { topic: topic.trim() } : {}),
+            });
+            if (!isFailure(start) && (0, helpers_1.hasFlag)(args, '--wait')) {
+                return waitStudyRunCompletion(context, from, start);
+            }
+            return start;
+        }
         return (0, helpers_1.commandUnknownSubcommand)(`knowledge-base study ${String(verb ?? '')}`.trim());
     }
     return (0, helpers_1.commandUnknownSubcommand)(`knowledge-base ${String(subcommand ?? '')}`.trim());
+}
+/**
+ * `study run --wait`: poll the acting bot's study jobs (the in-process
+ * studyList handler reads the local store — no daemon round-trips) until the
+ * started job leaves `running`. Generous cap — a study turn's LLM timeout is
+ * 30 minutes in the daemon.
+ */
+const STUDY_RUN_WAIT_TIMEOUT_MS = 45 * 60_000;
+const STUDY_RUN_WAIT_POLL_MS = 10_000;
+async function waitStudyRunCompletion(context, from, start) {
+    const data = (start.data ?? {});
+    const jobId = typeof data.jobId === 'string' ? data.jobId : '';
+    if (!jobId)
+        return start;
+    const listHandler = requireKbHandler(context, 'studyList');
+    if (isFailure(listHandler))
+        return listHandler;
+    const deadline = Date.now() + STUDY_RUN_WAIT_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+        const listed = await listHandler({ from: from ?? undefined });
+        if (!isFailure(listed)) {
+            const jobs = Array.isArray(listed.data?.jobs)
+                ? listed.data.jobs
+                : [];
+            const job = jobs.find((row) => row.id === jobId);
+            if (job && job.status !== 'running') {
+                const summary = typeof job.summary === 'string' ? job.summary : '';
+                const error = typeof job.error === 'string' ? job.error : '';
+                return {
+                    ...start,
+                    data: { ...(start.data ?? {}), waited: true, job },
+                    message: `Study job "${String(job.topic ?? jobId)}" settled as ${String(job.status)}.`
+                        + (summary ? `\nSummary: ${summary}` : '')
+                        + (error ? `\nError: ${error}` : ''),
+                };
+            }
+        }
+        await new Promise((resolve) => setTimeout(resolve, STUDY_RUN_WAIT_POLL_MS));
+    }
+    return {
+        ...start,
+        message: `Study job ${jobId} is still running after the ${STUDY_RUN_WAIT_TIMEOUT_MS / 60_000}-minute wait cap; check metabot knowledge-base study status.`,
+    };
 }

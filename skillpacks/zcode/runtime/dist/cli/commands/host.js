@@ -28,7 +28,7 @@ async function runHostCommand(args, context) {
                     : undefined;
         if (!handler) {
             if (!['bind', 'status', 'unbind'].includes(action ?? '')) {
-                return (0, helpers_1.commandUnknownSubcommand)(`host ${args.join(' ')}`.trim());
+                return (0, helpers_1.commandUnknownSubcommand)(`host ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
             }
             return (0, commandResult_1.commandFailed)('not_implemented', `Host persona ${action} handler is not configured.`);
         }
@@ -39,7 +39,7 @@ async function runHostCommand(args, context) {
         return handler({ host, from: (0, helpers_1.readFlagValue)(args, '--from') ?? undefined });
     }
     if (args[0] !== 'bind-skills') {
-        return (0, helpers_1.commandUnknownSubcommand)(`host ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`host ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     const handler = context.dependencies.host?.bindSkills;
     if (!handler) {

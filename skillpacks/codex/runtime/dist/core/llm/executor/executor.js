@@ -494,6 +494,25 @@ class LlmExecutor {
             });
         }
     }
+    /**
+     * Resolve the state home a resume target originally ran in. Sessions this
+     * executor created ran in the isolated provider home (recorded as
+     * providerStateHome); resuming one of them against the real home would both
+     * miss the thread and leak the turn into the user's platform history.
+     * Returns null for caller-owned sessions (no matching record) — those live
+     * in the CLI's real home and must keep running against it.
+     */
+    async findResumeStateHome(provider, resumeSessionId) {
+        const direct = await this.sessionManager.get(resumeSessionId).catch(() => null);
+        if (direct && direct.provider === provider && direct.providerStateHome) {
+            return direct.providerStateHome;
+        }
+        const records = await this.sessionManager.list(500).catch(() => []);
+        const match = records.find((record) => record.provider === provider
+            && record.providerSessionId === resumeSessionId
+            && record.providerStateHome);
+        return match?.providerStateHome ?? null;
+    }
     async runSession(sessionId, request, factory, binaryPath, controller) {
         let isolation = null;
         try {
@@ -513,7 +532,10 @@ class LlmExecutor {
             const isolationScope = isolation?.scope ?? null;
             const cwd = isolationScope?.cwd ?? request.cwd ?? process.cwd();
             const requestEnv = isolationScope?.env ?? request.env;
-            const baseProcessEnv = mergeStringEnvValues(process.env, this.env, requestEnv);
+            // Scrub the daemon's own env before spreading: the child runs with
+            // bypassed permissions and must not inherit API keys or tokens. this.env
+            // and requestEnv are explicit configuration channels and stay verbatim.
+            const baseProcessEnv = mergeStringEnvValues((0, backend_1.scrubSensitiveEnvVars)(process.env), this.env, requestEnv);
             const processEnv = (0, platformRegistry_1.isRuntimePlatformId)(request.runtime.provider)
                 ? await (0, providerProcessEnv_1.resolveProviderProcessEnv)(request.runtime.provider, binaryPath, baseProcessEnv)
                 : { env: baseProcessEnv };
@@ -523,15 +545,22 @@ class LlmExecutor {
             // redirect the CLI's state home when the platform declares a policy.
             // Strict skill isolation already runs against an isolated HOME, so the
             // scope's platform-home env vars stay authoritative there.
+            const resumeStateHome = request.resumeSessionId
+                ? await this.findResumeStateHome(request.runtime.provider, request.resumeSessionId)
+                : null;
             const executionHome = isolationScope
                 ? null
-                : await (0, providerExecutionHome_1.prepareProviderExecutionHome)({
-                    provider: request.runtime.provider,
-                    homesRoot: this.providerHomesRoot,
-                    baseEnv: processEnv.env,
-                    requestEnv: request.env,
-                    resumeSessionId: request.resumeSessionId,
-                });
+                : request.resumeSessionId && !resumeStateHome
+                    // Caller-owned resume: the thread lives in the CLI's real home, so
+                    // resuming must run against it (no redirection).
+                    ? null
+                    : await (0, providerExecutionHome_1.prepareProviderExecutionHome)({
+                        provider: request.runtime.provider,
+                        homesRoot: this.providerHomesRoot,
+                        baseEnv: processEnv.env,
+                        requestEnv: request.env,
+                        resumeStateHome: resumeStateHome ?? undefined,
+                    });
             if (executionHome) {
                 processEnv.env = { ...processEnv.env, ...executionHome.env };
                 for (const warning of executionHome.warnings) {

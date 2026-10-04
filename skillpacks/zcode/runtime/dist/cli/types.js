@@ -10,5 +10,6 @@ function createCliRuntimeContext(context = {}) {
         cwd: context.cwd ?? process.cwd(),
         readTextFile: context.readTextFile ?? ((filePath) => node_fs_1.promises.readFile(filePath, 'utf8')),
         dependencies: context.dependencies ?? {},
+        stdin: context.stdin ?? process.stdin,
     };
 }

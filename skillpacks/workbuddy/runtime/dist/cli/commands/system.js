@@ -76,5 +76,5 @@ async function runSystemCommand(args, context) {
             yes: (0, helpers_1.hasFlag)(args, '--yes'),
         });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`system ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`system ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

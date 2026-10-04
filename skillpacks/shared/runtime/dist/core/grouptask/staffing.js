@@ -235,6 +235,11 @@ function classifyOwnerStaffingReply(text) {
         return 'confirm';
     if (CONFIRM_PHRASE_PATTERNS.some((pattern) => pattern.test(value)))
         return 'confirm';
+    // An explicit auto-start waiver outranks the veto sweep: the broad reject
+    // patterns (/不需要…开群/, /no need to/i) would otherwise swallow the
+    // documented skip phrasings ("不用确认，直接开群", "no need to confirm").
+    if (detectSkipConfirmInWish(value))
+        return 'skip';
     if (!isInterrogativeStaffingText(value) && REJECT_PATTERNS.some((pattern) => pattern.test(value))) {
         return 'reject';
     }
@@ -267,7 +272,7 @@ function resolveStaffingOwnerGate(input) {
             lastIntent = 'owner_rejected';
         else if (kind === 'confirm')
             lastIntent = 'owner_confirmed';
-        else if (detectSkipConfirmInWish(reply))
+        else if (kind === 'skip')
             lastIntent = 'skip_authorized';
     }
     if (lastIntent === 'owner_revise')

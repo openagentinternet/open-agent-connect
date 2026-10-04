@@ -66,5 +66,5 @@ async function runMediaCommand(args, context) {
             return (0, commandResult_1.commandFailed)('media_describe_failed', (0, llmRelayService_1.formatMediaRelayError)(kind, message));
         }
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`media ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`media ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

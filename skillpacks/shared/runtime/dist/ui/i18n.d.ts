@@ -1086,6 +1086,8 @@ export declare const DICTIONARIES: {
         readonly 'kb.learnNow': "Learn now";
         readonly 'kb.learning': "Learning...";
         readonly 'kb.learned': "Learned: {added} added · {updated} updated · {removed} removed";
+        readonly 'kb.learnFailedFiles': "{count} file(s) failed to extract and are not indexed:";
+        readonly 'kb.learnFailedMore': "…and {count} more failed file(s)";
         readonly 'kb.learnFailed': "Learn failed.";
         readonly 'kb.queryTitle': "Query tester";
         readonly 'kb.queryHint': "Search every knowledge base, or pin the query to one.";
@@ -1120,6 +1122,9 @@ export declare const DICTIONARIES: {
         readonly 'kb.jobProgress': "{processed} pins · {runs} runs";
         readonly 'kb.jobNeverRun': "Not yet";
         readonly 'kb.jobRetry': "Retry";
+        readonly 'kb.jobRunNow': "Run now";
+        readonly 'kb.studyRunStarted': "Study job started — it runs in the background; the status column shows the outcome.";
+        readonly 'kb.studyRunFailed': "Failed to start the study job.";
         readonly 'kb.studyRetried': "Retried {count} failed job(s).";
         readonly 'kb.studyRetryFailed': "Failed to retry the study job.";
         readonly 'memory.title': "Memory — Open Agent Connect";
@@ -2595,6 +2600,8 @@ export declare const DICTIONARIES: {
         readonly 'kb.learnNow': "立即学习";
         readonly 'kb.learning': "正在学习...";
         readonly 'kb.learned': "学习完成：新增 {added} · 更新 {updated} · 移除 {removed}";
+        readonly 'kb.learnFailedFiles': "{count} 个文件提取失败，未被收入索引：";
+        readonly 'kb.learnFailedMore': "…还有 {count} 个失败文件";
         readonly 'kb.learnFailed': "学习失败。";
         readonly 'kb.queryTitle': "检索测试";
         readonly 'kb.queryHint': "检索所有知识库，或固定检索某一个。";
@@ -2629,6 +2636,9 @@ export declare const DICTIONARIES: {
         readonly 'kb.jobProgress': "{processed} 个 pin · {runs} 次运行";
         readonly 'kb.jobNeverRun': "尚未运行";
         readonly 'kb.jobRetry': "重试";
+        readonly 'kb.jobRunNow': "立即运行";
+        readonly 'kb.studyRunStarted': "学习任务已启动——它在后台运行，结果见状态列。";
+        readonly 'kb.studyRunFailed': "启动学习任务失败。";
         readonly 'kb.studyRetried': "已重试 {count} 个失败任务。";
         readonly 'kb.studyRetryFailed': "学习任务重试失败。";
         readonly 'memory.title': "记忆 — Open Agent Connect";

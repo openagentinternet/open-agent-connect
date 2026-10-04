@@ -5,7 +5,7 @@ const commandResult_1 = require("../../core/contracts/commandResult");
 const helpers_1 = require("./helpers");
 async function runChainCommand(args, context) {
     if (args[0] !== 'write') {
-        return (0, helpers_1.commandUnknownSubcommand)(`chain ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`chain ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
     if (!requestFile) {

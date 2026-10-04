@@ -86,11 +86,24 @@ async function buildCliRuntimeDoctorCheck(systemHomeDir, env, cwd, currentEntryP
     if (!canonicalTargetPath || !normalizedCurrentEntryPath) {
         return null;
     }
+    const ok = node_path_1.default.resolve(normalizedCurrentEntryPath) === node_path_1.default.resolve(canonicalTargetPath);
     return {
         code: 'cli_runtime_matches_canonical_shim',
-        ok: node_path_1.default.resolve(normalizedCurrentEntryPath) === node_path_1.default.resolve(canonicalTargetPath),
+        ok,
         canonicalShimPath,
         canonicalTargetPath,
         currentEntryPath: normalizedCurrentEntryPath,
+        // A mismatch means multiple OAC installs (e.g. a global npm/homebrew
+        // package plus a checkout) — the classic root cause of "my change did
+        // nothing". Hand back copy-pasteable repair steps instead of a bare
+        // ok:false.
+        ...(ok ? {} : {
+            remediation: [
+                `Run \`oac install\` from the OAC install you want canonical — it rewrites ${canonicalShimPath} to that install's dist.`,
+                `Make ${node_path_1.default.join(canonicalBinDir, '')} the first PATH entry (or invoke ${canonicalShimPath} directly) so the shim is what actually runs.`,
+                'Remove redundant installs you do not want (e.g. `npm uninstall -g open-agent-connect` or the equivalent homebrew formula).',
+                'Run `metabot daemon restart` so the tracked daemon runs from the canonical entry too.',
+            ],
+        }),
     };
 }

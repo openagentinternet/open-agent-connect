@@ -125,6 +125,34 @@ Open the Bot management page and keep the returned `localUiUrl`:
 $HOME/.metabot/bin/metabot ui open --page bot
 ```
 
+## Importing an Existing Owner Identity
+
+`user import` restores the local owner identity from a BIP39 mnemonic. The
+mnemonic is a master secret: never pass it as a CLI argv value when a safer
+channel exists, because argv values land in shell history and process
+listings. Use one of the recommended channels instead.
+
+For a human at a terminal, read the words from stdin (run the command, paste
+the words, press Ctrl-D):
+
+```bash
+$HOME/.metabot/bin/metabot user import --name "Alice" --mnemonic-stdin
+```
+
+For agents and scripts, write a one-off request file, import from it, and
+delete the file afterwards:
+
+```bash
+cat > owner-import.json <<'JSON'
+{"name":"Alice","mnemonic":"<12 or 24 words>"}
+JSON
+$HOME/.metabot/bin/metabot user import --request-file owner-import.json
+rm owner-import.json
+```
+
+`--mnemonic "<words>"` still works for compatibility but is discouraged for
+exactly this reason.
+
 ## First Bot Creation Handoff
 
 When creating the first local Bot after a fresh install, treat the user chosen
@@ -253,6 +281,13 @@ $HOME/.metabot/bin/metabot chain write --from <bot-slug> --request-file avatar-r
 ## Guardrails
 
 - Local Bot names are unique per machine.
+- Never pass an owner mnemonic through argv (`--mnemonic`); it lands in shell
+  history and process listings. Use `--mnemonic-stdin` or `--request-file`,
+  and delete the request file after a successful import.
+- `user delete` removes the owner identity and its locally stored mnemonic,
+  which cannot be recovered. It requires `--confirm` (or `confirm: true` on
+  the plugin route); only run it when the human explicitly asked, and back
+  the mnemonic up with `user reveal` first.
 - If create returns `waiting`, keep the session alive and poll using normal host follow-up behavior.
 - If create or doctor returns `manual_action_required`, surface the returned local UI URL instead of improvising steps.
 - If create returns `identity_name_taken`, do not force-create in another home; run `identity list` and use the existing profile by name via `--from`.

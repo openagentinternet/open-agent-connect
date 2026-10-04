@@ -90,6 +90,8 @@ export interface MetabotDaemonPaths {
     recoveryRoot: string;
     installationPath: string;
     daemonStatePath: string;
+    /** Append-only lifecycle journal (start/stop/crash/respawn) next to daemon.json. */
+    daemonEventsPath: string;
     daemonLockPath: string;
     daemonLogPath: string;
     migrationStatePath: string;

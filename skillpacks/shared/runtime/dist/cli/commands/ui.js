@@ -26,7 +26,7 @@ const SUPPORTED_UI_PAGES = new Set([
 ]);
 async function runUiCommand(args, context) {
     if (args[0] !== 'open') {
-        return (0, helpers_1.commandUnknownSubcommand)(`ui ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`ui ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     const page = (0, helpers_1.readFlagValue)(args, '--page')?.trim();
     if (!page) {

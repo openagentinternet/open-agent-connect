@@ -127,5 +127,5 @@ async function runChatCommand(args, context) {
         }
         return (0, helpers_1.commandUnknownSubcommand)(`chat auto-reply ${normalizeText(subAction)}`);
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`chat ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`chat ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

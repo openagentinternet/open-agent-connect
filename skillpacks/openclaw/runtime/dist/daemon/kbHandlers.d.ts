@@ -7,9 +7,28 @@
  * core/knowledgebase/studyJobs (the daemon nightly tick drains the queue).
  */
 import { commandFailed } from '../core/contracts/commandResult';
-import { type StudyJobRecord, type StudyJobStore } from '../core/knowledgebase/studyJobs';
+import { type StudyJobKind, type StudyJobRecord, type StudyJobStore } from '../core/knowledgebase/studyJobs';
 import type { DreamBotRef } from './dreamHandlers';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
+/**
+ * The unattended study turn executor, injected by the daemon runtime (same
+ * lazy-bridge pattern as the host LLM executor bridge): the scheduler block
+ * in runtime.ts builds the unified passive-LLM chain + tool wiring and
+ * registers it here, so `POST /api/kb/study/run` can drain a job NOW while
+ * the nightly tick keeps using the same closure and the same per-profile
+ * store instances (one write queue per profile across both surfaces).
+ */
+export interface ActiveStudyTurnRunner {
+    runStudyTurn(input: {
+        slug: string;
+        kind?: StudyJobKind;
+        prompt: string;
+        budgetPins: number;
+    }): Promise<string>;
+    /** Shared per-profile store factory (the nightly tick drains through the same instances). */
+    storeFor(homeDir: string): StudyJobStore;
+}
+export declare function setActiveStudyTurnRunner(runner: ActiveStudyTurnRunner): void;
 /**
  * Shared failed-study-job retry selection + requeue (DSH metaweb_study_retry
  * semantics): an explicit jobId must exist for this bot; otherwise every

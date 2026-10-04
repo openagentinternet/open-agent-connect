@@ -2504,7 +2504,6 @@ function createGroupTaskEngine(options) {
         const tickStartedAt = now();
         try {
             const profiles = await ctx.listProfiles();
-            log(`[GroupTaskEngine] Tick over ${profiles.length} profiles started`);
             const profileBySlug = new Map(profiles.map((entry) => [entry.slug, entry]));
             let ownerGmid = null;
             try {
@@ -2513,6 +2512,9 @@ function createGroupTaskEngine(options) {
             catch {
                 ownerGmid = null;
             }
+            // A liveness line every 5s floods the daemon's startup log; the tick is
+            // only worth a line when it actually drove a task.
+            let drivenTasks = 0;
             for (const profile of profiles) {
                 let store;
                 let tasks;
@@ -2525,6 +2527,7 @@ function createGroupTaskEngine(options) {
                 }
                 const runnable = tasks.filter((task) => task.chairSlug === profile.slug && RUNNABLE_STATUSES.has(task.status));
                 for (const task of runnable) {
+                    drivenTasks += 1;
                     try {
                         await clearStaleChairOutage(store, task, now());
                         await driveTask(profile, store, task, profileBySlug, ownerGmid);
@@ -2541,6 +2544,9 @@ function createGroupTaskEngine(options) {
                     log(`[OpenTeam] Profile ${profile.slug} processing failed: `
                         + `${error instanceof Error ? error.message : String(error)}`);
                 }
+            }
+            if (drivenTasks > 0) {
+                log(`[GroupTaskEngine] Tick over ${profiles.length} profiles drove ${drivenTasks} task${drivenTasks === 1 ? '' : 's'}`);
             }
         }
         finally {

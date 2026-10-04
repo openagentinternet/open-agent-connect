@@ -35,6 +35,15 @@ export declare class LlmExecutor {
         metaBotSlug?: string;
     }): Promise<LlmSessionRecord[]>;
     streamEvents(sessionId: string): AsyncIterable<LlmExecutionEvent>;
+    /**
+     * Resolve the state home a resume target originally ran in. Sessions this
+     * executor created ran in the isolated provider home (recorded as
+     * providerStateHome); resuming one of them against the real home would both
+     * miss the thread and leak the turn into the user's platform history.
+     * Returns null for caller-owned sessions (no matching record) — those live
+     * in the CLI's real home and must keep running against it.
+     */
+    private findResumeStateHome;
     private runSession;
     private failSession;
     private pushEvent;

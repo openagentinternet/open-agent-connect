@@ -12,10 +12,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.KnowledgeBaseStoreError = void 0;
+exports.localDateIso = localDateIso;
 exports.createKnowledgeBaseStore = createKnowledgeBaseStore;
 exports.knowledgeBaseIndexPath = knowledgeBaseIndexPath;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+/** Local-timezone YYYY-MM-DD — the auto-learn "already done today" stamp. */
+function localDateIso(now) {
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
 class KnowledgeBaseStoreError extends Error {
     code;
     constructor(code, message) {
@@ -194,7 +199,7 @@ function createKnowledgeBaseStore(paths) {
         }),
         listDueForAutoLearn: async (now) => {
             const state = await readRegistry();
-            const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            const today = localDateIso(now);
             const hour = now.getHours();
             return state.bases
                 .map(normalizeRecord)

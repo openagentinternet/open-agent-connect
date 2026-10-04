@@ -217,7 +217,7 @@ async function runServicesCommand(args, context) {
                 ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
             });
         }
-        return (0, helpers_1.commandUnknownSubcommand)(`services owned ${ownedArgs.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`services owned ${(0, helpers_1.redactSensitiveArgs)(ownedArgs).join(' ')}`.trim());
     }
     if (subcommand === 'refunds') {
         const refundsSubcommand = args[1];
@@ -272,7 +272,7 @@ async function runServicesCommand(args, context) {
                 all,
             });
         }
-        return (0, helpers_1.commandUnknownSubcommand)(`services refunds ${refundsArgs.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`services refunds ${(0, helpers_1.redactSensitiveArgs)(refundsArgs).join(' ')}`.trim());
     }
     if (subcommand === 'orders') {
         const ordersSubcommand = args[1];
@@ -292,7 +292,7 @@ async function runServicesCommand(args, context) {
                 ...selector.selector,
             });
         }
-        return (0, helpers_1.commandUnknownSubcommand)(`services orders ${ordersArgs.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`services orders ${(0, helpers_1.redactSensitiveArgs)(ordersArgs).join(' ')}`.trim());
     }
     if (subcommand === 'call') {
         const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
@@ -375,5 +375,5 @@ async function runServicesCommand(args, context) {
         const request = await (0, helpers_1.readJsonFile)(context, requestFile);
         return handler(applyOptionalActor(chainFlag.chain ? { ...request, network: chainFlag.chain } : request, from));
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`services ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`services ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

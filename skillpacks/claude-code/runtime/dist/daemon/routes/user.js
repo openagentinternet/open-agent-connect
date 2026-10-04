@@ -14,6 +14,7 @@ const POST_VERBS = {
     '/api/user/create': 'create',
     '/api/user/import': 'import',
     '/api/user/rename': 'rename',
+    '/api/user/update': 'update',
     '/api/user/reveal': 'reveal',
     '/api/user/delete': 'delete',
 };
@@ -24,6 +25,9 @@ function validateInput(verb, input) {
     }
     if (verb === 'rename' && !trimmed('name')) {
         return { code: 'missing_name', message: 'name is required.' };
+    }
+    if (verb === 'update' && !trimmed('name') && typeof input.avatarDataUrl !== 'string') {
+        return { code: 'missing_update', message: 'name or avatarDataUrl is required.' };
     }
     return undefined;
 }

@@ -115,6 +115,8 @@ export interface GroupTaskStore {
     updateDeliverableUri(deliverableId: number, uri: string, kind?: string): Promise<GroupTaskDeliverable | null>;
     deleteDeliverable(deliverableId: number): Promise<boolean>;
     updateDeliverableVerification(deliverableId: number, verification: string | null, confirmation: 'unconfirmed' | 'confirmed', status?: GroupTaskDeliverableStatus): Promise<void>;
+    /** Single-row status write (e.g. owner close accepting a non-chain row). */
+    updateDeliverableStatus(deliverableId: number, status: GroupTaskDeliverableStatus): Promise<GroupTaskDeliverable | null>;
     updateDeliverablesStatusByTask(taskId: number, fromStatus: GroupTaskDeliverableStatus, toStatus: GroupTaskDeliverableStatus): Promise<number>;
     addTransition(input: {
         taskId: number;

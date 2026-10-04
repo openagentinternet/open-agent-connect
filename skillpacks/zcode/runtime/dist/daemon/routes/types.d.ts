@@ -146,6 +146,9 @@ export interface MetabotDaemonHttpHandlers {
         create?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         import?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         rename?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Name/avatar profile save that publishes the changed fields on-chain
+         *  (chain-first: the local record updates only after the pins land). */
+        update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         reveal?: () => Awaitable<MetabotCommandResult<unknown>>;
         delete?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -553,6 +556,11 @@ export interface MetabotDaemonHttpHandlers {
             budgetPins?: number;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         studyRetry?: (input: {
+            from?: string;
+            jobId?: string;
+            topic?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        studyRun?: (input: {
             from?: string;
             jobId?: string;
             topic?: string;

@@ -11,6 +11,7 @@ import { type GroupTaskRelayStore } from './relayStore';
 import { type OpenTeamStore } from './openteamStore';
 import { type StaffingStore } from './staffingStore';
 import { type GroupTaskTransportOptions } from './transport';
+import { type PinVerifier } from './deliverableVerification';
 import { type CreateGroupTaskInput, type GroupTaskDetail, type GroupTaskListTab, type GroupTaskMember, type GroupTaskMemberStatus, type GroupTaskMemberSummary, type GroupTaskMemberWorkStatus, type GroupTaskMessagesView, type GroupTaskRecord, type GroupTaskRelayKind, type GroupTaskRelayRow, type GroupTaskStatusEventActor, type GroupTaskSummary, type GroupTaskSuperviseAction } from './types';
 export interface GroupTaskProfileRef {
     slug: string;
@@ -68,6 +69,13 @@ export interface GroupTaskServiceContext {
     }): Promise<{
         pinId: string | null;
     }>;
+    /**
+     * Pin-existence verifier used for one final deliverable verification pass
+     * when a task closes as done (the engine's 10-minute re-verification loop
+     * stops at close, so without this pass recently-confirmed pins would stay
+     * pending forever). Absent = skip the final pass (tests/legacy callers).
+     */
+    verifyPin?: PinVerifier;
     transport?: GroupTaskTransportOptions;
     log?(message: string): void;
 }

@@ -425,17 +425,23 @@ export function buildKbPageDefinition(i18n: LocalUiI18nContext = createI18nConte
       const retry = job.status === 'failed'
         ? '<button class="btn btn-sm" type="button" data-kb-job-retry="' + escapeHtml(job.id) + '">' + escapeHtml(uiText('kb.jobRetry', 'Retry')) + '</button>'
         : '';
+      const runNow = job.status !== 'running'
+        ? '<button class="btn btn-sm" type="button" data-kb-job-run="' + escapeHtml(job.id) + '">' + escapeHtml(uiText('kb.jobRunNow', 'Run now')) + '</button>'
+        : '';
       return '<tr>'
         + '<td>' + escapeHtml(job.topic || '') + note + '</td>'
         + '<td>' + jobStatusPill(job.status) + '</td>'
         + '<td class="mono">' + escapeHtml(progress) + '</td>'
         + '<td class="mono" title="' + escapeHtml(formatDateTime(lastRunMs)) + '">' + escapeHtml(lastRunLabel) + '</td>'
-        + '<td>' + retry + '</td>'
+        + '<td>' + retry + runNow + '</td>'
         + '</tr>';
     }).join('');
     elements.studyTable.innerHTML = '<table class="data-table">' + head + '<tbody>' + rows + '</tbody></table>';
     elements.studyTable.querySelectorAll('[data-kb-job-retry]').forEach((button) => {
       button.addEventListener('click', () => retryJob(button.getAttribute('data-kb-job-retry') || ''));
+    });
+    elements.studyTable.querySelectorAll('[data-kb-job-run]').forEach((button) => {
+      button.addEventListener('click', () => runJobNow(button.getAttribute('data-kb-job-run') || ''));
     });
   };
 
@@ -568,14 +574,28 @@ export function buildKbPageDefinition(i18n: LocalUiI18nContext = createI18nConte
     try {
       const data = await postJson('/api/kb/learn', { id: kb.id });
       const summary = data.knowledgeBase && data.knowledgeBase.learnSummary;
-      if (summary) {
-        setMessage(state.detailMessage, 'success', uiText('kb.learned', 'Learned: {added} added · {updated} updated · {removed} removed', {
-          added: Number(summary.added) || 0,
-          updated: Number(summary.updated) || 0,
-          removed: Number(summary.removed) || 0,
-        }));
+      const base = { added: 0, updated: 0, removed: 0, ...(summary || {}) };
+      const learnedText = uiText('kb.learned', 'Learned: {added} added · {updated} updated · {removed} removed', {
+        added: Number(base.added) || 0,
+        updated: Number(base.updated) || 0,
+        removed: Number(base.removed) || 0,
+      });
+      const failedTotal = Number(summary && summary.failedTotal) || 0;
+      if (failedTotal > 0) {
+        // Extraction failures are an error condition (IDBots parity): name the
+        // failing files so an unreadable corpus never learns in silence.
+        const failed = Array.isArray(summary.failed) ? summary.failed : [];
+        const lines = failed.map((row) => \`\${row.file}: \${row.reason}\`);
+        setMessage(state.detailMessage, 'error', [
+          learnedText,
+          uiText('kb.learnFailedFiles', '{count} file(s) failed to extract and are not indexed:', { count: failedTotal }),
+          ...lines,
+          ...(failedTotal > lines.length
+            ? [uiText('kb.learnFailedMore', '…and {count} more failed file(s)', { count: failedTotal - lines.length })]
+            : []),
+        ].join('\\n'));
       } else {
-        setMessage(state.detailMessage, 'success', uiText('kb.learned', 'Learned: {added} added · {updated} updated · {removed} removed', { added: 0, updated: 0, removed: 0 }));
+        setMessage(state.detailMessage, 'success', learnedText);
       }
       await load();
     } catch (error) {
@@ -678,6 +698,27 @@ export function buildKbPageDefinition(i18n: LocalUiI18nContext = createI18nConte
       state.studyJobs = Array.isArray(studyData.jobs) ? studyData.jobs : [];
     } catch (error) {
       setMessage(state.studyMessage, 'error', (error && error.message) || uiText('kb.studyRetryFailed', 'Failed to retry the study job.'));
+    } finally {
+      state.busyStudy = false;
+      render();
+    }
+  };
+
+  // Manual run of one study job NOW (window ignored) — the daylight-testing
+  // surface for the nightly drain. The daemon answers once the job is
+  // claimed; the run itself continues in the background, so refresh the
+  // table and point the operator at the status column.
+  const runJobNow = async (jobId) => {
+    if (state.busyStudy || !jobId) return;
+    state.busyStudy = true;
+    render();
+    try {
+      await postJson('/api/kb/study/run', { jobId });
+      setMessage(state.studyMessage, 'success', uiText('kb.studyRunStarted', 'Study job started — it runs in the background; the status column shows the outcome.'));
+      const studyData = await getJson('/api/kb/study/status');
+      state.studyJobs = Array.isArray(studyData.jobs) ? studyData.jobs : [];
+    } catch (error) {
+      setMessage(state.studyMessage, 'error', (error && error.message) || uiText('kb.studyRunFailed', 'Failed to start the study job.'));
     } finally {
       state.busyStudy = false;
       render();

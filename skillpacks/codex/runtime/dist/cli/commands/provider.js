@@ -52,5 +52,5 @@ async function runProviderCommand(args, context) {
         }
         return handler({ ...(from ? { from } : {}), ...selector.selector });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`provider ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`provider ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

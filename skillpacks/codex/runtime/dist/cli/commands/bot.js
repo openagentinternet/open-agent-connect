@@ -195,5 +195,5 @@ async function runBotCommand(args, context) {
             limit: readLimit(args, 50),
         });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`bot ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`bot ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

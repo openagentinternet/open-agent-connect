@@ -60,13 +60,15 @@ async function seedEntry(source, target, warnings) {
  *
  * Returns null (no redirection) when:
  * - the provider declares no `executionHome` policy;
- * - the request resumes a caller-owned session (that session lives in the
- *   CLI's real home, so resuming must run against it);
  * - the request already sets the policy's env var (explicit caller override).
+ *
+ * `resumeStateHome` pins the redirection to the home a previous managed
+ * session used (recorded on its session record as providerStateHome), so a
+ * resumed thread is found where it was written instead of leaking into the
+ * user's real platform session history — the exact pollution the redirection
+ * exists to prevent.
  */
 async function prepareProviderExecutionHome(input) {
-    if (input.resumeSessionId)
-        return null;
     if (!(0, platformRegistry_1.isRuntimePlatformId)(input.provider))
         return null;
     const policy = (0, platformRegistry_1.getRuntimePlatformDefinition)(input.provider).runtime.executionHome;
@@ -75,7 +77,7 @@ async function prepareProviderExecutionHome(input) {
     const callerValue = input.requestEnv?.[policy.envName];
     if (typeof callerValue === 'string' && callerValue.trim())
         return null;
-    const home = node_path_1.default.join(input.homesRoot, input.provider);
+    const home = input.resumeStateHome ?? node_path_1.default.join(input.homesRoot, input.provider);
     const baseEnv = input.baseEnv ?? process.env;
     const configuredHome = baseEnv[policy.envName]?.trim();
     const sourceHome = configuredHome

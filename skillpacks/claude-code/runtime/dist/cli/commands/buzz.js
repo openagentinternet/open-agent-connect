@@ -20,7 +20,7 @@ function resolveAttachmentPaths(baseDir, value) {
 }
 async function runBuzzCommand(args, context) {
     if (args[0] !== 'post') {
-        return (0, helpers_1.commandUnknownSubcommand)(`buzz ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`buzz ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
     if (!requestFile) {

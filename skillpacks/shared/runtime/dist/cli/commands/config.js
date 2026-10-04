@@ -56,5 +56,5 @@ async function runConfigCommand(args, context) {
                     : rawValue,
         });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`config ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`config ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

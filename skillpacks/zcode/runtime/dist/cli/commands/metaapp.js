@@ -432,5 +432,5 @@ async function runMetaAppCommand(args, context) {
             comment: comment.value,
         });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`metaapp ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`metaapp ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

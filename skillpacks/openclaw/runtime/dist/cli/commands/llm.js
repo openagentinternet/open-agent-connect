@@ -66,5 +66,5 @@ async function runLlmCommand(args, context) {
             ? llm.hostExecutorStatus()
             : (0, commandResult_1.commandFailed)('not_implemented', 'LLM host executor handler not configured.');
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`llm ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`llm ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

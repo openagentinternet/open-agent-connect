@@ -86,5 +86,5 @@ async function runMetaIdCommand(args, context) {
         }
         return handler({ identity });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`metaid ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`metaid ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

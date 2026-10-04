@@ -482,6 +482,15 @@ function createGroupTaskStore(paths) {
                 deliverable.status = status;
             await writeState(state);
         }),
+        updateDeliverableStatus: (deliverableId, status) => enqueue(async () => {
+            const state = await readState();
+            const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+            if (!deliverable)
+                return null;
+            deliverable.status = status;
+            await writeState(state);
+            return deliverable;
+        }),
         updateDeliverablesStatusByTask: (taskId, fromStatus, toStatus) => enqueue(async () => {
             const state = await readState();
             let changed = 0;

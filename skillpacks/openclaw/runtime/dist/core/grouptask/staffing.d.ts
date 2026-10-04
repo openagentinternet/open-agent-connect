@@ -59,7 +59,7 @@ export declare const STAFFING_PROPOSAL_TTL_MS: number;
 export declare function normalizeStaffingPlan(raw: unknown): GroupTaskStaffingPlan;
 export declare function validateStaffingPlan(plan: GroupTaskStaffingPlan): StaffingPlanValidation;
 export declare function detectSkipConfirmInWish(text: string): boolean;
-export declare function classifyOwnerStaffingReply(text: string): 'confirm' | 'revise' | 'reject' | 'unknown';
+export declare function classifyOwnerStaffingReply(text: string): 'confirm' | 'revise' | 'reject' | 'skip' | 'unknown';
 export declare function pickTriggeringWishText(messages: StaffingSessionMessage[], atOrBeforeMs: number): string;
 export declare function isStaffingProposalExpired(createdAt: number, nowMs: number): boolean;
 export declare function resolveStaffingOwnerGate(input: {

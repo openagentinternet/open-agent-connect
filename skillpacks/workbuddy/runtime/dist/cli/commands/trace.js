@@ -12,7 +12,7 @@ function readLimit(args, fallback) {
 }
 async function runTraceCommand(args, context) {
     if (args[0] !== 'get' && args[0] !== 'watch' && args[0] !== 'sessions') {
-        return (0, helpers_1.commandUnknownSubcommand)(`trace ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`trace ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     if (args[0] === 'sessions') {
         const handler = context.dependencies.trace?.listSessions;

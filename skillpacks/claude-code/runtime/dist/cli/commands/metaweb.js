@@ -98,5 +98,5 @@ function runMetawebCommand(args, context) {
             return Promise.resolve(commandNotImplemented('read'));
         return Promise.resolve(handler({ pinId }));
     }
-    return Promise.resolve(commandUnknownSubcommand(`metaweb ${args.join(' ')}`.trim()));
+    return Promise.resolve(commandUnknownSubcommand(`metaweb ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim()));
 }

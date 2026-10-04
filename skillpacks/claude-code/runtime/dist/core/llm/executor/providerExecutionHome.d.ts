@@ -18,14 +18,18 @@ export interface ProviderExecutionHomePreparation {
  *
  * Returns null (no redirection) when:
  * - the provider declares no `executionHome` policy;
- * - the request resumes a caller-owned session (that session lives in the
- *   CLI's real home, so resuming must run against it);
  * - the request already sets the policy's env var (explicit caller override).
+ *
+ * `resumeStateHome` pins the redirection to the home a previous managed
+ * session used (recorded on its session record as providerStateHome), so a
+ * resumed thread is found where it was written instead of leaking into the
+ * user's real platform session history — the exact pollution the redirection
+ * exists to prevent.
  */
 export declare function prepareProviderExecutionHome(input: {
     provider: string;
     homesRoot: string;
     baseEnv?: NodeJS.ProcessEnv;
     requestEnv?: Record<string, string>;
-    resumeSessionId?: string;
+    resumeStateHome?: string;
 }): Promise<ProviderExecutionHomePreparation | null>;

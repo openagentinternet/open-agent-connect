@@ -23,6 +23,15 @@ export interface AddDocumentInput {
     pinId?: string;
     tags?: string[];
 }
+/** What one importFiles batch did (IDBots importFiles parity). */
+export interface KbImportResult {
+    /** Files copied into the raw corpus (filename collisions get `-2`/`-3`… suffixes). */
+    imported: number;
+    /** Skipped files: unsupported extensions or copy failures. */
+    skipped: number;
+    /** Rel paths of the imported copies, in import order. */
+    files: string[];
+}
 export declare class KnowledgeBaseServiceError extends Error {
     readonly code: string;
     constructor(code: string, message: string);
@@ -44,7 +53,7 @@ export interface KnowledgeBaseService {
         /** False when the post-save incremental index refresh failed — the raw document is still saved. */
         indexed: boolean;
     }>;
-    importFiles(metabotSlug: string, knowledgeBaseId: string | undefined, filePaths: string[]): Promise<number>;
+    importFiles(metabotSlug: string, knowledgeBaseId: string | undefined, filePaths: string[]): Promise<KbImportResult>;
 }
 export declare function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseService;
 export { extractKbDocTitle };

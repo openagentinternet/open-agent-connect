@@ -138,5 +138,5 @@ async function runQandaCommand(args, context) {
     if (subcommand === undefined) {
         return (0, commandResult_1.commandFailed)('missing_subcommand', 'Usage: metabot qanda <question|answer|like|search|latest|detail|answers> …');
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`qanda ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`qanda ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

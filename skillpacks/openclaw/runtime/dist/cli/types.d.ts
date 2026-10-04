@@ -1,3 +1,4 @@
+import type { Readable } from 'node:stream';
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
 import type { ChainHistoryKind, RecordChainReadInput } from '../core/chainhistory/types';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
@@ -104,6 +105,7 @@ export interface CliDependencies {
     daemon?: {
         start?: () => Awaitable<MetabotCommandResult<unknown>>;
         stop?: () => Awaitable<MetabotCommandResult<unknown>>;
+        status?: () => Awaitable<MetabotCommandResult<unknown>>;
         restart?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
     doctor?: {
@@ -116,6 +118,10 @@ export interface CliDependencies {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         who?: () => Awaitable<MetabotCommandResult<unknown>>;
         list?: () => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    user?: {
+        /** Name/avatar profile save with on-chain publish (daemon-backed). */
+        update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     network?: {
         listServices?: (input: {
@@ -565,6 +571,12 @@ export interface CliDependencies {
             jobId?: string;
             topic?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Manual run of one study job NOW via the daemon (window ignored). */
+        studyRun?: (input: {
+            from?: string;
+            jobId?: string;
+            topic?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     schedule?: {
         create?: (input: {
@@ -819,6 +831,7 @@ export interface CliContext {
     cwd?: string;
     dependencies?: CliDependencies;
     readTextFile?: (filePath: string) => Promise<string>;
+    stdin?: Readable;
 }
 export interface CliRuntimeContext {
     stdout: Pick<NodeJS.WriteStream, 'write'>;
@@ -827,5 +840,7 @@ export interface CliRuntimeContext {
     cwd: string;
     readTextFile: (filePath: string) => Promise<string>;
     dependencies: CliDependencies;
+    /** Stdin source for commands that read secrets without argv (defaults to process.stdin). */
+    stdin: Readable;
 }
 export declare function createCliRuntimeContext(context?: CliContext): CliRuntimeContext;

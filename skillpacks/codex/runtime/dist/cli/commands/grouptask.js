@@ -178,7 +178,7 @@ async function runGroupTaskCommand(args, context) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Group task relay handler is not configured.');
         const sub = normalizeText(args[1]);
         if (sub !== 'drain') {
-            return (0, helpers_1.commandUnknownSubcommand)(`grouptask relay ${args.slice(1).join(' ')}`.trim());
+            return (0, helpers_1.commandUnknownSubcommand)(`grouptask relay ${(0, helpers_1.redactSensitiveArgs)(args.slice(1)).join(' ')}`.trim());
         }
         return handler({ chairSlug: normalizeText((0, helpers_1.readFlagValue)(args, '--chair')) || undefined });
     }
@@ -215,7 +215,7 @@ async function runGroupTaskCommand(args, context) {
                 dshSessionId: typeof payload.dshSessionId === 'string' ? payload.dshSessionId : undefined,
             });
         }
-        return (0, helpers_1.commandUnknownSubcommand)(`grouptask work ${args.slice(1).join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`grouptask work ${(0, helpers_1.redactSensitiveArgs)(args.slice(1)).join(' ')}`.trim());
     }
     if (action === 'close') {
         const handler = requireHandler(context, 'close');
@@ -478,7 +478,7 @@ async function runGroupTaskCommand(args, context) {
                 limit: typeof limit === 'number' ? limit : undefined,
             });
         }
-        return (0, helpers_1.commandUnknownSubcommand)(`grouptask staffing ${args.slice(1).join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`grouptask staffing ${(0, helpers_1.redactSensitiveArgs)(args.slice(1)).join(' ')}`.trim());
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`grouptask ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`grouptask ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

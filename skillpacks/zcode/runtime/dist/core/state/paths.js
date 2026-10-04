@@ -183,6 +183,7 @@ function resolveMetabotDaemonPaths(systemHomeDir) {
         recoveryRoot,
         installationPath: node_path_1.default.join(runtimeRoot, 'installation.json'),
         daemonStatePath: node_path_1.default.join(runtimeRoot, 'daemon.json'),
+        daemonEventsPath: node_path_1.default.join(runtimeRoot, 'daemon-events.jsonl'),
         daemonLockPath: node_path_1.default.join(locksRoot, 'daemon.lock'),
         daemonLogPath: node_path_1.default.join(logsRoot, 'daemon.log'),
         migrationStatePath: node_path_1.default.join(recoveryRoot, 'migration.json'),

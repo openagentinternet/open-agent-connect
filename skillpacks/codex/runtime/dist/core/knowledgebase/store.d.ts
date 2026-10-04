@@ -26,8 +26,17 @@ export interface KnowledgeBaseRecord {
         added: number;
         updated: number;
         removed: number;
+        /** Raw docs whose (re-)extraction failed this pass (first 20, IDBots parity). */
+        failed?: Array<{
+            file: string;
+            reason: string;
+        }>;
+        /** Total failed docs this pass — `failed` is a bounded sample of it. */
+        failedTotal?: number;
     };
 }
+/** Local-timezone YYYY-MM-DD — the auto-learn "already done today" stamp. */
+export declare function localDateIso(now: Date): string;
 export interface CreateKnowledgeBaseInput {
     metabotSlug: string;
     name: string;

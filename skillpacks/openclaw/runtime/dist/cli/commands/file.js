@@ -56,7 +56,7 @@ function collectUploadLargePositionalPaths(args) {
 async function runFileCommand(args, context) {
     const subcommand = args[0];
     if (subcommand !== 'upload' && subcommand !== 'upload-large') {
-        return (0, helpers_1.commandUnknownSubcommand)(`file ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`file ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     const commandArgs = args.slice(1);
     if (subcommand === 'upload') {

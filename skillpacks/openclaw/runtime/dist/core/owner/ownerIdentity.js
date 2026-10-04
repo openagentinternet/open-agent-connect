@@ -44,6 +44,7 @@ exports.createOwnerIdentity = createOwnerIdentity;
 exports.importOwnerIdentity = importOwnerIdentity;
 exports.ensureOwnerIdentity = ensureOwnerIdentity;
 exports.renameOwnerIdentity = renameOwnerIdentity;
+exports.updateOwnerIdentityProfile = updateOwnerIdentityProfile;
 exports.revealOwnerMnemonic = revealOwnerMnemonic;
 exports.deleteOwnerIdentity = deleteOwnerIdentity;
 // The local human "owner" identity: the person who talks to the Bots. This is
@@ -58,6 +59,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const bip39 = __importStar(require("@scure/bip39"));
 const english_1 = require("@scure/bip39/wordlists/english");
 const deriveIdentity_1 = require("../identity/deriveIdentity");
+const avatarChainWrite_1 = require("../identity/avatarChainWrite");
 const OWNER_FILE_MODE = 0o600;
 exports.DEFAULT_OWNER_NAME = 'User';
 class OwnerIdentityError extends Error {
@@ -82,6 +84,7 @@ function toOwnerIdentityPublic(record) {
         mvcAddress: record.mvcAddress,
         metaId: record.metaId,
         globalMetaId: record.globalMetaId,
+        ...(record.avatarDataUrl ? { avatarDataUrl: record.avatarDataUrl } : {}),
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
     };
@@ -111,6 +114,7 @@ function normalizeOwnerIdentityRecord(value) {
         mvcAddress,
         metaId: readString(value, 'metaId'),
         globalMetaId,
+        ...(readString(value, 'avatarDataUrl') ? { avatarDataUrl: readString(value, 'avatarDataUrl') } : {}),
         createdAt: readString(value, 'createdAt'),
         updatedAt: readString(value, 'updatedAt'),
     };
@@ -211,6 +215,47 @@ async function renameOwnerIdentity(systemHomeDir, name) {
         throw new OwnerIdentityError('invalid_name', 'Name must not be empty.');
     }
     const record = { ...current, name: nextName, updatedAt: new Date().toISOString() };
+    await writeOwnerIdentityFile(systemHomeDir, record);
+    return record;
+}
+/**
+ * Update the owner profile fields (name and/or avatar). An empty avatar data
+ * URL clears the stored avatar. Callers that publish on-chain write the chain
+ * FIRST and call this only after the publish succeeded (chain-first ordering,
+ * same as the Bot profile update handler).
+ */
+async function updateOwnerIdentityProfile(systemHomeDir, input) {
+    const current = await readOwnerIdentity(systemHomeDir);
+    if (!current) {
+        throw new OwnerIdentityError('owner_missing', 'No owner identity exists on this machine.');
+    }
+    let nextName = current.name;
+    if (input.name !== undefined) {
+        nextName = cleanName(input.name);
+        if (!nextName) {
+            throw new OwnerIdentityError('invalid_name', 'Name must not be empty.');
+        }
+    }
+    let avatarDataUrl = current.avatarDataUrl;
+    if (input.avatarDataUrl !== undefined) {
+        const nextAvatar = input.avatarDataUrl.trim();
+        const validation = (0, avatarChainWrite_1.validateAvatarDataUrl)(nextAvatar);
+        if (!validation.valid) {
+            throw new OwnerIdentityError('invalid_avatar', validation.error ?? 'Invalid avatar.');
+        }
+        avatarDataUrl = nextAvatar || undefined;
+    }
+    const record = {
+        ...current,
+        name: nextName,
+        updatedAt: new Date().toISOString(),
+    };
+    if (avatarDataUrl) {
+        record.avatarDataUrl = avatarDataUrl;
+    }
+    else {
+        delete record.avatarDataUrl;
+    }
     await writeOwnerIdentityFile(systemHomeDir, record);
     return record;
 }

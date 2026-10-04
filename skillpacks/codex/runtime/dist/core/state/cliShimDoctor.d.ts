@@ -4,6 +4,7 @@ export declare function buildCliShimDoctorCheck(systemHomeDir: string, env: Node
     canonicalShimPath: string | null;
 }>;
 export declare function buildCliRuntimeDoctorCheck(systemHomeDir: string, env: NodeJS.ProcessEnv, cwd: string, currentEntryPath?: string | null): Promise<{
+    remediation?: string[] | undefined;
     code: string;
     ok: boolean;
     canonicalShimPath: string;

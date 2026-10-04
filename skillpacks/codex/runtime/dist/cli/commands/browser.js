@@ -37,7 +37,7 @@ function parseBrowserOpenArgs(args) {
  */
 function parseBrowserTabOpenArgs(args) {
     if (args[0] !== 'open') {
-        return { error: (0, helpers_1.commandUnknownSubcommand)(`browser tab ${args.join(' ')}`.trim()) };
+        return { error: (0, helpers_1.commandUnknownSubcommand)(`browser tab ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim()) };
     }
     const parsed = parseBrowserOpenArgs(args);
     if (parsed.error) {
@@ -77,7 +77,7 @@ async function runBrowserCommand(args, context) {
         return handler({ uri: parsed.uri });
     }
     if (args[0] !== 'open') {
-        return (0, helpers_1.commandUnknownSubcommand)(`browser ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`browser ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     const parsed = parseBrowserOpenArgs(args);
     if (parsed.error) {

@@ -104,5 +104,5 @@ async function runSkillsCommand(args, context) {
         }
         return handler({ name, confirm: hasFlag(args, '--confirm') });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`skills ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`skills ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

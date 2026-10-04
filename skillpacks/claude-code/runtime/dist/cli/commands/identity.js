@@ -34,5 +34,5 @@ async function runIdentityCommand(args, context) {
         }
         return handler();
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`identity ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`identity ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

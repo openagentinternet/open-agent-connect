@@ -67,5 +67,5 @@ async function runWalletCommand(args, context) {
         const from = (0, helpers_1.readFromFlag)(args);
         return handler({ ...(from ? { from } : {}), toAddress, amountRaw, confirm });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`wallet ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`wallet ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

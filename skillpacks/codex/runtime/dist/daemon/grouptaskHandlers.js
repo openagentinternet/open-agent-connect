@@ -23,7 +23,7 @@ const store_1 = require("../core/grouptask/store");
 const privateChat_1 = require("../core/chat/privateChat");
 const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
 const ownerIdentity_1 = require("../core/owner/ownerIdentity");
-const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
+const ownerSigner_1 = require("../core/owner/ownerSigner");
 const runtimeStateStore_1 = require("../core/state/runtimeStateStore");
 const paths_1 = require("../core/state/paths");
 // ---------------------------------------------------------------------------
@@ -110,28 +110,6 @@ async function readProfileMetaId(homeDir) {
         return null;
     }
 }
-/**
- * Read-only SecretStore view over the owner identity record; the signer only
- * ever calls readIdentitySecrets. The owner home (~/.metabot/owner) is NOT a
- * profile home, so resolveMetabotPaths rejects it — the paths stub below
- * exists solely to satisfy the SecretStore interface.
- */
-function createOwnerSecretStore(systemHomeDir, owner) {
-    const paths = {
-        identitySecretsPath: (0, ownerIdentity_1.resolveOwnerIdfilePath)(systemHomeDir),
-    };
-    return {
-        paths,
-        ensureLayout: async () => paths,
-        readIdentitySecrets: async () => ({ mnemonic: owner.mnemonic, path: owner.path }),
-        writeIdentitySecrets: async () => {
-            throw new Error('Owner identity secrets are read-only in the group task context.');
-        },
-        deleteIdentitySecrets: async () => {
-            throw new Error('Owner identity secrets are read-only in the group task context.');
-        },
-    };
-}
 /** Build the production GroupTaskServiceContext (exported for engine reuse). */
 function createGroupTaskServiceContext(input) {
     let ownerSigner = null;
@@ -192,8 +170,9 @@ function createGroupTaskServiceContext(input) {
             const owner = await (0, ownerIdentity_1.readOwnerIdentity)(input.systemHomeDir);
             if (!owner)
                 return null;
-            ownerSigner ??= (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
-                secretStore: createOwnerSecretStore(input.systemHomeDir, owner),
+            ownerSigner ??= (0, ownerSigner_1.createOwnerSigner)({
+                systemHomeDir: input.systemHomeDir,
+                owner,
                 adapters: input.adapters,
                 ...(input.resolveSponsorWritePin ? { resolveSponsorWritePin: input.resolveSponsorWritePin } : {}),
             });
@@ -205,6 +184,7 @@ function createGroupTaskServiceContext(input) {
             };
         },
         ...(input.transport ? { transport: input.transport } : {}),
+        ...(input.verifyPin ? { verifyPin: input.verifyPin } : {}),
         ...(input.log ? { log: input.log } : {}),
     };
 }

@@ -102,7 +102,7 @@ async function runNetworkCommand(args, context) {
         return result;
     }
     if (args[0] !== 'sources') {
-        return (0, helpers_1.commandUnknownSubcommand)(`network ${args.join(' ')}`.trim());
+        return (0, helpers_1.commandUnknownSubcommand)(`network ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }
     const subcommand = args[1];
     if (subcommand === 'list') {
@@ -135,5 +135,5 @@ async function runNetworkCommand(args, context) {
         }
         return handler({ baseUrl });
     }
-    return (0, helpers_1.commandUnknownSubcommand)(`network ${args.join(' ')}`.trim());
+    return (0, helpers_1.commandUnknownSubcommand)(`network ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }
