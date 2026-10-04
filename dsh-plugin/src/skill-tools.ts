@@ -5,7 +5,8 @@
  * write ~/.metabot, and the CLI owns download, safe extraction, the install
  * registry, host re-binding, and the publish wallet path. Installs and
  * publishes ask DSH `ctx.approval` before the CLI's --confirm (same posture
- * as bot_browser_publish_app).
+ * as bot_browser_publish_app); when the session approval policy is 'never'
+ * they are refused unless OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE=1 opts in.
  */
 import { runMetabot } from './cli-bridge.js'
 import type { RunFn } from './cli-payload.js'
@@ -74,6 +75,17 @@ function approvalPolicyOf(gate: HostApproval, agent: HostAgentLike | undefined):
     }
   }
   return sessionApprovalPolicy(agent)
+}
+
+/**
+ * Explicit owner opt-in that re-enables skill installs/publishes in sessions
+ * whose approval policy is 'never' (unattended runs with no dialog surface).
+ * Without it those writes are refused outright: the approval dialog is the
+ * only gate, and 'never' means nobody is there to answer it.
+ */
+function unattendedSkillWriteAllowed(): boolean {
+  const value = process.env.OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE
+  return value === '1' || value === 'true'
 }
 
 export interface SkillToolDependencies {
@@ -155,6 +167,13 @@ export function buildSkillToolDefinitions(input: SkillToolDependencies): HostToo
             }
             const agent = exec.agent
             const policy = approvalPolicyOf(gate, agent)
+            if (policy === 'never' && !unattendedSkillWriteAllowed()) {
+              return [
+                'Install refused: the approval dialog is disabled in this session (approval policy "never"),',
+                'so the skill install cannot be confirmed. Run it in an attended session, or ask the owner',
+                'to set OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE=1 to explicitly allow unattended skill writes.',
+              ].join(' ')
+            }
             if (policy !== 'never') {
               const reason = [
                 `Install skill package on this machine.`,
@@ -200,6 +219,13 @@ export function buildSkillToolDefinitions(input: SkillToolDependencies): HostToo
             }
             const agent = exec.agent
             const policy = approvalPolicyOf(gate, agent)
+            if (policy === 'never' && !unattendedSkillWriteAllowed()) {
+              return [
+                'Publish refused: the approval dialog is disabled in this session (approval policy "never"),',
+                'so the on-chain publish cannot be confirmed. Run it in an attended session, or ask the owner',
+                'to set OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE=1 to explicitly allow unattended skill writes.',
+              ].join(' ')
+            }
             if (policy !== 'never') {
               const reason = [
                 `Publish skill package on-chain as this bot.`,

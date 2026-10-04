@@ -87,17 +87,40 @@ test('install_skill is refused without approval and cancelled on decline', async
   assert.equal(ran, 0)
 })
 
-test('install_skill skips the dialog when the session disabled approval prompts', async () => {
+test('install_skill is refused when the session disabled approval prompts without opt-in', async () => {
   const requests = []
   const host = fakeHostContext({
     approval: { request: async (req) => { requests.push(req); return 'allowed-once' } },
   })
-  const run = async (args) => successEnvelope({ formatted: 'ok', skill: { name: 'x' }, args })
+  let ran = 0
+  const run = async () => { ran += 1; return successEnvelope({ formatted: 'ok' }) }
   const tool = plugin.buildSkillToolDefinitions({ ctx: host.ctx, run }).find((d) => d.name === 'skill_tool')
   const agent = { session: { events: [{ type: 'approval/policy', data: { policy: 'never' } }] } }
   const result = await tool.execute({ action: 'install_skill', pinId: 'p' }, { agent })
   assert.equal(requests.length, 0, 'no dialog when prompts are disabled')
-  assert.match(result, /ok/)
+  assert.equal(ran, 0, 'no CLI call when prompts are disabled and no opt-in is set')
+  assert.match(result, /Install refused: the approval dialog is disabled/)
+  assert.match(result, /OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE=1/)
+})
+
+test('install_skill proceeds under never policy when the unattended opt-in is set', async () => {
+  const requests = []
+  const host = fakeHostContext({
+    approval: { request: async (req) => { requests.push(req); return 'allowed-once' } },
+  })
+  const calls = []
+  const run = async (args) => { calls.push(args); return successEnvelope({ formatted: 'ok', skill: { name: 'x' } }) }
+  const tool = plugin.buildSkillToolDefinitions({ ctx: host.ctx, run }).find((d) => d.name === 'skill_tool')
+  const agent = { session: { events: [{ type: 'approval/policy', data: { policy: 'never' } }] } }
+  process.env.OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE = '1'
+  try {
+    const result = await tool.execute({ action: 'install_skill', pinId: 'p' }, { agent })
+    assert.equal(requests.length, 0, 'opt-in replaces the dialog')
+    assert.deepEqual(calls[0], ['skills', 'install', '--pin', 'p', '--confirm'])
+    assert.match(result, /ok/)
+  } finally {
+    delete process.env.OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE
+  }
 })
 
 test('install_skill validates its arguments', async () => {
@@ -173,4 +196,40 @@ test('publish_skill is refused without approval, cancelled on decline, and valid
 
   const missing = await tool.execute({ action: 'publish_skill' }, {})
   assert.match(missing, /requires the local skill directory/)
+})
+
+test('publish_skill is refused when the session disabled approval prompts without opt-in', async () => {
+  const requests = []
+  const host = fakeHostContext({
+    approval: { request: async (req) => { requests.push(req); return 'allowed-once' } },
+  })
+  let ran = 0
+  const run = async () => { ran += 1; return successEnvelope({}) }
+  const tool = plugin.buildSkillToolDefinitions({ ctx: host.ctx, run }).find((d) => d.name === 'skill_tool')
+  const agent = { session: { events: [{ type: 'approval/policy', data: { policy: 'never' } }] } }
+  const result = await tool.execute({ action: 'publish_skill', dir: '/tmp/x' }, { agent })
+  assert.equal(requests.length, 0, 'no dialog when prompts are disabled')
+  assert.equal(ran, 0, 'no CLI call when prompts are disabled and no opt-in is set')
+  assert.match(result, /Publish refused: the approval dialog is disabled/)
+  assert.match(result, /OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE=1/)
+})
+
+test('publish_skill proceeds under never policy when the unattended opt-in is set', async () => {
+  const requests = []
+  const host = fakeHostContext({
+    approval: { request: async (req) => { requests.push(req); return 'allowed-once' } },
+  })
+  const calls = []
+  const run = async (args) => { calls.push(args); return successEnvelope({ formatted: 'Published.' }) }
+  const tool = plugin.buildSkillToolDefinitions({ ctx: host.ctx, run }).find((d) => d.name === 'skill_tool')
+  const agent = { session: { events: [{ type: 'approval/policy', data: { policy: 'never' } }] } }
+  process.env.OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE = 'true'
+  try {
+    const result = await tool.execute({ action: 'publish_skill', dir: '/tmp/x' }, { agent })
+    assert.equal(requests.length, 0, 'opt-in replaces the dialog')
+    assert.deepEqual(calls[0], ['skills', 'publish', '--dir', '/tmp/x', '--confirm'])
+    assert.match(result, /Published/)
+  } finally {
+    delete process.env.OAC_DSH_ALLOW_UNATTENDED_SKILL_WRITE
+  }
 })
