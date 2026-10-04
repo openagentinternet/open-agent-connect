@@ -39,12 +39,51 @@ export function filterBlockedArgs(args: string[] | undefined, blocked: Record<st
   return filtered;
 }
 
+/**
+ * Env var names that must never leak into spawned CLI processes. Names are
+ * upper-cased before matching because Windows env names are case-insensitive.
+ * Deliberately over-matches: a false positive only drops a variable the child
+ * process did not strictly need.
+ */
+const SENSITIVE_ENV_NAME_PATTERNS: readonly RegExp[] = [
+  // Suffix-style secret names: API_KEY, MY_TOKEN, DB_PASSWORD,
+  // SERVICE_PRIVATE_KEY, DEPLOY_PASSPHRASE, APP_CREDENTIALS, BOT_AUTH, ...
+  /(^|_)(API_?KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|PRIVATE_?KEY|CREDENTIALS|AUTH)$/,
+  // Provider/credential families whose non-suffix variables are also secret:
+  // AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, NPM_TOKEN, OPENAI_API_KEY, ...
+  /^(AWS|GITHUB|GITLAB|NPM|OPENAI|ANTHROPIC|GOOGLE|GCLOUD|AZURE|FIREBASE|HUGGINGFACE|OPENROUTER|DEEPSEEK|ZHIPU|DASHSCOPE|MOONSHOT)_/,
+];
+
+function isSensitiveEnvName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return SENSITIVE_ENV_NAME_PATTERNS.some((pattern) => pattern.test(upper));
+}
+
+/**
+ * Drop sensitive entries from a process-level env before it is spread into a
+ * spawned CLI process. Remote-driven turns run backends with bypassed
+ * permissions, so any variable that reaches the child env is readable by
+ * untrusted prompt content through the CLI's own tools. Explicitly configured
+ * env (executor config or request env) is the sanctioned credential channel
+ * and must not go through this scrub.
+ */
+export function scrubSensitiveEnvVars(env: Record<string, string | undefined>): Record<string, string> {
+  const scrubbed: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (typeof value !== 'string' || isSensitiveEnvName(name)) continue;
+    scrubbed[name] = value;
+  }
+  return scrubbed;
+}
+
 export function buildProcessEnv(
   baseEnv: Record<string, string> | undefined,
   requestEnv: Record<string, string> | undefined,
 ): NodeJS.ProcessEnv {
   return {
-    ...process.env,
+    // The daemon's own env may hold API keys and tokens; strip the sensitive
+    // families before spreading. baseEnv/requestEnv stay verbatim.
+    ...scrubSensitiveEnvVars(process.env),
     ...(baseEnv ?? {}),
     ...(requestEnv ?? {}),
   };

@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { LlmBackendFactory } from './backends/backend';
-import { stringifyError } from './backends/backend';
+import { scrubSensitiveEnvVars, stringifyError } from './backends/backend';
 import { createFileSessionManager, type SessionManager } from './session-manager';
 import { injectSkills } from './skill-injector';
 import type { LlmExecutionEvent, LlmExecutionRequest, LlmExecutionResult, LlmSessionRecord } from './types';
@@ -675,7 +675,10 @@ export class LlmExecutor {
       const isolationScope = isolation?.scope ?? null;
       const cwd = isolationScope?.cwd ?? request.cwd ?? process.cwd();
       const requestEnv = isolationScope?.env ?? request.env;
-      const baseProcessEnv = mergeStringEnvValues(process.env, this.env, requestEnv);
+      // Scrub the daemon's own env before spreading: the child runs with
+      // bypassed permissions and must not inherit API keys or tokens. this.env
+      // and requestEnv are explicit configuration channels and stay verbatim.
+      const baseProcessEnv = mergeStringEnvValues(scrubSensitiveEnvVars(process.env), this.env, requestEnv);
       const processEnv = isRuntimePlatformId(request.runtime.provider)
         ? await resolveProviderProcessEnv(request.runtime.provider, binaryPath, baseProcessEnv)
         : { env: baseProcessEnv };
