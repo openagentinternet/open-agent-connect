@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createECDH } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
@@ -20,6 +21,7 @@ const {
   upsertIdentityProfile,
 } = require('../../dist/core/identity/identityProfiles.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
+const { sendPrivateChat } = require('../../dist/core/chat/privateChat.js');
 
 const DEFAULT_HANDLERS_MODULE_PATH = require.resolve('../../dist/daemon/defaultHandlers.js');
 
@@ -38,6 +40,32 @@ const ORDER_TXID = 'a'.repeat(64);
 const PAYMENT_TXID = 'payment-tx-1';
 const ORDER_SESSION_ID = `a2a-order-${ORDER_TXID}`;
 const BASE_TIME = 1_777_000_000_000;
+const LOCAL_CHAT_KEYS = (() => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.setPrivateKey(Buffer.from('1'.repeat(64), 'hex'));
+  return { privateKeyHex: ecdh.getPrivateKey('hex'), publicKeyHex: ecdh.getPublicKey('hex', 'uncompressed') };
+})();
+const PEER_CHAT_KEYS = (() => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return { privateKeyHex: ecdh.getPrivateKey('hex'), publicKeyHex: ecdh.getPublicKey('hex', 'uncompressed') };
+})();
+
+// Chain history rows carry encrypted simplemsg payloads; plaintext fixtures
+// would be dropped as unauthenticated by the receive path.
+function encryptHistoryContent({ from, content }) {
+  const outgoing = from === 'local';
+  return sendPrivateChat({
+    fromIdentity: {
+      globalMetaId: outgoing ? LOCAL_GLOBAL_META_ID : PEER_GLOBAL_META_ID,
+      privateKeyHex: outgoing ? LOCAL_CHAT_KEYS.privateKeyHex : PEER_CHAT_KEYS.privateKeyHex,
+    },
+    toGlobalMetaId: outgoing ? PEER_GLOBAL_META_ID : LOCAL_GLOBAL_META_ID,
+    peerChatPublicKey: outgoing ? PEER_CHAT_KEYS.publicKeyHex : LOCAL_CHAT_KEYS.publicKeyHex,
+    content,
+  }).payload;
+}
+
 const LOCAL_AVATAR = '/content/f77ba5db20c19242f9a5e5025357d29ad83f897f3700d2b1972f6ce1485098d7i0';
 const PEER_AVATAR = '/content/607b2da84bbd01e01397bb6ea8cd09e4f9b0e87552dd0d0e24b828f18884dd30i0';
 const DELIVERY_IMAGE_ARTIFACT = {
@@ -109,7 +137,7 @@ function createMessage(index, overrides = {}) {
   };
 }
 
-function privateHistoryRow({ index, from, content, txid, timestamp = BASE_TIME + index }) {
+function privateHistoryRow({ index, from, content, txid, timestamp = BASE_TIME + index, encrypt = false }) {
   const outgoing = from === 'local';
   const fromInfo = outgoing
     ? { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Alice', avatar: LOCAL_AVATAR }
@@ -124,7 +152,7 @@ function privateHistoryRow({ index, from, content, txid, timestamp = BASE_TIME +
     chain: 'mvc',
     pinId: `${txid}i0`,
     txId: txid,
-    content,
+    content: encrypt ? encryptHistoryContent({ from, content }) : content,
     fromGlobalMetaId: fromInfo.globalMetaId,
     toGlobalMetaId: toInfo.globalMetaId,
     fromUserInfo: fromInfo,
@@ -576,34 +604,38 @@ test('default trace handlers enrich unified peer windows with full on-chain priv
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
-    fetchPeerChatPublicKey: async () => 'peer-chat-public-key',
+    fetchPeerChatPublicKey: async () => PEER_CHAT_KEYS.publicKeyHex,
     signer: {
       getPrivateChatIdentity: async () => ({
         globalMetaId: LOCAL_GLOBAL_META_ID,
-        privateKeyHex: '1'.repeat(64),
-        chatPublicKey: 'local-chat-public-key',
+        privateKeyHex: LOCAL_CHAT_KEYS.privateKeyHex,
+        chatPublicKey: LOCAL_CHAT_KEYS.publicKeyHex,
       }),
     },
     fetchPrivateChatHistory: async () => [
       privateHistoryRow({
+        encrypt: true,
         index: 1,
         from: 'peer',
         txid: chatTxid,
         content: 'Can you call my weather service?',
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 2,
         from: 'local',
         txid: ORDER_TXID,
         content: `[ORDER] Tell me tomorrow weather\n<raw_request>\nTell me tomorrow weather\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 3,
         from: 'peer',
         txid: statusTxid,
         content: `[ORDER_STATUS:${ORDER_TXID}] I received the order and started processing.`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 4,
         from: 'peer',
         txid: deliveryTxid,
@@ -630,12 +662,14 @@ test('default trace handlers enrich unified peer windows with full on-chain priv
         })}`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 5,
         from: 'peer',
         txid: needsRatingTxid,
         content: `[NeedsRating:${ORDER_TXID}] Please rate this service.`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 6,
         from: 'local',
         txid: orderEndTxid,
@@ -718,22 +752,24 @@ test('default trace handlers do not expose raw DELIVERY JSON when private histor
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
-    fetchPeerChatPublicKey: async () => 'peer-chat-public-key',
+    fetchPeerChatPublicKey: async () => PEER_CHAT_KEYS.publicKeyHex,
     signer: {
       getPrivateChatIdentity: async () => ({
         globalMetaId: LOCAL_GLOBAL_META_ID,
-        privateKeyHex: '1'.repeat(64),
-        chatPublicKey: 'local-chat-public-key',
+        privateKeyHex: LOCAL_CHAT_KEYS.privateKeyHex,
+        chatPublicKey: LOCAL_CHAT_KEYS.publicKeyHex,
       }),
     },
     fetchPrivateChatHistory: async () => [
       privateHistoryRow({
+        encrypt: true,
         index: 1,
         from: 'local',
         txid: ORDER_TXID,
         content: `[ORDER] Send an image\n<raw_request>\nSend an image\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 2,
         from: 'peer',
         txid: deliveryTxid,
@@ -1609,22 +1645,24 @@ test('legacy trace detail prefers scoped on-chain simplemsg history over local s
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
-    fetchPeerChatPublicKey: async () => 'peer-chat-public-key',
+    fetchPeerChatPublicKey: async () => PEER_CHAT_KEYS.publicKeyHex,
     signer: {
       getPrivateChatIdentity: async () => ({
         globalMetaId: LOCAL_GLOBAL_META_ID,
-        privateKeyHex: '1'.repeat(64),
-        chatPublicKey: 'local-chat-public-key',
+        privateKeyHex: LOCAL_CHAT_KEYS.privateKeyHex,
+        chatPublicKey: LOCAL_CHAT_KEYS.publicKeyHex,
       }),
     },
     fetchPrivateChatHistory: async () => [
       privateHistoryRow({
+        encrypt: true,
         index: 0,
         from: 'local',
         txid: unrelatedOrderTxid,
         content: `[ORDER] Earlier order for the same service\n<raw_request>\nEarlier order\n</raw_request>\ntxid: other-payment-tx\nservice id: service-pin-1\nskill name: Weather Oracle`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 0.5,
         from: 'peer',
         txid: unrelatedDeliveryTxid,
@@ -1635,18 +1673,21 @@ test('legacy trace detail prefers scoped on-chain simplemsg history over local s
         })}`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 1,
         from: 'local',
         txid: ORDER_TXID,
         content: `[ORDER] Tell me tomorrow weather\n<raw_request>\nTell me tomorrow weather\n</raw_request>\ntxid: ${PAYMENT_TXID}\nservice id: service-pin-1\nskill name: Weather Oracle`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 2,
         from: 'peer',
         txid: statusTxid,
         content: `[ORDER_STATUS:${ORDER_TXID}] I received the order and started processing.`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 3,
         from: 'peer',
         txid: deliveryTxid,
@@ -1659,12 +1700,14 @@ test('legacy trace detail prefers scoped on-chain simplemsg history over local s
         })}`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 4,
         from: 'peer',
         txid: needsRatingTxid,
         content: `[NeedsRating:${ORDER_TXID}] Please rate this service.`,
       }),
       privateHistoryRow({
+        encrypt: true,
         index: 5,
         from: 'peer',
         txid: orderEndTxid,

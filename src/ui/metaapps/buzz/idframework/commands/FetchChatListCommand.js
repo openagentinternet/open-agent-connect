@@ -297,27 +297,6 @@ export default class FetchChatListCommand {
     }
   }
 
-  _chatPubKeyFromSources(raw, peerGlobalMetaId, userStore) {
-    const localPeer = this._toText(peerGlobalMetaId);
-    const fromRawUser = raw && raw.userInfo && typeof raw.userInfo === 'object' ? raw.userInfo : {};
-    const fromRawCreate = raw && raw.createUserInfo && typeof raw.createUserInfo === 'object' ? raw.createUserInfo : {};
-    const users = userStore && userStore.users && typeof userStore.users === 'object' ? userStore.users : {};
-    const fromStore = localPeer ? (users[localPeer] || {}) : {};
-    const candidates = [
-      fromRawUser.chatPublicKey,
-      fromRawUser.chatPubkey,
-      fromRawCreate.chatPublicKey,
-      fromRawCreate.chatPubkey,
-      fromStore.chatPublicKey,
-      fromStore.chatPubkey,
-    ];
-    for (let i = 0; i < candidates.length; i += 1) {
-      const pub = this._toText(candidates[i]);
-      if (pub) return pub;
-    }
-    return '';
-  }
-
   async _resolveSharedSecret(peerGlobalMetaId, raw, userStore) {
     const peer = this._toText(peerGlobalMetaId);
     if (!peer) return '';
@@ -326,8 +305,12 @@ export default class FetchChatListCommand {
       return '';
     }
 
-    let pubkey = this._chatPubKeyFromSources(raw, peer, userStore);
-    if (!pubkey && window.IDFramework && typeof window.IDFramework.dispatch === 'function') {
+    // Sender authentication: only the chain-registered chat public key for
+    // the claimed peer identity may be used. Keys carried inside the message
+    // or the local user store are attacker-controlled and would let anyone
+    // forge this peer.
+    let pubkey = '';
+    if (window.IDFramework && typeof window.IDFramework.dispatch === 'function') {
       try {
         const info = await window.IDFramework.dispatch('fetchUserInfo', { globalMetaId: peer });
         pubkey = this._toText(info && (info.chatpubkey || info.chatPubkey || info.chatPublicKey));

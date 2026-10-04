@@ -2,12 +2,16 @@
  * Game Adapter sandbox (docs/08 section 4, docs/09 section 6.6).
  *
  * The adapter runs inside a worker thread with memory resource limits; inside
- * the worker the adapter executes in a `node:vm` context that exposes only the
- * JS standard library. There is no `require`, `process`, `fetch`, `WebSocket`,
- * filesystem, wallet, host bridge, or other-group access in scope, and dynamic
- * code generation (`eval` / `new Function`) is disabled so the vm context
- * cannot reach host primordials. Execution time, output size and JSON
- * serializability are enforced by the host on every call.
+ * the worker the adapter executes in a `node:vm` context built from a
+ * null-prototype template, so only the context's own intrinsics are reachable.
+ * No host-realm value ever enters the context: there is no `require`,
+ * `process`, `fetch`, `WebSocket`, filesystem, wallet, host bridge, or
+ * other-group access in scope, dynamic code generation (`eval` /
+ * `new Function`) is disabled, and call arguments cross the boundary as JSON
+ * text that is parsed inside the context — adapter code can never touch a
+ * host-realm object, so `Object.constructor` and friends resolve to the
+ * context's own (code-generation-disabled) intrinsics. Execution time, output
+ * size and JSON serializability are enforced by the host on every call.
  *
  * `adapterHash` is verified by the runtime before loading (see
  * `gamePackage.ts`); this module re-checks the hash of the code it receives so

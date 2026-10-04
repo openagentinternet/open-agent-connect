@@ -46,9 +46,12 @@ and leases; MetaApps only start/list/status/pause/resume/stop sessions.
 
 ## Security notes
 
-- The vm sandbox blocks dynamic code generation (`eval`/`new Function`) and
-  exposes no `require`/`process`/`fetch`; the worker adds memory limits and
-  the host enforces timeouts and output sizes. Unreviewed adapters must not be
-  granted write access (spectate only).
+- The vm sandbox builds its context from a null-prototype template so only
+  context-realm intrinsics are reachable; dynamic code generation
+  (`eval`/`new Function`) is disabled, no host-realm value ever enters the
+  context (call arguments cross as JSON text parsed inside it), and there is
+  no `require`/`process`/`fetch`. The worker adds memory limits and an empty
+  process environment, and the host enforces timeouts and output sizes.
+  Unreviewed adapters must not be granted write access (spectate only).
 - `adapterHash` is verified when the package loads and is frozen for the whole
   session; a package whose hash changed after session start is rejected.

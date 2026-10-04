@@ -102,7 +102,7 @@ test('senderGlobalMetaIdFromPrivateChatSocketMessage prefers the user info id ov
   assert.equal(senderGlobalMetaIdFromPrivateChatSocketMessage({}), '');
 });
 
-test('decryptPrivateChatSocketMessage round-trips ciphertext and rejects missing peer keys', () => {
+test('decryptPrivateChatSocketMessage authenticates via the trusted peer key only', () => {
   const localKeys = createIdentityPair();
   const peerKeys = createIdentityPair();
   const payload = buildEncryptedSocketPayload({
@@ -119,17 +119,36 @@ test('decryptPrivateChatSocketMessage round-trips ciphertext and rejects missing
     chatPublicKey: localKeys.publicKeyHex,
   };
 
+  // The message-carried chat public key is attacker-controlled and never
+  // trusted: without a trusted (chain-resolved) key, decryption is refused
+  // even though the payload carries a working inline key.
+  assert.equal(decryptPrivateChatSocketMessage(payload, identity, null), null);
+
+  // The trusted key decrypts regardless of which key the payload claims.
   assert.equal(
-    decryptPrivateChatSocketMessage(payload, identity, null),
+    decryptPrivateChatSocketMessage(payload, identity, peerKeys.publicKeyHex),
     'shared helper round trip',
   );
-
-  // Without an inline or override peer chat public key, decryption is skipped.
   const keylessPayload = { ...payload, fromUserInfo: { globalMetaId: PEER_GLOBAL_META_ID } };
-  assert.equal(decryptPrivateChatSocketMessage(keylessPayload, identity, null), null);
-  // The override key stands in when the payload omits the sender key.
   assert.equal(
     decryptPrivateChatSocketMessage(keylessPayload, identity, peerKeys.publicKeyHex),
     'shared helper round trip',
   );
+
+  // A forged payload (encrypted with the attacker's key but claiming the
+  // peer's identity) must not decrypt against the peer's registered key.
+  const attackerKeys = createIdentityPair();
+  const forged = buildEncryptedSocketPayload({
+    fromGlobalMetaId: PEER_GLOBAL_META_ID,
+    fromKeys: attackerKeys,
+    toGlobalMetaId: LOCAL_GLOBAL_META_ID,
+    toChatPublicKey: localKeys.publicKeyHex,
+    content: 'forged sender identity',
+    pinId: 'helper-pin-forged',
+  });
+  assert.equal(decryptPrivateChatSocketMessage(forged, identity, peerKeys.publicKeyHex), null);
+
+  // Unencrypted content performs no ECDH and carries no proof of identity.
+  const plaintextPayload = { ...payload, content: 'plaintext forgery' };
+  assert.equal(decryptPrivateChatSocketMessage(plaintextPayload, identity, peerKeys.publicKeyHex), null);
 });

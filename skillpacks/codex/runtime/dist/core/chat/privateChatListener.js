@@ -60,8 +60,12 @@ function normalizePrivateChatSocketMessage(data) {
     return null;
 }
 function decryptPrivateChatSocketMessage(message, identity, peerChatPublicKeyOverride) {
-    const peerChatPublicKey = normalizeText(message.fromUserInfo?.chatPublicKey)
-        || normalizeText(peerChatPublicKeyOverride);
+    // Sender authentication: the peer chat public key must come from a trusted
+    // source (the chain-registered key for the claimed sender globalMetaId) —
+    // never from the inbound message itself, whose fromUserInfo fields are
+    // attacker-controlled. Successful ECDH decryption against the registered
+    // key is what proves the sender actually holds that identity.
+    const peerChatPublicKey = normalizeText(peerChatPublicKeyOverride);
     if (!peerChatPublicKey) {
         return null;
     }
@@ -81,6 +85,11 @@ function decryptPrivateChatSocketMessage(message, identity, peerChatPublicKeyOve
                 replyPinId: normalizeText(message.replyPin),
             },
         });
+        // An unencrypted payload performs no ECDH and therefore carries no proof
+        // of sender identity; treat it as unauthenticated.
+        if (!normalizeText(received.sharedSecret)) {
+            return null;
+        }
         return normalizeText(received.plaintext) || null;
     }
     catch {

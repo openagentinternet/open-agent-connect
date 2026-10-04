@@ -208,3 +208,114 @@ export function initialState() {
     sandbox.dispose();
   }
 });
+
+test('adapter sandbox blocks host-primordial escape via constructor chains', async () => {
+  const probe = `
+export function initialState() {
+  const attempts = {};
+  const tryEscape = (fn) => {
+    try {
+      const value = fn();
+      return value && typeof value.pid === 'number' ? 'ESCAPED' : 'no-process';
+    } catch (_) {
+      return 'blocked';
+    }
+  };
+  attempts.hostObjectConstructor = tryEscape(() => Object.constructor('return process')());
+  attempts.globalThisConstructor = tryEscape(() => {
+    const ctor = globalThis.constructor;
+    return ctor ? ctor.constructor('return process')() : undefined;
+  });
+  attempts.protoOfGlobal = tryEscape(() =>
+    Object.getPrototypeOf(globalThis).constructor.constructor('return process')());
+  attempts.objectLiteralChain = tryEscape(() => ({}).constructor.constructor('return process')());
+  attempts.arrayMethodChain = tryEscape(() => [].filter.constructor('return process')());
+  attempts.asyncConstructor = tryEscape(() => (async function () {}).constructor('return process')());
+  attempts.generatorConstructor = tryEscape(() => (function* () {}).constructor('return process')());
+  attempts.errorStackCallSites = tryEscape(() => {
+    Error.prepareStackTrace = (error, frames) => frames;
+    const frames = new Error('probe').stack;
+    if (typeof frames === 'string') return undefined;
+    for (const frame of frames) {
+      const fnValue = frame.getFunction && frame.getFunction();
+      if (fnValue) return fnValue.constructor('return process')();
+    }
+    return undefined;
+  });
+  attempts.dynamicImportRejected = 'pending';
+  return Promise.resolve(import('node:fs')).then(
+    () => { attempts.dynamicImportRejected = 'ESCAPED'; return attempts; },
+    () => { attempts.dynamicImportRejected = 'blocked'; return attempts; },
+  );
+}
+`;
+  const sandbox = createAdapterSandbox({
+    adapterCode: probe,
+    adapterHash: hashOf(probe),
+  });
+  try {
+    const attempts = await sandbox.call('initialState', []);
+    for (const [name, outcome] of Object.entries(attempts)) {
+      assert.notEqual(outcome, 'ESCAPED', `${name} must not reach the host process`);
+    }
+  } finally {
+    sandbox.dispose();
+  }
+});
+
+test('adapter sandbox cannot escape through call arguments or mutate host state', async () => {
+  const probe = `
+export function initialState(arg) {
+  let argChain = 'blocked';
+  try {
+    const value = arg.constructor.constructor('return process')();
+    if (value && typeof value.pid === 'number') argChain = 'ESCAPED';
+  } catch (_) {}
+  arg.turn = 'MUTATED';
+  arg.deep.n = -1;
+  return { argChain, sawTurn: arg.turn === 'MUTATED' ? 'saw-own-copy' : 'unexpected' };
+}
+`;
+  const sandbox = createAdapterSandbox({
+    adapterCode: probe,
+    adapterHash: hashOf(probe),
+  });
+  const hostArg = { turn: 'red', deep: { n: 1 } };
+  try {
+    const result = await sandbox.call('initialState', [hostArg]);
+    assert.equal(result.argChain, 'blocked');
+    assert.equal(result.sawTurn, 'saw-own-copy');
+  } finally {
+    sandbox.dispose();
+  }
+  assert.deepEqual(hostArg, { turn: 'red', deep: { n: 1 } });
+});
+
+test('adapter sandbox keeps utf-8 TextEncoder/TextDecoder and structuredClone', async () => {
+  const probe = `
+export function initialState() {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const bytes = encoder.encode('héllo 世界');
+  const roundTrip = decoder.decode(bytes);
+  const ascii = decoder.decode(encoder.encode('plain ascii'));
+  const clone = structuredClone({ a: [1, 2, { b: 'x' }] });
+  return { roundTrip, ascii, cloneOk: clone.a[2].b === 'x', types: [typeof TextEncoder, typeof TextDecoder, typeof structuredClone].join(',') };
+}
+`;
+  const sandbox = createAdapterSandbox({
+    adapterCode: probe,
+    adapterHash: hashOf(probe),
+  });
+  try {
+    const result = await sandbox.call('initialState', []);
+    assert.deepEqual(result, {
+      roundTrip: 'héllo 世界',
+      ascii: 'plain ascii',
+      cloneOk: true,
+      types: 'function,function,function',
+    });
+  } finally {
+    sandbox.dispose();
+  }
+});
