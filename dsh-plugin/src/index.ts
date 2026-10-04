@@ -62,7 +62,7 @@ import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyScheduleScheduler } from './schedule-scheduler.js'
 import { HostLlmExecutor, type HostAgentTurnRunner } from './host-llm-executor.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
-import { markA2aReplyAgent, unmarkA2aReplyAgent } from './a2a-reply-guard.js'
+import { markRemoteContentAgent, unmarkRemoteContentAgent } from './remote-content-guard.js'
 import { bindGlobalKnowledgeToolInstall, installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { agentsRegistryOf, errorFromTurnEvents, installTwinOnAgent, liveOacAgents, textFromAssistantEvents } from './twin-tools.js'
@@ -526,7 +526,7 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
       // mark it so privacy-sensitive tools (browser state, local files, KB /
       // memory reads) refuse to run — their output would flow back to the
       // peer as the reply text.
-      markA2aReplyAgent(agent)
+      markRemoteContentAgent(agent)
       // The DSH session owns its system prompt, so the daemon-supplied `system`
       // text (bot identity/persona for this turn) is merged into the turn
       // message — dropping it would strip the bot of its persona.
@@ -560,7 +560,7 @@ export function createHostAgentTurnRunner(ctx: HostContext): HostAgentTurnRunner
       }
       return text
     } finally {
-      if (handle) unmarkA2aReplyAgent(handle.agent)
+      if (handle) unmarkRemoteContentAgent(handle.agent)
       tap?.dispose()
       void Promise.resolve(handle?.dispose()).catch(() => undefined)
     }

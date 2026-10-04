@@ -32,6 +32,7 @@ import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { isChipBotAvailable, presetIdForSlug, slugFromPresetId } from './chip-logic.js'
 import type { HostAgentLike, HostAgentsRegistryLike, HostContext, HostToolDefinition, HostUserMessage } from './context-types.js'
+import { withRemoteContentGuard } from './remote-content-guard.js'
 import { oacMessageSource } from './message-source.js'
 import { tappedOrSnapshot, tapSessionEvents } from './session-event-tap.js'
 
@@ -1098,7 +1099,7 @@ export function installTwinOnAgent(
     text: TWIN_OVERLAY_TEXT,
   })
   for (const definition of buildTwinToolDefinitions(orchestrator, twinSlug, options.run)) {
-    agent.ctx.tools?.register(definition)
+    agent.ctx.tools?.register(withRemoteContentGuard(definition))
   }
   return orchestrator
 }

@@ -11,7 +11,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { constants as fsConstants } from 'node:fs'
-import { withA2aReplyGuard } from './a2a-reply-guard.js'
+import { withRemoteContentGuard } from './remote-content-guard.js'
 import type { BrowserEventHub } from './browser-bridge.js'
 import {
   catalogFromMetaAppCandidates,
@@ -1228,7 +1228,7 @@ export function bindBrowserToolInstall(
     host: ctx,
   })) {
     try {
-      ctx.tools?.register(withA2aReplyGuard(definition))
+      ctx.tools?.register(withRemoteContentGuard(definition))
     } catch (error) {
       if (!isDuplicateToolError(error)) {
         ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
