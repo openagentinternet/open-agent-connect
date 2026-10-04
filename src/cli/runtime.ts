@@ -349,6 +349,8 @@ const DAEMON_START_TRIGGER_ENV = 'METABOT_DAEMON_START_TRIGGER';
 /** Pid of the crashed daemon this serve process replaces (respawn marker). */
 const DAEMON_REPLACED_PID_ENV = 'METABOT_DAEMON_REPLACED_PID';
 const DAEMON_LOG_MAX_BYTES = 5 * 1024 * 1024;
+/** How often the serving daemon re-enforces the startup-log cap (writer side). */
+const DAEMON_LOG_CAP_INTERVAL_MS = 60 * 60 * 1000;
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
@@ -1694,6 +1696,9 @@ async function startDetachedDaemon(
       await fs.promises.writeFile(daemonPaths.daemonLogPath, '', 'utf8');
     }
     const logHandle = await fs.promises.open(daemonPaths.daemonLogPath, 'a');
+    // The startup log can mention peer/task ids — owner-only, like the secret
+    // stores (also repairs pre-existing world-readable logs).
+    await fs.promises.chmod(daemonPaths.daemonLogPath, 0o600).catch(() => undefined);
     const childCause: DaemonChildStartCause = { spawnError: null, exitCode: null, signal: null };
     let child: ReturnType<typeof spawn>;
     try {
@@ -7013,6 +7018,30 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     void sweepProviderWorkspaces();
   }, PROVIDER_RUN_WORKSPACE_SWEEP_INTERVAL_MS);
   providerWorkspaceSweepInterval.unref?.();
+  // Enforce the startup-log cap from the writer side: the parent CLI only
+  // re-checks at the next start, so a long-running daemon would otherwise sit
+  // past the cap for its whole uptime. stderr is appended through an O_APPEND
+  // fd, so an external truncate-and-rewrite is safe mid-stream.
+  const capDaemonStartupLog = async () => {
+    const stat = await fs.promises.stat(daemonPaths.daemonLogPath).catch(() => null);
+    if (!stat || stat.size <= DAEMON_LOG_MAX_BYTES) return;
+    const handle = await fs.promises.open(daemonPaths.daemonLogPath, 'r').catch(() => null);
+    if (!handle) return;
+    try {
+      const keepBytes = Math.floor(DAEMON_LOG_MAX_BYTES / 2);
+      const buffer = Buffer.alloc(keepBytes);
+      const { bytesRead } = await handle.read(buffer, 0, keepBytes, stat.size - keepBytes);
+      await fs.promises.writeFile(daemonPaths.daemonLogPath, buffer.subarray(0, bytesRead));
+    } catch {
+      // Best-effort housekeeping; never disturb the serving daemon.
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  };
+  const daemonStartupLogCapInterval = setInterval(() => {
+    void capDaemonStartupLog();
+  }, DAEMON_LOG_CAP_INTERVAL_MS);
+  daemonStartupLogCapInterval.unref?.();
   const serviceRefundSyncLoop = createServiceRefundSyncLoop({
     syncRefunds: async () => {
       const result = await handlers.services?.syncRefunds?.({});

@@ -61,25 +61,28 @@ async function seedEntry(source: string, target: string, warnings: string[]): Pr
  *
  * Returns null (no redirection) when:
  * - the provider declares no `executionHome` policy;
- * - the request resumes a caller-owned session (that session lives in the
- *   CLI's real home, so resuming must run against it);
  * - the request already sets the policy's env var (explicit caller override).
+ *
+ * `resumeStateHome` pins the redirection to the home a previous managed
+ * session used (recorded on its session record as providerStateHome), so a
+ * resumed thread is found where it was written instead of leaking into the
+ * user's real platform session history — the exact pollution the redirection
+ * exists to prevent.
  */
 export async function prepareProviderExecutionHome(input: {
   provider: string;
   homesRoot: string;
   baseEnv?: NodeJS.ProcessEnv;
   requestEnv?: Record<string, string>;
-  resumeSessionId?: string;
+  resumeStateHome?: string;
 }): Promise<ProviderExecutionHomePreparation | null> {
-  if (input.resumeSessionId) return null;
   if (!isRuntimePlatformId(input.provider)) return null;
   const policy = getRuntimePlatformDefinition(input.provider).runtime.executionHome;
   if (!policy) return null;
   const callerValue = input.requestEnv?.[policy.envName];
   if (typeof callerValue === 'string' && callerValue.trim()) return null;
 
-  const home = path.join(input.homesRoot, input.provider);
+  const home = input.resumeStateHome ?? path.join(input.homesRoot, input.provider);
   const baseEnv = input.baseEnv ?? process.env;
   const configuredHome = baseEnv[policy.envName]?.trim();
   const sourceHome = configuredHome

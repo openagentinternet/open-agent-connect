@@ -57,6 +57,7 @@ import type { StaffingDecisionSource } from '../core/grouptask/staffingStore';
 import { createImpressionStore } from '../core/memory/impressionStore';
 import { createConfigStore } from '../core/config/configStore';
 import { GroupTaskStoreError } from '../core/grouptask/store';
+import type { PinVerifier } from '../core/grouptask/deliverableVerification';
 import type { GroupTaskTransportOptions } from '../core/grouptask/transport';
 import { sendPrivateChat } from '../core/chat/privateChat';
 import type { GroupTaskListTab, GroupTaskMemberStatus } from '../core/grouptask/types';
@@ -212,6 +213,8 @@ export interface CreateGroupTaskDaemonHandlersInput {
   resolveSponsorWritePin?: ResolveSponsorWritePin;
   /** Peer chat pubkey resolver; enables OpenTeam private-message envelopes. */
   resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
+  /** Deliverable pin verifier; enables the final verification pass at close. */
+  verifyPin?: PinVerifier;
   transport?: GroupTaskTransportOptions;
   log?: (message: string) => void;
 }
@@ -298,6 +301,7 @@ export function createGroupTaskServiceContext(
       };
     },
     ...(input.transport ? { transport: input.transport } : {}),
+    ...(input.verifyPin ? { verifyPin: input.verifyPin } : {}),
     ...(input.log ? { log: input.log } : {}),
   };
 }

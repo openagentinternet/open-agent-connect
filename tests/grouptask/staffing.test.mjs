@@ -61,6 +61,25 @@ test('classifyOwnerStaffingReply: high-confidence vetoes reject; questions never
   assert.equal(classifyOwnerStaffingReply('好的，不换人'), 'confirm');
 });
 
+test('documented skip phrasings are never swallowed by the veto sweep', () => {
+  // Regression: /不需要…开群/ and /no need to/i in REJECT_PATTERNS used to
+  // classify these as reject, permanently killing the slate.
+  assert.equal(classifyOwnerStaffingReply('不用确认，直接开群'), 'skip');
+  assert.equal(classifyOwnerStaffingReply('不用确认，直接开群任务'), 'skip');
+  assert.equal(classifyOwnerStaffingReply('no need to confirm'), 'skip');
+  assert.equal(classifyOwnerStaffingReply('no need to confirm, just start'), 'skip');
+  assert.deepEqual(
+    resolveStaffingOwnerGate({
+      triggeringWish: '帮我开个群任务做技能介绍',
+      repliesAfterPropose: ['不用确认，直接开群'],
+    }),
+    { allowed: true, decision: 'skip_authorized' },
+  );
+  // Genuine vetoes still reject.
+  assert.equal(classifyOwnerStaffingReply('不需要开群任务'), 'reject');
+  assert.equal(classifyOwnerStaffingReply('no need to start it'), 'reject');
+});
+
 test('a skip phrase after propose authorizes create without a new propose', () => {
   assert.deepEqual(
     resolveStaffingOwnerGate({
