@@ -2276,7 +2276,12 @@ function selectProtocolPinContent(payload: unknown): unknown {
 async function fetchProtocolPinDetail(inputFetch: {
   pinId: string;
   chainApiBaseUrl?: string;
-}): Promise<{ pinId: string; path: string | null; content: unknown }> {
+}): Promise<{
+  pinId: string;
+  path: string | null;
+  content: unknown;
+  author: { globalMetaId: string; metaid: string; address: string } | null;
+}> {
   const pinId = normalizeText(inputFetch.pinId);
   if (!pinId) {
     throw new Error('pin_id_missing: Refund request pin id is required.');
@@ -2288,10 +2293,20 @@ async function fetchProtocolPinDetail(inputFetch: {
   const payload = await response.json() as unknown;
   const root = readObject(payload) ?? {};
   const data = readObject(root.data) ?? {};
+  const authorGlobalMetaId = normalizeText(data.globalMetaId)
+    || normalizeText(data.global_metaid)
+    || normalizeText(data.globalMetaID);
+  const authorMetaid = normalizeText(data.metaid) || normalizeText(data.metaId);
+  const authorAddress = normalizeText(data.address);
   return {
     pinId,
     path: normalizeText(data.path) || normalizeText(root.path) || null,
     content: selectProtocolPinContent(payload),
+    // The pin author is the on-chain signer identity — the settlement gate
+    // compares it against the order buyer before any refund leaves the wallet.
+    author: authorGlobalMetaId || authorMetaid || authorAddress
+      ? { globalMetaId: authorGlobalMetaId, metaid: authorMetaid, address: authorAddress }
+      : null,
   };
 }
 
@@ -8932,6 +8947,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       pinId: string;
       path: string;
       content: Record<string, unknown>;
+      author: { globalMetaId: string; metaid: string; address: string };
     };
   }> {
     if (!isSellerOrderEligibleForLocalBuyerRefundRequest(inputRefund.order)) {
@@ -9063,6 +9079,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
               pinId: refundRequestPinId,
               path: SERVICE_REFUND_REQUEST_PATH,
               content: refundRequestPayload,
+              // The local buyer wrote this pin with its own identity, so the
+              // author is known without a chain round trip.
+              author: {
+                globalMetaId: buyerGlobalMetaId,
+                metaid: normalizeText(buyerIdentity.metaId),
+                address: normalizeText(buyerIdentity.mvcAddress),
+              },
             },
           }
           : {}),

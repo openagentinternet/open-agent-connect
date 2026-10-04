@@ -451,6 +451,9 @@ test('POST /api/provider/refund/confirm settles a sellerOrder with transfer and 
       return new Response(JSON.stringify({
         data: {
           path: '/protocols/service-refund-request',
+          // The pin's on-chain author: the buyer identity signed this request.
+          globalMetaId: 'idq1buyer',
+          address: 'mvc-buyer-address',
           contentSummary: JSON.stringify({
             version: '1.0.0',
             paymentTxid: 'd'.repeat(64),
