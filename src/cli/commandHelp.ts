@@ -3617,17 +3617,21 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['user', 'import'],
     summary: 'Import an owner identity from an existing BIP39 mnemonic.',
-    usage: 'metabot user import --name <name> --mnemonic "<words>" [--path <derivation>]',
-    requiredFlags: [
-      { flag: '--mnemonic', value: '<words>', description: 'BIP39 mnemonic phrase (12 or 24 words).' },
-    ],
+    usage: 'metabot user import (--mnemonic-stdin | --request-file <json> | --mnemonic "<words>") [--name <name>] [--path <derivation>]',
+    requiredFlags: [],
     optionalFlags: [
+      { flag: '--mnemonic-stdin', description: 'Recommended: read the BIP39 mnemonic from stdin (paste the words, end with EOF/Ctrl-D); never enters shell history or process lists.' },
+      { flag: '--request-file', value: '<json>', description: 'Recommended for agents: JSON file with { name?, mnemonic, path? }; delete the file after importing.' },
+      { flag: '--mnemonic', value: '<words>', description: 'BIP39 mnemonic phrase (12 or 24 words). Discouraged: as an argv value the words land in shell history and process lists; prefer --mnemonic-stdin or --request-file.' },
       { flag: '--name', value: '<name>', description: 'Display name for the owner (defaults to "User").' },
       { flag: '--path', value: '<derivation>', description: 'Derivation path. Defaults to m/44\'/10001\'/0\'/0/0.' },
       HELP_JSON_FLAG,
     ],
     successFields: ['identity', 'mnemonic'],
-    examples: ['metabot user import --name "Alice" --mnemonic "word1 word2 ..."'],
+    examples: [
+      'metabot user import --name "Alice" --mnemonic-stdin  # paste words, then Ctrl-D',
+      'metabot user import --request-file ./owner-import.json',
+    ],
   },
   {
     commandPath: ['knowledge-base'],

@@ -11,7 +11,7 @@ import {
   toOwnerIdentityPublic,
 } from '../../core/owner/ownerIdentity';
 import { normalizeSystemHomeDir } from '../../core/state/homeSelection';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, readJsonFile, readStdinText } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function ownerFailure(error: unknown): MetabotCommandResult<never> {
@@ -41,12 +41,49 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
   }
 
   if (subcommand === 'import') {
-    const name = readFlagValue(args, '--name') ?? '';
-    const mnemonic = readFlagValue(args, '--mnemonic');
-    if (!mnemonic) {
-      return commandMissingFlag('--mnemonic');
+    // The mnemonic is a master secret. argv values land in shell history and
+    // process listings, so the stdin and request-file channels are the
+    // recommended paths; exactly one channel may be provided.
+    const nameFlag = readFlagValue(args, '--name');
+    const pathFlag = readFlagValue(args, '--path');
+    const mnemonicFlag = readFlagValue(args, '--mnemonic');
+    const mnemonicFromStdin = hasFlag(args, '--mnemonic-stdin');
+    const requestFile = readFlagValue(args, '--request-file');
+    const channelCount = [mnemonicFlag !== null, mnemonicFromStdin, requestFile !== null].filter(Boolean).length;
+    if (channelCount > 1) {
+      return commandFailed('conflicting_flags', 'Provide exactly one mnemonic channel: --mnemonic-stdin, --request-file, or --mnemonic.');
     }
-    const derivationPath = readFlagValue(args, '--path') ?? undefined;
+    if (channelCount === 0) {
+      return commandFailed('missing_mnemonic', 'Missing mnemonic. Use --mnemonic-stdin (recommended) or --request-file <json>; --mnemonic <words> also works but lands in shell history.');
+    }
+    let payload: Record<string, unknown> = {};
+    if (requestFile) {
+      try {
+        payload = await readJsonFile(context, requestFile);
+      } catch (error) {
+        return commandFailed('invalid_request_file', error instanceof Error ? error.message : String(error));
+      }
+    }
+    let mnemonic: string;
+    if (mnemonicFlag !== null) {
+      if (!mnemonicFlag.trim()) {
+        return commandFailed('missing_mnemonic', 'The --mnemonic value is empty.');
+      }
+      mnemonic = mnemonicFlag;
+    } else if (mnemonicFromStdin) {
+      mnemonic = (await readStdinText(context.stdin)).trim();
+      if (!mnemonic) {
+        return commandFailed('missing_mnemonic', 'No mnemonic received on stdin. Pipe or type the BIP39 words and end with EOF (Ctrl-D).');
+      }
+    } else {
+      mnemonic = typeof payload.mnemonic === 'string' ? payload.mnemonic.trim() : '';
+      if (!mnemonic) {
+        return commandFailed('invalid_request_file', 'Request file must include a non-empty "mnemonic".');
+      }
+    }
+    const name = nameFlag ?? (typeof payload.name === 'string' ? payload.name : '');
+    const derivationPath = pathFlag
+      ?? (typeof payload.path === 'string' && payload.path.trim() ? payload.path.trim() : undefined);
     try {
       const record = await importOwnerIdentity(systemHomeDir, { name, mnemonic, path: derivationPath });
       return commandSuccess({ identity: toOwnerIdentityPublic(record), mnemonic: record.mnemonic });
