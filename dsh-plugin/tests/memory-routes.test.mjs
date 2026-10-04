@@ -61,8 +61,12 @@ test('user identity routes and twin routes map to CLI verbs', async () => {
   const create = await capture('user/create', { name: 'Alice' })
   assert.deepEqual(create.calls[0], ['user', 'create', '--name', 'Alice'])
   const importRoute = await capture('user/import', { name: 'Alice', mnemonic: 'a b c', path: "m/44'/10001'/0'/0/1" })
-  assert.ok(importRoute.calls[0].includes('--mnemonic'))
-  assert.ok(importRoute.calls[0].includes('--path'))
+  assert.ok(importRoute.calls[0].includes('--request-file'))
+  assert.ok(
+    !importRoute.calls[0].some((arg) => arg.includes('a b c')),
+    'the mnemonic must never ride on the subprocess argv',
+  )
+  assert.deepEqual(importRoute.result.data.file, { mnemonic: 'a b c', name: 'Alice', path: "m/44'/10001'/0'/0/1" })
   const missingMnemonic = await capture('user/import', { name: 'Alice' })
   assert.equal(missingMnemonic.result.code, 'missing_mnemonic')
   const rename = await capture('user/rename', { name: 'Alicia' })
