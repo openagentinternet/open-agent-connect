@@ -277,6 +277,7 @@ import {
 } from '../core/metaprotocol/publish';
 import { MetaprotocolResolveError } from '../core/metaprotocol/registry';
 import { createProfileScopedUpload } from '../core/files/profileUploadGate';
+import { isPathInsideDir } from '../core/files/chainUploadGate';
 import { ChainBroadcastUnknownError } from '../core/signing/localMnemonicSigner';
 import {
   createChainWriteAttemptStore,
@@ -488,6 +489,40 @@ function readErrorCode(error: unknown, fallback: string): string {
 function readKnownLargeFileUploadErrorCode(error: unknown): string {
   const code = readErrorCode(error, '');
   return KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES.has(code) || code.startsWith('mvc_fee_assist_') ? code : '';
+}
+
+/**
+ * MetaApp project publishing reads the whole project directory and puts it
+ * on-chain irreversibly, so the directory must live inside the acting Bot's
+ * own workspace. The daemon has no interactive surface to consent to
+ * anything else, and a caller-supplied path is attacker-controlled.
+ */
+function checkMetaAppProjectDirContained(
+  rawInput: Record<string, unknown>,
+  actorHomeDir: string,
+): ReturnType<typeof commandFailed> | null {
+  const requested = typeof rawInput.projectDir === 'string' ? rawInput.projectDir.trim() : '';
+  const resolved = path.resolve(requested || '.');
+  if (!isPathInsideDir(resolved, actorHomeDir)) {
+    return commandFailed(
+      'metaapp_project_dir_outside_workspace',
+      `Refused to publish a project from outside the Bot workspace: ${resolved}. `
+      + 'On-chain publishing is irreversible; move or copy the project into the Bot workspace '
+      + `(${actorHomeDir}) and retry.`,
+    );
+  }
+  const manifestFile = typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile.trim() : '';
+  if (manifestFile) {
+    const resolvedManifest = path.resolve(manifestFile);
+    if (!isPathInsideDir(resolvedManifest, actorHomeDir)) {
+      return commandFailed(
+        'metaapp_project_dir_outside_workspace',
+        `Refused to read a manifest from outside the Bot workspace: ${resolvedManifest}. `
+        + 'Keep the manifest file inside the project directory.',
+      );
+    }
+  }
+  return null;
 }
 
 function readLargeFileUploadFailureData(error: unknown): Record<string, unknown> | undefined {
@@ -13592,6 +13627,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
         }
+        // Publishing reads the whole project directory and puts it on-chain
+        // irreversibly, so the directory must live inside the acting Bot's
+        // own workspace — never an arbitrary path from the caller.
+        const projectDirCheck = checkMetaAppProjectDirContained(rawInput, actor.homeDir);
+        if (projectDirCheck) {
+          return projectDirCheck;
+        }
 
         const cache = createMetaAppLocalCacheStore(actor.homeDir);
         const opId = normalizeText(rawInput.opId);
@@ -13684,6 +13726,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const state = await actor.runtimeStateStore.readState();
         if (!state.identity) {
           return commandFailed('identity_missing', 'Create a local MetaBot identity before uploading files.');
+        }
+        const projectDirCheck = checkMetaAppProjectDirContained(rawInput, actor.homeDir);
+        if (projectDirCheck) {
+          return projectDirCheck;
         }
 
         const cache = createMetaAppLocalCacheStore(actor.homeDir);
