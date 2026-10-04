@@ -19,6 +19,38 @@ Reference implementation: IDBots (`/Users/tusm/Documents/MetaID_Projects/IDBots/
 > tab → /ui/kb), import suffixing + imported/skipped reporting, the 100 MB
 > import cap, budget default 50, and the dead budget-counter removal.
 
+> **Phase 3 landed on this branch** (same day): #9 cross-instance learn
+> serialization via a per-KB lock file next to the derived index (atomic
+> link(2) create with content, stale-lock steal after 15 min, 4-min bounded
+> wait → typed `learn_busy`); #10 `addDocument` now refreshes the index
+> through a single-doc `upsertDoc` (no corpus walk per save; v1 indexes
+> fall back to a full rebuild) and the study loop's redundant
+> learn-after-save is gone; #11 was already covered by Phase 2's
+> `learnSummary.failed` (kept-stale-copy failures are reported with a note);
+> #12 daemon KB handlers single-source the owner slug from `resolveBot`
+> (`bot.slug`) instead of `basename(profileRoot)`, agreeing with the study
+> verbs in every resolution; #13 the study turn gained a wall-clock
+> watchdog (`STUDY_TURN_WALL_CLOCK_MS`, 35 min — overruns take the existing
+> no-tools partial-report path), the nightly tick gained a wall-clock
+> budget (`STUDY_TICK_BUDGET_MS`, 120 min) with a rotating start cursor
+> (`rotateForTick`) so a slow first Bot can never systematically starve the
+> list tail, and a conservative pre-flight gate (`profileHasStudyLlm`)
+> skips only profiles with no usable LLM at all (no DSH pair + no connected
+> host executor AND no local runtime) instead of burning their per-call
+> timeout at the front of the queue.
+>
+> **#13 design notes (what was deliberately NOT done).** Auto-learn rides
+> the same tick and stays unwatchdogged: it is pure file/CPU work bounded
+> by corpus size, and the tick budget now caps its impact; interrupting a
+> JS async walk cooperatively was judged not worth the complexity. The
+> read→steal decision in the learn lock has a theoretical
+> replace-in-between race (lock replaced by a fresh acquirer between
+> reading stale content and rename-stealing); the failure mode is one
+> benign interleaved rebuild — the pre-lock status quo — never corruption
+> (index writes stay atomic). Per-tick the cursor advances only past
+> processed profiles, so unavailable/skipped rows between a break point get
+> re-skipped cheaply next tick; no starvation either way.
+
 ## Goal
 
 Step 1 of the knowledge-base (KB) roadmap: bring OAC's KB feature to the same

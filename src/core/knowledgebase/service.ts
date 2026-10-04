@@ -16,7 +16,7 @@ import {
   type KnowledgeBaseRecord,
   type KnowledgeBaseStore,
 } from './store';
-import { createKnowledgeBaseIndexStore, type KbQueryHit } from './indexStore';
+import { createKnowledgeBaseIndexStore, withKbIndexLock, type KbQueryHit } from './indexStore';
 import {
   SUPPORTED_KB_EXTENSIONS,
   cleanKnowledgeBaseText,
@@ -148,21 +148,27 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
       const kb = await requireKb(metabotSlug, knowledgeBaseId);
       let learnSummary: KnowledgeBaseRecord['learnSummary'];
       await enqueueLearn(kb.id, async () => {
-        const index = indexFor(kb.id);
-        // Incremental by default (unchanged docs reuse their stored chunks +
-        // tokens); learn(full) forces a from-scratch rebuild — stale docs
-        // always drop either way, since the walk is the source of truth.
-        await fs.mkdir(kb.rawDir, { recursive: true });
-        const stats = await index.rebuild(kb.rawDir, () => Date.now(), { full: full === true });
-        await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
-        learnSummary = {
-          added: stats.added,
-          updated: stats.updated,
-          removed: stats.removed,
-          ...(stats.failedTotal > 0
-            ? { failed: stats.failed, failedTotal: stats.failedTotal }
-            : {}),
-        };
+        // Cross-instance serialization (#9): the daemon, the DSH host, and the
+        // CLI each build their own service here; the per-instance queue above
+        // cannot serialize them, so the index-rebuild critical section takes
+        // the per-KB lock file next to the derived index.
+        await withKbIndexLock(knowledgeBaseIndexPath(paths, kb.id), async () => {
+          const index = indexFor(kb.id);
+          // Incremental by default (unchanged docs reuse their stored chunks +
+          // tokens); learn(full) forces a from-scratch rebuild — stale docs
+          // always drop either way, since the walk is the source of truth.
+          await fs.mkdir(kb.rawDir, { recursive: true });
+          const stats = await index.rebuild(kb.rawDir, () => Date.now(), { full: full === true });
+          await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
+          learnSummary = {
+            added: stats.added,
+            updated: stats.updated,
+            removed: stats.removed,
+            ...(stats.failedTotal > 0
+              ? { failed: stats.failed, failedTotal: stats.failedTotal }
+              : {}),
+          };
+        });
       });
       const updated = await store.getKnowledgeBase(kb.id);
       if (!updated) throw new KnowledgeBaseServiceError('kb_not_found', `Knowledge base ${kb.id} disappeared mid-learn.`);
@@ -209,17 +215,30 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
           // Marking is advisory; the document is already saved.
         }
       }
-      // A save is searchable the moment it returns: run the incremental learn
-      // (unchanged docs reuse their chunks) through the per-KB queue so it
-      // serializes with explicit learns. A refresh failure must not fail the
-      // save — the document stays on disk and the next learn picks it up.
+      // A save is searchable the moment it returns. The refresh is a
+      // single-doc upsert (#10): the saved inbox file is the only change, so
+      // there is no reason to walk the whole corpus per save (the study/surf
+      // loops save dozens of docs per night — a full incremental walk per
+      // save was O(saves × files)). v1 indexes still migrate via a full
+      // rebuild. Everything rides the per-KB lock (#9) so a concurrent learn
+      // from another process cannot interleave. A refresh failure must not
+      // fail the save — the document stays on disk and the next learn picks
+      // it up.
       let indexed = true;
       try {
         await enqueueLearn(kb.id, async () => {
-          const index = indexFor(kb.id);
-          await fs.mkdir(kb.rawDir, { recursive: true });
-          const stats = await index.rebuild(kb.rawDir, () => Date.now());
-          await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
+          await withKbIndexLock(knowledgeBaseIndexPath(paths, kb.id), async () => {
+            const index = indexFor(kb.id);
+            const fast = await index.upsertDoc(kb.rawDir, path.join(kb.rawDir, relPath), () => Date.now());
+            if (fast === null) {
+              // v1 index (no stored token lists): migrate via a full rebuild.
+              await fs.mkdir(kb.rawDir, { recursive: true });
+              const stats = await index.rebuild(kb.rawDir, () => Date.now());
+              await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
+            } else if (fast.changed) {
+              await store.setCounts(kb.id, fast.docCount, fast.chunkCount, Date.now());
+            }
+          });
         });
       } catch {
         indexed = false;
