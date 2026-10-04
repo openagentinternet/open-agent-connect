@@ -276,7 +276,7 @@ import {
   type MetaprotocolNetwork,
 } from '../core/metaprotocol/publish';
 import { MetaprotocolResolveError } from '../core/metaprotocol/registry';
-import { createProfileScopedUpload } from '../core/files/profileUploadGate';
+import { createProfileScopedUpload, UploadOutsideWorkspaceError } from '../core/files/profileUploadGate';
 import { isPathInsideDir } from '../core/files/chainUploadGate';
 import { ChainBroadcastUnknownError } from '../core/signing/localMnemonicSigner';
 import {
@@ -489,6 +489,22 @@ function readErrorCode(error: unknown, fallback: string): string {
 function readKnownLargeFileUploadErrorCode(error: unknown): string {
   const code = readErrorCode(error, '');
   return KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES.has(code) || code.startsWith('mvc_fee_assist_') ? code : '';
+}
+
+/**
+ * External-upload consent is honored only as an in-process callback (the
+ * daemon's own raw-bytes upload route sets one for the file it just staged).
+ * Request bodies cross HTTP as JSON, which cannot carry functions — so a
+ * caller-supplied `confirmExternalUpload: true` boolean is ignored on
+ * purpose: letting the caller self-authorize would defeat the workspace gate
+ * (arbitrary local file read + irreversible on-chain publish).
+ */
+function readInternalUploadConsent(
+  value: unknown,
+): ((input: { slug: string; filePath: string }) => Promise<boolean> | boolean) | undefined {
+  return typeof value === 'function'
+    ? value as (input: { slug: string; filePath: string }) => Promise<boolean> | boolean
+    : undefined;
 }
 
 /**
@@ -14073,10 +14089,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const buzzAttachments = readStringArray(rawInput.attachments);
+          // Fail-closed workspace gate (same rule as the other chain-write
+          // routes): a local file may leave the machine only from inside the
+          // acting Bot's home; no request field can consent otherwise.
+          for (const filePath of buzzAttachments) {
+            if (path.isAbsolute(filePath) && !isPathInsideDir(filePath, actor.homeDir)) {
+              throw new UploadOutsideWorkspaceError(filePath, normalizeText(rawInput.from) || 'actor');
+            }
+          }
           const buzzContentHash = stableChainWriteHash('buzz', [
             normalizeText(rawInput.content),
             network,
-            ...readStringArray(rawInput.attachments),
+            ...buzzAttachments,
           ]);
           const priorBuzzAttempt = await createChainWriteAttemptStore(normalizedSystemHomeDir)
             .findRecent(buzzContentHash).catch(() => null);
@@ -14091,7 +14116,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const result = await postBuzzToChain({
             content: normalizeText(rawInput.content),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
-            attachments: readStringArray(rawInput.attachments),
+            attachments: buzzAttachments,
             quotePin: typeof rawInput.quotePin === 'string' ? rawInput.quotePin : undefined,
             network,
             signer: actor.signer,
@@ -14117,8 +14142,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
       },
-    },
-    simplenote: {
+    },    simplenote: {
       post: async (rawInput) => {
         const actor = await resolveActorWriteContext(rawInput.from);
         if ('failure' in actor) {
@@ -14130,14 +14154,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         try {
           const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
-          // Workspace-scoped gate: in-workspace files publish freely; anything
-          // else requires the explicit owner-consent flag in the request
-          // (interactive hosts like the DSH tool set it after their approval
-          // dialog; the loopback fence cannot gate local processes).
+          // Workspace-scoped gate, fail-closed: in-workspace files publish
+          // freely; consent for anything else is honored only as an
+          // in-process callback (never from the request body).
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const noteContentHash = stableChainWriteHash('simplenote', [
             normalizeText(rawInput.title),
@@ -14217,7 +14240,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const result = await publishSimpleQuestion(
             actor.signer,
@@ -14294,7 +14317,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const result = await publishSimpleAnswer(
             actor.signer,
@@ -17762,7 +17785,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const gatedUpload = createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
             signerForSlug: async () => actor.signer,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
           });
           const result = await gatedUpload({
             slug: normalizeText(rawInput.from) || 'actor',
@@ -17796,7 +17819,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           // (or consented) files, same rule as the direct route.
           const gateCheck = await createProfileScopedUpload({
             profileHomeDir: async () => actor.homeDir,
-            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            confirmExternalUpload: readInternalUploadConsent(rawInput.confirmExternalUpload),
             // Probe-only invocation: refuses out-of-workspace paths before the
             // heavy upload machinery starts.
             upload: async () => ({ metafileUri: '', pinId: '' }),

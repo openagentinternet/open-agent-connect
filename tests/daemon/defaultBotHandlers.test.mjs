@@ -671,6 +671,57 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
   assert.match(result.message, /temporarily unavailable/);
 });
 
+test('default file upload handlers ignore a caller-supplied confirmExternalUpload boolean (H3)', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-upload-no-self-consent-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'No Self Consent Bot');
+  // A file OUTSIDE the Bot home (sibling temp root).
+  const outsideRoot = path.join(homeDir, '..', `${path.basename(homeDir)}-secret`);
+  await mkdir(outsideRoot, { recursive: true });
+  const secretPath = path.join(outsideRoot, 'secret.txt');
+  await writeFile(secretPath, 'TOP SECRET', 'utf8');
+  t.after(async () => {
+    await rm(outsideRoot, { recursive: true, force: true });
+  });
+  let uploads = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      uploads += 1;
+      throw new Error('no chain write may happen for a refused upload');
+    }),
+    providerLargeFileUploader: {
+      upload: async () => {
+        uploads += 1;
+        throw new Error('no upload may happen for a refused path');
+      },
+    },
+    getDaemonRecord: () => null,
+  });
+
+  // The caller self-authorizes with a plain boolean — this must be ignored.
+  const largeResult = await handlers.file.uploadLarge({
+    filePath: secretPath,
+    confirmExternalUpload: true,
+    network: 'mvc',
+  });
+  assert.equal(largeResult.ok, false);
+  assert.match(largeResult.message, /outside the Bot workspace/);
+
+  const smallResult = await handlers.file.upload({
+    filePath: secretPath,
+    confirmExternalUpload: true,
+    network: 'mvc',
+  });
+  assert.equal(smallResult.ok, false);
+  assert.match(smallResult.message, /outside the Bot workspace/);
+  assert.equal(uploads, 0, 'nothing left the machine');
+});
+
 test('default file.uploadLarge returns sponsor feeAssist metadata on direct MVC success when enabled', async (t) => {
   const homeDir = await createProfileHome('metabot-default-large-upload-sponsor-enabled-');
   t.after(async () => {

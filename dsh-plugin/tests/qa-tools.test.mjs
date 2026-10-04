@@ -204,13 +204,22 @@ test('post_simplequestion: workspace files publish freely, external files need o
     overrideOf: () => undefined,
   }
   const { run, calls } = fakeRun()
-  const host = fakeHost()
+  const host = fakeHost({ agentPresets: { composedPreset: () => 'oac-alice' } })
+  const stagedCalls = []
+  const stageExternalFiles = async (from, paths) => {
+    stagedCalls.push({ from, paths })
+    return {
+      pathByOriginal: new Map(paths.map((item) => [item, path.join(workspace, 'staged-' + path.basename(item))])),
+      cleanup: async () => {},
+    }
+  }
   const [tool] = plugin.buildQaToolDefinitions({
     host: host.ctx,
     hostAgent: { ctx: host.ctx },
     approval,
     run,
     getWorkspaceDir: () => workspace,
+    stageExternalFiles,
   })
 
   const ok = await tool.execute({
@@ -223,12 +232,17 @@ test('post_simplequestion: workspace files publish freely, external files need o
   assert.equal(calls[0].payload.content, 'ctx')
   assert.deepEqual(calls[0].payload.tags, ['x'])
   assert.equal(calls[0].payload.network, 'doge')
-  assert.equal(calls[0].payload.confirmExternalUpload, true)
+  assert.equal(calls[0].payload.confirmExternalUpload, undefined, 'no caller-side consent flag may reach the daemon (H3)')
+  assert.equal(stagedCalls.length, 0, 'in-workspace files are never staged')
 
   const external = await tool.execute({ title: 'T2', attachments: [outside] }, {})
   assert.match(external, /Question published on-chain/)
   assert.equal(asked.length, 1)
   assert.equal(asked[0].toolName, 'post_simplequestion')
+  assert.equal(stagedCalls.length, 1, 'approved external files are staged by the host')
+  assert.deepEqual(stagedCalls[0].paths, [outside])
+  assert.deepEqual(calls[1].payload.attachments, [path.join(workspace, 'staged-shot.png')], 'publish uses the staged in-workspace path')
+  assert.equal(calls[1].payload.confirmExternalUpload, undefined)
 
   approve = false
   const denied = await tool.execute({ title: 'T3', attachments: [outside] }, {})
@@ -305,7 +319,7 @@ test('post_simpleanswer passes answer fields through and renders the already-ans
   assert.match(notice, /Not published yet — you already have 1 previous answer/)
   assert.ok(!notice.includes('Answer published'), 'the notice must not claim a publish')
   assert.deepEqual(calls[0].args.slice(0, 2), ['qanda', 'answer'])
-  assert.deepEqual(calls[0].payload, { answer_to: 'q1', content: 'again', confirmExternalUpload: true })
+  assert.deepEqual(calls[0].payload, { answer_to: 'q1', content: 'again' })
 
   const missing = await tool.execute({ answer_to: '', content: 'x' }, {})
   assert.match(missing, /requires both `answer_to`/)

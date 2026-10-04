@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -23,7 +23,13 @@ function fakeRun(result) {
   return {
     calls,
     run: async (args, options) => {
-      calls.push({ args, options })
+      // runMetabotWithPayloadFile deletes its temp payload on return, so the
+      // payload must be captured synchronously here.
+      const flagIndex = args.indexOf('--request-file')
+      const payload = flagIndex >= 0
+        ? JSON.parse(readFileSync(args[flagIndex + 1], 'utf8'))
+        : undefined
+      calls.push({ args, options, payload })
       return result ?? { ok: true, state: 'success', data: { pinId: 'np1', formatted: 'Note published on-chain.\n- pinId: np1' } }
     },
   }
@@ -62,13 +68,22 @@ test('metafile URIs and in-workspace files publish without asking; external file
     overrideOf: () => undefined,
   }
   const { run, calls } = fakeRun()
-  const host = fakeHost()
+  const host = fakeHost({ agentPresets: { composedPreset: () => 'oac-alice' } })
+  const stagedCalls = []
+  const stageExternalFiles = async (from, paths) => {
+    stagedCalls.push({ from, paths })
+    return {
+      pathByOriginal: new Map(paths.map((item) => [item, path.join(workspace, `staged-${path.basename(item)}`)])),
+      cleanup: async () => {},
+    }
+  }
   const [tool] = plugin.buildSimpleNoteToolDefinitions({
     host: host.ctx,
     hostAgent: { ctx: host.ctx },
     approval,
     run,
     getWorkspaceDir: () => workspace,
+    stageExternalFiles,
   })
 
   const ok = await tool.execute({
@@ -82,6 +97,9 @@ test('metafile URIs and in-workspace files publish without asking; external file
   assert.match(external, /pinId: np1/)
   assert.equal(asked.length, 1)
   assert.match(asked[0].reason, /Publish these files on-chain/)
+  assert.deepEqual(stagedCalls[0]?.paths, [outside], 'approved external files are staged by the host')
+  assert.equal(calls[1].payload.cover, path.join(workspace, 'staged-secret.png'), 'publish uses the staged in-workspace path')
+  assert.equal(calls[1].payload.confirmExternalUpload, undefined, 'no caller-side consent flag may reach the daemon (H3)')
 
   approve = false
   const denied = await tool.execute({ title: 'T', content: 'B', cover: outside }, {})

@@ -109,6 +109,11 @@ test('daemon engine construction passes a gated deliverable upload (source wirin
   assert.match(runtime, /createProfileScopedUpload\(/, 'gate helper is used');
   const handlers = fs.readFileSync('src/daemon/defaultHandlers.ts', 'utf8');
   assert.match(handlers, /publishSimpleNote\(\s*actor\.signer,\s*async \(\{ filePath, network: uploadNetwork \}\) => gatedUpload/, 'simplenote daemon path is gated');
+  // H3: request bodies can only carry booleans, so the daemon honors consent
+  // solely as an in-process callback and never from the caller.
+  assert.doesNotMatch(handlers, /confirmExternalUpload: rawInput\.confirmExternalUpload === true/, 'daemon handlers must not trust a caller-supplied boolean');
+  assert.match(handlers, /readInternalUploadConsent/, 'consent is read through the in-process-only helper');
   const tool = fs.readFileSync('dsh-plugin/src/simplenote-tools.ts', 'utf8');
-  assert.match(tool, /confirmExternalUpload: true/, 'DSH tool forwards the consent flag');
+  assert.doesNotMatch(tool, /confirmExternalUpload: true/, 'DSH tool must not forward a self-authorizing consent flag');
+  assert.match(tool, /stageExternalFilesIntoWorkspace/, 'approved external files are staged into the Bot workspace by the host');
 });
