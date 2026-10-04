@@ -531,12 +531,15 @@ export async function dispatchMemoryRoutes(
   if (method === 'user/import') {
     const mnemonic = readTrimmed(payload, 'mnemonic')
     if (!mnemonic) return missing('missing_mnemonic', 'mnemonic is required')
+    // The mnemonic is a master secret: pass it through the CLI's --request-file
+    // payload channel instead of argv, where any local process could read it
+    // from the process list.
+    const request: Record<string, unknown> = { mnemonic }
     const name = readTrimmed(payload, 'name')
+    if (name) request.name = name
     const derivationPath = readTrimmed(payload, 'path')
-    const args = ['user', 'import', '--mnemonic', mnemonic]
-    if (name) args.push('--name', name)
-    if (derivationPath) args.push('--path', derivationPath)
-    return run(args, { timeoutMs: 60_000 })
+    if (derivationPath) request.path = derivationPath
+    return runMetabotWithPayloadFile(['user', 'import'], request, '--request-file', [], run, { timeoutMs: 60_000 })
   }
   if (method === 'user/ensure') {
     const name = readTrimmed(payload, 'name')
