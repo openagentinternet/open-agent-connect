@@ -243,8 +243,11 @@ import {
 import { localDateIso } from '../core/knowledgebase/store';
 import {
   createStudyJobStore,
+  profileHasStudyLlm,
+  rotateForTick,
   runStudyTick,
   runStudyTurnWithTools,
+  STUDY_TICK_BUDGET_MS,
   STUDY_TICK_INTERVAL_MINUTES,
   StudyJobStoreError,
 } from '../core/knowledgebase/studyJobs';
@@ -7629,7 +7632,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
             ...(pinId ? { pinId } : {}),
           });
           savedDocs += 1;
-          await kbService.learnKnowledgeBase(slug).catch(() => undefined);
+          // No learn here: addDocument already indexes the save through the
+          // single-doc upsert (a full incremental learn per save made each
+          // nightly save O(corpus)). knowledge_base_learn remains available
+          // to the model for corpus imports/edits and full rebuilds.
           return `Saved as ${saved.relPath} (budget ${savedDocs}/${budgetPins}).`;
         },
         learnKnowledgeBase: async () => {
@@ -7810,6 +7816,11 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   // recovery flips the in-flight `running` row back to pending and the same
   // job runs twice (double pin budget, duplicate KB writes).
   let studyTickInFlight = false;
+  // Fairness cursor (#13): each tick starts at the profile where the previous
+  // one stopped, so a slow first Bot (bounded per-turn by the study watchdog)
+  // and the tick budget below rotate the serving order instead of always
+  // starving the tail of the list past the window.
+  let studyTickStartIndex = 0;
   const studyTimer = setInterval(() => {
     if (studyTickInFlight) {
       groupTaskEngineLog('[Study] tick skipped: previous tick still running');
@@ -7819,14 +7830,43 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     void (async () => {
       try {
         const profiles = await listMetabotProfiles(systemHomeDir).catch(() => []);
-        for (const profile of profiles) {
+        if (!profiles.length) return;
+        const tickDeadline = Date.now() + STUDY_TICK_BUDGET_MS;
+        for (const profile of rotateForTick(profiles, studyTickStartIndex)) {
+          // Tick budget (#13): stop before starting another profile's
+          // auto-learn/turn. The cursor advances past every processed
+          // profile, so on a break it points at the first profile after the
+          // last processed one — unserved work (and any skipped-unavailable
+          // rows before it, which cost nothing to re-skip) leads the next
+          // tick.
+          if (Date.now() >= tickDeadline) break;
           // Toggle-off Bots (Settings availability switch) skip the nightly
           // KB auto-learn and the study drain too.
           if (profile.isAvailable === false) continue;
+          // Pre-flight gate (#13): a profile with no usable LLM at all (no
+          // DSH pair + no connected host executor, and no local runtime) is
+          // skipped instead of burning its per-call timeout at the front of
+          // the queue every night. Uncertain cases run — see
+          // profileHasStudyLlm for the exact policy.
+          const profilePaths = resolveMetabotPaths(profile.homeDir);
+          const [dshPairConfigured, runtimes] = await Promise.all([
+            fs.promises.access(profilePaths.dshLlmPath).then(() => true, () => false),
+            createLlmRuntimeStore(profilePaths).read()
+              .then((state) => state.runtimes ?? [])
+              .catch(() => [] as Array<{ health?: string }>),
+          ]);
+          if (!profileHasStudyLlm({
+            dshPairConfigured,
+            connectedExecutors: hostLlmExecutorBridge.connectedExecutors(),
+            runtimes,
+          })) {
+            groupTaskEngineLog(`[Study] skipping profile "${profile.slug}": no usable LLM (no DSH pair with a connected host executor, no local runtime).`);
+            continue;
+          }
           // Nightly KB auto-learn (imported/raw files indexed once per local
           // day in the window) rides the same tick as the study drain.
           try {
-            const kbService = createKnowledgeBaseService(resolveMetabotPaths(profile.homeDir));
+            const kbService = createKnowledgeBaseService(profilePaths);
             for (const kb of await kbService.store.listDueForAutoLearn(new Date())) {
               await kbService.learnKnowledgeBase(profile.slug, kb.id).catch(() => undefined);
               await kbService.store.markAutoLearned(kb.id, localDateIso(new Date()));
@@ -7841,6 +7881,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
               groupTaskEngineLog(message);
             },
           }).catch(() => undefined);
+          // Processed → the next tick starts after this profile.
+          studyTickStartIndex = (studyTickStartIndex + 1) % profiles.length;
         }
       } catch {
         // Scheduler failures never take down the daemon.

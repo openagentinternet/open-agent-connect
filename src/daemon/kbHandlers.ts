@@ -7,8 +7,6 @@
  * core/knowledgebase/studyJobs (the daemon nightly tick drains the queue).
  */
 
-import path from 'node:path';
-
 import { commandFailed, commandSuccess } from '../core/contracts/commandResult';
 import { createKnowledgeBaseService } from '../core/knowledgebase/service';
 import {
@@ -105,10 +103,13 @@ export function createKbDaemonHandlers(
     create: async (rawInput) => {
       const bot = await input.resolveBot(rawInput?.from);
       if ('failure' in bot) return bot.failure;
-      const paths = resolveMetabotPaths(bot.homeDir);
-      const service = createKnowledgeBaseService(paths);
+      const service = createKnowledgeBaseService(resolveMetabotPaths(bot.homeDir));
       const knowledgeBase = await service.store.createKnowledgeBase({
-        metabotSlug: path.basename(paths.profileRoot),
+        // Single-source the owner slug from resolveBot (#12): the study verbs
+        // already used bot.slug, while these KB verbs derived it from
+        // basename(profileRoot) — the two disagreed when no Twin exists and
+        // no --from was passed (effectiveSlug 'default' vs the dir basename).
+        metabotSlug: bot.slug,
         name: rawInput?.name ?? '',
         ...(rawInput?.description ? { description: rawInput.description } : {}),
         ...(rawInput?.rawDir ? { rawDir: rawInput.rawDir } : {}),
@@ -120,11 +121,9 @@ export function createKbDaemonHandlers(
     update: async (rawInput) => {
       const bot = await input.resolveBot(rawInput?.from);
       if ('failure' in bot) return bot.failure;
-      const paths = resolveMetabotPaths(bot.homeDir);
-      const service = createKnowledgeBaseService(paths);
-      const slug = path.basename(paths.profileRoot);
+      const service = createKnowledgeBaseService(resolveMetabotPaths(bot.homeDir));
       const existing = await service.store.getKnowledgeBase(rawInput?.id ?? '');
-      if (!existing || existing.metabotSlug !== slug) {
+      if (!existing || existing.metabotSlug !== bot.slug) {
         return commandFailed('kb_not_found', `Knowledge base ${rawInput?.id ?? ''} not found for this Bot.`);
       }
       const knowledgeBase = await service.store.updateKnowledgeBase(rawInput?.id ?? '', {
@@ -138,11 +137,9 @@ export function createKbDaemonHandlers(
     remove: async (rawInput) => {
       const bot = await input.resolveBot(rawInput?.from);
       if ('failure' in bot) return bot.failure;
-      const paths = resolveMetabotPaths(bot.homeDir);
-      const service = createKnowledgeBaseService(paths);
-      const slug = path.basename(paths.profileRoot);
+      const service = createKnowledgeBaseService(resolveMetabotPaths(bot.homeDir));
       const existing = await service.store.getKnowledgeBase(rawInput?.id ?? '');
-      if (!existing || existing.metabotSlug !== slug) {
+      if (!existing || existing.metabotSlug !== bot.slug) {
         return commandFailed('kb_not_found', `Knowledge base ${rawInput?.id ?? ''} not found for this Bot.`);
       }
       const removed = await service.store.removeKnowledgeBase(rawInput?.id ?? '');
@@ -154,7 +151,7 @@ export function createKbDaemonHandlers(
       if ('failure' in bot) return bot.failure;
       const service = createKnowledgeBaseService(resolveMetabotPaths(bot.homeDir));
       const results = await service.queryKnowledgeBase(
-        path.basename(resolveMetabotPaths(bot.homeDir).profileRoot),
+        bot.slug,
         rawInput?.text ?? '',
         {
           ...(rawInput?.id ? { knowledgeBaseId: rawInput.id } : {}),
@@ -170,7 +167,7 @@ export function createKbDaemonHandlers(
       if ('failure' in bot) return bot.failure;
       const service = createKnowledgeBaseService(resolveMetabotPaths(bot.homeDir));
       const saved = await service.addDocument(
-        path.basename(resolveMetabotPaths(bot.homeDir).profileRoot),
+        bot.slug,
         {
           title: rawInput?.title ?? '',
           content: rawInput?.content ?? '',
@@ -189,7 +186,7 @@ export function createKbDaemonHandlers(
       if ('failure' in bot) return bot.failure;
       const service = createKnowledgeBaseService(resolveMetabotPaths(bot.homeDir));
       const knowledgeBase = await service.learnKnowledgeBase(
-        path.basename(resolveMetabotPaths(bot.homeDir).profileRoot),
+        bot.slug,
         rawInput?.id,
         rawInput?.full === true,
       );

@@ -68,6 +68,16 @@ export interface KbIndexStore {
     now: () => number,
     options?: { full?: boolean },
   ): Promise<KbLearnStats & { docCount: number; chunkCount: number }>;
+  /**
+   * Learn ONE raw doc into the current index without walking the corpus
+   * (the addDocument hot path). Returns null when the stored index is v1
+   * (no token lists) and a full rebuild is required to migrate.
+   */
+  upsertDoc(
+    rawDir: string,
+    filePath: string,
+    now: () => number,
+  ): Promise<{ changed: boolean; docCount: number; chunkCount: number } | null>;
   query(
     query: string,
     options: { topK?: number; minScore?: number },
@@ -202,6 +212,117 @@ function buildInverted(chunks: Array<KbIndexChunkRow>): Record<string, number[]>
     }
   });
   return inverted;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-instance learn lock (#9): daemon, DSH host, and CLI learn the same KB
+// from separate service instances, and a per-instance queue cannot serialize
+// them. The lock file lives next to the derived index. Creation is atomic via
+// link(2) from a fully-written temp file (no empty-file window); a lock left
+// by a crashed process is stolen once its content timestamp goes stale. The
+// read→steal decision has a theoretical replace-in-between race; its failure
+// mode is one benign interleaved rebuild (the pre-lock status quo), never
+// corruption — atomic index writes are unchanged.
+// ---------------------------------------------------------------------------
+
+export class KbIndexLockError extends Error {
+  constructor(readonly code: 'learn_busy', message: string) {
+    super(message);
+    this.name = 'KbIndexLockError';
+  }
+}
+
+export const KB_INDEX_LOCK_WAIT_MS = 4 * 60_000;
+export const KB_INDEX_LOCK_STALE_MS = 15 * 60_000;
+const KB_INDEX_LOCK_POLL_MS = 250;
+
+interface KbIndexLockContent {
+  pid: number;
+  at: number;
+}
+
+export interface KbIndexLockOptions {
+  waitMs?: number;
+  staleMs?: number;
+  now?: () => number;
+  log?: (message: string) => void;
+}
+
+export async function withKbIndexLock<T>(
+  indexPath: string,
+  fn: () => Promise<T>,
+  options: KbIndexLockOptions = {},
+): Promise<T> {
+  const lockPath = `${indexPath}.lock`;
+  const waitMs = options.waitMs ?? KB_INDEX_LOCK_WAIT_MS;
+  const staleMs = options.staleMs ?? KB_INDEX_LOCK_STALE_MS;
+  const now = options.now ?? Date.now;
+  const deadline = now() + waitMs;
+
+  const acquire = async (): Promise<boolean> => {
+    const content: KbIndexLockContent = { pid: process.pid, at: now() };
+    const tmpPath = `${lockPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    // The index directory may not exist yet (lock taken before any learn).
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(tmpPath, JSON.stringify(content), 'utf8');
+    try {
+      await fs.link(tmpPath, lockPath);
+      return true;
+    } catch (error) {
+      return false; // EEXIST — someone else holds it
+    } finally {
+      await fs.unlink(tmpPath).catch(() => undefined);
+    }
+  };
+
+  const stealIfStale = async (): Promise<boolean> => {
+    let raw: string;
+    try {
+      raw = await fs.readFile(lockPath, 'utf8');
+    } catch {
+      return true; // gone — retry the acquire directly
+    }
+    let content: KbIndexLockContent | null = null;
+    try {
+      const parsed = JSON.parse(raw) as Partial<KbIndexLockContent>;
+      if (parsed && typeof parsed.at === 'number') content = { pid: Number(parsed.pid) || 0, at: parsed.at };
+    } catch {
+      content = null;
+    }
+    // Unparseable (crash mid-write via an older writer) or stale → steal by
+    // rename (atomic; only one contender wins the rename).
+    if (content && now() - content.at < staleMs) return false;
+    const stealPath = `${lockPath}.steal-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      await fs.rename(lockPath, stealPath);
+    } catch {
+      return true; // someone else stole or released it — retry the acquire
+    }
+    await fs.unlink(stealPath).catch(() => undefined);
+    options.log?.(`[KB] stole a stale learn lock (${lockPath}) held since ${content ? new Date(content.at).toISOString() : 'an unreadable timestamp'}`);
+    return true;
+  };
+
+  let acquired = false;
+  try {
+    while (true) {
+      if (await acquire()) {
+        acquired = true;
+        break;
+      }
+      if (now() >= deadline) {
+        throw new KbIndexLockError(
+          'learn_busy',
+          `Another learn is holding the lock for this knowledge base (waited ${Math.round(waitMs / 1000)}s). Retry later.`,
+        );
+      }
+      if (await stealIfStale()) continue;
+      await new Promise((resolve) => setTimeout(resolve, KB_INDEX_LOCK_POLL_MS));
+    }
+    return await fn();
+  } finally {
+    if (acquired) await fs.unlink(lockPath).catch(() => undefined);
+  }
 }
 
 /**
@@ -397,6 +518,58 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
         failed: built.failures.failed,
         failedTotal: built.failures.failedTotal,
       };
+    },
+
+    // Single-doc learn for the addDocument hot path: the saved inbox file is
+    // the only change, so extract/chunk/tokenize just it and splice it into
+    // the stored index — no corpus walk, no per-file re-hash. The inverted
+    // map is rebuilt from the stored chunk token lists (CPU-only, bounded by
+    // index size, no file I/O). v1 indexes (no token lists) return null and
+    // the caller falls back to a full rebuild (the v1→v2 migration).
+    upsertDoc: async (rawDir, filePath, now) => {
+      const index = await readIndex();
+      if (index.version !== 2) return null;
+      const relpath = path.relative(rawDir, filePath);
+      const stat = await fs.stat(filePath);
+      const rawSha256 = await sha256FileAsync(filePath);
+      const prevDocs = index.docs.filter((doc) => doc.relpath !== relpath);
+      const oldRow = index.docs.find((doc) => doc.relpath === relpath);
+      const oldChunks = index.chunks.filter((chunk) => chunk.docRelPath === relpath);
+
+      if (oldRow
+        && oldRow.size === stat.size
+        && oldRow.mtimeMs === Math.floor(stat.mtimeMs)
+        && oldChunks.length > 0
+        && oldChunks.every((chunk) => Array.isArray(chunk.tokens))) {
+        return { changed: false, docCount: index.docs.length, chunkCount: index.chunks.length };
+      }
+      if (oldRow && oldRow.sha256 === rawSha256
+        && oldChunks.length > 0
+        && oldChunks.every((chunk) => Array.isArray(chunk.tokens))) {
+        return { changed: false, docCount: index.docs.length, chunkCount: index.chunks.length };
+      }
+
+      const { learned } = await learnDoc(rawDir, filePath, stat, rawSha256, now);
+      if (!learned) {
+        // Extraction failed: keep any previously indexed copy (same policy as
+        // the incremental rebuild) and report no change — the failure shows up
+        // in the next full learn's learnSummary.
+        return { changed: false, docCount: index.docs.length, chunkCount: index.chunks.length };
+      }
+      const docs = [...prevDocs, learned.row];
+      const chunks: KbIndexChunkRow[] = [
+        ...index.chunks.filter((chunk) => chunk.docRelPath !== relpath),
+        ...learned.chunks.map((chunk) => ({
+          docRelPath: chunk.docRelPath,
+          ord: chunk.ord,
+          text: chunk.text,
+          tokens: chunk.tokens,
+        })),
+      ];
+      const next: IndexFile = { version: 2, docs, chunks, inverted: buildInverted(chunks) };
+      await writeIndex(next);
+      cache = null;
+      return { changed: true, docCount: docs.length, chunkCount: chunks.length };
     },
 
     query: async (query, options: { topK?: number; minScore?: number } = {}) => {
