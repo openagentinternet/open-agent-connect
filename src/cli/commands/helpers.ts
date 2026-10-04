@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { Readable } from 'node:stream';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { CliRuntimeContext } from '../types';
 
@@ -86,6 +87,20 @@ export async function readJsonFile(
     throw new Error('Expected JSON object input.');
   }
   return parsed as Record<string, unknown>;
+}
+
+/**
+ * Drain a stdin stream to EOF and return its content as UTF-8 text. Commands
+ * that receive secrets (e.g. the owner mnemonic) read them through this
+ * instead of argv, so the value never lands in shell history or process
+ * listings.
+ */
+export async function readStdinText(stream: Readable = process.stdin): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 export function commandMissingFlag(flag: string): MetabotCommandResult<never> {

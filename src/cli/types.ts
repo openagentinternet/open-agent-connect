@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import type { Readable } from 'node:stream';
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
 import type { ChainHistoryKind, RecordChainReadInput } from '../core/chainhistory/types';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
@@ -485,6 +486,7 @@ export interface CliContext {
   cwd?: string;
   dependencies?: CliDependencies;
   readTextFile?: (filePath: string) => Promise<string>;
+  stdin?: Readable;
 }
 
 export interface CliRuntimeContext {
@@ -494,6 +496,8 @@ export interface CliRuntimeContext {
   cwd: string;
   readTextFile: (filePath: string) => Promise<string>;
   dependencies: CliDependencies;
+  /** Stdin source for commands that read secrets without argv (defaults to process.stdin). */
+  stdin: Readable;
 }
 
 export function createCliRuntimeContext(context: CliContext = {}): CliRuntimeContext {
@@ -504,5 +508,6 @@ export function createCliRuntimeContext(context: CliContext = {}): CliRuntimeCon
     cwd: context.cwd ?? process.cwd(),
     readTextFile: context.readTextFile ?? ((filePath) => fs.readFile(filePath, 'utf8')),
     dependencies: context.dependencies ?? {},
+    stdin: context.stdin ?? process.stdin,
   };
 }
