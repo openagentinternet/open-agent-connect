@@ -5783,7 +5783,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       getWallet: async (input) =>
         requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/wallet`),
       getBackup: async (input) =>
-        requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/backup`),
+        requestJson(context, 'POST', `/api/bot/profiles/${encodeURIComponent(input.slug)}/backup`),
       retryProfileSetup: async (input) =>
         requestJson(context, 'POST', `/api/bot/profiles/${encodeURIComponent(input.slug)}/setup/retry`),
       listRuntimes: async (input = {}) => {

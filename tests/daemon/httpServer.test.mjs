@@ -1155,6 +1155,8 @@ test('local daemon rejects non-local Host headers before sensitive read handlers
   t.after(async () => server.close());
 
   const result = await requestJsonWithHeaders(server.baseUrl, '/api/bot/profiles/alice-bot/backup', {
+    method: 'POST',
+    body: {},
     headers: {
       host: 'attacker.example',
     },
@@ -2113,11 +2115,21 @@ test('POST /api/bot/profiles/:slug/wallet/transfer/confirm forwards to the MetaB
   assert.equal(payload.data.txid, 'tx-doge-transfer-1');
 });
 
-test('GET /api/bot/profiles/:slug/backup forwards to the MetaBot backup handler', async (t) => {
+test('POST /api/bot/profiles/:slug/backup forwards to the MetaBot backup handler, GET is refused', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/backup`);
+  // The mnemonic backup is a sensitive read: it must ride the unsafe-method
+  // boundary checks (Sec-Fetch-Site / Origin), so plain GET no longer exists.
+  const getResponse = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/backup`);
+  assert.notEqual(getResponse.status, 200);
+  assert.deepEqual(server.calls.botBackup, []);
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/backup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  });
   const payload = await response.json();
 
   assert.equal(response.status, 200);

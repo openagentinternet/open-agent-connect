@@ -130,7 +130,10 @@ export const handleBotRoutes: RouteHandler = async (context) => {
   }
 
   const backupMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/backup$/);
-  if (backupMatch && req.method === 'GET') {
+  // POST only: the mnemonic backup is a sensitive read, and GET requests skip
+  // the daemon's Sec-Fetch-Site/Origin boundary checks (same level as
+  // /api/user/reveal).
+  if (backupMatch && req.method === 'POST') {
     const slug = normalizeSlug(backupMatch[1]);
     const result = handlers.bot?.getBackup
       ? await handlers.bot.getBackup({ slug })
