@@ -1,5 +1,5 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readChainWriteFlag, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readChainWriteFlag, readFlagValue, readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function readFromFlag(args: string[], options: { allowSlugAlias?: boolean } = {}): string | undefined {
@@ -237,7 +237,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
       });
     }
 
-    return commandUnknownSubcommand(`services owned ${ownedArgs.join(' ')}`.trim());
+    return commandUnknownSubcommand(`services owned ${redactSensitiveArgs(ownedArgs).join(' ')}`.trim());
   }
 
   if (subcommand === 'refunds') {
@@ -297,7 +297,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
       });
     }
 
-    return commandUnknownSubcommand(`services refunds ${refundsArgs.join(' ')}`.trim());
+    return commandUnknownSubcommand(`services refunds ${redactSensitiveArgs(refundsArgs).join(' ')}`.trim());
   }
 
   if (subcommand === 'orders') {
@@ -320,7 +320,7 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
       });
     }
 
-    return commandUnknownSubcommand(`services orders ${ordersArgs.join(' ')}`.trim());
+    return commandUnknownSubcommand(`services orders ${redactSensitiveArgs(ordersArgs).join(' ')}`.trim());
   }
 
   if (subcommand === 'call') {
@@ -420,5 +420,5 @@ export async function runServicesCommand(args: string[], context: CliRuntimeCont
     ));
   }
 
-  return commandUnknownSubcommand(`services ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`services ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

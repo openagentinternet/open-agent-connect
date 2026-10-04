@@ -8,14 +8,12 @@
  */
 
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import {
-  commandMissingFlag,
+import { commandMissingFlag,
   commandUnknownSubcommand,
   readChainWriteFlag,
   readFlagValue,
   readFromFlag,
-  readJsonFile,
-} from './helpers';
+  readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function commandNotImplemented(command: string): MetabotCommandResult<never> {
@@ -108,5 +106,5 @@ export async function runProtocolCommand(args: string[], context: CliRuntimeCont
   if (subcommand === undefined) {
     return commandFailed('missing_subcommand', 'Usage: metabot protocol <list|read|versions|check|publish|update> …');
   }
-  return commandUnknownSubcommand(`protocol ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`protocol ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

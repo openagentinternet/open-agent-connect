@@ -1,10 +1,8 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import {
-  commandMissingFlag,
+import { commandMissingFlag,
   commandUnknownSubcommand,
   hasFlag,
-  readFlagValue,
-} from './helpers';
+  readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 const METAID_SEARCH_LIMIT_DEFAULT = 8;
@@ -112,5 +110,5 @@ export async function runMetaIdCommand(args: string[], context: CliRuntimeContex
     return handler({ identity });
   }
 
-  return commandUnknownSubcommand(`metaid ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`metaid ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

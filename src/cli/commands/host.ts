@@ -1,7 +1,7 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { ConcreteSkillHost } from '../../core/skills/skillContractTypes';
 import { SUPPORTED_PLATFORM_IDS, isPlatformId } from '../../core/platform/platformRegistry';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 const SUPPORTED_HOSTS: ConcreteSkillHost[] = [...SUPPORTED_PLATFORM_IDS];
@@ -33,7 +33,7 @@ export async function runHostCommand(args: string[], context: CliRuntimeContext)
           : undefined;
     if (!handler) {
       if (!['bind', 'status', 'unbind'].includes(action ?? '')) {
-        return commandUnknownSubcommand(`host ${args.join(' ')}`.trim());
+        return commandUnknownSubcommand(`host ${redactSensitiveArgs(args).join(' ')}`.trim());
       }
       return commandFailed('not_implemented', `Host persona ${action} handler is not configured.`);
     }
@@ -46,7 +46,7 @@ export async function runHostCommand(args: string[], context: CliRuntimeContext)
   }
 
   if (args[0] !== 'bind-skills') {
-    return commandUnknownSubcommand(`host ${args.join(' ')}`.trim());
+    return commandUnknownSubcommand(`host ${redactSensitiveArgs(args).join(' ')}`.trim());
   }
 
   const handler = context.dependencies.host?.bindSkills;

@@ -1,5 +1,5 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function readLimit(args: string[], fallback: number): number {
@@ -11,7 +11,7 @@ function readLimit(args: string[], fallback: number): number {
 
 export async function runTraceCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   if (args[0] !== 'get' && args[0] !== 'watch' && args[0] !== 'sessions') {
-    return commandUnknownSubcommand(`trace ${args.join(' ')}`.trim());
+    return commandUnknownSubcommand(`trace ${redactSensitiveArgs(args).join(' ')}`.trim());
   }
 
   if (args[0] === 'sessions') {

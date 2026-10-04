@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function readFromSlug(args: string[]): string | null {
@@ -199,5 +199,5 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
     });
   }
 
-  return commandUnknownSubcommand(`bot ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`bot ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

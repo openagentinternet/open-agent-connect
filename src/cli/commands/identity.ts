@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 export async function runIdentityCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
@@ -38,5 +38,5 @@ export async function runIdentityCommand(args: string[], context: CliRuntimeCont
     return handler();
   }
 
-  return commandUnknownSubcommand(`identity ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`identity ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

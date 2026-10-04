@@ -1,6 +1,6 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import { SUPPORTED_SYSTEM_HOSTS, type SystemHost } from '../../core/system/types';
-import { commandUnknownSubcommand, hasFlag, readFlagValue } from './helpers';
+import { commandUnknownSubcommand, hasFlag, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function isSupportedHost(value: string): value is SystemHost {
@@ -88,5 +88,5 @@ export async function runSystemCommand(
     });
   }
 
-  return commandUnknownSubcommand(`system ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`system ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

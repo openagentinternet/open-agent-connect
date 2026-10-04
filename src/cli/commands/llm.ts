@@ -1,6 +1,6 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { CliRuntimeContext } from '../types';
-import { commandUnknownSubcommand, readFlagValue, readFromFlag } from './helpers';
+import { commandUnknownSubcommand, readFlagValue, readFromFlag, redactSensitiveArgs } from './helpers';
 
 export async function runLlmCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
@@ -75,5 +75,5 @@ export async function runLlmCommand(args: string[], context: CliRuntimeContext):
       : commandFailed('not_implemented', 'LLM host executor handler not configured.');
   }
 
-  return commandUnknownSubcommand(`llm ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`llm ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

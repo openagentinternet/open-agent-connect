@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../../core/skills/skillContractTypes';
 import { SUPPORTED_PLATFORM_IDS, isPlatformId } from '../../core/platform/platformRegistry';
@@ -129,5 +129,5 @@ export async function runSkillsCommand(args: string[], context: CliRuntimeContex
     return handler({ name, confirm: hasFlag(args, '--confirm') });
   }
 
-  return commandUnknownSubcommand(`skills ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`skills ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

@@ -11,7 +11,7 @@ import {
   toOwnerIdentityPublic,
 } from '../../core/owner/ownerIdentity';
 import { normalizeSystemHomeDir } from '../../core/state/homeSelection';
-import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, readJsonFile, readStdinText } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, readJsonFile, readStdinText, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function ownerFailure(error: unknown): MetabotCommandResult<never> {
@@ -159,5 +159,5 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
     return commandSuccess({ deleted: true });
   }
 
-  return commandUnknownSubcommand(`user ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`user ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

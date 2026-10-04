@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readChainWriteFlag, readFlagValue, readFromFlag, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readChainWriteFlag, readFlagValue, readFromFlag, readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function resolveMaybeRelativePath(baseDir: string, filePath: unknown): string | undefined {
@@ -17,7 +17,7 @@ function resolveAttachmentPaths(baseDir: string, value: unknown): unknown {
 
 export async function runBuzzCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   if (args[0] !== 'post') {
-    return commandUnknownSubcommand(`buzz ${args.join(' ')}`.trim());
+    return commandUnknownSubcommand(`buzz ${redactSensitiveArgs(args).join(' ')}`.trim());
   }
 
   const requestFile = readFlagValue(args, '--request-file');

@@ -1,5 +1,5 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function parseLimitFlag(args: string[]): { limit?: number; error?: MetabotCommandResult<never> } {
@@ -120,7 +120,7 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
   }
 
   if (args[0] !== 'sources') {
-    return commandUnknownSubcommand(`network ${args.join(' ')}`.trim());
+    return commandUnknownSubcommand(`network ${redactSensitiveArgs(args).join(' ')}`.trim());
   }
 
   const subcommand = args[1];
@@ -158,5 +158,5 @@ export async function runNetworkCommand(args: string[], context: CliRuntimeConte
     return handler({ baseUrl });
   }
 
-  return commandUnknownSubcommand(`network ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`network ${redactSensitiveArgs(args).join(' ')}`.trim());
 }
