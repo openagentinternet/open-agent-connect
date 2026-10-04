@@ -229,7 +229,7 @@ test('bot page template ships a set-as-default toggle in the hero actions and De
   assert.match(template, /\.metabot-default-label\s*\{/);
 });
 
-test('bot page list marks only the default Bot with a Default badge', () => {
+test('bot page list marks only the Twin Bot with a Default badge', () => {
   const list = { innerHTML: '' };
   const context = createBotScriptContext({
     elements: {
@@ -240,8 +240,8 @@ test('bot page list marks only the default Bot with a Default badge', () => {
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
   context.state.profiles = [
-    { slug: 'alice-bot', name: 'Alice', isActive: true },
-    { slug: 'bob-bot', name: 'Bob', isActive: false },
+    { slug: 'alice-bot', name: 'Alice', isActive: true, botType: 'twin' },
+    { slug: 'bob-bot', name: 'Bob', isActive: false, botType: 'worker' },
   ];
 
   context.renderMetabotList();
@@ -250,7 +250,7 @@ test('bot page list marks only the default Bot with a Default badge', () => {
   assert.match(list.innerHTML, /data-slug="alice-bot"[\s\S]*metabot-default-label[\s\S]*>Twin Bot<\/span>[\s\S]*data-slug="bob-bot"/);
 });
 
-test('bot page list hides the Default badge when only one Bot exists', () => {
+test('bot page list badges only the real Twin, not the isActive fallback', () => {
   const list = { innerHTML: '' };
   const context = createBotScriptContext({
     elements: {
@@ -260,14 +260,25 @@ test('bot page list hides the Default badge when only one Bot exists', () => {
   });
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
-  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice', isActive: true }];
+  // Twin-less machine: listProfiles falls back to marking the startup-home
+  // Bot as isActive, but only a botType 'twin' Bot may carry the badge.
+  context.state.profiles = [
+    { slug: 'alice-bot', name: 'Alice', isActive: true, botType: 'worker' },
+    { slug: 'bob-bot', name: 'Bob', isActive: false, botType: 'worker' },
+  ];
 
+  context.renderMetabotList();
+
+  assert.equal((list.innerHTML.match(/metabot-default-label/g) || []).length, 0);
+
+  // A single-Bot roster shows no badge even when it is the Twin.
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice', isActive: true, botType: 'twin' }];
   context.renderMetabotList();
 
   assert.equal((list.innerHTML.match(/metabot-default-label/g) || []).length, 0);
 });
 
-test('bot page hero offers the set-as-default toggle only while no Twin Bot exists', () => {
+test('bot page hero offers the set-as-Twin toggle to every Bot while twin-less, then only on the Twin page', () => {
   const toggle = toggleElement();
   const control = { hidden: false };
   const status = { textContent: 'stale', className: 'save-status error', hidden: false };
@@ -291,10 +302,10 @@ test('bot page hero offers the set-as-default toggle only while no Twin Bot exis
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
   context.state.profiles = [
-    { slug: 'alice-bot', name: 'Alice', isActive: false },
-    { slug: 'bob-bot', name: 'Bob', isActive: false },
+    { slug: 'alice-bot', name: 'Alice', isActive: false, botType: 'worker' },
+    { slug: 'bob-bot', name: 'Bob', isActive: false, botType: 'worker' },
   ];
-  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: false });
+  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: false, botType: 'worker' });
 
   assert.equal(control.hidden, false);
   assert.equal(status.hidden, false);
@@ -306,26 +317,31 @@ test('bot page hero offers the set-as-default toggle only while no Twin Bot exis
   assert.equal(status.textContent, '');
   assert.equal(status.className, 'save-status');
 
-  // Once a Twin Bot exists, the toggle leaves every edit page so another
-  // Bot cannot be promoted by accident; the list badge keeps identifying
-  // the sitting Twin.
+  // Once a Twin Bot exists, the toggle leaves every other Bot's edit page
+  // so promoting a Bot stays a deliberate act.
   context.state.profiles = [
-    { slug: 'alice-bot', name: 'Alice', isActive: false },
+    { slug: 'alice-bot', name: 'Alice', isActive: false, botType: 'worker' },
     { slug: 'bob-bot', name: 'Bob', isActive: true, botType: 'twin' },
   ];
-  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: false });
+  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: false, botType: 'worker' });
 
   assert.equal(control.hidden, true);
   assert.equal(status.hidden, true);
 
-  // The Twin's own edit page hides it too.
+  // The Twin's own page keeps the toggle On and enabled so the Twin role
+  // can be handed back deliberately.
   context.renderBotHero({ slug: 'bob-bot', name: 'Bob', globalMetaId: 'gm-bob', isActive: true, botType: 'twin' });
 
-  assert.equal(control.hidden, true);
-  assert.equal(status.hidden, true);
+  assert.equal(control.hidden, false);
+  assert.equal(status.hidden, false);
+  assert.equal(toggle.classList.contains('on'), true);
+  assert.equal(toggle.disabled, false);
+  assert.equal(toggle.getAttribute('aria-checked'), 'true');
+  assert.equal(toggle.getAttribute('title'), 'This is the Twin Bot');
+  assert.equal(toggle.textEl.textContent, 'On');
 });
 
-test('bot page hero hides the set-as-default toggle when only one Bot exists', () => {
+test('bot page hero keeps the set-as-Twin toggle on a single Bot page, On when it is the Twin', () => {
   const toggle = toggleElement();
   const control = { hidden: false };
   const status = { textContent: '', className: 'save-status', hidden: false };
@@ -351,8 +367,15 @@ test('bot page hero hides the set-as-default toggle when only one Bot exists', (
   context.state.profiles = [{ slug: 'alice-bot', name: 'Alice', isActive: true }];
   context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: true });
 
-  assert.equal(control.hidden, true);
-  assert.equal(status.hidden, true);
+  assert.equal(control.hidden, false);
+  assert.equal(status.hidden, false);
+  assert.equal(toggle.classList.contains('on'), false);
+
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice', isActive: true, botType: 'twin' }];
+  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: true, botType: 'twin' });
+
+  assert.equal(control.hidden, false);
+  assert.equal(toggle.classList.contains('on'), true);
 });
 
 test('bot page set-as-default toggle promotes the profile to Twin Bot through the daemon API', async () => {
@@ -389,6 +412,46 @@ test('bot page set-as-default toggle promotes the profile to Twin Bot through th
   assert.deepEqual(JSON.parse(requests[0].options.body), { botType: 'twin' });
   assert.equal(context.state.profiles[0].isActive, false);
   assert.equal(context.state.profiles[1].isActive, true);
+  assert.equal(status.textContent, 'Twin Bot updated.');
+  assert.equal(status.className, 'save-status success');
+});
+
+test('bot page set-as-default toggle demotes the Twin back to worker through the daemon API', async () => {
+  const toggle = toggleElement();
+  toggle.classList.toggle('on', true);
+  const status = { textContent: '', className: 'save-status' };
+  const requests = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-default-bot-status]': status,
+    },
+    fetch: (url, options) => {
+      requests.push({ url, options });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: { slug: 'bob-bot' } }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'bob-bot';
+  context.state.profiles = [
+    { slug: 'alice-bot', name: 'Alice', isActive: false, botType: 'worker' },
+    { slug: 'bob-bot', name: 'Bob', isActive: true, botType: 'twin' },
+  ];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+
+  await context.setSelectedBotDefault(toggle);
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/bot/profiles/bob-bot');
+  assert.equal(requests[0].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(requests[0].options.body), { botType: 'worker' });
+  assert.equal(context.state.profiles[0].botType, 'worker');
+  assert.equal(context.state.profiles[1].botType, 'worker');
+  assert.equal(context.state.profiles[1].isActive, false);
   assert.equal(status.textContent, 'Twin Bot updated.');
   assert.equal(status.className, 'save-status success');
 });
