@@ -210,6 +210,7 @@ import {
 } from '../core/chat/privateConversation';
 import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
 import { createGroupTaskDaemonHandlers } from './grouptaskHandlers';
+import { createMetasoPinVerifier } from '../core/grouptask/deliverableVerification';
 import { createScheduleDaemonHandlers } from './scheduleHandlers';
 import { createUserDaemonHandlers } from './userHandlers';
 import type { ScheduleStore } from '../core/schedule/store';
@@ -17264,6 +17265,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       adapters,
       resolveSponsorWritePin,
       resolvePeerChatPublicKey,
+      verifyPin: createMetasoPinVerifier(),
       log: (message) => console.warn(message),
     }),
     schedule: createScheduleDaemonHandlers({

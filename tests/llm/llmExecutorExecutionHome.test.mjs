@@ -33,7 +33,7 @@ function captureBackend(captured) {
     provider: 'capture',
     async execute(request) {
       captured.requestEnv = request.env;
-      return { status: 'completed', output: 'ok', durationMs: 1 };
+      return { status: 'completed', output: 'ok', durationMs: 1, providerSessionId: 'provider-thread-1' };
     },
   });
 }
@@ -156,6 +156,42 @@ test('resumed sessions run against the real provider home (no redirection)', asy
   assert.equal(session.providerStateHome, undefined);
 });
 
+test('resuming an executor-created session redirects back into its isolated provider home', async () => {
+  const base = await mkdtempTempRoot('metabot-llm-exec-home-resume-');
+  const sourceHome = path.join(base, 'source-home');
+  await writeSourceHome(sourceHome, { 'config.toml': 'model = "k2"\n' });
+  const captured = {};
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'llm', 'sessions'),
+    transcriptsRoot: path.join(base, 'llm', 'transcripts'),
+    skillsRoot: path.join(base, 'skills'),
+    env: { KIMI_CODE_HOME: sourceHome },
+    backends: { kimi: captureBackend(captured) },
+  });
+  const expectedHome = path.join(base, 'llm', 'provider-homes', 'kimi');
+
+  const firstId = await executor.execute({ runtimeId: 'r', runtime: makeRuntime('kimi'), prompt: 'one' });
+  const first = await waitForResult(executor, firstId);
+  assert.equal(first.providerStateHome, expectedHome);
+  assert.equal(first.providerSessionId, 'provider-thread-1');
+
+  // Resume by executor session id: the recorded providerStateHome is reused.
+  const secondId = await executor.execute({
+    runtimeId: 'r', runtime: makeRuntime('kimi'), prompt: 'two', resumeSessionId: first.sessionId,
+  });
+  const second = await waitForResult(executor, secondId);
+  assert.equal(second.providerStateHome, expectedHome);
+  assert.equal(captured.requestEnv.KIMI_CODE_HOME, expectedHome);
+
+  // Resume by provider thread id: matched through the session record list.
+  const thirdId = await executor.execute({
+    runtimeId: 'r', runtime: makeRuntime('kimi'), prompt: 'three', resumeSessionId: first.providerSessionId,
+  });
+  const third = await waitForResult(executor, thirdId);
+  assert.equal(third.providerStateHome, expectedHome);
+  assert.equal(captured.requestEnv.KIMI_CODE_HOME, expectedHome);
+});
+
 test('a caller-provided state-home env var is respected as an explicit override', async () => {
   const { captured, session } = await runExecution({
     provider: 'kimi',
@@ -207,10 +243,11 @@ test('prepareProviderExecutionHome keeps existing execution-home entries on late
   assert.equal(await fs.readFile(shadowConfig, 'utf8'), 'model = "k2-new"\n');
 
   assert.equal(await prepareProviderExecutionHome({ provider: 'custom', homesRoot, baseEnv }), null);
-  assert.equal(
-    await prepareProviderExecutionHome({ provider: 'kimi', homesRoot, baseEnv, resumeSessionId: 'session_x' }),
-    null,
-  );
+  const resumeHome = path.join(base, 'elsewhere', 'kimi-resume');
+  const resumed = await prepareProviderExecutionHome({ provider: 'kimi', homesRoot, baseEnv, resumeStateHome: resumeHome });
+  assert.ok(resumed);
+  assert.equal(resumed.home, resumeHome);
+  assert.equal(resumed.env.KIMI_CODE_HOME, resumeHome);
   assert.equal(
     await prepareProviderExecutionHome({ provider: 'kimi', homesRoot, baseEnv, requestEnv: { KIMI_CODE_HOME: '/x' } }),
     null,

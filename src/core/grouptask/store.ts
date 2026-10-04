@@ -211,6 +211,11 @@ export interface GroupTaskStore {
     confirmation: 'unconfirmed' | 'confirmed',
     status?: GroupTaskDeliverableStatus,
   ): Promise<void>;
+  /** Single-row status write (e.g. owner close accepting a non-chain row). */
+  updateDeliverableStatus(
+    deliverableId: number,
+    status: GroupTaskDeliverableStatus,
+  ): Promise<GroupTaskDeliverable | null>;
   updateDeliverablesStatusByTask(
     taskId: number,
     fromStatus: GroupTaskDeliverableStatus,
@@ -798,6 +803,15 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       deliverable.confirmation = confirmation;
       if (status) deliverable.status = status;
       await writeState(state);
+    }),
+
+    updateDeliverableStatus: (deliverableId, status) => enqueue(async () => {
+      const state = await readState();
+      const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+      if (!deliverable) return null;
+      deliverable.status = status;
+      await writeState(state);
+      return deliverable;
     }),
 
     updateDeliverablesStatusByTask: (taskId, fromStatus, toStatus) => enqueue(async () => {

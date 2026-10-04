@@ -435,7 +435,7 @@ test('closeGroupTask broadcasts the verdict as the group final message (OT-06 R1
   assert.equal((await store2.getTaskById(task.id)).status, 'done');
 });
 
-test('closeGroupTask(done) accepts delivered rows only; unverified rows stay pending', async () => {
+test('closeGroupTask(done) accepts delivered and non-chain rows; unverified pin rows stay pending', async () => {
   const { ctx, pins, profiles } = createFakeContext('metabot-gts-close-pending-');
   const { task } = await createGroupTask(ctx, { title: 'T', goal: 'G', workerSlugs: ['worker-1'] });
   const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
@@ -446,8 +446,15 @@ test('closeGroupTask(done) accepts delivered rows only; unverified rows stay pen
     taskId: task.id, msgPinId: 'pin-d', authorGlobalMetaId: 'IDWORKER1', kind: 'pin', uri: 'pin://abc',
   });
   await store.updateDeliverableVerification(delivered.id, { sources: [] }, 'confirmed', 'delivered');
-  const pending = await store.addDeliverable({
+  const textRow = await store.addDeliverable({
     taskId: task.id, msgPinId: 'pin-p', authorGlobalMetaId: 'IDWORKER1', kind: 'text', uri: null,
+  });
+  const linkRow = await store.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-l', authorGlobalMetaId: 'IDWORKER1', kind: 'link', uri: 'https://example.com/a',
+  });
+  const pinRow = await store.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-u', authorGlobalMetaId: 'IDWORKER1', kind: 'metafile',
+    uri: `metafile://${'ab'.repeat(32)}i0`,
   });
   const pinsBefore = pins.length;
 
@@ -456,14 +463,38 @@ test('closeGroupTask(done) accepts delivered rows only; unverified rows stay pen
   const rows = await store.listDeliverables(task.id);
   assert.equal(rows.find((row) => row.id === delivered.id).status, 'accepted',
     'chain-confirmed rows are accepted by the owner close');
-  assert.equal(rows.find((row) => row.id === pending.id).status, 'pending',
-    'unverified rows are never stamped accepted');
+  assert.equal(rows.find((row) => row.id === textRow.id).status, 'accepted',
+    'text rows can never be chain-verified — the owner close IS their acceptance');
+  assert.equal(rows.find((row) => row.id === linkRow.id).status, 'accepted',
+    'link rows can never be chain-verified — the owner close IS their acceptance');
+  assert.equal(rows.find((row) => row.id === pinRow.id).status, 'pending',
+    'unverified chain-shaped rows are never stamped accepted');
 
   assert.equal(pins.length, pinsBefore + 1);
   const payload = JSON.parse(pins.at(-1).payload);
   const text = decryptGroupContent(String(payload.content ?? ''), String(payload.groupId ?? ''));
-  assert.match(text, /1 deliverable remained unverified and stay pending/,
-    'the closing notice says what stayed unverified');
+  assert.match(text, /1 deliverable could not be verified on-chain and stay pending/,
+    'the closing notice counts only the chain-shaped rows left behind');
+});
+
+test('closeGroupTask(done) runs one final verification pass so late pins settle', async () => {
+  const { ctx, profiles } = createFakeContext('metabot-gts-close-finalverify-');
+  ctx.verifyPin = async () => 'found';
+  const { task } = await createGroupTask(ctx, { title: 'T', goal: 'G', workerSlugs: ['worker-1'] });
+  const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+  const { createGroupTaskStore } = require('../../dist/core/grouptask/store.js');
+  const store = createGroupTaskStore(resolveMetabotPaths(profiles[0].homeDir));
+  const latePin = await store.addDeliverable({
+    taskId: task.id, msgPinId: 'pin-late', authorGlobalMetaId: 'IDWORKER1', kind: 'metafile',
+    uri: `metafile://${'cd'.repeat(32)}i1`,
+  });
+
+  await closeGroupTask(ctx, 'twin-bot', task.id, { status: 'done', rating: 5 });
+
+  const row = (await store.listDeliverables(task.id)).find((entry) => entry.id === latePin.id);
+  assert.equal(row.status, 'accepted',
+    'a pin confirmed inside the final pass is delivered and accepted at close');
+  assert.equal(row.confirmation, 'confirmed');
 });
 
 test('reopenGroupTask only works from review and rejects pending deliverables', async () => {

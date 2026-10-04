@@ -289,7 +289,7 @@ export function detectSkipConfirmInWish(text: string): boolean {
   return SKIP_CONFIRM_PATTERNS.some((pattern) => pattern.test(value));
 }
 
-export function classifyOwnerStaffingReply(text: string): 'confirm' | 'revise' | 'reject' | 'unknown' {
+export function classifyOwnerStaffingReply(text: string): 'confirm' | 'revise' | 'reject' | 'skip' | 'unknown' {
   const value = String(text ?? '').trim();
   if (!value) return 'unknown';
   // "好的，不换人" must not fire /换人/ first-match revise.
@@ -297,6 +297,10 @@ export function classifyOwnerStaffingReply(text: string): 'confirm' | 'revise' |
   if (REVISE_PATTERNS.some((pattern) => pattern.test(value))) return 'revise';
   if (CONFIRM_EXACT_PATTERNS.some((pattern) => pattern.test(value))) return 'confirm';
   if (CONFIRM_PHRASE_PATTERNS.some((pattern) => pattern.test(value))) return 'confirm';
+  // An explicit auto-start waiver outranks the veto sweep: the broad reject
+  // patterns (/不需要…开群/, /no need to/i) would otherwise swallow the
+  // documented skip phrasings ("不用确认，直接开群", "no need to confirm").
+  if (detectSkipConfirmInWish(value)) return 'skip';
   if (!isInterrogativeStaffingText(value) && REJECT_PATTERNS.some((pattern) => pattern.test(value))) {
     return 'reject';
   }
@@ -333,7 +337,7 @@ export function resolveStaffingOwnerGate(input: {
     if (kind === 'revise') lastIntent = 'owner_revise';
     else if (kind === 'reject') lastIntent = 'owner_rejected';
     else if (kind === 'confirm') lastIntent = 'owner_confirmed';
-    else if (detectSkipConfirmInWish(reply)) lastIntent = 'skip_authorized';
+    else if (kind === 'skip') lastIntent = 'skip_authorized';
   }
   if (lastIntent === 'owner_revise') return { allowed: false, decision: 'owner_revise' };
   if (lastIntent === 'owner_rejected') return { allowed: false, decision: 'owner_rejected' };
