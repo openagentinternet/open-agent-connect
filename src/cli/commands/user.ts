@@ -155,6 +155,11 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
   }
 
   if (subcommand === 'delete') {
+    // Deleting the owner identity destroys this machine's only copy of the
+    // owner mnemonic; same explicit-confirmation bar as bot/metaapp delete.
+    if (!hasFlag(args, '--confirm')) {
+      return commandFailed('confirmation_required', 'user delete removes the owner identity, and its locally stored mnemonic cannot be recovered. Back the mnemonic up with `metabot user reveal` first, then retry with --confirm.');
+    }
     await deleteOwnerIdentity(systemHomeDir);
     return commandSuccess({ deleted: true });
   }

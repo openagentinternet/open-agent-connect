@@ -273,6 +273,10 @@ If the human explicitly asks to write avatar on BTC, DOGE, or OPCAT, pass the ma
 - Never pass an owner mnemonic through argv (`--mnemonic`); it lands in shell
   history and process listings. Use `--mnemonic-stdin` or `--request-file`,
   and delete the request file after a successful import.
+- `user delete` removes the owner identity and its locally stored mnemonic,
+  which cannot be recovered. It requires `--confirm` (or `confirm: true` on
+  the plugin route); only run it when the human explicitly asked, and back
+  the mnemonic up with `user reveal` first.
 - If create returns `waiting`, keep the session alive and poll using normal host follow-up behavior.
 - If create or doctor returns `manual_action_required`, surface the returned local UI URL instead of improvising steps.
 - If create returns `identity_name_taken`, do not force-create in another home; run `identity list` and use the existing profile by name via `--from`.

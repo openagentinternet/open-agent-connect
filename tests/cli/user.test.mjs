@@ -171,10 +171,24 @@ test('user import help recommends the stdin channel over the argv mnemonic', asy
   assert.equal(argvExample, undefined, 'help must not showcase the argv mnemonic channel');
 });
 
-test('user delete removes the identity', async () => {
+test('user delete refuses without --confirm and keeps the identity', async () => {
   const home = await mkdtempTempRoot('metabot-user-cli-');
   await runCli(['user', 'create', '--name', 'Alice', '--json'], makeContext(home).context);
-  assert.equal(await runCli(['user', 'delete', '--json'], makeContext(home).context), 0);
+  const refused = makeContext(home);
+  assert.equal(await runCli(['user', 'delete', '--json'], refused.context), 1);
+  const envelope = refused.parseEnvelope();
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.code, 'confirmation_required');
+  assert.match(envelope.message, /reveal/);
+  const who = makeContext(home);
+  await runCli(['user', 'who', '--json'], who.context);
+  assert.equal(who.parseEnvelope().data.identity.name, 'Alice');
+});
+
+test('user delete removes the identity with --confirm', async () => {
+  const home = await mkdtempTempRoot('metabot-user-cli-');
+  await runCli(['user', 'create', '--name', 'Alice', '--json'], makeContext(home).context);
+  assert.equal(await runCli(['user', 'delete', '--confirm', '--json'], makeContext(home).context), 0);
   const who = makeContext(home);
   await runCli(['user', 'who', '--json'], who.context);
   assert.equal(who.parseEnvelope().data.identity, null);

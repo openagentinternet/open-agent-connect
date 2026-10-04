@@ -3585,7 +3585,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'rename', summary: 'Rename the owner identity (local only).' },
       { name: 'update', summary: 'Save the owner name/avatar and publish the changes on-chain.' },
       { name: 'reveal', summary: 'Reveal the stored mnemonic for backup.' },
-      { name: 'delete', summary: 'Delete the owner identity (logout).' },
+      { name: 'delete', summary: 'Delete the owner identity (logout). Requires --confirm; the locally stored mnemonic cannot be recovered afterwards — back it up with user reveal first.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
