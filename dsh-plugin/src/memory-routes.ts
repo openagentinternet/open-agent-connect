@@ -10,6 +10,7 @@ import {
   missing,
   readFrom,
   readTrimmed,
+  requireConfirm,
   requireFrom,
   runMetabotWithPayloadFile,
   type RunFn,
@@ -572,7 +573,11 @@ export async function dispatchMemoryRoutes(
     return run(['user', 'reveal'], { timeoutMs: LIST_TIMEOUT_MS })
   }
   if (method === 'user/delete') {
-    return run(['user', 'delete'], { timeoutMs: 60_000 })
+    // Irreversible: the CLI keeps the machine's only copy of the owner
+    // mnemonic, so the caller must confirm before we forward --confirm.
+    const blocked = requireConfirm(payload, 'user delete removes the owner identity (irreversible); pass confirm: true to proceed.')
+    if (blocked) return blocked
+    return run(['user', 'delete', '--confirm'], { timeoutMs: 60_000 })
   }
   return undefined
 }

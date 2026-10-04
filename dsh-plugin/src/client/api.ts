@@ -766,7 +766,9 @@ export const api = {
     post('user/import', input),
   userUpdate: async (input: OwnerUpdateInput): Promise<OwnerUpdatePayload> => post('user/update', input),
   userReveal: async (): Promise<{ mnemonic: string }> => post('user/reveal'),
-  userDelete: async (): Promise<{ deleted?: boolean }> => post('user/delete'),
+  // The Settings logout dialog already asked the human; the route still
+  // enforces confirm server-side, so forward it here.
+  userDelete: async (): Promise<{ deleted?: boolean }> => post('user/delete', { confirm: true }),
   /** Traffic (流量) account surface — thin wrappers over the `metabot traffic *` verbs. */
   trafficStatus: async (): Promise<TrafficStatusPayload> =>
     normalizeTrafficStatus(await post('traffic/status')),
