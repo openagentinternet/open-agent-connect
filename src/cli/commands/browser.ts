@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandUnknownSubcommand } from './helpers';
+import { commandUnknownSubcommand, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function parseBrowserOpenArgs(args: string[]): {
@@ -45,7 +45,7 @@ function parseBrowserTabOpenArgs(args: string[]): {
   error?: MetabotCommandResult<never>;
 } {
   if (args[0] !== 'open') {
-    return { error: commandUnknownSubcommand(`browser tab ${args.join(' ')}`.trim()) };
+    return { error: commandUnknownSubcommand(`browser tab ${redactSensitiveArgs(args).join(' ')}`.trim()) };
   }
 
   const parsed = parseBrowserOpenArgs(args);
@@ -92,7 +92,7 @@ export async function runBrowserCommand(
   }
 
   if (args[0] !== 'open') {
-    return commandUnknownSubcommand(`browser ${args.join(' ')}`.trim());
+    return commandUnknownSubcommand(`browser ${redactSensitiveArgs(args).join(' ')}`.trim());
   }
 
   const parsed = parseBrowserOpenArgs(args);

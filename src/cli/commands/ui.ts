@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 const SUPPORTED_UI_PAGES = new Set([
@@ -26,7 +26,7 @@ const SUPPORTED_UI_PAGES = new Set([
 
 export async function runUiCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   if (args[0] !== 'open') {
-    return commandUnknownSubcommand(`ui ${args.join(' ')}`.trim());
+    return commandUnknownSubcommand(`ui ${redactSensitiveArgs(args).join(' ')}`.trim());
   }
 
   const page = readFlagValue(args, '--page')?.trim();

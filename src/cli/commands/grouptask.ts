@@ -5,13 +5,11 @@
  */
 
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import {
-  commandMissingFlag,
+import { commandMissingFlag,
   commandUnknownSubcommand,
   hasFlag,
   readFlagValue,
-  readJsonFile,
-} from './helpers';
+  readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 type GroupTaskDeps = NonNullable<CliRuntimeContext['dependencies']['grouptask']>;
@@ -184,7 +182,7 @@ export async function runGroupTaskCommand(
     if (!handler) return commandFailed('not_implemented', 'Group task relay handler is not configured.');
     const sub = normalizeText(args[1]);
     if (sub !== 'drain') {
-      return commandUnknownSubcommand(`grouptask relay ${args.slice(1).join(' ')}`.trim());
+      return commandUnknownSubcommand(`grouptask relay ${redactSensitiveArgs(args.slice(1)).join(' ')}`.trim());
     }
     return handler({ chairSlug: normalizeText(readFlagValue(args, '--chair')) || undefined });
   }
@@ -221,7 +219,7 @@ export async function runGroupTaskCommand(
       });
     }
 
-    return commandUnknownSubcommand(`grouptask work ${args.slice(1).join(' ')}`.trim());
+    return commandUnknownSubcommand(`grouptask work ${redactSensitiveArgs(args.slice(1)).join(' ')}`.trim());
   }
 
   if (action === 'close') {
@@ -464,8 +462,8 @@ export async function runGroupTaskCommand(
       });
     }
 
-    return commandUnknownSubcommand(`grouptask staffing ${args.slice(1).join(' ')}`.trim());
+    return commandUnknownSubcommand(`grouptask staffing ${redactSensitiveArgs(args.slice(1)).join(' ')}`.trim());
   }
 
-  return commandUnknownSubcommand(`grouptask ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`grouptask ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

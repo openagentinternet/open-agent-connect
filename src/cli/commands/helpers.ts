@@ -107,6 +107,47 @@ export function commandMissingFlag(flag: string): MetabotCommandResult<never> {
   return commandFailed('missing_flag', `Missing required flag ${flag}.`);
 }
 
+/** Flags whose VALUES are secrets; echoing them back redacts the value only. */
+const SENSITIVE_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  '--mnemonic',
+  '--password',
+  '--token',
+  '--private-key',
+  '--secret',
+]);
+
+/**
+ * Replace the values of secret-bearing flags with '***' before raw argv is
+ * echoed back in error output: a typo like `user improt --mnemonic "<words>"`
+ * must not leak the mnemonic into stdout, logs, or agent session records.
+ * Handles both the `--flag value` and inline `--flag=value` forms; exact flag
+ * names only, so `--mnemonic-stdin` is never treated as a value flag.
+ */
+export function redactSensitiveArgs(args: string[]): string[] {
+  const redacted: string[] = [];
+  let redactNext = false;
+  for (const arg of args) {
+    if (redactNext) {
+      redacted.push('***');
+      redactNext = false;
+      continue;
+    }
+    const eqIndex = arg.indexOf('=');
+    const flag = eqIndex >= 0 ? arg.slice(0, eqIndex) : arg;
+    if (SENSITIVE_VALUE_FLAGS.has(flag)) {
+      if (eqIndex >= 0) {
+        redacted.push(`${flag}=***`);
+        continue;
+      }
+      redacted.push(arg);
+      redactNext = true;
+      continue;
+    }
+    redacted.push(arg);
+  }
+  return redacted;
+}
+
 export function commandUnknownSubcommand(command: string): MetabotCommandResult<never> {
   return commandFailed('unknown_command', `Unknown command: ${command}`);
 }

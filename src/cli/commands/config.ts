@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandUnknownSubcommand, readFromFlag } from './helpers';
+import { commandUnknownSubcommand, readFromFlag, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function readConfigPositionals(args: string[]): string[] {
@@ -59,5 +59,5 @@ export async function runConfigCommand(args: string[], context: CliRuntimeContex
     });
   }
 
-  return commandUnknownSubcommand(`config ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`config ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

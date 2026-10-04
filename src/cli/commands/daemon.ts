@@ -1,5 +1,5 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandUnknownSubcommand } from './helpers';
+import { commandUnknownSubcommand, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 export async function runDaemonCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
@@ -35,5 +35,5 @@ export async function runDaemonCommand(args: string[], context: CliRuntimeContex
     return handler();
   }
 
-  return commandUnknownSubcommand(`daemon ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`daemon ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

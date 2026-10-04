@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFileUploadChainFlag, readFlagValue, readFromFlag, readJsonFile } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFileUploadChainFlag, readFlagValue, readFromFlag, readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 const UPLOAD_LARGE_SOURCE_MESSAGE = 'Choose exactly one upload file source: --file, positional path, or --request-file.';
@@ -56,7 +56,7 @@ function collectUploadLargePositionalPaths(args: string[]): string[] {
 export async function runFileCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   const subcommand = args[0];
   if (subcommand !== 'upload' && subcommand !== 'upload-large') {
-    return commandUnknownSubcommand(`file ${args.join(' ')}`.trim());
+    return commandUnknownSubcommand(`file ${redactSensitiveArgs(args).join(' ')}`.trim());
   }
 
   const commandArgs = args.slice(1);

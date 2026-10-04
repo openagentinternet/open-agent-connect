@@ -16,7 +16,7 @@ import {
   type MediaKind,
 } from '../../core/llm/llmRelayService';
 import { normalizeSystemHomeDir } from '../../core/state/homeSelection';
-import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandMissingFlag, commandUnknownSubcommand, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function mediaKindOf(subcommand: string | undefined): MediaKind | null {
@@ -70,5 +70,5 @@ export async function runMediaCommand(args: string[], context: CliRuntimeContext
     }
   }
 
-  return commandUnknownSubcommand(`media ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`media ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

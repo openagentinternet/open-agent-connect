@@ -4,7 +4,7 @@
  * the metaso-p2p node (same pattern as `metaid search`).
  */
 
-import { commandMissingFlag } from './helpers';
+import { commandMissingFlag, redactSensitiveArgs } from './helpers';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { CliRuntimeContext } from '../types';
 
@@ -105,5 +105,5 @@ export function runMetawebCommand(
     return Promise.resolve(handler({ pinId }));
   }
 
-  return Promise.resolve(commandUnknownSubcommand(`metaweb ${args.join(' ')}`.trim()));
+  return Promise.resolve(commandUnknownSubcommand(`metaweb ${redactSensitiveArgs(args).join(' ')}`.trim()));
 }

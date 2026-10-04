@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandUnknownSubcommand, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 const TRAFFIC_LEDGER_DEFAULT_LIMIT = 20;
@@ -100,5 +100,5 @@ export async function runTrafficCommand(args: string[], context: CliRuntimeConte
     return commandFailed('invalid_argument', `Unknown api-base action: ${action}. Expected "get", "set <url>", or "reset".`);
   }
 
-  return commandUnknownSubcommand(`traffic ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`traffic ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

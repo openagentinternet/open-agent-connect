@@ -1,12 +1,10 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import {
-  commandMissingFlag,
+import { commandMissingFlag,
   commandUnknownSubcommand,
   readChainWriteFlag,
   readFlagValue,
   readFromFlag,
-  readJsonFile,
-} from './helpers';
+  readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function normalizeText(value: unknown): string {
@@ -140,5 +138,5 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
     return commandUnknownSubcommand(`chat auto-reply ${normalizeText(subAction)}`);
   }
 
-  return commandUnknownSubcommand(`chat ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`chat ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

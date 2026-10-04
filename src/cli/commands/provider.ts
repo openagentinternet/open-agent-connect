@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandUnknownSubcommand, readFlagValue } from './helpers';
+import { commandUnknownSubcommand, readFlagValue, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function readSellerOrderSelector(args: string[]): {
@@ -67,5 +67,5 @@ export async function runProviderCommand(args: string[], context: CliRuntimeCont
     return handler({ ...(from ? { from } : {}), ...selector.selector });
   }
 
-  return commandUnknownSubcommand(`provider ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`provider ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

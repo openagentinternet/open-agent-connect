@@ -7,14 +7,12 @@
 
 import path from 'node:path';
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import {
-  commandMissingFlag,
+import { commandMissingFlag,
   commandUnknownSubcommand,
   readChainWriteFlag,
   readFlagValue,
   readFromFlag,
-  readJsonFile,
-} from './helpers';
+  readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function commandNotImplemented(command: string): MetabotCommandResult<never> {
@@ -140,5 +138,5 @@ export async function runQandaCommand(args: string[], context: CliRuntimeContext
   if (subcommand === undefined) {
     return commandFailed('missing_subcommand', 'Usage: metabot qanda <question|answer|like|search|latest|detail|answers> …');
   }
-  return commandUnknownSubcommand(`qanda ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`qanda ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

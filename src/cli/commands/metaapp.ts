@@ -1,16 +1,14 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import { normalizeMetaAppPinIdOrUri } from '../../core/metaapp/pinId';
 import { scaffoldMetaAppProject } from '../../core/metaapp/scaffold';
-import {
-  commandMissingFlag,
+import { commandMissingFlag,
   commandUnknownSubcommand,
   hasFlag,
   readChainWriteFlag,
   readFileUploadChainFlag,
   readFlagValue,
   readFromFlag,
-  readJsonFile,
-} from './helpers';
+  readJsonFile, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 const METAAPP_SEARCH_LIMIT_DEFAULT = 8;
@@ -526,5 +524,5 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
     });
   }
 
-  return commandUnknownSubcommand(`metaapp ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`metaapp ${redactSensitiveArgs(args).join(' ')}`.trim());
 }

@@ -1,5 +1,5 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandUnknownSubcommand, readFromFlag } from './helpers';
+import { commandUnknownSubcommand, readFromFlag, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 function readStringFlag(args: string[], flag: string): string | null {
@@ -84,5 +84,5 @@ export async function runWalletCommand(
     return handler({ ...(from ? { from } : {}), toAddress, amountRaw, confirm });
   }
 
-  return commandUnknownSubcommand(`wallet ${args.join(' ')}`.trim());
+  return commandUnknownSubcommand(`wallet ${redactSensitiveArgs(args).join(' ')}`.trim());
 }
