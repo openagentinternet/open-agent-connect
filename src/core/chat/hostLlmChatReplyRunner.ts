@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { createDefaultChatReplyRunner } from './defaultChatReplyRunner';
 import { DEFAULT_MAX_TURNS, unwrapPrivateChatContent } from './privateChatAutoReply';
 import { isPrivateChatNoReplySentinel, PRIVATE_CHAT_NO_REPLY_SENTINEL } from './privateChatLoopGuards';
+import { writePrivateChatTurnContext } from './privateChatInterimTurn';
 import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import type { LlmExecutionEvent, LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import {
@@ -302,6 +303,8 @@ function buildChatPrompt(
       '- Use ONLY the skills listed here, even if the host runtime offers other skills.',
       '- Skills may perform their documented actions (including on-chain writes, uploads, or sending messages) when the task calls for it — but never to send this chat reply itself (see Reply Delivery Boundary).',
       '- When skill execution actually starts, the host sends a brief wait notice to the peer automatically. Do not preface normal replies with wait notices, and do not repeat the notice as your final answer.',
+      '- Interim updates (bot-initiated messages): the chat workspace holds a host ticket file `.oac-private-chat-turn.json`. When a long-running task produces a partial result the peer should see now, deliver at most the ticketed number of short interim updates: write {"text": "..."} to a JSON file and run `metabot chat interim --turn-file "$PWD/.oac-private-chat-turn.json" --request-file <file>`. Each update is a few sentences at most, goes to this peer only, is never the final answer, and is never a "please wait" note (the host sends those).',
+      '- The final reply still comes from your final output only — interim updates never replace it.',
       '<available_skills>',
       ...skillLines,
       '</available_skills>',
@@ -719,6 +722,17 @@ export function createHostLlmChatReplyRunner(options?: {
       await fs.mkdir(chatWorkspaceDir, { recursive: true }).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         logWarning?.('[private chat workspace]', message);
+      });
+      // Bot-initiated interim messages (IDBots send_private_chat parity):
+      // issue the turn ticket the `metabot chat interim` command consumes.
+      // Ticket-gated on the daemon side, so best-effort here.
+      await writePrivateChatTurnContext({
+        workspaceDir: chatWorkspaceDir,
+        conversationId: input.conversation.conversationId,
+        peerGlobalMetaId: input.conversation.peerGlobalMetaId,
+      }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        logWarning?.('[private chat interim ticket]', message);
       });
     }
 

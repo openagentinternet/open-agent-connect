@@ -330,6 +330,11 @@ import {
   type A2ATranscriptItemRecord,
 } from '../core/a2a/sessionStateStore';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
+import {
+  CHAT_INTERIM_EXTENSION,
+  consumePrivateChatTurnQuota,
+  normalizeInterimMessageText,
+} from '../core/chat/privateChatInterimTurn';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus, type PublicStatus } from '../core/a2a/publicStatus';
@@ -17712,6 +17717,149 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : 50,
         );
         return commandSuccess({ messages });
+      },
+
+      interim: async (rawInput) => {
+        // Bot-initiated interim private-chat update (IDBots send_private_chat
+        // parity): gated by the host-issued turn ticket the reply runner
+        // wrote into the chat workspace. The recipient comes from the ticket,
+        // never from the request.
+        const turnFile = normalizeText(rawInput.turnFile);
+        if (!turnFile) {
+          return commandFailed('missing_turn_file', 'chat interim requires --turn-file pointing at the turn ticket.');
+        }
+        const textResult = normalizeInterimMessageText(rawInput.text);
+        if (!textResult.ok) {
+          return commandFailed('invalid_interim_text', textResult.error);
+        }
+        const quota = await consumePrivateChatTurnQuota({ turnFilePath: turnFile });
+        if (!quota.ok) {
+          const messages: Record<typeof quota.error, string> = {
+            ticket_not_found: 'No valid turn ticket at the given path — interim sends only work inside an active chat reply turn.',
+            ticket_expired: 'The turn ticket expired — interim sends only work inside the issuing reply turn.',
+            ticket_exhausted: 'The turn ticket has no interim sends left.',
+          };
+          return commandFailed('interim_' + quota.error, messages[quota.error]);
+        }
+        const ticket = quota.context;
+
+        const actor = await resolveActorChatContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before sending private chat.');
+        }
+        if (ticket.peerGlobalMetaId === state.identity.globalMetaId) {
+          return commandFailed('interim_self_send', 'The turn ticket does not address a peer conversation.');
+        }
+
+        let privateChatIdentity;
+        try {
+          privateChatIdentity = await actor.signer.getPrivateChatIdentity();
+        } catch (error) {
+          return commandFailed(
+            'identity_secret_missing',
+            error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.'
+          );
+        }
+
+        let peerChatPublicKey: string | null = null;
+        const outcome = await lookupPeerChatPublicKey(ticket.peerGlobalMetaId, {
+          chainApiBaseUrl: input.chainApiBaseUrl,
+        });
+        if (outcome.status === 'found') {
+          peerChatPublicKey = outcome.chatPublicKey;
+        }
+        if (!peerChatPublicKey) {
+          return commandFailed(
+            'peer_chat_public_key_lookup_unreachable',
+            'Could not resolve the peer chat public key for the interim send; please retry shortly.',
+            { data: { target: ticket.peerGlobalMetaId, errors: (outcome as { errors?: unknown }).errors } },
+          );
+        }
+
+        const extensions: Record<string, unknown> = { [CHAT_INTERIM_EXTENSION]: true };
+        const sent = sendPrivateChat({
+          fromIdentity: {
+            globalMetaId: privateChatIdentity.globalMetaId,
+            privateKeyHex: privateChatIdentity.privateKeyHex,
+          },
+          toGlobalMetaId: ticket.peerGlobalMetaId,
+          peerChatPublicKey,
+          content: JSON.stringify({ content: textResult.text, extensions }),
+        });
+        let chatWrite;
+        try {
+          chatWrite = await actor.signer.writePin({
+            operation: 'create',
+            path: sent.path,
+            encryption: sent.encryption,
+            version: sent.version,
+            contentType: sent.contentType,
+            payload: sent.payload,
+            encoding: 'utf-8',
+            network: 'mvc',
+          });
+        } catch (error) {
+          return commandFailed(
+            'chat_broadcast_failed',
+            error instanceof Error ? error.message : 'Failed to broadcast interim private chat to chain.'
+          );
+        }
+        const chatTxids = Array.isArray(chatWrite.txids)
+          ? chatWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+          : [];
+        const timestamp = Date.now();
+        const pinId = normalizeText(chatWrite.pinId) || null;
+
+        // Local records: the auto-reply state store (prompt history + echo
+        // guard see the delivered text) and the UI-facing A2A store.
+        await createPrivateChatStateStore(actor.runtimeStateStore.paths).appendMessages([{
+          conversationId: ticket.conversationId,
+          messageId: pinId || `interim-${timestamp}`,
+          direction: 'outbound',
+          senderGlobalMetaId: state.identity.globalMetaId,
+          content: textResult.text,
+          messagePinId: pinId,
+          extensions,
+          timestamp,
+        }]).catch(() => undefined);
+        await persistA2AConversationMessageBestEffort({
+          paths: actor.runtimeStateStore.paths,
+          local: {
+            profileSlug: path.basename(actor.runtimeStateStore.paths.profileRoot),
+            globalMetaId: state.identity.globalMetaId,
+            name: state.identity.name,
+            chatPublicKey: state.identity.chatPublicKey,
+          },
+          peer: {
+            globalMetaId: ticket.peerGlobalMetaId,
+            chatPublicKey: peerChatPublicKey,
+          },
+          message: {
+            messageId: pinId || `interim-${timestamp}`,
+            direction: 'outgoing',
+            content: textResult.text,
+            contentType: 'text/markdown',
+            pinId,
+            txid: chatTxids[0] || null,
+            txids: chatTxids,
+            chain: 'mvc',
+            timestamp,
+            deliveryStatus: 'sent',
+            raw: { interim: true },
+          },
+        }, a2aConversationPersister);
+
+        return commandSuccess({
+          sent: true,
+          peerGlobalMetaId: ticket.peerGlobalMetaId,
+          pinId,
+          txids: chatTxids,
+          remainingInterimSends: quota.context.remaining,
+        });
       },
 
       autoReplyStatus: async (rawInput = {}) => {

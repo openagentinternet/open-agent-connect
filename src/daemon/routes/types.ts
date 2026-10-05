@@ -218,6 +218,11 @@ export interface MetabotDaemonHttpHandlers {
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    interim?: (input: {
+      turnFile: string;
+      text: string;
+      from?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     privateConversation?: (input: {
       from?: string;
       peer: string;

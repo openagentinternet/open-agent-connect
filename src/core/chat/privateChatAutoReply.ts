@@ -22,6 +22,7 @@ import {
   type PrivateChatWakeRecord,
   type PrivateChatWakeStore,
 } from './privateChatWake';
+import { CHAT_INTERIM_EXTENSION } from './privateChatInterimTurn';
 import {
   persistA2AConversationMessageBestEffort,
   publishA2AConversationReplyState,
@@ -79,6 +80,16 @@ function isHostSilenceMarker(message: PrivateChatMessage): boolean {
       message.extensions?.[CHAT_NO_REPLY_EXTENSION] === true
       || message.extensions?.[CHAT_SILENT_TAIL_EXTENSION] === true
     ),
+  );
+}
+
+// Bot-initiated interim updates (ticket-gated, IDBots send_private_chat
+// parity): real delivered text for the peer, but never the turn's answer.
+// Staleness checks must not read them as "the final reply already went out".
+function isChatInterimMessage(message: PrivateChatMessage): boolean {
+  return Boolean(
+    message.direction === 'outbound'
+    && message.extensions?.[CHAT_INTERIM_EXTENSION] === true,
   );
 }
 
@@ -335,6 +346,7 @@ async function latestConversationMessageMatches(input: {
     && (
       message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true
       || isHostSilenceMarker(message)
+      || isChatInterimMessage(message)
     )
   ));
   return Boolean(latestSignificantMessage && latestSignificantMessage.messageId === input.expectedMessageId);
@@ -356,8 +368,9 @@ function checkRateLimit(rateLimiter: RateLimiterState, now: number): boolean {
 // answered, IDBots-style) or a non-notice outbound already answered it. Used
 // both to skip queued reply turns BEFORE paying for an LLM call and as the
 // commit-time staleness guard before sending. Host-side silence markers
-// (chatNoReply / chatSilentTail) never answer a message — a wake turn must
-// still be able to re-drive the tail they sit behind.
+// (chatNoReply / chatSilentTail) and ticket-gated interim updates never
+// answer a message — a wake turn must still be able to re-drive the tail
+// they sit behind.
 async function conversationMovedPastMessage(input: {
   stateStore: PrivateChatStateStore;
   conversationId: string;
@@ -374,6 +387,7 @@ async function conversationMovedPastMessage(input: {
       message.direction === 'outbound'
       && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] !== true
       && !isHostSilenceMarker(message)
+      && !isChatInterimMessage(message)
     )
   ));
 }

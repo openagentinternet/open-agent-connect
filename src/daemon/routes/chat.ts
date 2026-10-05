@@ -183,6 +183,29 @@ export const handleChatRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/chat/interim') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+    const body = await context.readJsonBody();
+    const turnFile = normalizeText(body.turnFile);
+    const text = typeof body.text === 'string' ? body.text : '';
+    if (!turnFile) {
+      context.sendJson(400, commandFailed('missing_turn_file', 'turnFile is required.'));
+      return true;
+    }
+    const result = handlers.chat?.interim
+      ? await handlers.chat.interim({
+          turnFile,
+          text,
+          from: normalizeText(body.from) || undefined,
+        })
+      : commandFailed('not_implemented', 'Chat interim handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname !== '/api/chat/private') {
     return false;
   }

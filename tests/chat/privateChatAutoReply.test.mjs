@@ -3118,3 +3118,46 @@ test('wake fires and echo blocks record local-only host status messages', async 
   assert.equal(echoHostStatus.length, 1);
   assert.match(echoHostStatus[0], /\[Host\] Reply withheld/);
 });
+
+test('a ticket-gated interim update does not count as the turn answer', async () => {
+  let releaseRunner;
+  const runnerGate = new Promise((resolve) => {
+    releaseRunner = resolve;
+  });
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    replyRunner: async () => {
+      await runnerGate;
+      return { state: 'reply', content: 'final answer after the interim update' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  const turn = harness.handleInbound({ messagePinId: 'pin-interim-1', content: 'please run the long check' });
+  // While the runner is still composing, the bot delivers a ticket-gated
+  // interim update (as `metabot chat interim` would record it).
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const stored = await harness.stateStore.getRecentMessages(conversationId, 20);
+    if (stored.some((message) => message.messageId === 'pin-interim-1')) break;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await harness.stateStore.appendMessages([{
+    conversationId,
+    messageId: 'interim-msg-1',
+    direction: 'outbound',
+    senderGlobalMetaId: harness.localGlobalMetaId,
+    content: 'partial result: the scan is halfway through',
+    messagePinId: 'interim-pin-1',
+    extensions: { chatInterim: true },
+    timestamp: now + 5_000,
+  }]);
+  releaseRunner();
+  await turn;
+
+  assert.equal(harness.writes.length, 1, 'the final reply must still be delivered after an interim update');
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.lastDirection, 'outbound');
+});

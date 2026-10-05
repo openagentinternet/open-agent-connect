@@ -20,6 +20,28 @@ function readPositiveIntFlag(args: string[], flag: string): number | 'invalid' |
 }
 
 export async function runChatCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
+  if (args[0] === 'interim') {
+    // Bot-initiated interim update inside an active chat reply turn: gated by
+    // the host-issued turn ticket (see privateChatInterimTurn.ts).
+    const turnFile = readFlagValue(args, '--turn-file');
+    const requestFile = readFlagValue(args, '--request-file');
+    if (!turnFile) {
+      return commandMissingFlag('--turn-file');
+    }
+    if (!requestFile) {
+      return commandMissingFlag('--request-file');
+    }
+    const handler = context.dependencies.chat?.interim;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Chat interim handler is not configured.');
+    }
+    const request = await readJsonFile(context, requestFile);
+    const text = typeof (request as { text?: unknown }).text === 'string'
+      ? (request as { text: string }).text
+      : '';
+    return handler({ turnFile, text });
+  }
+
   if (args[0] === 'private') {
     const requestFile = readFlagValue(args, '--request-file');
     if (!requestFile) {

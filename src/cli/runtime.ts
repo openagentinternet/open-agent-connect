@@ -4299,6 +4299,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           input,
         );
       },
+      interim: async (input) => {
+        // Bot-initiated interim updates ride the ticket-gated daemon route;
+        // inside a reply turn this is the ONLY sanctioned send surface (the
+        // plain private send above stays blocked there).
+        return requestJsonForSelectedActor(
+          'POST',
+          '/api/chat/interim',
+          typeof input.from === 'string' ? input.from : undefined,
+          input,
+        );
+      },
       conversations: async (input = {}) => {
         const params = new URLSearchParams();
         if (input.from) params.set('from', input.from);
