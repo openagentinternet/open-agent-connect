@@ -84,9 +84,13 @@ async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<vo
 }
 
 async function writeTextFileAtomic(filePath: string, text: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true });
   const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   await fs.writeFile(tmpPath, text, 'utf8');
+  // The directory may have been removed between mkdir and rename (a test
+  // tearing down its temp home while a background init is in flight).
+  await fs.mkdir(dir, { recursive: true });
   await fs.rename(tmpPath, filePath);
 }
 
@@ -148,14 +152,27 @@ export function createMetaTaskStore(
 
   /** events by pinId — the effective (last-wins) view of the jsonl files. */
   const eventsByPin = new Map<string, MetaTaskChainEvent>();
-  // Lazy init (mkdir + version stamp + event-file load): every method awaits
-  // it, so the factory stays synchronous for the daemon handler assembly.
-  const ready = (async (): Promise<void> => {
-    await fs.mkdir(eventsDir, { recursive: true });
-    await fs.mkdir(projectionsDir, { recursive: true });
-    await writeJsonFileAtomic(path.join(root, 'version.json'), { version: PROJECTION_FORMAT_VERSION });
-    await loadAllEvents();
-  })();
+  // Lazy init (mkdir + version stamp + event-file load), started on FIRST
+  // USE so constructing the daemon handler group alone performs no IO; every
+  // method awaits it, so the factory stays synchronous for the daemon handler
+  // assembly. A vanished root (temp-home teardown mid-init) degrades to an
+  // empty store instead of an unhandled rejection.
+  let readyPromise: Promise<void> | null = null;
+  const ready = (): Promise<void> => {
+    if (!readyPromise) {
+      readyPromise = (async (): Promise<void> => {
+        try {
+          await fs.mkdir(eventsDir, { recursive: true });
+          await fs.mkdir(projectionsDir, { recursive: true });
+          await writeJsonFileAtomic(path.join(root, 'version.json'), { version: PROJECTION_FORMAT_VERSION }).catch(() => undefined);
+          await loadAllEvents();
+        } catch {
+          // The root disappeared under us: operate on the in-memory view.
+        }
+      })();
+    }
+    return readyPromise;
+  };
 
   const segmentFile = (segment: string): string =>
     path.join(eventsDir, `${safeFileSegment(segment)}.jsonl`);
@@ -239,7 +256,7 @@ export function createMetaTaskStore(
     root,
 
     async upsertEvents(events) {
-      await ready;
+      await ready();
       if (events.length === 0) return 0;
       // Merge the whole batch in memory first: an anti-downgrade row keeps the
       // cached body, everything else refreshes; identical rows cost no write.
@@ -276,7 +293,7 @@ export function createMetaTaskStore(
     },
 
     async loadEvents() {
-      await ready;
+      await ready();
       return Array.from(eventsByPin.values());
     },
 
