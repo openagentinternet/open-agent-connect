@@ -13,6 +13,7 @@ exports.usageRecordHasTokens = usageRecordHasTokens;
 exports.resolveJsonProcessError = resolveJsonProcessError;
 exports.stringifyContent = stringifyContent;
 exports.hasArg = hasArg;
+exports.stripStreamPrefix = stripStreamPrefix;
 exports.runJsonLineProcess = runJsonLineProcess;
 const node_child_process_1 = require("node:child_process");
 const node_readline_1 = __importDefault(require("node:readline"));

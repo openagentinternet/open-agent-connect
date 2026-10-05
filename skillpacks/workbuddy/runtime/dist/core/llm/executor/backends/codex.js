@@ -216,7 +216,10 @@ function createCodexBackend(binaryPath, env) {
                         const status = getString(turn.status) ?? 'completed';
                         if (status === 'failed') {
                             finalStatus = 'failed';
-                            finalError = String(turn.error ?? 'codex turn failed');
+                            const turnError = isRecord(turn.error)
+                                ? getString(turn.error.message)
+                                : typeof turn.error === 'string' && turn.error ? turn.error : undefined;
+                            finalError = turnError ?? 'codex turn failed';
                         }
                         else if (['cancelled', 'aborted', 'interrupted'].includes(status)) {
                             finalStatus = 'cancelled';
@@ -227,14 +230,33 @@ function createCodexBackend(binaryPath, env) {
                         return;
                     }
                     if (method === 'thread/status/changed') {
-                        const status = isRecord(params) ? getString(params.status) : undefined;
+                        // Newer app-servers send the status as an object ({type: 'idle'}),
+                        // older ones as a plain string.
+                        const statusValue = isRecord(params) ? params.status : undefined;
+                        const status = getString(statusValue)
+                            ?? (isRecord(statusValue) ? getString(statusValue.type) : undefined);
                         if (turnStarted && status === 'idle')
                             resolveOnce();
                         return;
                     }
                     if (method === 'error') {
+                        const errorPayload = isRecord(params) ? params.error : undefined;
+                        const message = (isRecord(errorPayload) ? getString(errorPayload.message) : undefined)
+                            ?? (isRecord(params) ? getString(params.message) : undefined)
+                            ?? 'codex error';
+                        // Reconnect notifications ("Reconnecting... 2/5") carry
+                        // willRetry at the params level and precede a retry, not a
+                        // terminal verdict; keep the turn alive for the retry instead
+                        // of failing on the first transient error.
+                        const willRetry = (isRecord(params) && params.willRetry === true)
+                            || (isRecord(errorPayload) && errorPayload.willRetry === true);
+                        if (willRetry) {
+                            emitter.emit({ type: 'log', level: 'warning', message });
+                            resetSemanticTimer();
+                            return;
+                        }
                         finalStatus = 'failed';
-                        finalError = isRecord(params) ? String(params.message ?? 'codex error') : 'codex error';
+                        finalError = message;
                         emitter.emit({ type: 'error', message: finalError });
                         resolveOnce();
                     }

@@ -7,6 +7,7 @@ exports.findExecutableInPath = findExecutableInPath;
 exports.findExecutablesInPath = findExecutablesInPath;
 exports.readExecutableVersion = readExecutableVersion;
 exports.probeExecutableVersion = probeExecutableVersion;
+exports.cliVersionAtLeast = cliVersionAtLeast;
 exports.readinessSemanticInactivityTimeoutForProvider = readinessSemanticInactivityTimeoutForProvider;
 exports.defaultRuntimeReadinessProbe = defaultRuntimeReadinessProbe;
 exports.discoverProvider = discoverProvider;
@@ -329,6 +330,55 @@ function detectAuthState(authEnv, env) {
     }
     return 'unknown';
 }
+/**
+ * Parses the leading dotted numeric version (`v`-prefixed, any segment count)
+ * into comparable segments. Returns null for values without a numeric core.
+ */
+function parseNumericVersionSegments(value) {
+    const match = value.trim().match(/^v?(\d+(?:\.\d+)+)/);
+    return match ? match[1].split('.').map(Number) : null;
+}
+function cliVersionBelowMinimum(actual, minimum) {
+    if (!actual)
+        return false;
+    const actualSegments = parseNumericVersionSegments(actual);
+    const minimumSegments = parseNumericVersionSegments(minimum);
+    // An unparsable version on either side fails open: the runtime keeps the
+    // pre-gate discovery behavior instead of going offline on a guess.
+    if (!actualSegments || !minimumSegments)
+        return false;
+    const length = Math.max(actualSegments.length, minimumSegments.length);
+    for (let index = 0; index < length; index += 1) {
+        const actualPart = actualSegments[index] ?? 0;
+        const minimumPart = minimumSegments[index] ?? 0;
+        if (actualPart !== minimumPart)
+            return actualPart < minimumPart;
+    }
+    return false;
+}
+/**
+ * Version floor check shared with the model catalog (e.g. the codex
+ * `debug models` gate). Unparsable versions fail open, mirroring the
+ * minimum-version gate semantics.
+ */
+function cliVersionAtLeast(actual, minimum) {
+    return !cliVersionBelowMinimum(actual, minimum);
+}
+/**
+ * Minimum-CLI-version gate (mirrors multica's BelowMinimumError semantics): a
+ * parsed-but-below-floor version produces an unavailable health reason with an
+ * upgrade hint so users see an actionable message instead of a cryptic
+ * protocol failure. Readiness is not attempted for gated runtimes.
+ */
+function minimumCliVersionGateReason(provider, version) {
+    if (!(0, platformRegistry_1.isRuntimePlatformId)(provider))
+        return undefined;
+    const platform = (0, platformRegistry_1.getRuntimePlatformDefinition)(provider);
+    const minimum = platform.runtime.minimumCliVersion;
+    if (!minimum || !cliVersionBelowMinimum(version, minimum))
+        return undefined;
+    return `${platform.displayName} ${version ?? ''} is below the minimum supported version ${minimum}. Upgrade ${platform.displayName} to ${minimum} or newer.`;
+}
 function compactEnv(env) {
     return Object.fromEntries(Object.entries(env).filter((entry) => typeof entry[1] === 'string'));
 }
@@ -586,6 +636,16 @@ async function discoverProvider(provider, pathDirs, options) {
             continue;
         }
         const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(provider), processEnv.env);
+        const minimumGateReason = minimumCliVersionGateReason(provider, versionProbe.version);
+        if (minimumGateReason) {
+            // A gated binary is reported unavailable with the upgrade hint; keep
+            // scanning so a newer candidate binary elsewhere still wins.
+            firstUnavailableCandidate ??= {
+                binaryPath,
+                versionProbe: { ...versionProbe, ok: false, message: minimumGateReason },
+            };
+            continue;
+        }
         if (versionProbe.ok) {
             const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
             const knownRuntime = options?.knownRuntimesById?.get(runtime.id);
@@ -695,6 +755,14 @@ async function testLlmRuntimeReadiness(runtime, options) {
             ...probedRuntime,
             health: 'unavailable',
             healthReason: versionProbe.message ?? 'Version probe failed.',
+        };
+    }
+    const minimumGateReason = minimumCliVersionGateReason(runtime.provider, versionProbe.version);
+    if (minimumGateReason) {
+        return {
+            ...probedRuntime,
+            health: 'unavailable',
+            healthReason: minimumGateReason,
         };
     }
     const readinessProbe = options?.readinessProbe ?? defaultRuntimeReadinessProbe;

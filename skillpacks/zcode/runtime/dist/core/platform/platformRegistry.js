@@ -52,6 +52,9 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['ANTHROPIC_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            // The stdin stream-json prompt channel and --disallowedTools need the 2.x
+            // CLI line (floor mirrors multica's MinVersions).
+            minimumCliVersion: '2.0.0',
             probeHints: {
                 readinessTimeoutMs: 45_000,
                 semanticInactivityTimeoutMs: 45_000,
@@ -79,7 +82,7 @@ exports.PLATFORM_DEFINITIONS = [
         executor: {
             kind: 'claude-stream-json',
             backendFactoryExport: 'claudeBackendFactory',
-            launchCommand: 'claude -p --output-format stream-json',
+            launchCommand: 'claude -p --output-format stream-json --input-format stream-json',
             multicaReferencePath: 'agent/claude.go',
         },
     },
@@ -92,6 +95,8 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['OPENAI_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            // `codex app-server --listen stdio://` landed in 0.100.0.
+            minimumCliVersion: '0.100.0',
             probeHints: {
                 readinessTimeoutMs: 45_000,
                 semanticInactivityTimeoutMs: 45_000,
@@ -132,6 +137,7 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['GITHUB_TOKEN', 'GH_TOKEN'],
             capabilities: DEFAULT_CAPABILITIES,
+            minimumCliVersion: '1.0.0',
         },
         skills: {
             roots: [
@@ -154,6 +160,9 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['OPENCODE_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            // Older OpenCode builds grow unbounded logs and fill the host disk
+            // (multica #8392); 1.1.54 is the fixed line.
+            minimumCliVersion: '1.1.54',
         },
         skills: {
             roots: [
@@ -177,6 +186,7 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['OPENCLAW_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            minimumCliVersion: '2026.5.5',
             nodeRuntime: { minimumVersion: '22.14.0' },
         },
         skills: {
@@ -391,7 +401,7 @@ exports.PLATFORM_DEFINITIONS = [
         executor: {
             kind: 'codebuddy-stream-json',
             backendFactoryExport: 'codeBuddyBackendFactory',
-            launchCommand: 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions',
+            launchCommand: 'codebuddy -p --output-format stream-json --input-format stream-json --permission-mode bypassPermissions',
             multicaReferencePath: 'agent/codebuddy.go',
         },
     },
@@ -456,8 +466,8 @@ exports.PLATFORM_DEFINITIONS = [
         executor: {
             kind: 'codebuddy-stream-json',
             backendFactoryExport: 'codeBuddyBackendFactory',
-            launchCommand: 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions',
-            multicaReferencePath: 'agent/workbuddy.go',
+            launchCommand: 'codebuddy -p --output-format stream-json --input-format stream-json --permission-mode bypassPermissions',
+            multicaReferencePath: 'agent/codebuddy.go',
         },
     },
     {

@@ -44,6 +44,12 @@ export declare function findExecutableInPath(name: string, pathDirs?: string[]):
 export declare function findExecutablesInPath(name: string, pathDirs?: string[]): Promise<string[]>;
 export declare function readExecutableVersion(binaryPath: string, versionArgs?: string[], timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<string | undefined>;
 export declare function probeExecutableVersion(binaryPath: string, versionArgs?: string[], timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<ExecutableVersionProbe>;
+/**
+ * Version floor check shared with the model catalog (e.g. the codex
+ * `debug models` gate). Unparsable versions fail open, mirroring the
+ * minimum-version gate semantics.
+ */
+export declare function cliVersionAtLeast(actual: string | undefined, minimum: string): boolean;
 export declare function readinessSemanticInactivityTimeoutForProvider(provider: LlmProvider, readinessTimeoutMs: number): number;
 /**
  * Test seam: `deps` lets tests substitute provider backends, so the default

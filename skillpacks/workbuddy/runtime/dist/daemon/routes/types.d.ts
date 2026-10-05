@@ -4,7 +4,7 @@ import type { BrowserHttpHandlers } from '../../browser/http';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { MetaAppStageEvent } from '../../core/metaapp/stageEvents';
 export type Awaitable<T> = T | Promise<T>;
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'conversations' | 'services' | 'apps' | 'settings' | 'kb' | 'surf' | 'memory' | 'schedule' | 'traffic' | 'dream' | 'metaapps' | 'browser';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'conversations' | 'services' | 'apps' | 'settings' | 'kb' | 'surf' | 'memory' | 'schedule' | 'tracking' | 'traffic' | 'dream' | 'metaapps' | 'browser';
 export interface ServiceRefundSyncResponse {
     scanned: {
         requestPins: number;
@@ -117,6 +117,7 @@ export interface MetabotDaemonHttpHandlers {
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         publishSpec?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         amend?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        watch?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     surf?: {
         status?: (input: {
