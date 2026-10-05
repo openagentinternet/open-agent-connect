@@ -82,6 +82,18 @@ test('detail root is the drawer positioning context; the drawer body is the righ
   assert.match(styles, /\.oac-mt-detail \.oac-gt-drawer-body \{[^}]*margin-left: auto/)
   assert.match(styles, /\.oac-mt-detail \.oac-gt-drawer-body \{[^}]*width: min\(460px, 94%\)/)
   assert.match(styles, /oac-mt-drawer-in/)
+  // No gray dimming over the page; the veil is a transparent click-catcher
+  // and the panel itself is opaque (real DSH surface token).
+  assert.match(styles, /\.oac-mt-detail \.oac-gt-drawer-veil \{[^}]*background: transparent/)
+  assert.match(styles, /\.oac-mt-detail \.oac-gt-drawer-body \{[^}]*background: var\(--dsw-alias-bg-layer-1\)/)
+})
+
+test('TRACKING_CSS uses real DSH theme tokens (no dead --dsw-alias variables)', async () => {
+  const styles = await read('src/client/styles.ts')
+  const tracking = styles.slice(styles.indexOf('export const TRACKING_CSS'))
+  for (const dead of ['--dsw-alias-fill-card', '--dsw-alias-line-border-card', '--dsw-alias-brand-standard', '--dsw-alias-fill-secondary', '--dsw-alias-fill-prompt']) {
+    assert.ok(!tracking.includes(dead), `TRACKING_CSS still uses dead token ${dead}`)
+  }
 })
 
 test('detail blocks are carded; roster/settlement render as full-width styled tables', async () => {
@@ -98,6 +110,35 @@ test('chain view re-glues edges on horizontal scroll and sizes the SVG to the co
   assert.match(chain, /addEventListener\('scroll', redraw/)
   assert.match(chain, /scrollWidth/)
   assert.match(chain, /scrollHeight/)
+  // IDBots geometry: the SVG is a child of the w-max columns canvas, so the
+  // overlay scrolls literally with the cards and cannot drift.
+  assert.match(chain, /className="oac-mt-columns" ref=\{canvasRef\}/)
+  const columnsOpen = chain.indexOf('className="oac-mt-columns"')
+  const svgOpen = chain.indexOf('className="oac-mt-edges"')
+  assert.ok(svgOpen > columnsOpen, 'svg must render INSIDE the columns canvas')
+})
+
+test('detail header: back button on its own row, IDBots meta line', async () => {
+  const styles = await read('src/client/styles.ts')
+  assert.match(styles, /\.oac-mt-detail-head \{[^}]*flex-direction: column/)
+  assert.match(styles, /oac-mt-back/)
+  assert.match(styles, /oac-mt-meta/)
+  const detail = await read('src/client/metatask/MetataskDetail.tsx')
+  assert.match(detail, /className="oac-mt-back"/)
+  assert.match(detail, /className="oac-mt-meta"/)
+  assert.match(detail, /mtProgressVerified/)
+})
+
+test('node sections: collapsible per-node cards (IDBots structure, no outer wrapper)', async () => {
+  const nodes = await read('src/client/metatask/NodeSections.tsx')
+  assert.match(nodes, /oac-mt-nodesection-head/)
+  assert.match(nodes, /oac-mt-chevron/)
+  assert.match(nodes, /useState<Set<string>>/)
+  const styles = await read('src/client/styles.ts')
+  assert.match(styles, /oac-mt-headtag-winner/)
+  assert.match(styles, /oac-mt-node-cand-gold/)
+  const detail = await read('src/client/metatask/MetataskDetail.tsx')
+  assert.doesNotMatch(detail, /<div className="oac-mt-sectioncard">\s*<NodeSections/)
 })
 
 test('daemon serves merged identities: task/board handlers stamp the freshest store identities', async () => {

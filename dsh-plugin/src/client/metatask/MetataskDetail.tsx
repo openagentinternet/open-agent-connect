@@ -278,64 +278,49 @@ export function MetataskDetail(
   return (
     <div className="oac-mt-detail">
       <div className="oac-mt-detail-head">
-        <button type="button" className="oac-mt-btn" onClick={onBack}>← {mt('mtBackToBoard')}</button>
-        <div className="oac-mt-titleblock">
-          <div className="oac-mt-titleline">
-            <span className="oac-mt-title">{task.title}</span>
-            <span className={`oac-mt-badge oac-mt-badge-${taskLifecycleOf({ settlementFinalized: Boolean(task.settlement), taskComplete: task.taskComplete })}`}>{lifecycle}</span>
-            <span className="oac-mt-chip">{policy.mode === 'competitive' ? mt('mtModeCompetitive') : mt('mtModeTree')}</span>
-            <span className="oac-mt-chip oac-mt-mono">{progress.verified}/{progress.total}</span>
-          </div>
-          {task.brief && (
-            <p className={`oac-mt-brief ${briefOpen ? '' : 'oac-mt-brief-clamp'}`} onClick={() => { setBriefOpen((value) => !value) }}>
-              {task.brief}
-            </p>
+        <button type="button" className="oac-mt-back" onClick={onBack}>← {mt('mtBackToBoard')}</button>
+        <div className="oac-mt-titleline">
+          <span className="oac-mt-title">{task.title}</span>
+          <span className={`oac-mt-badge oac-mt-badge-${taskLifecycleOf({ settlementFinalized: Boolean(task.settlement), taskComplete: task.taskComplete })}`}>{lifecycle}</span>
+          <span className="oac-mt-chip">{policy.mode === 'competitive' ? mt('mtModeCompetitive') : mt('mtModeTree')}</span>
+          {!task.taskComplete && props.metataskDraft && (
+            <button type="button" className="oac-mt-btn oac-mt-btn-sm oac-mt-btn-primary oac-mt-head-join"
+              onClick={() => { draftFor() }}>
+              {mt('mtParticipate')}
+            </button>
           )}
-          <div className="oac-mt-facts">
-            <span>{mt('mtPublisher')} <MtBadge metaId={task.publisher} name={identityOf(task.publisher).name} avatar={identityOf(task.publisher).avatar} /></span>
-            <span>{mt('mtPolicyFacts', {
-              quorum: policy.verifyQuorum,
-              sigma: policy.submitterShareBP,
-              reward: policy.rewardSat,
-              mode: policy.mode === 'competitive' ? mt('mtModeCompetitive') : mt('mtModeTree'),
-              final: policy.finalNode ?? '—',
-            })}</span>
-            <span className="oac-mt-mono">{task.freshness.eventCount} {mt('mtEvents')} @{task.freshness.boundaryBlock}</span>
-            {task.lastActivityMs > 0 && <span>{relativeTime(task.lastActivityMs, mt)}</span>}
-          </div>
         </div>
+        <div className="oac-mt-meta">
+          <span className="oac-mt-card-pub"><MtBadge metaId={task.publisher} name={identityOf(task.publisher).name} avatar={identityOf(task.publisher).avatar} /></span>
+          <span className="oac-mt-sep">·</span>
+          <span>{mt('mtProgressVerified', { verified: progress.verified, total: progress.total })}</span>
+          {task.lastActivityMs > 0 && (
+            <>
+              <span className="oac-mt-sep">·</span>
+              <span>{mt('mtLastActive', { when: relativeTime(task.lastActivityMs, mt) })}</span>
+            </>
+          )}
+          <span className="oac-mt-sep">·</span>
+          <span className="oac-mt-mono">{mt('mtEventCount', { count: task.freshness.eventCount })} @{task.freshness.boundaryBlock}</span>
+        </div>
+        {task.brief && (
+          <p className={`oac-mt-brief ${briefOpen ? '' : 'oac-mt-brief-clamp'}`} onClick={() => { setBriefOpen((value) => !value) }}>
+            {task.brief}
+          </p>
+        )}
       </div>
 
       {policy.mode === 'competitive' && (
-        <>
-          <div className="oac-mt-explainer">
-            <b>{mt('mtRulesTitle')}</b>
-            <span className="oac-mt-explainer-sep">·</span>
-            <span>{mt('mtRulesRace')}</span>
-            <span className="oac-mt-explainer-sep">·</span>
-            {mt('mtRulesGoldA')}<span className="oac-mt-gold-word">{mt('mtRulesGoldWord')}</span>{mt('mtRulesGoldB')}
-            <span className="oac-mt-explainer-sep">·</span>
-            {mt('mtRulesRaceA')}<span className="oac-mt-sky-word">{mt('mtRulesRaceWord')}</span>{mt('mtRulesRaceB')}
-          </div>
-          <div className="oac-mt-statusline">
-            <span className="oac-mt-status-item">
-              <i className="oac-mt-dot-gold" />
-              <b>{mt('mtStatusVerified')}</b>
-              <code>{chainText}</code>
-              <span className="oac-mt-dim">({chainNodeIds.length}/{Object.keys(task.nodeStates).length})</span>
-            </span>
-            <span className="oac-mt-status-item">
-              <i className="oac-mt-dot-sky" />
-              <b>{mt('mtStatusFront')}</b>
-              <code className={frontText ? '' : 'oac-mt-dim'}>
-                {frontText ?? (task.taskComplete ? mt('mtStatusSettled') : mt('mtStatusFrontNone'))}
-              </code>
-            </span>
-          </div>
-        </>
-      )}
-      {policy.mode === 'tree' && (
-        <div className="oac-mt-rules">{mt('mtRulesTree')}</div>
+        <div className="oac-mt-sectioncard">
+          <Deliverables
+            mt={mt}
+            task={task}
+            identityOf={identityOf}
+            byPin={byPin}
+            youLabel={youLabel}
+            onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
+          />
+        </div>
       )}
 
       {!task.taskComplete && openNodes.length > 0 && (
@@ -386,22 +371,33 @@ export function MetataskDetail(
         </section>
       )}
 
-      {policy.mode === 'competitive' && (
-        <div className="oac-mt-sectioncard">
-          <Deliverables
-            mt={mt}
-            task={task}
-            identityOf={identityOf}
-            byPin={byPin}
-            youLabel={youLabel}
-            onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
-          />
-        </div>
-      )}
-
       {policy.mode === 'competitive'
         ? (
           <div className="oac-mt-sectioncard">
+            <div className="oac-mt-explainer">
+              <b>{mt('mtRulesTitle')}</b>
+              <span className="oac-mt-explainer-sep">·</span>
+              <span>{mt('mtRulesRace')}</span>
+              <span className="oac-mt-explainer-sep">·</span>
+              {mt('mtRulesGoldA')}<span className="oac-mt-gold-word">{mt('mtRulesGoldWord')}</span>{mt('mtRulesGoldB')}
+              <span className="oac-mt-explainer-sep">·</span>
+              {mt('mtRulesRaceA')}<span className="oac-mt-sky-word">{mt('mtRulesRaceWord')}</span>{mt('mtRulesRaceB')}
+            </div>
+            <div className="oac-mt-statusline">
+              <span className="oac-mt-status-item">
+                <i className="oac-mt-dot-gold" />
+                <b>{mt('mtStatusVerified')}</b>
+                <code>{chainText}</code>
+                <span className="oac-mt-dim">({chainNodeIds.length}/{Object.keys(task.nodeStates).length})</span>
+              </span>
+              <span className="oac-mt-status-item">
+                <i className="oac-mt-dot-sky" />
+                <b>{mt('mtStatusFront')}</b>
+                <code className={frontText ? '' : 'oac-mt-dim'}>
+                  {frontText ?? (task.taskComplete ? mt('mtStatusSettled') : mt('mtStatusFrontNone'))}
+                </code>
+              </span>
+            </div>
             <ChainView
               mt={mt}
               task={task}
@@ -416,33 +412,34 @@ export function MetataskDetail(
           </div>
         )
         : (
-          <div className="oac-mt-nodetable">
-            {Object.values(task.nodeStates).map((node) => (
-              <div key={node.id} className="oac-mt-node-row">
-                <span className={`oac-mt-dot oac-mt-dot-${node.status}`} />
-                <span className="oac-mt-node-id">{node.id}</span>
-                <span className="oac-mt-node-title">{node.title}</span>
-                <span className="oac-mt-chip">{node.status}{node.disputed ? ` · ${mt('mtDisputed')}` : ''}</span>
-                <span className="oac-mt-chip">{mt('mtWeight', { weight: node.weight ?? 0 })}</span>
-                <span className="oac-mt-chip">{node.holder ? nameOf(node.holder.claimant) : node.submission ? nameOf(node.submission.submitter) : '—'}</span>
-              </div>
-            ))}
+          <div className="oac-mt-sectioncard">
+            <div className="oac-mt-rules">{mt('mtRulesTree')}</div>
+            <div className="oac-mt-nodetable">
+              {Object.values(task.nodeStates).map((node) => (
+                <div key={node.id} className="oac-mt-node-row">
+                  <span className={`oac-mt-dot oac-mt-dot-${node.status}`} />
+                  <span className="oac-mt-node-id">{node.id}</span>
+                  <span className="oac-mt-node-title">{node.title}</span>
+                  <span className="oac-mt-chip">{node.status}{node.disputed ? ` · ${mt('mtDisputed')}` : ''}</span>
+                  <span className="oac-mt-chip">{mt('mtWeight', { weight: node.weight ?? 0 })}</span>
+                  <span className="oac-mt-chip">{node.holder ? nameOf(node.holder.claimant) : node.submission ? nameOf(node.submission.submitter) : '—'}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
       {policy.mode === 'competitive' && (
-        <div className="oac-mt-sectioncard">
-          <NodeSections
-            mt={mt}
-            task={task}
-            byPin={byPin}
-            winningSet={winningSet}
-            identityOf={identityOf}
-            rosterIds={rosterIds}
-            youLabel={youLabel}
-            onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
-          />
-        </div>
+        <NodeSections
+          mt={mt}
+          task={task}
+          byPin={byPin}
+          winningSet={winningSet}
+          identityOf={identityOf}
+          rosterIds={rosterIds}
+          youLabel={youLabel}
+          onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
+        />
       )}
 
       <RosterSettlement mt={mt} task={task} identityOf={identityOf} rosterIds={rosterIds} youLabel={youLabel} />
