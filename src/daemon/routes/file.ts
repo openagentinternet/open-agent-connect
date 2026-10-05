@@ -9,6 +9,8 @@ import type { RouteHandler } from './types';
 const AVATAR_ROUTE_PATH = '/api/file/avatar';
 const FILE_UPLOAD_ROUTE_PATH = '/api/file/upload';
 const FILE_UPLOAD_LARGE_ROUTE_PATH = '/api/file/upload-large';
+/** Literal sub-paths owned by the routes above — never metafile references. */
+const FILE_PROXY_RESERVED_REFS = new Set(['upload', 'avatar', 'upload-large']);
 const FILE_UPLOAD_TEMP_PREFIX = 'oac-file-upload-';
 const FILE_UPLOAD_DEFAULT_FILE_NAME = 'upload.bin';
 const FILE_UPLOAD_MAX_LABEL = '50 MiB';
@@ -270,7 +272,7 @@ async function serveMetafileProxyRoute(context: Parameters<RouteHandler>[0]): Pr
     return false;
   }
   const reference = decodeURIComponent(url.pathname.slice('/api/file/'.length));
-  if (!reference || reference === 'upload' || reference === 'avatar') {
+  if (!reference || FILE_PROXY_RESERVED_REFS.has(reference)) {
     return false;
   }
   if (req.method !== 'GET') {

@@ -8078,6 +8078,27 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     : null;
   void metataskTickLoop;
 
+  // MetaTask watch heartbeat (IDBots metatask.watch parity): local alert checks
+  // (claim TTL soon / submission changes / closing drive) over the refreshed
+  // projections; 10-min cadence, one boot pass, alerts decay after 48h and are
+  // deduped per kind+node (regression-pinned in tests/metatask/watch.test.mjs).
+  const metataskWatchTickLoop = handlers.metatask?.watch
+    ? startAutomationTickLoop(
+      async () => {
+        const result = await handlers.metatask!.watch!({});
+        if (result.ok !== true && result.state === 'failed') {
+          groupTaskEngineLog(`[MetaTask] watch tick failed: ${result.message ?? 'unknown error'}`);
+        }
+      },
+      {
+        tickMs: 10 * 60_000,
+        bootDelayMs: 120_000,
+        log: (message) => groupTaskEngineLog(message),
+      },
+    )
+    : null;
+  void metataskWatchTickLoop;
+
   const dreamAutomationTickLoop = handlers.dream && handlers.memory && handlers.surf
     ? startAutomationTickLoop(
       () => runDreamAutomationTick({

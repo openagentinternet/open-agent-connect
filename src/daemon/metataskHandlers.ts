@@ -18,6 +18,7 @@ import {
 import { replayMetaTask } from '../core/metatask/engine/engine';
 import { estimateMetaTaskShares } from '../core/metatask/engine/estimate';
 import { H_ACT3 } from '../core/metatask/engine/constants';
+import { MetaTaskWatchService } from '../core/metatask/watch';
 import { MetaTaskRefresher } from '../core/metatask/refresher';
 import { createMetaTaskStore, type MetaTaskStore } from '../core/metatask/store';
 import {
@@ -48,6 +49,8 @@ export interface MetaTaskDaemonHandlers {
   publish: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   publishSpec: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   amend: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  /** Internal: the watch heartbeat (not routed over HTTP today). */
+  watch: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 
 function normalizeText(value: unknown): string {
@@ -128,6 +131,18 @@ export function createMetaTaskDaemonHandlers(input: {
     store: () => store,
     rosterMetaIds: () => rosterIds,
     minIntervalMs: input.minIntervalMs ?? 60_000,
+  });
+  // The watch heartbeat shares the refresher's store and roster: alerts are
+  // display-only rows in the same board payload both UIs read.
+  const watcher = new MetaTaskWatchService({
+    store: () => store,
+    rosterMetaIds: async () => {
+      await loadRoster();
+      return rosterIds;
+    },
+    onAlerts: (alerts) => {
+      input.log?.(`[metatask] ${alerts.length} new alert(s): ${alerts.map((alert) => alert.kind).join(', ')}`);
+    },
   });
   // The H_ACT3 write gate reads the boundary block from the same refresh state
   // the board reports; refreshed lazily per write call.
@@ -232,6 +247,20 @@ export function createMetaTaskDaemonHandlers(input: {
       return commandFailed(
         'metatask_write_failed',
         error instanceof Error ? error.message : 'MetaTask write failed.'
+      );
+    }
+  };
+
+  const runWatchTick = async (): Promise<MetabotCommandResult<unknown>> => {
+    try {
+      await loadRoster();
+      await watcher.run(Date.now());
+      return commandSuccess({ ok: true });
+    } catch (error) {
+      input.log?.(`[metatask] watch tick failed: ${error instanceof Error ? error.message : String(error)}`);
+      return commandFailed(
+        'metatask_watch_failed',
+        error instanceof Error ? error.message : 'MetaTask watch tick failed.'
       );
     }
   };
@@ -426,5 +455,7 @@ export function createMetaTaskDaemonHandlers(input: {
         ops: Array.isArray(rawInput.ops) ? (rawInput.ops as Array<Record<string, unknown>>) : [],
       }));
     },
+
+    watch: () => runWatchTick(),
   };
 }
