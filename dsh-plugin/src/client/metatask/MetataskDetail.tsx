@@ -1,8 +1,11 @@
 /**
- * MetaTask detail (F4 + F6): header with policy facts, the deliverables
- * section (competitive), the race explainer + chain status line, the chain
- * view (competitive) or the classic node table (tree), node requirement
- * sections, roster and settlement tables. Hosts the candidate drawer state.
+ * MetaTask detail — full-fidelity port of IDBots' MetaTaskDetail: header
+ * (title, lifecycle badge, brief, policy facts, publisher identity), the
+ * race explainer + chain status line, how-to-join chips (draft handoff only),
+ * the local-bot activity strip, deliverables, the chain view (competitive)
+ * or classic node rows (tree), node requirement sections, roster + settlement,
+ * ignored events, and the candidate drawer. Renderer-only: every state comes
+ * from the daemon projection.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
@@ -11,13 +14,15 @@ import {
   raceFrontTip,
   shortMetaId,
   shortPin,
+  taskLifecycleOf,
 } from '../../metatask-logic.js'
-import { ChainView } from './ChainView.tsx'
+import { ChainView, type IdentityOf } from './ChainView.tsx'
 import { CandidateDrawer, type DrawerCandidate } from './CandidateDrawer.tsx'
 import { Deliverables } from './Deliverables.tsx'
+import { MtBadge } from './MtBadge.tsx'
 import { NodeSections } from './NodeSections.tsx'
 import { RosterSettlement } from './RosterSettlement.tsx'
-import type { MetataskApi, MetataskBoardLocale } from './MetataskBoard.tsx'
+import type { BoardData, MetataskApi, MetataskBoardLocale } from './MetataskBoard.tsx'
 
 export interface TaskNodeState {
   id: string
@@ -92,9 +97,21 @@ export interface TaskProjection {
     engineAlgoVersion: string
     boundaryBlock: number
   } | null
+  estimation?: { basis: string; shares: { metaId: string; shareBP: number; from: { submittedBP: number; reviewedBP: number } }[] } | null
   freshness: { boundaryBlock: number; evaluatedAtMs: number; eventCount: number; eventSetHash: string; expiryApplied: boolean }
   lastActivityMs: number
   ignoredEvents: { pinId: string; reason: string }[]
+}
+
+const relativeTime = (ms: number, mt: (key: string, vars?: Record<string, string | number>) => string): string => {
+  if (!ms) return '—'
+  const delta = Date.now() - ms
+  const minutes = Math.round(delta / 60_000)
+  if (minutes < 1) return mt('mtJustNow')
+  if (minutes < 60) return mt('mtMinutesAgo', { count: minutes })
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return mt('mtHoursAgo', { count: hours })
+  return mt('mtDaysAgo', { count: Math.round(hours / 24) })
 }
 
 export function MetataskDetail(
@@ -105,10 +122,12 @@ export function MetataskDetail(
   },
 ): ReactNode {
   const { mt, root, onBack } = props
-  const metataskTask = props.mtApi?.metataskTask
+  const metataskTask = props.mtApi?.metataskTask ?? props.metataskTask
   const [task, setTask] = useState<TaskProjection | null>(null)
+  const [rosterIds, setRosterIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [drawer, setDrawer] = useState<{ pinId: string } | null>(null)
+  const [briefOpen, setBriefOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (!metataskTask) return
@@ -121,6 +140,19 @@ export function MetataskDetail(
   }, [metataskTask, root])
 
   useEffect(() => { void load() }, [load])
+  // The board payload carries the local roster (for the YOU chips); it is
+  // cheap (store-cached) and only needed once per detail visit.
+  useEffect(() => {
+    let alive = true
+    void props.metataskBoard(false)
+      .then((data) => {
+        if (!alive) return
+        const board = data as BoardData
+        setRosterIds(new Set(board.localRosterMetaIds ?? []))
+      })
+      .catch(() => { /* roster chips degrade to no-YOU */ })
+    return () => { alive = false }
+  }, [props.metataskBoard])
 
   const byPin = useMemo(
     () => candidatesByPin(Object.values(task?.nodeStates ?? {})),
@@ -136,13 +168,83 @@ export function MetataskDetail(
     [task],
   )
 
+  const identityOf = useCallback<IdentityOf>((metaId) => {
+    const identity = task?.identities[metaId]
+    return { name: identity?.name ?? null, avatar: identity?.avatar ?? null }
+  }, [task])
+
+  const nameOf = (metaId: string): string =>
+    task?.identities[metaId]?.name || shortMetaId(metaId)
+
+  const youLabel = mt('mtYou')
+
   if (error) return <div className="oac-mt-empty">{mt('mtLoadError', { message: error })}</div>
   if (!task) return <div className="oac-mt-empty">{mt('mtLoading')}</div>
 
   const { policy, progress } = task
-  const verifiedChain = (task.settlement?.winningChain ?? [])
-  const nameOf = (metaId: string): string => task.identities[metaId]?.name || shortMetaId(metaId)
-  const drawerCandidate = drawer ? byPin.get(drawer.pinId) ?? null : null
+  const lifecycle = mt(`mtLifecycle${taskLifecycleOf({ settlementFinalized: Boolean(task.settlement), taskComplete: task.taskComplete }).charAt(0).toUpperCase()}${taskLifecycleOf({ settlementFinalized: Boolean(task.settlement), taskComplete: task.taskComplete }).slice(1)}`)
+  const depths = new Map<string, number>()
+  for (const node of Object.values(task.nodeStates)) {
+    let depth = 0
+    const seen = new Set<string>()
+    let cursor: TaskNodeState | undefined = node
+    while (cursor) {
+      const dep: string | undefined = cursor.deps[0]
+      if (!dep || seen.has(cursor.id) || !task.nodeStates[dep]) break
+      seen.add(cursor.id)
+      cursor = task.nodeStates[dep]
+      depth += 1
+    }
+    depths.set(node.id, depth)
+  }
+  const chainNodeIds = [...Object.values(task.nodeStates)]
+    .filter((node) => {
+      const lead = node.submission?.pinId
+      if (!lead) return false
+      if (winningSet) return winningSet.has(lead)
+      return (node.submissions ?? []).some((cand) => cand.pinId === lead && cand.verified && cand.chainValid)
+    })
+    .sort((left, right) => (depths.get(left.id) ?? 0) - (depths.get(right.id) ?? 0))
+    .map((node) => node.id)
+  const chainText = chainNodeIds.length > 0 ? chainNodeIds.join(' → ') : '—'
+  const raceTip = race ? (byPin.get([...race][0] ?? '') ?? null) : null
+  const raceTipNode = raceTip
+    ? Object.values(task.nodeStates).find((node) => (node.submissions ?? []).some((cand) => cand.pinId === raceTip.pinId))
+    : null
+  const frontText = raceTip && raceTipNode && raceTip.submitter
+    ? `${raceTipNode.id} · ${nameOf(raceTip.submitter)}`
+    : null
+
+  const openNodes = Object.values(task.nodeStates).filter((node) => node.status === 'open')
+  const isZh = mt('mtViewSquare') === '任务广场'
+  const draftFor = (nodeId?: string) => {
+    void props.metataskDraft?.(root, isZh ? 'zh' : 'en').catch(() => { /* handoff is best-effort */ })
+    void nodeId
+  }
+
+  // Local-bot activity: holder claims, my candidates, my review votes.
+  const mine = Object.values(task.nodeStates).flatMap((node) => {
+    const rows: { key: string; nodeId: string; kind: string; text: string }[] = []
+    if (node.holder && rosterIds.has(node.holder.claimant)) {
+      rows.push({ key: `${node.id}-claim`, nodeId: node.id, kind: 'claim', text: `${node.id} · ${nameOf(node.holder.claimant)}` })
+    }
+    for (const cand of node.submissions ?? []) {
+      if (!rosterIds.has(cand.submitter)) continue
+      const state = (node.submissions ?? []).length >= 0
+        ? (winningSet?.has(cand.pinId) ? 'winner' : cand.verified && cand.chainValid ? 'verified' : cand.failed ? 'rejected' : cand.superseded ? 'replaced' : 'live')
+        : 'live'
+      rows.push({ key: cand.pinId, nodeId: node.id, kind: `sub-${state}`, text: `${node.id} · ${shortPin(cand.pinId)}` })
+    }
+    for (const vote of node.votes) {
+      if (!rosterIds.has(vote.voter)) continue
+      rows.push({ key: vote.pinId, nodeId: node.id, kind: `vote-${vote.verdict}`, text: `${node.id} · ${vote.verdict}${vote.counted ? '' : ` (${vote.ignoreReason ?? '?'})`}` })
+    }
+    return rows
+  })
+
+  const drawerCandidate = drawer
+    ? (byPin.get(drawer.pinId) as unknown as DrawerCandidate | undefined) ?? null
+    : null
   const drawerNode = drawerCandidate
     ? Object.values(task.nodeStates).find((node) => (node.submissions ?? []).some((cand) => cand.pinId === drawerCandidate.pinId)) ?? null
     : null
@@ -150,42 +252,113 @@ export function MetataskDetail(
   return (
     <div className="oac-mt-detail">
       <div className="oac-mt-detail-head">
-        <button type="button" className="oac-btn oac-btn-sm" onClick={onBack}>← {mt('mtBackToBoard')}</button>
-        <span className="oac-mt-card-title">{task.title}</span>
-        <span className="oac-mt-chip">{shortPin(task.rootPinId)}</span>
-        <span className="oac-mt-chip">{mt('mtPublisher')}: {nameOf(task.publisher)}</span>
-        <span className="oac-mt-chip">{progress.verified}/{progress.total} {mt('mtVerified')}</span>
-        <span className="oac-mt-chip">{task.freshness.eventCount} {mt('mtEvents')} @{task.freshness.boundaryBlock}</span>
-      </div>
-      <div className="oac-mt-policy">
-        {mt('mtPolicyFacts', {
-          quorum: policy.verifyQuorum,
-          sigma: policy.submitterShareBP,
-          reward: policy.rewardSat,
-          mode: policy.mode === 'competitive' ? mt('mtModeCompetitive') : mt('mtModeTree'),
-          final: policy.finalNode ?? '—',
-        })}
+        <button type="button" className="oac-mt-btn" onClick={onBack}>← {mt('mtBackToBoard')}</button>
+        <div className="oac-mt-titleblock">
+          <div className="oac-mt-titleline">
+            <span className="oac-mt-title">{task.title}</span>
+            <span className={`oac-mt-badge oac-mt-badge-${taskLifecycleOf({ settlementFinalized: Boolean(task.settlement), taskComplete: task.taskComplete })}`}>{lifecycle}</span>
+            <span className="oac-mt-chip">{policy.mode === 'competitive' ? mt('mtModeCompetitive') : mt('mtModeTree')}</span>
+            <span className="oac-mt-chip oac-mt-mono">{progress.verified}/{progress.total}</span>
+          </div>
+          {task.brief && (
+            <p className={`oac-mt-brief ${briefOpen ? '' : 'oac-mt-brief-clamp'}`} onClick={() => { setBriefOpen((value) => !value) }}>
+              {task.brief}
+            </p>
+          )}
+          <div className="oac-mt-facts">
+            <span>{mt('mtPublisher')} <MtBadge metaId={task.publisher} name={identityOf(task.publisher).name} avatar={identityOf(task.publisher).avatar} /></span>
+            <span>{mt('mtPolicyFacts', {
+              quorum: policy.verifyQuorum,
+              sigma: policy.submitterShareBP,
+              reward: policy.rewardSat,
+              mode: policy.mode === 'competitive' ? mt('mtModeCompetitive') : mt('mtModeTree'),
+              final: policy.finalNode ?? '—',
+            })}</span>
+            <span className="oac-mt-mono">{task.freshness.eventCount} {mt('mtEvents')} @{task.freshness.boundaryBlock}</span>
+            {task.lastActivityMs > 0 && <span>{relativeTime(task.lastActivityMs, mt)}</span>}
+          </div>
+        </div>
       </div>
 
-      {task.policy.mode === 'competitive' && (
-        <Deliverables mt={mt} task={task} nameOf={nameOf} byPin={byPin} onOpenCandidate={(pinId) => { setDrawer({ pinId }) }} />
+      {policy.mode === 'competitive' && (
+        <>
+          <div className="oac-mt-explainer">
+            <b>{mt('mtRulesTitle')}</b>
+            <span className="oac-mt-explainer-sep">·</span>
+            <span>{mt('mtRulesRace')}</span>
+            <span className="oac-mt-explainer-sep">·</span>
+            {mt('mtRulesGoldA')}<span className="oac-mt-gold-word">{mt('mtRulesGoldWord')}</span>{mt('mtRulesGoldB')}
+            <span className="oac-mt-explainer-sep">·</span>
+            {mt('mtRulesRaceA')}<span className="oac-mt-sky-word">{mt('mtRulesRaceWord')}</span>{mt('mtRulesRaceB')}
+          </div>
+          <div className="oac-mt-statusline">
+            <span className="oac-mt-status-item">
+              <i className="oac-mt-dot-gold" />
+              <b>{mt('mtStatusVerified')}</b>
+              <code>{chainText}</code>
+              <span className="oac-mt-dim">({chainNodeIds.length}/{Object.keys(task.nodeStates).length})</span>
+            </span>
+            <span className="oac-mt-status-item">
+              <i className="oac-mt-dot-sky" />
+              <b>{mt('mtStatusFront')}</b>
+              <code className={frontText ? '' : 'oac-mt-dim'}>
+                {frontText ?? (task.taskComplete ? mt('mtStatusSettled') : mt('mtStatusFrontNone'))}
+              </code>
+            </span>
+          </div>
+        </>
+      )}
+      {policy.mode === 'tree' && (
+        <div className="oac-mt-rules">{mt('mtRulesTree')}</div>
       )}
 
-      <div className="oac-mt-rules" data-mode={policy.mode}>
-        {policy.mode === 'competitive' ? mt('mtRulesCompetitive') : mt('mtRulesTree')}
-      </div>
-      <div className="oac-mt-chainline">
-        {task.taskComplete
-          ? <span className="oac-mt-chainline-gold">● {mt('mtVerifiedChain', { count: verifiedChain.length })} {mt('mtSettled')}</span>
-          : race
-            ? (
-              <span>
-                <span className="oac-mt-chainline-gold">● {mt('mtVerifiedChain', { count: progress.satisfied })}</span>
-                <span className="oac-mt-chainline-sky"> ● {mt('mtRaceFront', { bot: nameOf((byPin.get([...race][0] ?? '')?.submitter ?? '')) })}</span>
-              </span>
-            )
-            : <span>● {mt('mtVerifiedChain', { count: progress.satisfied })}</span>}
-      </div>
+      {!task.taskComplete && openNodes.length > 0 && (
+        <section className="oac-mt-howto">
+          <div className="oac-mt-h3">{mt('mtHowToJoin')}</div>
+          <p className="oac-mt-dim">
+            {policy.mode === 'competitive' ? mt('mtHowToJoinHintCompetitive', { count: openNodes.length }) : mt('mtHowToJoinHintTree', { count: openNodes.length })}
+          </p>
+          {props.metataskDraft && (
+            <div className="oac-mt-openchips">
+              {openNodes.slice(0, 8).map((node) => (
+                <button key={node.id} type="button" className="oac-mt-openchip" onClick={() => { draftFor(node.id) }}>
+                  <code>{node.id}</code> {node.title}
+                </button>
+              ))}
+              {openNodes.length > 8 && <span className="oac-mt-dim">+{openNodes.length - 8}</span>}
+            </div>
+          )}
+        </section>
+      )}
+
+      {mine.length > 0 && (
+        <section className="oac-mt-mine">
+          <div className="oac-mt-h3">{mt('mtMineTitle')}</div>
+          <div className="oac-mt-minerows">
+            {mine.slice(0, 12).map((row) => (
+              <span key={row.key} className={`oac-mt-chip oac-mt-mine-${row.kind}`}>{row.text}</span>
+            ))}
+            {mine.length > 12 && <span className="oac-mt-dim">+{mine.length - 12}</span>}
+          </div>
+        </section>
+      )}
+      {mine.length === 0 && rosterIds.size > 0 && (
+        <section className="oac-mt-mine">
+          <div className="oac-mt-h3">{mt('mtMineTitle')}</div>
+          <div className="oac-mt-dim">{mt('mtMineEmpty')}</div>
+        </section>
+      )}
+
+      {policy.mode === 'competitive' && (
+        <Deliverables
+          mt={mt}
+          task={task}
+          identityOf={identityOf}
+          byPin={byPin}
+          youLabel={youLabel}
+          onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
+        />
+      )}
 
       {policy.mode === 'competitive'
         ? (
@@ -195,6 +368,9 @@ export function MetataskDetail(
             byPin={byPin}
             winningSet={winningSet}
             race={race}
+            identityOf={identityOf}
+            rosterIds={rosterIds}
+            youLabel={youLabel}
             onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
           />
         )
@@ -214,17 +390,26 @@ export function MetataskDetail(
         )}
 
       {policy.mode === 'competitive' && (
-        <NodeSections mt={mt} task={task} byPin={byPin} winningSet={winningSet} nameOf={nameOf} onOpenCandidate={(pinId) => { setDrawer({ pinId }) }} />
+        <NodeSections
+          mt={mt}
+          task={task}
+          byPin={byPin}
+          winningSet={winningSet}
+          identityOf={identityOf}
+          rosterIds={rosterIds}
+          youLabel={youLabel}
+          onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
+        />
       )}
 
-      <RosterSettlement mt={mt} task={task} nameOf={nameOf} />
+      <RosterSettlement mt={mt} task={task} identityOf={identityOf} />
 
       {(task.ignoredEvents ?? []).length > 0 && (
         <div className="oac-mt-ignored">
-          <div className="oac-mt-section-title">{mt('mtIgnoredTitle')}</div>
+          <div className="oac-mt-h3">{mt('mtIgnoredTitle')}</div>
           {task.ignoredEvents.map((entry) => (
             <div key={entry.pinId} className="oac-mt-node-row oac-mt-ignored-row">
-              <span className="oac-mt-chip">{shortPin(entry.pinId)}</span>
+              <span className="oac-mt-chip oac-mt-mono">{shortPin(entry.pinId)}</span>
               <span>{mt(`mtIgnored_${entry.reason}`) !== `mtIgnored_${entry.reason}` ? mt(`mtIgnored_${entry.reason}`) : entry.reason}</span>
             </div>
           ))}
@@ -238,7 +423,9 @@ export function MetataskDetail(
           node={drawerNode}
           cand={drawerCandidate}
           byPin={byPin}
-          nameOf={nameOf}
+          identityOf={identityOf}
+          rosterIds={rosterIds}
+          youLabel={youLabel}
           winningSet={winningSet}
           onClose={() => { setDrawer(null) }}
           onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
