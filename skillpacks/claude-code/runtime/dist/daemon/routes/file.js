@@ -9,6 +9,7 @@ const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../../core/contracts/commandResult");
 const uploadLargeFile_1 = require("../../core/files/uploadLargeFile");
+const artifactProxy_1 = require("../../core/metatask/artifactProxy");
 const AVATAR_ROUTE_PATH = '/api/file/avatar';
 const FILE_UPLOAD_ROUTE_PATH = '/api/file/upload';
 const FILE_UPLOAD_LARGE_ROUTE_PATH = '/api/file/upload-large';
@@ -225,9 +226,51 @@ async function serveRawFileUploadRoute(context, isLargeUpload) {
         }
     }
 }
+/**
+ * GET /api/file/<urlencoded metafile URI | bare pin id> — the artifact
+ * download proxy for MetaTask reviewers (plan M9): resolves via the MAN
+ * content route, reassembles chunked uploads in listed order, verifies the
+ * manifest sha256, and serves the bytes with the manifest's dataType/name.
+ * Content is immutable, so resolved pins cache in-process.
+ */
+async function serveMetafileProxyRoute(context) {
+    const { req, url } = context;
+    if (!url.pathname.startsWith('/api/file/')) {
+        return false;
+    }
+    const reference = decodeURIComponent(url.pathname.slice('/api/file/'.length));
+    if (!reference || reference === 'upload' || reference === 'avatar') {
+        return false;
+    }
+    if (req.method !== 'GET') {
+        context.sendMethodNotAllowed(['GET']);
+        return true;
+    }
+    if (!(0, artifactProxy_1.normalizeMetafileReference)(reference)) {
+        context.sendJson(400, (0, commandResult_1.commandFailed)('invalid_metafile_ref', `Not a valid metafile pin reference: ${reference}`));
+        return true;
+    }
+    const resolved = await (0, artifactProxy_1.fetchMetafileContent)(reference);
+    if (!resolved) {
+        context.sendJson(404, (0, commandResult_1.commandFailed)('metafile_not_found', `Metafile content not resolvable for: ${reference}`));
+        return true;
+    }
+    context.res.writeHead(200, {
+        'Content-Type': resolved.contentType,
+        'Content-Length': String(resolved.body.length),
+        'Content-Disposition': `attachment; filename="${resolved.fileName.replace(/[\r\n"]/g, '')}"`,
+        'Cache-Control': 'public, max-age=86400',
+        'X-Metafile-Pin': resolved.pinId,
+    });
+    context.res.end(resolved.body);
+    return true;
+}
 const handleFileRoutes = async (context) => {
     const { req, url, handlers } = context;
     if (await serveAvatarRoute(context)) {
+        return true;
+    }
+    if (await serveMetafileProxyRoute(context)) {
         return true;
     }
     if (url.pathname !== FILE_UPLOAD_ROUTE_PATH && url.pathname !== FILE_UPLOAD_LARGE_ROUTE_PATH) {

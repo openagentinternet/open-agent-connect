@@ -24,6 +24,7 @@ const kb_1 = require("./routes/kb");
 const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
 const grouptask_1 = require("./routes/grouptask");
+const metatask_1 = require("./routes/metatask");
 const schedule_1 = require("./routes/schedule");
 const conversations_1 = require("./routes/conversations");
 const file_1 = require("./routes/file");
@@ -56,6 +57,7 @@ const ROUTES = [
     daemon_1.handleDaemonRoutes,
     chat_1.handleChatRoutes,
     grouptask_1.handleGroupTaskRoutes,
+    metatask_1.handleMetaTaskRoutes,
     schedule_1.handleScheduleRoutes,
     conversations_1.handleConversationRoutes,
     file_1.handleFileRoutes,

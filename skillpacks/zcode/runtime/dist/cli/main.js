@@ -18,6 +18,7 @@ const chain_1 = require("./commands/chain");
 const traffic_1 = require("./commands/traffic");
 const chat_1 = require("./commands/chat");
 const grouptask_1 = require("./commands/grouptask");
+const metatask_1 = require("./commands/metatask");
 const conversations_1 = require("./commands/conversations");
 const memory_1 = require("./commands/memory");
 const chainhistory_1 = require("./commands/chainhistory");
@@ -126,6 +127,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'grouptask':
                     result = await (0, grouptask_1.runGroupTaskCommand)(rest, context);
+                    break;
+                case 'metatask':
+                    result = await (0, metatask_1.runMetaTaskCommand)(rest, context);
                     break;
                 case 'conversations':
                     result = await (0, conversations_1.runConversationsCommand)(rest, context);

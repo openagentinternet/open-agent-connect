@@ -30,6 +30,8 @@ Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent
 - `metabot-simplenote`
 - `metabot-grouptask`
 - `metabot-twin`
+- `metabot-metatask`
+- `metabot-metatask-wizard`
 
 ## Install
 

@@ -41,6 +41,8 @@ const METABOT_SKILLS = [
   'metabot-simplenote',
   'metabot-grouptask',
   'metabot-twin',
+  'metabot-metatask',
+  'metabot-metatask-wizard',
 ];
 
 const HOSTS = {

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { commandFailed } from '../../core/contracts/commandResult';
 import { LARGE_UPLOAD_MAX_BYTES } from '../../core/files/uploadLargeFile';
+import { fetchMetafileContent, normalizeMetafileReference } from '../../core/metatask/artifactProxy';
 import type { RouteHandler } from './types';
 
 const AVATAR_ROUTE_PATH = '/api/file/avatar';
@@ -256,10 +257,54 @@ async function serveRawFileUploadRoute(context: Parameters<RouteHandler>[0], isL
   }
 }
 
+/**
+ * GET /api/file/<urlencoded metafile URI | bare pin id> — the artifact
+ * download proxy for MetaTask reviewers (plan M9): resolves via the MAN
+ * content route, reassembles chunked uploads in listed order, verifies the
+ * manifest sha256, and serves the bytes with the manifest's dataType/name.
+ * Content is immutable, so resolved pins cache in-process.
+ */
+async function serveMetafileProxyRoute(context: Parameters<RouteHandler>[0]): Promise<boolean> {
+  const { req, url } = context;
+  if (!url.pathname.startsWith('/api/file/')) {
+    return false;
+  }
+  const reference = decodeURIComponent(url.pathname.slice('/api/file/'.length));
+  if (!reference || reference === 'upload' || reference === 'avatar') {
+    return false;
+  }
+  if (req.method !== 'GET') {
+    context.sendMethodNotAllowed(['GET']);
+    return true;
+  }
+  if (!normalizeMetafileReference(reference)) {
+    context.sendJson(400, commandFailed('invalid_metafile_ref', `Not a valid metafile pin reference: ${reference}`));
+    return true;
+  }
+  const resolved = await fetchMetafileContent(reference);
+  if (!resolved) {
+    context.sendJson(404, commandFailed('metafile_not_found', `Metafile content not resolvable for: ${reference}`));
+    return true;
+  }
+  context.res.writeHead(200, {
+    'Content-Type': resolved.contentType,
+    'Content-Length': String(resolved.body.length),
+    'Content-Disposition': `attachment; filename="${resolved.fileName.replace(/[\r\n"]/g, '')}"`,
+    'Cache-Control': 'public, max-age=86400',
+    'X-Metafile-Pin': resolved.pinId,
+  });
+  context.res.end(resolved.body);
+  return true;
+}
+
 export const handleFileRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
 
   if (await serveAvatarRoute(context)) {
+    return true;
+  }
+
+  if (await serveMetafileProxyRoute(context)) {
     return true;
   }
 

@@ -73,6 +73,7 @@ const writeLedger_1 = require("../core/chainhistory/writeLedger");
 const privateConversation_1 = require("../core/chat/privateConversation");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const grouptaskHandlers_1 = require("./grouptaskHandlers");
+const metataskHandlers_1 = require("./metataskHandlers");
 const deliverableVerification_1 = require("../core/grouptask/deliverableVerification");
 const scheduleHandlers_1 = require("./scheduleHandlers");
 const userHandlers_1 = require("./userHandlers");
@@ -14832,6 +14833,11 @@ function createDefaultMetabotDaemonHandlers(input) {
             resolveSponsorWritePin,
             resolvePeerChatPublicKey,
             verifyPin: (0, deliverableVerification_1.createMetasoPinVerifier)(),
+            log: (message) => console.warn(message),
+        }),
+        metatask: (0, metataskHandlers_1.createMetaTaskDaemonHandlers)({
+            systemHomeDir: normalizedSystemHomeDir,
+            createSignerForProfileHome,
             log: (message) => console.warn(message),
         }),
         schedule: (0, scheduleHandlers_1.createScheduleDaemonHandlers)({
