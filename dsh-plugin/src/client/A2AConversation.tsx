@@ -86,9 +86,28 @@ function MessageRow({
   const senderName = message.sender.name ?? (isLocal ? localLabel : peerLabel)
   const senderAvatar = message.sender.avatar ?? (isLocal ? localAvatar : peerAvatar)
   const senderGlobalMetaId = message.sender.globalMetaId ?? (isLocal ? localGlobalMetaId : peerGlobalMetaId)
-  const isImage = (message.contentType ?? '').toLowerCase().startsWith('image/')
+  const contentType = (message.contentType ?? '').toLowerCase()
+  const isImage = contentType.startsWith('image/')
+  const isVideo = contentType.startsWith('video/')
+  const isAudio = contentType.startsWith('audio/')
   const isMarkdown = message.contentType === 'text/markdown'
   const mdLabels = useMemo(() => markdownLabels(t), [t])
+  // Attachments (metafile:// pointers, IDBots simplefilemsg parity) resolve
+  // through the host's decrypting media proxy, never as raw text.
+  const isMetafileAttachment = /^metafile:\/\//iu.test(message.content.trim())
+  const attachmentUrl = isMetafileAttachment
+    ? `/oac/api/chat/media?from=${encodeURIComponent(localGlobalMetaId)}`
+      + `&peer=${encodeURIComponent(peerGlobalMetaId)}`
+      + `&ref=${encodeURIComponent(message.content.trim())}`
+      + `&type=${encodeURIComponent(message.contentType ?? '')}`
+    : message.content
+  // Local-only host status lines (wake checks, retries, withheld replies)
+  // render as centered internal notes, never as chat bubbles (IDBots
+  // internal-status parity).
+  if (message.hostStatus === true) {
+    return <div className="oac-a2a-host-status">{message.content}</div>
+  }
+  const deliveryStatus = message.deliveryStatus
   return (
     <div className={isLocal ? 'oac-a2a-msg oac-a2a-msg-local' : 'oac-a2a-msg oac-a2a-msg-peer'}>
       {senderGlobalMetaId
@@ -120,17 +139,33 @@ function MessageRow({
                 <span className="oac-a2a-msg-txid-empty">txid: -</span>
               )}
             </span>
+            {isLocal && deliveryStatus === 'pending' ? (
+              <span className="oac-a2a-delivery oac-a2a-delivery-pending">{t('sending')}</span>
+            ) : null}
+            {isLocal && deliveryStatus === 'failed' ? (
+              <span className="oac-a2a-delivery oac-a2a-delivery-failed">{t('deliveryFailed')}</span>
+            ) : null}
             <span className="oac-a2a-msg-time" title={timestampLabel(message.timestamp)}>
               {relativeTimeLabel(message.timestamp)}
             </span>
           </span>
         </div>
         <div className={isLocal ? 'oac-a2a-bubble oac-a2a-bubble-local' : 'oac-a2a-bubble oac-a2a-bubble-peer'}>
-          {isImage
-            ? <img className="oac-a2a-msg-image" src={message.content} alt="" />
-            : isMarkdown
-              ? <MarkdownText text={message.content} labels={mdLabels} />
-              : <span className="oac-a2a-msg-text">{message.content}</span>}
+          {isMetafileAttachment
+            ? (
+              isImage
+                ? <img className="oac-a2a-msg-image" src={attachmentUrl} alt="" />
+                : isVideo
+                  ? <video className="oac-a2a-msg-media" controls preload="metadata" src={attachmentUrl} />
+                  : isAudio
+                    ? <audio className="oac-a2a-msg-audio" controls preload="metadata" src={attachmentUrl} />
+                    : <a className="oac-a2a-msg-download" href={attachmentUrl} target="_blank" rel="noopener noreferrer">{t('downloadAttachment')}</a>
+            )
+            : isImage
+              ? <img className="oac-a2a-msg-image" src={attachmentUrl} alt="" />
+              : isMarkdown
+                ? <MarkdownText text={message.content} labels={mdLabels} />
+                : <span className="oac-a2a-msg-text">{message.content}</span>}
         </div>
       </div>
     </div>
@@ -192,6 +227,10 @@ export function A2AConversation({
   // The group task the user opened last; its live updates stay read while it
   // is on screen.
   const [taskKey, setTaskKey] = useState('')
+  // Live reply-turn activity per peer (conversation-reply-state SSE events,
+  // IDBots StreamingActivityBar parity) and the back-to-bottom affordance.
+  const [replyingPeers, setReplyingPeers] = useState<Record<string, boolean>>({})
+  const [showJumpLatest, setShowJumpLatest] = useState(false)
   const unread = useUnread((state) => state)
   const panelTarget = usePanel((state) => state.target)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -347,7 +386,9 @@ export function A2AConversation({
   const onMessagesScroll = useCallback((): void => {
     const el = messagesRef.current
     if (!el) return
-    pinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    pinnedToBottomRef.current = nearBottom
+    setShowJumpLatest((prev) => (prev === !nearBottom ? prev : !nearBottom))
   }, [])
 
   useEffect(() => {
@@ -384,6 +425,19 @@ export function A2AConversation({
       }, 400)
     }
     source.addEventListener('conversation-update', onUpdate)
+    // Live reply-turn activity: toggle the "local bot is working" indicator
+    // without a data reload.
+    source.addEventListener('conversation-reply-state', (event) => {
+      try {
+        const data = JSON.parse(event.data) as { peerGlobalMetaId?: string; replying?: boolean }
+        const peer = (data.peerGlobalMetaId ?? '').trim()
+        if (!peer) return
+        const replying = data.replying === true
+        setReplyingPeers((prev) => (prev[peer] === replying ? prev : { ...prev, [peer]: replying }))
+      } catch {
+        // Ignore malformed activity events.
+      }
+    })
     return () => {
       if (timer !== null) clearTimeout(timer)
       source?.close()
@@ -593,7 +647,28 @@ export function A2AConversation({
                 t={t}
               />
             ))}
+            {threadStatus === 'ready' && replyingPeers[selectedPeer] === true ? (
+              <div className="oac-a2a-typing" aria-live="polite">
+                <span className="oac-a2a-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                <span>{t('workingStatus')}</span>
+              </div>
+            ) : null}
           </div>
+          {showJumpLatest ? (
+            <button
+              type="button"
+              className="oac-a2a-jump-latest"
+              onClick={() => {
+                const el = messagesRef.current
+                if (!el) return
+                el.scrollTop = el.scrollHeight
+                pinnedToBottomRef.current = true
+                setShowJumpLatest(false)
+              }}
+            >
+              {t('jumpToLatest')}
+            </button>
+          ) : null}
           <div className="oac-a2a-composer">
             {selectedPeer ? (
               <div className="oac-a2a-guidance">
@@ -647,11 +722,34 @@ export function A2AConversation({
                 )}
               </div>
             ) : null}
-            {/* OAC /ui/conversations parity: a selected conversation is
-                Steer-only — no free message composer. The plain composer
-                exists solely to start a brand-new conversation, and with the
-                lists in the left tabs it doubles as the empty state. */}
-            {!selectedPeer ? (
+            {/* IDBots parity: an open thread carries BOTH a message composer
+                (send as the local Bot) and the Steer guidance toggle; the
+                plain-composer-with-peer-input combo only starts brand-new
+                conversations and doubles as the empty state. */}
+            {selectedPeer ? (
+              <div className="oac-a2a-composer-row">
+                <Input
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder={t('messagePlaceholder')}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      if (!busy) void onSend()
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="primary"
+                  icon={<IconSendOutline14 />}
+                  disabled={busy || !from || !draft.trim()}
+                  onClick={() => { void onSend() }}
+                >
+                  {busy ? t('sending') : t('send')}
+                </Button>
+              </div>
+            ) : (
               <>
                 <Input
                   value={peerDraft}
@@ -681,7 +779,7 @@ export function A2AConversation({
                   </Button>
                 </div>
               </>
-            ) : null}
+            )}
           </div>
         </div>
       </div>

@@ -646,3 +646,59 @@ test('buildConversationsPageViewModel honors an explicit selection over the defa
 
   assert.equal(model.selectedLocalGlobalMetaId, 'gm-first');
 });
+
+test('buildConversationsPageViewModel passes host status and delivery status through to messages', () => {
+  const model = buildConversationsPageViewModel({
+    localBots: [{ name: 'Alice Bot', slug: 'alice', globalMetaId: 'gm-local' }],
+    selectedLocalGlobalMetaId: 'gm-local',
+    conversations: [
+      {
+        conversationId: 'peer-gm-local-gm-bob',
+        localGlobalMetaId: 'gm-local',
+        peerGlobalMetaId: 'gm-bob',
+        peerName: 'Bob Bot',
+        latestAt: FIXTURE_TIMESTAMP,
+      },
+    ],
+    selectedPeerGlobalMetaId: 'gm-bob',
+    messages: [
+      {
+        messageId: 'm-host',
+        direction: 'outgoing',
+        content: '[Host] Wake check 1: re-evaluating the silent conversation tail.',
+        timestamp: FIXTURE_TIMESTAMP,
+        hostStatus: true,
+      },
+      {
+        messageId: 'm-pending',
+        direction: 'outgoing',
+        content: 'on its way to the chain',
+        contentType: 'text/markdown',
+        timestamp: FIXTURE_TIMESTAMP + 1000,
+        deliveryStatus: 'pending',
+      },
+      {
+        messageId: 'm-failed',
+        direction: 'outgoing',
+        content: 'never landed',
+        timestamp: FIXTURE_TIMESTAMP + 2000,
+        deliveryStatus: 'failed',
+      },
+      {
+        messageId: 'm-inbound',
+        direction: 'incoming',
+        content: 'peer text',
+        contentType: 'text/markdown',
+        timestamp: FIXTURE_TIMESTAMP + 3000,
+      },
+    ],
+  });
+  const [host, pending, failed, inbound] = model.messages;
+  assert.equal(host.hostStatus, true);
+  assert.equal(host.deliveryStatus, '');
+  assert.equal(pending.deliveryStatus, 'pending');
+  assert.equal(pending.isMarkdown, true);
+  assert.equal(failed.deliveryStatus, 'failed');
+  assert.equal(inbound.hostStatus, false);
+  assert.equal(inbound.deliveryStatus, '');
+});

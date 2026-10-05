@@ -41,6 +41,7 @@ function readUnreadState(): UnreadState {
       group: value.group && typeof value.group === 'object' ? value.group : {},
       privateSeen: value.privateSeen && typeof value.privateSeen === 'object' ? value.privateSeen : {},
       groupSeen: value.groupSeen && typeof value.groupSeen === 'object' ? value.groupSeen : {},
+      privateCounts: value.privateCounts && typeof value.privateCounts === 'object' ? value.privateCounts : {},
     }
   } catch {
     return fallback
@@ -131,6 +132,13 @@ export class A2AUnreadController {
       void this.api.thread(from, peer).then((conversation) => {
         const latest = conversation.messages[conversation.messages.length - 1]
         if (latest === undefined) return
+        // Numeric badges (IDBots parity): count the inbound messages the user
+        // has not accounted for yet, so a burst of three peer messages shows
+        // "3" instead of a single dot.
+        const seenBefore = this.store.getSnapshot().privateSeen[key] ?? Number.NEGATIVE_INFINITY
+        const unseenInbound = conversation.messages
+          .filter((message) => !isLocalMessage(message) && message.timestamp > seenBefore)
+          .length
         if (firstSight) {
           const fresh = latest.timestamp >= Date.now() - FRESH_MS
           fold((state) => applyPrivateLatest(
@@ -138,6 +146,7 @@ export class A2AUnreadController {
             key,
             Math.max(latest.timestamp, latestAt),
             isLocalMessage(latest) || !fresh,
+            unseenInbound,
           ))
           return
         }
@@ -146,6 +155,7 @@ export class A2AUnreadController {
           key,
           Math.max(latest.timestamp, latestAt),
           isLocalMessage(latest),
+          unseenInbound,
         ))
       }).catch(() => {
         // transient read failure: the next change retries

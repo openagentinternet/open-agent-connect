@@ -289,6 +289,7 @@ import {
 } from '../core/chat/hostLlmChatReplyRunner';
 import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
 import { createChatSkillWaitNoticeGenerator } from '../core/chat/chatSkillWaitNotice';
+import { createChatEpisodeSummaryGenerator } from '../core/chat/chatEpisodeSummary';
 import { createLlmOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 import {
   PROVIDER_RUN_WORKSPACE_SWEEP_INTERVAL_MS,
@@ -2413,9 +2414,18 @@ export function createPrivateChatAutoReplyProfileDispatcher(
         metaBotSlug,
         dshLlmPath: profilePaths.dshLlmPath,
       }),
+      episodeSummaryGenerator: createChatEpisodeSummaryGenerator({
+        runtimeResolver: profileRuntimeResolver,
+        llmExecutor: input.llmExecutor,
+        metaBotSlug,
+        dshLlmPath: profilePaths.dshLlmPath,
+      }),
     }, profileAutoReplyConfig);
 
     orchestrators.set(cacheKey, orchestrator);
+    // Wake timers re-drive silent-but-open conversation tails (IDBots parity).
+    // Optional-call: injected test orchestrators may not implement the loop.
+    orchestrator.startWakeLoop?.();
     return orchestrator;
   }
 
@@ -4294,6 +4304,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return requestJsonForSelectedActor(
           'POST',
           '/api/chat/private',
+          typeof input.from === 'string' ? input.from : undefined,
+          input,
+        );
+      },
+      interim: async (input) => {
+        // Bot-initiated interim updates ride the ticket-gated daemon route;
+        // inside a reply turn this is the ONLY sanctioned send surface (the
+        // plain private send above stays blocked there).
+        return requestJsonForSelectedActor(
+          'POST',
+          '/api/chat/interim',
           typeof input.from === 'string' ? input.from : undefined,
           input,
         );
@@ -7225,7 +7246,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       metaBotSlug,
       dshLlmPath: paths.dshLlmPath,
     }),
+    episodeSummaryGenerator: createChatEpisodeSummaryGenerator({
+      runtimeResolver: llmResolver,
+      llmExecutor,
+      metaBotSlug,
+      dshLlmPath: paths.dshLlmPath,
+    }),
   }, sharedAutoReplyConfig);
+  // Wake timers re-drive silent-but-open conversation tails (IDBots parity);
+  // the loop no-ops when no wake records exist.
+  chatAutoReplyOrchestrator.startWakeLoop();
   const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
     autoReplyConfig: sharedAutoReplyConfig,
     resolvePeerChatPublicKey,

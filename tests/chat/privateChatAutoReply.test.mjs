@@ -155,6 +155,7 @@ async function createAutoReplyHarness(options = {}) {
       : options.logSendFailure ?? undefined,
     chatSkillWaitNotice: options.chatSkillWaitNotice,
     hasActiveOrderWithPeer: options.hasActiveOrderWithPeer,
+    episodeSummaryGenerator: options.episodeSummaryGenerator,
     replyRunner: async (input) => {
       runnerInputs.push(input);
       if (options.replyRunner) {
@@ -172,6 +173,7 @@ async function createAutoReplyHarness(options = {}) {
     defaultStrategyId: options.defaultStrategyId ?? null,
     maxTurns: options.maxTurns,
     cooldownMs: options.cooldownMs,
+    episodeRolloverMessages: options.episodeRolloverMessages,
   });
 
   return {
@@ -1069,7 +1071,10 @@ test('auto-reply resumes after the order with the peer reaches a terminal state'
   assert.equal(harness.writes.length, 0);
 
   orderActive = false;
-  await harness.handleInbound({ messagePinId: 'incoming-pin-after-order' });
+  await harness.handleInbound({
+    messagePinId: 'incoming-pin-after-order',
+    content: 'the order finished, thanks for the work',
+  });
   assert.equal(harness.runnerInputs.length, 1);
   assert.equal(harness.writes.length, 1);
 });
@@ -1611,13 +1616,20 @@ test('guided local turns use injected A2A persister for the outbound message', a
 
   await harness.handleLocalGuidedTurn();
 
-  assert.equal(persistedInputs.length, 1);
+  // Delivery lifecycle (IDBots parity): the outgoing message is persisted as
+  // pending first, then replaced with the sent record once the pin lands.
+  assert.equal(persistedInputs.length, 2);
   assert.equal(persistedInputs[0].local.globalMetaId, harness.localGlobalMetaId);
   assert.equal(persistedInputs[0].peer.globalMetaId, harness.peerGlobalMetaId);
   assert.equal(persistedInputs[0].message.direction, 'outgoing');
   assert.equal(persistedInputs[0].message.content, 'reply from LLM');
-  assert.equal(persistedInputs[0].message.pinId, 'reply-pin-1');
-  assert.deepEqual(persistedInputs[0].message.txids, ['reply-tx-1']);
+  assert.equal(persistedInputs[0].message.deliveryStatus, 'pending');
+  assert.equal(persistedInputs[0].message.pinId, undefined);
+  assert.equal(persistedInputs[1].message.deliveryStatus, 'sent');
+  assert.equal(persistedInputs[1].replaceExistingMessage, true);
+  assert.equal(persistedInputs[1].message.messageId, persistedInputs[0].message.messageId);
+  assert.equal(persistedInputs[1].message.pinId, 'reply-pin-1');
+  assert.deepEqual(persistedInputs[1].message.txids, ['reply-tx-1']);
 });
 
 test('guided local turns are a no-op for closed conversations without pending guidance', async () => {
@@ -1980,7 +1992,7 @@ test('auto-reply hard limit emits canonical visible Bye without close extensions
     topic: null,
     strategyId: null,
     state: 'active',
-    turnCount: 29,
+    turnCount: 49,
     lastDirection: 'inbound',
     createdAt: now - 1_000_000,
     updatedAt: now - 1_000,
@@ -1999,7 +2011,7 @@ test('auto-reply hard limit emits canonical visible Bye without close extensions
   assert.equal(outbound.extensions, null);
   const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
   assert.equal(conversation.state, 'closed');
-  assert.equal(conversation.turnCount, 30);
+  assert.equal(conversation.turnCount, 50);
 });
 
 test('auto-reply force-closes on the configured maxTurns without a strategy', async () => {
@@ -2632,7 +2644,15 @@ test('orchestrator logs commit-path failures through the send-failure log', asyn
 });
 
 test('orchestrator logs rate-limited replies through the send-failure log', async () => {
-  const harness = await createAutoReplyHarness({});
+  let replyIndex = 0;
+  const harness = await createAutoReplyHarness({
+    // Unique reply text per turn: the echo guard blocks a third verbatim
+    // delivery, which would otherwise short-circuit this rate-limit test.
+    replyRunner: async () => {
+      replyIndex += 1;
+      return { state: 'reply', content: `distinct reply ${replyIndex}` };
+    },
+  });
 
   for (let index = 0; index < 11; index += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -2776,4 +2796,487 @@ test('orchestrator renders legacy wrapper-stored inbound records as plain text i
     .join('\n');
   assert.match(prompt, /legacy plain text/);
   assert.doesNotMatch(prompt, /\{"content"/);
+});
+
+// ---- Phase 1 IDBots-parity behaviors: [NO_REPLY], wakes, retries, guards ----
+
+const { createPrivateChatWakeStore } = require('../../dist/core/chat/privateChatWake.js');
+
+test('[NO_REPLY] turns deliver nothing, record a local marker, and arm a silent-tail wake', async () => {
+  let clock = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now: () => clock,
+    replyRunner: async () => ({ state: 'no_reply' }),
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.handleInbound({ messagePinId: 'pin-noreply-1', content: 'just an ack, no reply needed' });
+
+  assert.equal(harness.writes.length, 0);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+  assert.equal(conversation.lastDirection, 'outbound');
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const marker = messages.find((message) => message.direction === 'outbound');
+  assert.ok(marker);
+  assert.equal(marker.extensions?.chatNoReply, true);
+  assert.equal(marker.messagePinId, null);
+
+  const wakeStore = createPrivateChatWakeStore(harness.paths);
+  const wakes = await wakeStore.readWakes();
+  assert.equal(wakes.length, 1);
+  assert.equal(wakes[0].kind, 'silent_tail');
+  assert.equal(wakes[0].triggerMessageId, 'pin-noreply-1');
+  assert.equal(wakes[0].fireAt, clock + 15 * 60_000);
+});
+
+test('a due wake re-drives the silent tail with a host notice and delivers the owed answer', async () => {
+  let clock = 1_770_000_000_000;
+  const notices = [];
+  const harness = await createAutoReplyHarness({
+    now: () => clock,
+    replyRunner: async (input) => {
+      notices.push(input.hostNoticeText ?? null);
+      if (input.hostNoticeText) {
+        return { state: 'reply', content: 'here is the result I promised' };
+      }
+      return { state: 'no_reply' };
+    },
+  });
+
+  await harness.handleInbound({ messagePinId: 'pin-wake-1', content: 'please verify and come back' });
+  assert.equal(harness.writes.length, 0);
+
+  clock += 15 * 60_000 + 1;
+  const ran = await harness.orchestrator.fireDueWakes();
+  assert.equal(ran, 1);
+  assert.equal(harness.writes.length, 1);
+  assert.equal(notices.filter((notice) => notice && notice.includes('Host Wake Check 1')).length, 1);
+
+  const wakeStore = createPrivateChatWakeStore(harness.paths);
+  assert.equal((await wakeStore.readWakes()).length, 0);
+});
+
+test('a new peer message cancels the pending wake', async () => {
+  let clock = 1_770_000_000_000;
+  let calls = 0;
+  const harness = await createAutoReplyHarness({
+    now: () => clock,
+    replyRunner: async () => {
+      calls += 1;
+      return calls === 1
+        ? { state: 'no_reply' }
+        : { state: 'reply', content: 'got it, moving on' };
+    },
+  });
+
+  await harness.handleInbound({ messagePinId: 'pin-wake-cancel-1', content: 'hold on' });
+  const wakeStore = createPrivateChatWakeStore(harness.paths);
+  assert.equal((await wakeStore.readWakes()).length, 1);
+
+  clock += 60_000;
+  await harness.handleInbound({ messagePinId: 'pin-wake-cancel-2', content: 'actually never mind' });
+  assert.equal(harness.writes.length, 1);
+  assert.equal((await wakeStore.readWakes()).length, 0);
+});
+
+test('an empty reply arms a bounded retry that delivers once the model emits final text', async () => {
+  let clock = 1_770_000_000_000;
+  let calls = 0;
+  const harness = await createAutoReplyHarness({
+    now: () => clock,
+    replyRunner: async (input) => {
+      calls += 1;
+      if (calls <= 1) {
+        return { state: 'empty_reply' };
+      }
+      assert.ok(input.hostNoticeText?.includes('Host Retry Notice'));
+      return { state: 'reply', content: 'recovered final answer' };
+    },
+  });
+
+  await harness.handleInbound({ messagePinId: 'pin-empty-1', content: 'needs research' });
+  assert.equal(harness.writes.length, 0);
+  const wakeStore = createPrivateChatWakeStore(harness.paths);
+  let wakes = await wakeStore.readWakes();
+  assert.equal(wakes[0].kind, 'empty_reply');
+
+  clock += 15_000 + 1;
+  assert.equal(await harness.orchestrator.fireDueWakes(), 1);
+  assert.equal(harness.writes.length, 1);
+  wakes = await wakeStore.readWakes();
+  assert.equal(wakes.length, 0);
+});
+
+test('empty replies exhaust the retry budget, log a failure, and clear the wake', async () => {
+  let clock = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now: () => clock,
+    replyRunner: async () => ({ state: 'empty_reply' }),
+  });
+
+  await harness.handleInbound({ messagePinId: 'pin-empty-exhaust-1', content: 'will stay empty' });
+  const wakeStore = createPrivateChatWakeStore(harness.paths);
+  // Retries fire at +15s and +60s; the third wake (at +240s) sees another
+  // empty completion, exhausts the budget, removes the record, and logs.
+  for (const delay of [15_000, 60_000]) {
+    clock += delay + 1;
+    await harness.orchestrator.fireDueWakes();
+    assert.equal((await wakeStore.readWakes()).length, 1, `wake should survive after +${delay}ms`);
+  }
+  clock += 240_000 + 1;
+  await harness.orchestrator.fireDueWakes();
+  assert.equal((await wakeStore.readWakes()).length, 0);
+  const exhaustion = harness.sendFailureEvents
+    .filter((event) => event.kind === 'reply_empty_after_retries');
+  assert.equal(exhaustion.length, 1);
+  assert.equal(harness.writes.length, 0);
+});
+
+test('the echo guard blocks a third verbatim reply and leaves the tail silent', async () => {
+  let clock = 1_770_000_000_000;
+  let calls = 0;
+  const harness = await createAutoReplyHarness({
+    now: () => clock,
+    replyRunner: async () => {
+      calls += 1;
+      return { state: 'reply', content: 'identical canned answer' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.handleInbound({ messagePinId: 'pin-echo-1', content: 'question one' });
+  clock += 1_000;
+  await harness.handleInbound({ messagePinId: 'pin-echo-2', content: 'question two' });
+  clock += 1_000;
+  await harness.handleInbound({ messagePinId: 'pin-echo-3', content: 'question three' });
+
+  assert.equal(calls, 3);
+  assert.equal(harness.writes.length, 2);
+  assert.equal(
+    harness.sendFailureEvents.filter((event) => event.kind === 'echo_guard_blocked').length,
+    1,
+  );
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.lastDirection, 'outbound');
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const marker = messages
+    .filter((message) => message.direction === 'outbound')
+    .find((message) => message.extensions?.chatSilentTail === true);
+  assert.ok(marker, 'echo-blocked turn should record a silent-tail marker');
+});
+
+test('skip-list inbound messages are recorded without driving a reply turn', async () => {
+  const harness = await createAutoReplyHarness({});
+
+  await harness.handleInbound({ messagePinId: 'pin-skip-1', content: 'Thinking...' });
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+
+  // A bare goodbye still closes the conversation.
+  await harness.handleInbound({ messagePinId: 'pin-skip-2', content: 'Bye' });
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(harness.runnerInputs.length, 0);
+});
+
+test('a verbatim inbound retransmission is absorbed, then escalates on the third copy', async () => {
+  let clock = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now: () => clock });
+
+  await harness.handleInbound({ messagePinId: 'pin-repeat-1', content: 'same question' });
+  assert.equal(harness.runnerInputs.length, 1);
+  clock += 1_000;
+  await harness.handleInbound({ messagePinId: 'pin-repeat-2', content: 'same question' });
+  assert.equal(harness.runnerInputs.length, 1, 'the second verbatim copy should be absorbed');
+  clock += 1_000;
+  await harness.handleInbound({ messagePinId: 'pin-repeat-3', content: 'same question' });
+  assert.equal(harness.runnerInputs.length, 2, 'the third verbatim copy should run as an insistent re-ask');
+});
+
+// ---- Phase 2: markdown wire contentType + delivery lifecycle + host status ----
+
+test('private chat wire payload carries text/markdown contentType', async () => {
+  const harness = await createAutoReplyHarness({});
+  await harness.handleInbound({ messagePinId: 'pin-md-1', content: 'markdown question' });
+  assert.equal(harness.writes.length, 1);
+  const payload = JSON.parse(harness.writes[0].payload);
+  assert.equal(payload.contentType, 'text/markdown');
+});
+
+test('a failed chain write records pending then failed delivery status', async () => {
+  const persistedInputs = [];
+  const harness = await createAutoReplyHarness({
+    writePinError: new Error('chain rejected'),
+    a2aConversationPersister: async (input) => {
+      persistedInputs.push(input);
+      return {
+      messageId: input.message.messageId ?? 'persisted-x',
+      sessionId: 'a2a-peer-local-peer',
+      orderSessionId: null,
+      direction: input.message.direction,
+      kind: 'private_chat',
+      protocolTag: null,
+      orderTxid: null,
+      serviceOrderPinId: null,
+      orderPinId: null,
+      paymentTxid: null,
+      content: input.message.content,
+      contentType: input.message.contentType ?? null,
+      chain: input.message.chain ?? null,
+      pinId: input.message.pinId ?? null,
+      txid: input.message.txid ?? null,
+      txids: input.message.txids ?? [],
+      replyPinId: null,
+      timestamp: input.message.timestamp ?? 0,
+      chainTimestamp: null,
+      sender: { globalMetaId: input.local.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+      recipient: { globalMetaId: input.peer.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+      raw: null,
+      };
+    },
+  });
+  persistedInputs.length = 0;
+  await harness.handleInbound({ messagePinId: 'pin-fail-1', content: 'will fail to send' });
+
+  const deliveryRecords = persistedInputs.filter((input) => input.message.deliveryStatus);
+  assert.equal(deliveryRecords.length, 2);
+  assert.equal(deliveryRecords[0].message.deliveryStatus, 'pending');
+  assert.equal(deliveryRecords[1].message.deliveryStatus, 'failed');
+  assert.equal(deliveryRecords[1].replaceExistingMessage, true);
+  assert.equal(deliveryRecords[1].message.messageId, deliveryRecords[0].message.messageId);
+});
+
+test('wake fires and echo blocks record local-only host status messages', async () => {
+  let clock = 1_770_000_000_000;
+  const persistedInputs = [];
+  const persister = async (input) => {
+    persistedInputs.push(input);
+    return {
+    messageId: input.message.messageId ?? 'persisted-x',
+    sessionId: 'a2a-peer-local-peer',
+    orderSessionId: null,
+    direction: input.message.direction,
+    kind: 'private_chat',
+    protocolTag: null,
+    orderTxid: null,
+    serviceOrderPinId: null,
+    orderPinId: null,
+    paymentTxid: null,
+    content: input.message.content,
+    contentType: input.message.contentType ?? null,
+    chain: input.message.chain ?? null,
+    pinId: input.message.pinId ?? null,
+    txid: input.message.txid ?? null,
+    txids: input.message.txids ?? [],
+    replyPinId: null,
+    timestamp: input.message.timestamp ?? 0,
+    chainTimestamp: null,
+    sender: { globalMetaId: input.local.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+    recipient: { globalMetaId: input.peer.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+    raw: null,
+    };
+  };
+
+  // Wake path: silent tail → host status on the wake fire.
+  const wakeHarness = await createAutoReplyHarness({
+    now: () => clock,
+    a2aConversationPersister: persister,
+    replyRunner: async (input) => (
+      input.hostNoticeText
+        ? { state: 'reply', content: 'owed answer arrives' }
+        : { state: 'no_reply' }
+    ),
+  });
+  persistedInputs.length = 0;
+  await wakeHarness.handleInbound({ messagePinId: 'pin-host-wake', content: 'please come back later' });
+  clock += 15 * 60_000 + 1;
+  await wakeHarness.orchestrator.fireDueWakes();
+  const wakeHostStatus = persistedInputs
+    .filter((input) => input.message.hostStatus === true)
+    .map((input) => input.message.content);
+  assert.equal(wakeHostStatus.length, 1);
+  assert.match(wakeHostStatus[0], /\[Host\] Wake check 1/);
+
+  // Echo path: withheld reply leaves a host status line.
+  let calls = 0;
+  const echoHarness = await createAutoReplyHarness({
+    now: () => clock,
+    a2aConversationPersister: persister,
+    replyRunner: async () => {
+      calls += 1;
+      return { state: 'reply', content: 'canned duplicate' };
+    },
+  });
+  persistedInputs.length = 0;
+  await echoHarness.handleInbound({ messagePinId: 'pin-host-echo-1', content: 'q1' });
+  clock += 1_000;
+  await echoHarness.handleInbound({ messagePinId: 'pin-host-echo-2', content: 'q2' });
+  clock += 1_000;
+  await echoHarness.handleInbound({ messagePinId: 'pin-host-echo-3', content: 'q3' });
+  const echoHostStatus = persistedInputs
+    .filter((input) => input.message.hostStatus === true)
+    .map((input) => input.message.content);
+  assert.equal(echoHostStatus.length, 1);
+  assert.match(echoHostStatus[0], /\[Host\] Reply withheld/);
+});
+
+test('a ticket-gated interim update does not count as the turn answer', async () => {
+  let releaseRunner;
+  const runnerGate = new Promise((resolve) => {
+    releaseRunner = resolve;
+  });
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    replyRunner: async () => {
+      await runnerGate;
+      return { state: 'reply', content: 'final answer after the interim update' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  const turn = harness.handleInbound({ messagePinId: 'pin-interim-1', content: 'please run the long check' });
+  // While the runner is still composing, the bot delivers a ticket-gated
+  // interim update (as `metabot chat interim` would record it).
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const stored = await harness.stateStore.getRecentMessages(conversationId, 20);
+    if (stored.some((message) => message.messageId === 'pin-interim-1')) break;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await harness.stateStore.appendMessages([{
+    conversationId,
+    messageId: 'interim-msg-1',
+    direction: 'outbound',
+    senderGlobalMetaId: harness.localGlobalMetaId,
+    content: 'partial result: the scan is halfway through',
+    messagePinId: 'interim-pin-1',
+    extensions: { chatInterim: true },
+    timestamp: now + 5_000,
+  }]);
+  releaseRunner();
+  await turn;
+
+  assert.equal(harness.writes.length, 1, 'the final reply must still be delivered after an interim update');
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.lastDirection, 'outbound');
+});
+
+// ---- Phase 5: episode rollover (IDBots a2aEpisodeRollover parity) ----
+
+test('a conversation crossing the episode threshold rolls with a handoff summary and pruned engine log', async () => {
+  const now = 1_770_000_000_000;
+  const persistedInputs = [];
+  const harness = await createAutoReplyHarness({
+    now,
+    episodeRolloverMessages: 4,
+    episodeSummaryGenerator: async () => 'The peer asked for a market report; the report draft is owed and the peer prefers bullet points.',
+    a2aConversationPersister: async (input) => {
+      persistedInputs.push(input);
+      return { messageId: input.message.messageId ?? 'persisted-x' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: 'Market Bot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.appendMessages([
+    { conversationId, messageId: 'ep-msg-1', direction: 'inbound', senderGlobalMetaId: harness.peerGlobalMetaId, content: 'topic one', messagePinId: 'ep-pin-1', extensions: null, timestamp: now - 3_000 },
+    { conversationId, messageId: 'ep-msg-2', direction: 'outbound', senderGlobalMetaId: harness.localGlobalMetaId, content: 'answer one', messagePinId: 'ep-pin-2', extensions: null, timestamp: now - 2_000 },
+    { conversationId, messageId: 'ep-msg-3', direction: 'inbound', senderGlobalMetaId: harness.peerGlobalMetaId, content: 'topic two', messagePinId: 'ep-pin-3', extensions: null, timestamp: now - 1_000 },
+  ]);
+
+  // The 4th engine-side message is the inbound driving this turn: 4 >= 4 rolls.
+  await harness.handleInbound({ messagePinId: 'pin-episode-roll', content: 'and the report please' });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.episodeIndex, 1);
+  assert.match(conversation.episodeSummary, /market report/);
+
+  // Engine log pruned: the old episode is gone; the rolled episode starts
+  // with the driving inbound plus this turn's reply. The full thread lives on
+  // in the A2A store and on chain.
+  const remaining = await harness.stateStore.getRecentMessages(conversationId, 50);
+  assert.equal(remaining.length, 2);
+  assert.equal(remaining[0].messageId, 'pin-episode-roll');
+  assert.equal(remaining.some((message) => message.messageId === 'ep-msg-1'), false);
+
+  // The divider line lands in the UI-facing store as a host status message.
+  const divider = persistedInputs.find((input) => input.message.hostStatus === true);
+  assert.ok(divider, 'episode divider host status should be persisted');
+  assert.match(divider.message.content, /Episode 1 ended · handoff summary: /);
+
+  // The next turn's prompt carries the handoff instead of the pruned history.
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.match(harness.runnerInputs[0].episodeSummaryText, /market report/);
+  const promptMessages = harness.runnerInputs[0].recentMessages.map((m) => m.content).join('\n');
+  assert.doesNotMatch(promptMessages, /topic one/);
+});
+
+test('conversations below the episode threshold do not roll', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    episodeRolloverMessages: 50,
+    episodeSummaryGenerator: async () => 'should not be used',
+  });
+
+  await harness.handleInbound({ messagePinId: 'pin-episode-none', content: 'just chatting' });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.episodeIndex ?? 0, 0);
+  assert.equal(harness.runnerInputs[0].episodeSummaryText ?? '', '');
+});
+
+// ---- Phase 6: file messages (simplefilemsg) are recorded, never replied to ----
+
+test('an inbound file message is recorded with its attachment and drives no LLM turn', async () => {
+  const persistedInputs = [];
+  const harness = await createAutoReplyHarness({
+    a2aConversationPersister: async (input) => {
+      persistedInputs.push(input);
+      return { messageId: input.message.messageId ?? 'persisted-x' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const attachment = 'metafile://' + 'e'.repeat(64) + 'i0.png';
+
+  await harness.handleInbound({
+    messagePinId: 'pin-file-in-1',
+    contentType: 'application/json',
+    content: JSON.stringify({
+      to: harness.localGlobalMetaId,
+      encrypt: 'ecdh',
+      attachment,
+      fileType: 'image/png',
+      timestamp: 1_770_000_000,
+      replyPin: '',
+    }),
+  });
+
+  assert.equal(harness.runnerInputs.length, 0, 'file messages never drive an LLM turn');
+  assert.equal(harness.writes.length, 0);
+  const stored = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(stored.length, 1);
+  assert.match(stored[0].content, /\[File message: metafile:\/\//);
+  const persisted = persistedInputs.find((input) => input.message.direction === 'incoming');
+  assert.ok(persisted, 'inbound file message should persist to the A2A store');
+  assert.equal(persisted.message.content, attachment);
+  assert.equal(persisted.message.contentType, 'image/png');
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
 });

@@ -21,7 +21,12 @@ export type PrivateChatSendFailureKind =
   // be silent, which made unexplained peer-visible silence undiagnosable.
   | 'reply_runner_failed'
   | 'reply_commit_failed'
-  | 'rate_limited';
+  | 'rate_limited'
+  // Host loop-hygiene decisions (IDBots parity): a reply was withheld because
+  // it verbatim-echoed the last delivered replies, or a turn never produced
+  // final reply text even after all bounded host retries.
+  | 'echo_guard_blocked'
+  | 'reply_empty_after_retries';
 
 export interface PrivateChatSendFailureEvent {
   kind: PrivateChatSendFailureKind;

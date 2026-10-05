@@ -241,10 +241,13 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
    kernel .panelActive never fires for an overlay) — same vocabulary as the
    kernel's selected panel row; the glyph itself just tints brand-primary. */
 .oac-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3); }
+/* Numeric unread badge (IDBots parity): shows the unread message count. */
+.oac-unread-count { flex: none; min-width: 18px; height: 16px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--dsw-alias-state-error-primary, #ef4444); color: #fff; font-size: 10px; line-height: 12px; font-weight: 600; }
 .oac-a2a-glyph { position: relative; display: inline-flex; align-items: center; justify-content: center; }
 .oac-a2a-glyph[data-open='true'] { color: var(--dsw-alias-brand-primary); }
 button.oac-a2a-row-active, button.oac-bots-row-active { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); font-weight: 500; }
 .oac-a2a-glyph .oac-unread-dot { position: absolute; top: -3px; right: -4px; box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-2); }
+.oac-a2a-glyph .oac-unread-count { position: absolute; top: -8px; right: -12px; box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-2); }
 .oac-a2a-panel { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-base); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--dsw-alias-label-primary); }
@@ -335,6 +338,25 @@ button.oac-a2a-row-active, button.oac-bots-row-active { background: var(--dsw-al
 .oac-a2a-bubble-peer { background: var(--dsw-alias-bg-layer-3); border: 1px solid var(--dsw-alias-border-l2); border-radius: 16px 16px 16px 4px; padding: 8px 12px; }
 .oac-a2a-msg-text { white-space: pre-wrap; }
 .oac-a2a-msg-image { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; object-fit: contain; }
+.oac-a2a-msg-media { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; }
+.oac-a2a-msg-audio { width: 100%; min-width: 220px; }
+.oac-a2a-msg-download { font-size: 12.5px; color: var(--dsw-alias-brand-primary); }
+/* Local-only host status line (wake checks, retries, withheld replies). */
+.oac-a2a-host-status { align-self: center; max-width: 72%; padding: 3px 12px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; text-align: center; }
+/* Outgoing delivery lifecycle chips (IDBots privateChatDeliveryStatus parity). */
+.oac-a2a-delivery { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.oac-a2a-delivery-pending::before { content: '… '; }
+.oac-a2a-delivery-failed { color: var(--dsw-alias-status-danger, #d5484f); }
+/* "Local bot is working" activity line (IDBots StreamingActivityBar parity). */
+.oac-a2a-typing { display: flex; align-items: center; gap: 8px; padding: 4px 2px 0; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.oac-a2a-typing-dots { display: inline-flex; gap: 3px; }
+.oac-a2a-typing-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--dsw-alias-label-tertiary); animation: oac-a2a-typing-bounce 1.2s infinite ease-in-out; }
+.oac-a2a-typing-dots i:nth-child(2) { animation-delay: .15s; }
+.oac-a2a-typing-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes oac-a2a-typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-4px); opacity: 1; } }
+/* Floating back-to-bottom control over the thread. */
+.oac-a2a-jump-latest { position: absolute; right: 20px; bottom: 96px; z-index: 8; padding: 5px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 16px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.oac-a2a-jump-latest:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
 .oac-a2a-composer { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-composer-row { display: flex; align-items: center; gap: 8px; }
 .oac-a2a-composer-row .oac-input { flex: 1; min-width: 0; }

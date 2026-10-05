@@ -289,3 +289,72 @@ export async function streamDaemonConversationEvents(
     endResponse()
   })
 }
+
+/**
+ * `GET /oac/api/chat/media?from=<slug>&peer=…&ref=…&type=…` — byte-pipes the
+ * daemon's decrypted private-chat attachment endpoint so plugin <img>/<video>
+ * sources resolve without exposing the daemon port to the page.
+ */
+export async function proxyDaemonChatMedia(
+  req: PluginHttpRequest,
+  res: PluginHttpResponse,
+  query: URLSearchParams,
+): Promise<void> {
+  const baseUrl = await resolveDaemonBaseUrl()
+  if (baseUrl === null) {
+    writeJson(res, 503, { ok: false, error: { code: 'daemon_unreachable', message: 'OAC daemon is not reachable.' } })
+    return
+  }
+  const peer = query.get('peer')?.trim() ?? ''
+  const ref = query.get('ref')?.trim() ?? ''
+  const type = query.get('type')?.trim() ?? ''
+  const from = query.get('from')?.trim() ?? ''
+  if (!peer || !ref) {
+    writeJson(res, 400, { ok: false, error: { code: 'invalid_chat_media_request', message: 'peer and ref are required.' } })
+    return
+  }
+  const daemonUrl = `${baseUrl}/api/chat/media?local=${encodeURIComponent(from)}`
+    + `&peer=${encodeURIComponent(peer)}&ref=${encodeURIComponent(ref)}`
+    + (type ? `&type=${encodeURIComponent(type)}` : '')
+  const daemonRequest = httpGet(daemonUrl, (response) => {
+    if (response.statusCode !== 200) {
+      response.resume()
+      writeJson(res, response.statusCode === 404 ? 404 : 502, {
+        ok: false,
+        error: { code: 'chat_media_unreachable', message: 'The chat attachment could not be loaded.' },
+      })
+      return
+    }
+    res.writeHead(200, {
+      'content-type': response.headers['content-type'] ?? 'application/octet-stream',
+      ...(response.headers['content-length'] !== undefined
+        ? { 'content-length': response.headers['content-length'] }
+        : {}),
+      'cache-control': response.headers['cache-control'] ?? 'public, max-age=86400',
+    })
+    response.on('data', (chunk: Buffer) => {
+      try {
+        res.write?.(chunk)
+      } catch {
+        daemonRequest.destroy()
+      }
+    })
+    response.on('end', () => {
+      try {
+        res.end?.()
+      } catch {
+        // already ended
+      }
+    })
+    response.on('error', () => {
+      try {
+        res.end?.()
+      } catch {
+        // already ended
+      }
+    })
+  })
+  daemonRequest.on('error', () => {
+    writeJson(res, 502, { ok: false, error: { code: 'daemon_unreachable', message: 'OAC daemon is not reachable.' } })
+  })
+}

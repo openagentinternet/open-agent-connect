@@ -222,6 +222,24 @@ export interface MetabotDaemonHttpHandlers {
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    privateFile?: (input: {
+      from?: string;
+      to: string;
+      dataBase64: string;
+      fileType: string;
+      peerChatPublicKey?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    media?: (input: {
+      from?: string;
+      peer: string;
+      ref: string;
+      contentType?: string;
+    }) => Awaitable<MetabotCommandResult<{ dataBase64: string; contentType: string }>>;
+    interim?: (input: {
+      turnFile: string;
+      text: string;
+      from?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     privateConversation?: (input: {
       from?: string;
       peer: string;

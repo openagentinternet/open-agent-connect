@@ -163,7 +163,10 @@ function buildPrivateMsgPayload(
     to: toGlobalMetaId,
     timestamp,
     content: encryptedContent,
-    contentType: 'text/plain',
+    // IDBots parity: private-chat bodies are markdown; receivers (including
+    // the IDBots app and the DSH plugin) gate markdown rendering on this
+    // value. text/plain bodies would render verbatim with raw asterisks.
+    contentType: 'text/markdown',
     encrypt: 'ecdh',
     replyPin: replyPinId,
   });
@@ -261,6 +264,231 @@ export function sendPrivateChat(input: SendPrivateChatInput): SendPrivateChatRes
     secretVariant,
   };
 }
+
+// ---- Private file messages (/protocols/simplefilemsg, IDBots parity) ----
+// The message body is plaintext JSON carrying a `metafile://` attachment
+// pointer; the FILE itself is pinned encrypted under /file with a raw
+// AES-CBC cipher (fixed IV, raw-hex ciphertext) — deliberately NOT the
+// OpenSSL-format cipher used for text, to stay wire-compatible with the
+// IDBots chat app on the other side.
+
+export const PRIVATE_FILE_MSG_PATH = '/protocols/simplefilemsg';
+export const PRIVATE_FILE_MAX_BYTES = 1024 * 1024;
+
+const FILE_CIPHER_IV = enc.Utf8.parse('0000000000000000');
+
+/** @internal */
+export function encryptPrivateFileHex(fileHex: string, sharedSecretHex: string): string {
+  const encrypted = AES.encrypt(
+    enc.Hex.parse(String(fileHex ?? '')),
+    enc.Hex.parse(String(sharedSecretHex ?? '')),
+    {
+      mode: mode.CBC,
+      padding: pad.Pkcs7,
+      iv: FILE_CIPHER_IV,
+    },
+  );
+  return encrypted.ciphertext.toString(enc.Hex);
+}
+
+/** @internal */
+export function decryptPrivateFileHex(cipherHex: string, sharedSecretHex: string): Buffer | null {
+  try {
+    const cipherParams = (CryptoJS.lib.CipherParams as {
+      create: (config: { ciphertext: CryptoJS.lib.WordArray }) => CryptoJS.lib.CipherParams;
+    }).create({ ciphertext: enc.Hex.parse(String(cipherHex ?? '')) });
+    const plainHex = AES.decrypt(
+      cipherParams,
+      enc.Hex.parse(String(sharedSecretHex ?? '')),
+      {
+        mode: mode.CBC,
+        padding: pad.Pkcs7,
+        iv: FILE_CIPHER_IV,
+      },
+    ).toString(enc.Hex);
+    if (!plainHex || !/^[0-9a-f]*$/iu.test(plainHex) || plainHex.length % 2 !== 0) {
+      return null;
+    }
+    return Buffer.from(plainHex, 'hex');
+  } catch {
+    return null;
+  }
+}
+
+export interface PrivateFileChatAttachment {
+  attachment: string;
+  fileType: string;
+  timestamp: number;
+  replyPin: string | null;
+}
+
+const METAFILE_ATTACHMENT_PATTERN = /^metafile:\/\/([0-9a-f]{64}i0)(?:\.([a-z0-9][a-z0-9+-]{0,31}))?$/iu;
+
+/** Extracts the pin id and extension from a `metafile://<pinId>.<ext>` URI. */
+export function parseMetafileAttachmentUri(value: string): { pinId: string; extension: string } | null {
+  const match = normalizeText(value).match(METAFILE_ATTACHMENT_PATTERN);
+  return match ? { pinId: match[1], extension: match[2] ?? '' } : null;
+}
+
+/**
+ * Parses an inbound simplefilemsg body (`{"to","encrypt","attachment",
+ * "fileType","timestamp","replyPin"}`). Returns null for anything else so
+ * callers can treat it as regular text chat.
+ */
+export function parsePrivateFileChatContent(content: string): PrivateFileChatAttachment | null {
+  const normalized = normalizeText(content);
+  if (!normalized.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(normalized) as Record<string, unknown>;
+    const attachment = typeof parsed.attachment === 'string' ? normalizeText(parsed.attachment) : '';
+    if (!attachment || !parseMetafileAttachmentUri(attachment)) return null;
+    if (typeof parsed.content === 'string') return null;
+    return {
+      attachment,
+      fileType: typeof parsed.fileType === 'string' && normalizeText(parsed.fileType) ? normalizeText(parsed.fileType) : 'application/octet-stream',
+      timestamp: Number.isFinite(Number(parsed.timestamp)) ? Number(parsed.timestamp) : 0,
+      replyPin: typeof parsed.replyPin === 'string' ? normalizeText(parsed.replyPin) || null : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** @internal */
+export interface SendPrivateFileChatInput {
+  fromIdentity: {
+    globalMetaId: string;
+    privateKeyHex: string;
+  };
+  toGlobalMetaId: string;
+  peerChatPublicKey: string;
+  fileDataBase64: string;
+  fileType: string;
+  sharedSecretOverride?: string;
+}
+
+/** @internal */
+export interface SendPrivateFileChatResult {
+  fileWrite: {
+    operation: 'create';
+    path: '/file';
+    encryption: '0';
+    contentType: string;
+    payload: string;
+    encoding: 'hex';
+  };
+  msgWrite: {
+    operation: 'create';
+    path: '/protocols/simplefilemsg';
+    encryption: '0';
+    version: '1.0.0';
+    contentType: 'application/json';
+    payload: string;
+    encoding: 'utf-8';
+  };
+  attachment: string;
+  sharedSecret: string;
+}
+
+/** @internal */
+export function sendPrivateFileChat(input: SendPrivateFileChatInput): SendPrivateFileChatResult {
+  const peerPublicKey = requirePeerChatPublicKey(input.peerChatPublicKey);
+  const toGlobalMetaId = normalizeText(input.toGlobalMetaId);
+  if (!toGlobalMetaId) {
+    throw new Error('Target globalMetaId is required');
+  }
+  const fileBuffer = Buffer.from(String(input.fileDataBase64 ?? ''), 'base64');
+  if (!fileBuffer.length || fileBuffer.length > PRIVATE_FILE_MAX_BYTES) {
+    throw new Error(`Private file messages require 1-${PRIVATE_FILE_MAX_BYTES} bytes of file data`);
+  }
+  const fileType = normalizeText(input.fileType) || 'application/octet-stream';
+
+  const sharedSecret = normalizeText(input.sharedSecretOverride)
+    || computeEcdhSharedSecretSha256(
+      requirePrivateKeyBuffer(input.fromIdentity, 'Local private key'),
+      peerPublicKey,
+    );
+  const encryptedFileHex = encryptPrivateFileHex(fileBuffer.toString('hex'), sharedSecret);
+
+  const msgWrite: SendPrivateFileChatResult['msgWrite'] = {
+    operation: 'create',
+    path: PRIVATE_FILE_MSG_PATH,
+    encryption: '0',
+    version: '1.0.0',
+    contentType: 'application/json',
+    payload: '',
+    encoding: 'utf-8',
+  };
+  // The attachment pin id comes from the /file write result, so the message
+  // payload is filled by the caller once that lands.
+  return {
+    fileWrite: {
+      operation: 'create',
+      path: '/file',
+      encryption: '0',
+      contentType: fileType,
+      payload: encryptedFileHex,
+      encoding: 'hex',
+    },
+    msgWrite,
+    attachment: '',
+    sharedSecret,
+  };
+}
+
+/** Builds the simplefilemsg payload once the /file pin id is known. */
+export function buildPrivateFileMsgPayload(input: {
+  toGlobalMetaId: string;
+  attachment: string;
+  fileType: string;
+  replyPinId?: string;
+  timestamp?: number;
+}): string {
+  return JSON.stringify({
+    to: input.toGlobalMetaId,
+    encrypt: 'ecdh',
+    attachment: input.attachment,
+    fileType: input.fileType,
+    timestamp: Number.isFinite(input.timestamp) ? Math.floor(input.timestamp as number) : Math.floor(Date.now() / 1000),
+    replyPin: normalizeText(input.replyPinId),
+  });
+}
+
+/** Derives the display attachment URI from a /file write result. */
+export function attachmentUriFromFileWrite(fileWrite: { pinId?: unknown; txids?: unknown }, fileType: string): string | null {
+  const pinId = normalizeText(fileWrite.pinId);
+  if (pinId) {
+    return `metafile://${pinId}${extensionForFileType(fileType)}`;
+  }
+  const txids = Array.isArray(fileWrite.txids)
+    ? fileWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+    : [];
+  if (txids[0]) {
+    return `metafile://${txids[0]}i0${extensionForFileType(fileType)}`;
+  }
+  return null;
+}
+
+function extensionForFileType(fileType: string): string {
+  const normalized = normalizeText(fileType).toLowerCase().split(';')[0]?.trim() ?? '';
+  const extension = EXTENSION_BY_FILE_TYPE[normalized];
+  return extension ? `.${extension}` : '';
+}
+
+const EXTENSION_BY_FILE_TYPE: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/ogg': 'ogg',
+  'application/pdf': 'pdf',
+  'text/plain': 'txt',
+};
 
 /** @internal */
 export function receivePrivateChat(input: ReceivePrivateChatInput): ReceivePrivateChatResult {

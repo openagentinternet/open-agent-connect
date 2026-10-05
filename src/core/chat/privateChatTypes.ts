@@ -13,6 +13,10 @@ export interface PrivateChatConversation {
   pendingGuidanceCreatedAt: number | null;
   pendingGuidanceLeaseId?: string | null;
   pendingGuidanceLeaseExpiresAt?: number | null;
+  /** Episode rollover (IDBots parity): 0-based index of the active episode. */
+  episodeIndex?: number;
+  /** LLM handoff summary of the episode that ended before the current one. */
+  episodeSummary?: string | null;
 }
 
 export interface PrivateChatMessage {
@@ -86,10 +90,22 @@ export interface ChatReplyRunnerInput {
   // orchestrator uses it to send the peer a short wait notice before a long
   // skill execution; it must never break the reply path.
   onSkillExecutionStart?: () => void;
+  // Host-injected notice appended to the prompt (wake checks, empty-reply
+  // retries). Empty/null means a plain turn.
+  hostNoticeText?: string | null;
+  // Handoff summary of the previous episode (IDBots rollover parity): shown
+  // to the model as background instead of the pruned raw history.
+  episodeSummaryText?: string | null;
 }
 
 export interface ChatReplyRunnerResult {
-  state: 'reply' | 'end_conversation' | 'skip';
+  // 'reply': deliver content. 'end_conversation': deliver content and close.
+  // 'no_reply': the model deliberately chose silence ([NO_REPLY]) — record a
+  // local marker, deliver nothing, and arm a wake (IDBots parity).
+  // 'empty_reply': the LLM completed but emitted no final text (reasoning-only
+  // completion) — retryable with a host notice; never deliverable.
+  // 'skip': no reply could be produced at all (no runtime, runner failure).
+  state: 'reply' | 'end_conversation' | 'no_reply' | 'empty_reply' | 'skip';
   content?: string;
   extensions?: Record<string, unknown>;
 }
@@ -104,4 +120,10 @@ export interface PrivateChatAutoReplyConfig {
   defaultStrategyId: string | null;
   maxTurns?: number;
   cooldownMs?: number;
+  // Wake schedule for silent-but-open conversation tails (IDBots parity).
+  // Defaults to DEFAULT_PRIVATE_CHAT_WAKE_DELAYS_MS when absent.
+  wakeDelaysMs?: number[];
+  // Episode rollover threshold in messages per conversation (IDBots parity).
+  // Defaults to 1000; values below 2 disable rollover.
+  episodeRolloverMessages?: number;
 }

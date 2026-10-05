@@ -22,7 +22,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { IconNewChatOutline16 } from './icons.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { hasAnyUnread, type UnreadState } from '../unread-logic.ts'
+import { hasAnyUnread, sumPrivateUnreadCounts, type UnreadState } from '../unread-logic.ts'
 import { A2A_PANEL_ROW_MARK } from './a2a-panel-row.ts'
 import type { A2APanelState } from './a2a-panel-store.ts'
 
@@ -43,6 +43,7 @@ export type A2APanelGlyphProps =
   }
 
 export function A2APanelGlyph({ size, useUnread, usePanel }: A2APanelGlyphProps): ReactNode {
+  const unreadCount = useUnread((state) => sumPrivateUnreadCounts(state))
   const hasUnread = useUnread((state) => hasAnyUnread(state))
   const open = usePanel((state) => state.open)
   const markRef = useRef<HTMLSpanElement | null>(null)
@@ -63,7 +64,9 @@ export function A2APanelGlyph({ size, useUnread, usePanel }: A2APanelGlyphProps)
   return (
     <span ref={markRef} className="oac-a2a-glyph" {...{ [A2A_PANEL_ROW_MARK]: '' }} data-open={open || undefined}>
       <IconNewChatOutline16 size={size} />
-      {hasUnread ? <span className="oac-unread-dot" /> : null}
+      {unreadCount > 0
+        ? <span className="oac-unread-count">{unreadCount > 99 ? '99+' : unreadCount}</span>
+        : hasUnread ? <span className="oac-unread-dot" /> : null}
     </span>
   )
 }

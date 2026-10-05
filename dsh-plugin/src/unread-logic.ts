@@ -5,16 +5,19 @@
  * `<chair-slug>:<task-id>` (group). The `*Seen` maps are per-conversation
  * baselines: the newest activity timestamp the user has accounted for. First
  * sight only seeds the baseline, so installing the plugin never marks
- * history unread.
+ * history unread. `privateCounts` carries the unread message COUNT per
+ * private key (IDBots numeric-badge parity); presence in `private` still
+ * drives boolean dots where a count is not shown.
  */
 export type UnreadState = {
   private: Record<string, number>
   group: Record<string, number>
   privateSeen: Record<string, number>
   groupSeen: Record<string, number>
+  privateCounts: Record<string, number>
 }
 
-export const EMPTY_UNREAD: UnreadState = { private: {}, group: {}, privateSeen: {}, groupSeen: {} }
+export const EMPTY_UNREAD: UnreadState = { private: {}, group: {}, privateSeen: {}, groupSeen: {}, privateCounts: {} }
 
 /** One changed group task, emitted by the host watcher's store diff. */
 export type GroupTaskUpdate = { key: string; updatedAt: number }
@@ -84,22 +87,34 @@ export function privateRowStatus(
 }
 
 /**
- * Fold the thread check for a `changed` row: an inbound latest message marks
- * unread; a local one (own sends, auto-replies) only advances the baseline —
- * the local Bot's own activity must never light a badge.
+ * Fold the thread check for a `changed` row: inbound messages mark unread
+ * (and add their count); a local one (own sends, auto-replies) only advances
+ * the baseline — the local Bot's own activity must never light a badge.
  */
 export function applyPrivateLatest(
   state: Readonly<UnreadState>,
   key: string,
   latestAt: number,
   isLocal: boolean,
+  unseenInboundCount = 1,
 ): UnreadState {
   const priv = { ...state.private }
-  if (isLocal) delete priv[key]
-  else priv[key] = latestAt
+  let privateCounts = state.privateCounts
+  if (isLocal) {
+    delete priv[key]
+    if (privateCounts[key] !== undefined) privateCounts = { ...privateCounts }
+    delete privateCounts[key]
+  } else {
+    priv[key] = latestAt
+    privateCounts = {
+      ...privateCounts,
+      [key]: Math.max(1, Math.trunc(unseenInboundCount) || 1) + (privateCounts[key] ?? 0),
+    }
+  }
   return {
     ...state,
     private: priv,
+    privateCounts,
     privateSeen: { ...state.privateSeen, [key]: latestAt },
   }
 }
@@ -119,9 +134,12 @@ export function clearPrivateMark(
   if (marked === undefined) return null
   const priv = { ...state.private }
   delete priv[key]
+  const privateCounts = { ...state.privateCounts }
+  delete privateCounts[key]
   return {
     ...state,
     private: priv,
+    privateCounts,
     privateSeen: { ...state.privateSeen, [key]: Math.max(state.privateSeen[key] ?? 0, marked) },
   }
 }
@@ -154,4 +172,14 @@ export function seedPrivateSeen(
 /** Any unread mark at all — drives the sidebar-foot entry dot. */
 export function hasAnyUnread(state: Readonly<UnreadState>): boolean {
   return Object.keys(state.private).length > 0 || Object.keys(state.group).length > 0
+}
+
+/** Total unread private messages across conversations (numeric badges). */
+export function sumPrivateUnreadCounts(state: Readonly<UnreadState>): number {
+  let total = 0
+  for (const value of Object.values(state.privateCounts)) {
+    const count = Math.trunc(Number(value))
+    if (Number.isFinite(count) && count > 0) total += count
+  }
+  return total
 }
