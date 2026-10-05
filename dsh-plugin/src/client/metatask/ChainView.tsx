@@ -152,6 +152,15 @@ export function ChainView(props: {
   const redraw = () => {
     const container = containerRef.current
     if (!container) return
+    const svg = container.querySelector('.oac-mt-edges') as SVGSVGElement | null
+    // The SVG lives INSIDE the horizontally-scrolling container: size it to
+    // the full content box (not the visible viewport) and compute every
+    // coordinate against the container's content origin — both rects shift
+    // together when scrolled, so the paths stay glued to the cards.
+    if (svg) {
+      svg.style.width = `${container.scrollWidth}px`
+      svg.style.height = `${container.scrollHeight}px`
+    }
     const rectOf = (pinId: string): DOMRect | null =>
       container.querySelector(`[data-cand-pin="${CSS.escape(pinId)}"]`)?.getBoundingClientRect() ?? null
     const base = container.getBoundingClientRect()
@@ -194,13 +203,17 @@ export function ChainView(props: {
   useEffect(() => {
     redraw()
     const container = containerRef.current
-    if (!container || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => { redraw() })
-    observer.observe(container)
+    if (!container) return
+    // Horizontal scrolling must also re-glue the edge overlay (avatars
+    // arriving or scrollbar appearing can otherwise leave stale coordinates).
+    container.addEventListener('scroll', redraw, { passive: true })
     window.addEventListener('resize', redraw)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { redraw() })
+    if (observer) observer.observe(container)
     return () => {
-      observer.disconnect()
+      container.removeEventListener('scroll', redraw)
       window.removeEventListener('resize', redraw)
+      observer?.disconnect()
     }
   })
 
@@ -262,7 +275,7 @@ export function ChainView(props: {
                 {(node.submissions ?? []).map((cand) => {
                   const state = candidateState(node as unknown as NodeLike, cand as unknown as CandidateLike, byPin, winningSet)
                   const onRaceLine = race !== null && race.has(cand.pinId) && state === 'inReview'
-                  const isTip = raceTipId !== null && cand.pinId === raceTipId
+                  const isTip = raceTipId !== null && cand.pinId === raceTipId && state !== 'leading' && state !== 'winner'
                   const identity = identityOf(cand.submitter)
                   return (
                     <button

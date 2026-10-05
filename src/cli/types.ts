@@ -205,6 +205,7 @@ export interface CliDependencies {
     get?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     replay?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    draft?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     claim?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     submit?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     verify?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

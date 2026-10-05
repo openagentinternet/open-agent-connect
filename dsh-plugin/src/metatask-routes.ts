@@ -64,5 +64,14 @@ export async function dispatchMetaTaskRoutes(
     return run(['metatask', 'refresh'], { timeoutMs: REFRESH_TIMEOUT_MS })
   }
 
+  if (method === 'metatask/draft') {
+    const root = readTrimmed(body, 'root')
+    if (!root) return { ok: false, state: 'failed', code: 'missing_root', message: 'root is required' }
+    const args = ['metatask', 'draft', '--root', root]
+    const lang = readTrimmed(body, 'lang')
+    if (lang) args.push('--lang', lang)
+    return run(args, { timeoutMs: READ_TIMEOUT_MS })
+  }
+
   return { ok: false, state: 'failed', code: 'unknown_metatask_method', message: `Unknown metatask method: ${method}` }
 }
