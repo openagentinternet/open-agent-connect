@@ -26,9 +26,11 @@ const PAGE_SOURCES = [
   'src/ui/pages/publish/viewModel.ts',
   'src/ui/pages/refund/app.ts',
   'src/ui/pages/conversations/app.ts',
+  'src/ui/pages/tracking/app.ts',
 ];
 
 const HTML_TEMPLATES = [
+  'src/ui/pages/tracking/index.html',
   'src/ui/pages/bot/index.html',
   'src/ui/pages/hub/index.html',
   'src/ui/pages/publish/index.html',

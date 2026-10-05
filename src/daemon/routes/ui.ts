@@ -13,6 +13,7 @@ import { buildKbPageDefinition } from '../../ui/pages/kb/app';
 import { buildSurfPageDefinition } from '../../ui/pages/surf/app';
 import { buildMemoryPageDefinition } from '../../ui/pages/memory/app';
 import { buildSchedulePageDefinition } from '../../ui/pages/schedule/app';
+import { buildTrackingPageDefinition } from '../../ui/pages/tracking/app';
 import { buildTrafficPageDefinition } from '../../ui/pages/traffic/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
@@ -61,6 +62,7 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'surf': buildSurfPageDefinition,
   'memory': buildMemoryPageDefinition,
   'schedule': buildSchedulePageDefinition,
+  'tracking': buildTrackingPageDefinition,
   'traffic': buildTrafficPageDefinition,
   'settings': buildSettingsPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
@@ -71,6 +73,7 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'conversations', labelKey: 'nav.conversations' },
   { page: 'apps', labelKey: 'nav.apps' },
   { page: 'schedule', labelKey: 'nav.schedule' },
+  { page: 'tracking', labelKey: 'nav.tracking' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();

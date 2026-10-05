@@ -21,6 +21,7 @@ export type MetabotUiPageName =
   | 'surf'
   | 'memory'
   | 'schedule'
+  | 'tracking'
   | 'traffic'
   | 'dream'
   | 'metaapps'
