@@ -99,7 +99,7 @@ export function hasArg(args: string[] | undefined, flag: string): boolean {
   return Boolean(args?.some((arg) => arg === flag || arg.startsWith(`${flag}=`)));
 }
 
-function stripStreamPrefix(line: string): string {
+export function stripStreamPrefix(line: string): string {
   const trimmed = line.trimStart();
   if (trimmed.startsWith('stdout:')) return trimmed.slice('stdout:'.length).trimStart();
   if (trimmed.startsWith('stderr:')) return trimmed.slice('stderr:'.length).trimStart();
