@@ -206,6 +206,60 @@ export const handleChatRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/chat/private/file') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+    const body = await context.readJsonBody();
+    const result = handlers.chat?.privateFile
+      ? await handlers.chat.privateFile({
+          from: normalizeText(body.from) || undefined,
+          to: normalizeText(body.to),
+          dataBase64: typeof body.dataBase64 === 'string' ? body.dataBase64 : '',
+          fileType: normalizeText(body.fileType),
+        })
+      : commandFailed('not_implemented', 'Chat private file handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
+  if (url.pathname === '/api/chat/media') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const peer = normalizeText(url.searchParams.get('peer'));
+    const ref = normalizeText(url.searchParams.get('ref'));
+    if (!peer || !ref) {
+      context.sendJson(400, commandFailed('invalid_chat_media_request', 'peer and ref are required.'));
+      return true;
+    }
+    const handler = handlers.chat?.media;
+    if (!handler) {
+      context.sendJson(501, commandFailed('not_implemented', 'Chat media handler is not configured.'));
+      return true;
+    }
+    const result = await handler({
+      from: normalizeText(url.searchParams.get('local')) || undefined,
+      peer,
+      ref,
+      contentType: normalizeText(url.searchParams.get('type')) || undefined,
+    });
+    if (!result.ok) {
+      context.sendJson(404, result);
+      return true;
+    }
+    const bytes = Buffer.from(result.data.dataBase64, 'base64');
+    context.res.writeHead(200, {
+      'Content-Type': result.data.contentType,
+      'Content-Length': String(bytes.length),
+      'Cache-Control': 'public, max-age=86400',
+    });
+    context.res.end(bytes);
+    return true;
+  }
+
   if (url.pathname !== '/api/chat/private') {
     return false;
   }

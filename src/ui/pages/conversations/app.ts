@@ -56,6 +56,8 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
                 placeholder="${i18n.t('conversations.composerPlaceholder')}"
                 aria-label="${i18n.t('conversations.composerPlaceholder')}"
               />
+              <input type="file" data-attach-input hidden accept="image/*,video/*,audio/*,application/pdf,text/plain" />
+              <button class="btn btn-sm btn-ghost" type="button" data-attach-button data-i18n-key="conversations.attachFile">${i18n.t('conversations.attachFile')}</button>
               <button class="btn btn-sm" type="submit" data-send-submit data-i18n-key="conversations.send">${i18n.t('conversations.send')}</button>
             </form>
             <div class="conversation-readonly-status" data-conversation-readonly-status data-i18n-key="conversations.readonlyStatus">${i18n.t('conversations.readonlyStatus')}</div>
@@ -120,6 +122,8 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     sendForm: document.querySelector('[data-send-form]'),
     sendInput: document.querySelector('[data-send-input]'),
     sendSubmit: document.querySelector('[data-send-submit]'),
+    attachInput: document.querySelector('[data-attach-input]'),
+    attachButton: document.querySelector('[data-attach-button]'),
     typing: document.querySelector('[data-conversation-typing]'),
     typingText: document.querySelector('[data-conversation-typing-text]'),
     toast: document.querySelector('[data-copy-toast]'),
@@ -880,7 +884,28 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const avatarHtml = isLocal
       ? avatarImg(senderAvatar, senderName, 'msg-avatar')
       : botBrowserAvatarLink(selected.peerGlobalMetaId, senderAvatar, senderName, 'msg-avatar');
-    const contentHtml = message.isMarkdown ? renderMarkdown(message.content) : renderPlainText(message.content);
+    // Attachments (metafile:// pointers) render through the daemon's
+    // decrypting media endpoint instead of as text.
+    const attachmentMediaUrl = (ref, type) => '/api/chat/media?local=' + encodeURIComponent(model.selectedLocalGlobalMetaId)
+      + '&peer=' + encodeURIComponent(selected.peerGlobalMetaId)
+      + '&ref=' + encodeURIComponent(ref)
+      + '&type=' + encodeURIComponent(type || '');
+    let contentHtml;
+    if (message.isAttachment) {
+      const type = String(message.contentType || '').toLowerCase();
+      const url = attachmentMediaUrl(message.content, type);
+      if (type.indexOf('image/') === 0) {
+        contentHtml = '<img class="msg-media" src="' + escapeHtml(url) + '" alt="" loading="lazy" />';
+      } else if (type.indexOf('video/') === 0) {
+        contentHtml = '<video class="msg-media" controls preload="metadata" src="' + escapeHtml(url) + '"></video>';
+      } else if (type.indexOf('audio/') === 0) {
+        contentHtml = '<audio class="msg-media-audio" controls preload="metadata" src="' + escapeHtml(url) + '"></audio>';
+      } else {
+        contentHtml = '<a class="msg-media-download" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(uiText('conversations.downloadAttachment', 'Download attachment')) + '</a>';
+      }
+    } else {
+      contentHtml = message.isMarkdown ? renderMarkdown(message.content) : renderPlainText(message.content);
+    }
     const txidHtml = message.txid
       ? '<span class="msg-txid"><span class="msg-txid-text" data-message-txid-preview>txid: ' + escapeHtml(message.txidPreview) + '</span>' + copyButton(message.txid, uiText('conversations.copyTxid', 'Copy txid'), 'copy-txid', uiText('conversations.txidCopied', 'TxID copied')) + '</span>'
       : '<span class="msg-txid msg-txid-empty">txid: -</span>';
@@ -1265,6 +1290,51 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     elements.sendForm.addEventListener('submit', async (event) => {
       if (event && typeof event.preventDefault === 'function') event.preventDefault();
       await submitPeerMessage();
+    });
+  }
+  if (elements.attachButton && elements.attachInput) {
+    elements.attachButton.addEventListener('click', () => {
+      if (!state.sending) elements.attachInput.click();
+    });
+    elements.attachInput.addEventListener('change', async () => {
+      const file = elements.attachInput && elements.attachInput.files && elements.attachInput.files[0];
+      if (elements.attachInput) elements.attachInput.value = '';
+      if (!file || !hasGuidanceTarget() || state.sending) return;
+      if (file.size > 1024 * 1024) {
+        state.error = uiText('conversations.fileTooLarge', 'Attachments must be 1MB or smaller.');
+        render();
+        return;
+      }
+      const targetLocal = state.selectedLocalGlobalMetaId;
+      const targetPeer = state.selectedPeerGlobalMetaId;
+      state.sending = true;
+      render();
+      try {
+        const dataBase64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+          reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+          reader.readAsDataURL(file);
+        });
+        await fetchJson('/api/chat/private/file', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            from: targetLocal,
+            to: targetPeer,
+            fileType: file.type || 'application/octet-stream',
+            dataBase64,
+          }),
+        });
+        if (state.selectedLocalGlobalMetaId === targetLocal && state.selectedPeerGlobalMetaId === targetPeer) {
+          await loadConversations({ stickToBottom: true });
+        }
+      } catch (error) {
+        state.error = error.message || uiText('conversations.requestFailed', 'Request failed.');
+      } finally {
+        state.sending = false;
+        render();
+      }
     });
   }
   if (elements.guidanceToggle) {

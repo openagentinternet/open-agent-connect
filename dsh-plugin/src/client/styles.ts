@@ -338,6 +338,9 @@ button.oac-a2a-row-active, button.oac-bots-row-active { background: var(--dsw-al
 .oac-a2a-bubble-peer { background: var(--dsw-alias-bg-layer-3); border: 1px solid var(--dsw-alias-border-l2); border-radius: 16px 16px 16px 4px; padding: 8px 12px; }
 .oac-a2a-msg-text { white-space: pre-wrap; }
 .oac-a2a-msg-image { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; object-fit: contain; }
+.oac-a2a-msg-media { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; }
+.oac-a2a-msg-audio { width: 100%; min-width: 220px; }
+.oac-a2a-msg-download { font-size: 12.5px; color: var(--dsw-alias-brand-primary); }
 /* Local-only host status line (wake checks, retries, withheld replies). */
 .oac-a2a-host-status { align-self: center; max-width: 72%; padding: 3px 12px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; text-align: center; }
 /* Outgoing delivery lifecycle chips (IDBots privateChatDeliveryStatus parity). */

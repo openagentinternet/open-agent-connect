@@ -38,6 +38,7 @@ import {
   daemonConversationsMessages,
   daemonConversationsMeta,
   proxyDaemonAvatar,
+  proxyDaemonChatMedia,
   streamDaemonConversationEvents,
 } from './conversation-bridge.js'
 import { streamAllChatEvents } from './chat-watcher.js'
@@ -418,6 +419,14 @@ function registerApi(
           return
         }
         streamAllChatEvents(req, res)
+        return
+      }
+      if (method === 'chat/media') {
+        if (req.method !== 'GET') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+          return
+        }
+        await proxyDaemonChatMedia(req, res, new URL(req.url ?? '/', 'http://dsh.internal').searchParams)
         return
       }
       if (method === 'metaapp/events') {

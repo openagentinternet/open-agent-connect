@@ -1,4 +1,5 @@
 import { sendPrivateChat } from './privateChat';
+import { parsePrivateFileChatContent } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
 import {
   buildPrivateReplyMemoryContext,
@@ -1617,13 +1618,18 @@ export function createPrivateChatAutoReplyOrchestrator(
       // all see plain text instead of raw JSON.
       const inboundWireContent = unwrapPrivateChatContent(message.content);
       const simplemsgClassification = classifySimplemsgContent(inboundWireContent.content);
+      // File messages (simplefilemsg): the body is plaintext JSON carrying a
+      // metafile:// attachment pointer. Recorded, never replied to.
+      const fileAttachment = parsePrivateFileChatContent(inboundWireContent.content);
 
       const inboundMessageRecord: PrivateChatMessage = {
         conversationId: conversation.conversationId,
         messageId: message.messagePinId || buildMessageId(now),
         direction: 'inbound',
         senderGlobalMetaId: peerGlobalMetaId,
-        content: inboundWireContent.content,
+        content: fileAttachment
+          ? `[File message: ${fileAttachment.attachment}]`
+          : inboundWireContent.content,
         messagePinId: message.messagePinId,
         extensions: inboundWireContent.extensions,
         timestamp: inboundTimestamp,
@@ -1652,8 +1658,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         message: {
           messageId: inboundMessageRecord.messageId,
           direction: 'incoming',
-          content: inboundMessageRecord.content,
-          contentType: message.contentType,
+          content: fileAttachment ? fileAttachment.attachment : inboundMessageRecord.content,
+          contentType: fileAttachment
+            ? fileAttachment.fileType
+            : message.contentType,
           pinId: inboundMessageRecord.messagePinId,
           timestamp: inboundMessageRecord.timestamp,
           raw: message.rawMessage,
@@ -1665,6 +1673,14 @@ export function createPrivateChatAutoReplyOrchestrator(
       await wakeStore.remove(conversation.conversationId).catch(() => undefined);
 
       if (conversation.state === 'closed') {
+        await deps.stateStore.upsertConversation(conversation);
+        return;
+      }
+
+      // ---- File-message path (simplefilemsg, IDBots parity): the attachment
+      // is recorded above with its pointer and content type; file messages
+      // never drive an LLM turn or consume turns. ----
+      if (fileAttachment) {
         await deps.stateStore.upsertConversation(conversation);
         return;
       }

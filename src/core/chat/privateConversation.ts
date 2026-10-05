@@ -570,7 +570,10 @@ function decryptMessageContent(input: {
   protocol: string;
 }): string {
   if (isFileProtocol(input.protocol)) {
-    return UNSUPPORTED_FILE_TEXT;
+    // simplefilemsg bodies are plaintext JSON carrying a metafile://
+    // attachment pointer (the file itself is separately encrypted under
+    // /file); pass the body through so consumers can parse the attachment.
+    return normalizeText(input.cipherContent) || UNSUPPORTED_FILE_TEXT;
   }
 
   try {

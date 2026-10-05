@@ -86,9 +86,21 @@ function MessageRow({
   const senderName = message.sender.name ?? (isLocal ? localLabel : peerLabel)
   const senderAvatar = message.sender.avatar ?? (isLocal ? localAvatar : peerAvatar)
   const senderGlobalMetaId = message.sender.globalMetaId ?? (isLocal ? localGlobalMetaId : peerGlobalMetaId)
-  const isImage = (message.contentType ?? '').toLowerCase().startsWith('image/')
+  const contentType = (message.contentType ?? '').toLowerCase()
+  const isImage = contentType.startsWith('image/')
+  const isVideo = contentType.startsWith('video/')
+  const isAudio = contentType.startsWith('audio/')
   const isMarkdown = message.contentType === 'text/markdown'
   const mdLabels = useMemo(() => markdownLabels(t), [t])
+  // Attachments (metafile:// pointers, IDBots simplefilemsg parity) resolve
+  // through the host's decrypting media proxy, never as raw text.
+  const isMetafileAttachment = /^metafile:\/\//iu.test(message.content.trim())
+  const attachmentUrl = isMetafileAttachment
+    ? `/oac/api/chat/media?from=${encodeURIComponent(localGlobalMetaId)}`
+      + `&peer=${encodeURIComponent(peerGlobalMetaId)}`
+      + `&ref=${encodeURIComponent(message.content.trim())}`
+      + `&type=${encodeURIComponent(message.contentType ?? '')}`
+    : message.content
   // Local-only host status lines (wake checks, retries, withheld replies)
   // render as centered internal notes, never as chat bubbles (IDBots
   // internal-status parity).
@@ -139,11 +151,21 @@ function MessageRow({
           </span>
         </div>
         <div className={isLocal ? 'oac-a2a-bubble oac-a2a-bubble-local' : 'oac-a2a-bubble oac-a2a-bubble-peer'}>
-          {isImage
-            ? <img className="oac-a2a-msg-image" src={message.content} alt="" />
-            : isMarkdown
-              ? <MarkdownText text={message.content} labels={mdLabels} />
-              : <span className="oac-a2a-msg-text">{message.content}</span>}
+          {isMetafileAttachment
+            ? (
+              isImage
+                ? <img className="oac-a2a-msg-image" src={attachmentUrl} alt="" />
+                : isVideo
+                  ? <video className="oac-a2a-msg-media" controls preload="metadata" src={attachmentUrl} />
+                  : isAudio
+                    ? <audio className="oac-a2a-msg-audio" controls preload="metadata" src={attachmentUrl} />
+                    : <a className="oac-a2a-msg-download" href={attachmentUrl} target="_blank" rel="noopener noreferrer">{t('downloadAttachment')}</a>
+            )
+            : isImage
+              ? <img className="oac-a2a-msg-image" src={attachmentUrl} alt="" />
+              : isMarkdown
+                ? <MarkdownText text={message.content} labels={mdLabels} />
+                : <span className="oac-a2a-msg-text">{message.content}</span>}
         </div>
       </div>
     </div>

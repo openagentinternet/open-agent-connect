@@ -41,6 +41,7 @@ export interface ConversationMessageViewModel {
   timestampLabel: string;
   hostStatus: boolean;
   deliveryStatus: string;
+  isAttachment: boolean;
 }
 
 export interface ConversationsEmptyStateViewModel {
@@ -382,6 +383,7 @@ function buildMessage(row: unknown): ConversationMessageViewModel {
     timestampLabel: formatTimestamp(timestamp || normalizeTimestampMs(sender.timestamp)),
     hostStatus: record.hostStatus === true,
     deliveryStatus: normalizeText(record.deliveryStatus),
+    isAttachment: /^metafile:\/\//iu.test(normalizeText(record.content)),
   };
 }
 

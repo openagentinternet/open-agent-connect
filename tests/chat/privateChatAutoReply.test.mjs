@@ -3241,3 +3241,42 @@ test('conversations below the episode threshold do not roll', async () => {
   assert.equal(conversation.episodeIndex ?? 0, 0);
   assert.equal(harness.runnerInputs[0].episodeSummaryText ?? '', '');
 });
+
+// ---- Phase 6: file messages (simplefilemsg) are recorded, never replied to ----
+
+test('an inbound file message is recorded with its attachment and drives no LLM turn', async () => {
+  const persistedInputs = [];
+  const harness = await createAutoReplyHarness({
+    a2aConversationPersister: async (input) => {
+      persistedInputs.push(input);
+      return { messageId: input.message.messageId ?? 'persisted-x' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const attachment = 'metafile://' + 'e'.repeat(64) + 'i0.png';
+
+  await harness.handleInbound({
+    messagePinId: 'pin-file-in-1',
+    contentType: 'application/json',
+    content: JSON.stringify({
+      to: harness.localGlobalMetaId,
+      encrypt: 'ecdh',
+      attachment,
+      fileType: 'image/png',
+      timestamp: 1_770_000_000,
+      replyPin: '',
+    }),
+  });
+
+  assert.equal(harness.runnerInputs.length, 0, 'file messages never drive an LLM turn');
+  assert.equal(harness.writes.length, 0);
+  const stored = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(stored.length, 1);
+  assert.match(stored[0].content, /\[File message: metafile:\/\//);
+  const persisted = persistedInputs.find((input) => input.message.direction === 'incoming');
+  assert.ok(persisted, 'inbound file message should persist to the A2A store');
+  assert.equal(persisted.message.content, attachment);
+  assert.equal(persisted.message.contentType, 'image/png');
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+});

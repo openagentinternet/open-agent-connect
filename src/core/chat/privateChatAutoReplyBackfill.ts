@@ -661,6 +661,42 @@ export function createPrivateChatAutoReplyBackfillLoop(
 
       let peerFailed = false;
       for (const message of response.messages) {
+        // File messages (simplefilemsg, IDBots parity): record-only
+        // passthrough — the orchestrator persists the attachment pointer
+        // without spending an LLM turn, so the same dedupe + initial-catch-up
+        // gates as text apply, just without the replyable filter.
+        if (
+          message.protocol === '/protocols/simplefilemsg'
+          && normalizeGlobalMetaId(message.fromGlobalMetaId) === normalizeGlobalMetaId(peerGlobalMetaId)
+          && normalizeGlobalMetaId(message.toGlobalMetaId) === normalizeGlobalMetaId(selfGlobalMetaId)
+          && normalizeText(message.content)
+        ) {
+          const fileDedupId = getMessageDedupId(message);
+          if (fileDedupId && processedIds.has(fileDedupId)) {
+            skipped += 1;
+            continue;
+          }
+          if (!existingCursor && !shouldProcessInitialMessage({
+            message,
+            peerGlobalMetaId,
+            latestInboundTimestampByPeer,
+            nowMs: getNow(),
+            startupCatchUpMs,
+          })) {
+            skipped += 1;
+            continue;
+          }
+          try {
+            await deps.handleInboundMessage(toInboundMessage(message, peerChatPublicKey));
+            if (fileDedupId) processedIds.add(fileDedupId);
+            processed += 1;
+          } catch (error) {
+            failed += 1;
+            peerFailed = true;
+            deps.onError?.(error instanceof Error ? error : new Error(String(error)));
+          }
+          continue;
+        }
         if (!isReplyableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId)) {
           if (isUndecryptableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId)) {
             // Hold the cursor so the row is retried instead of permanently lost.
