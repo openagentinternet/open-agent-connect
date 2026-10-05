@@ -191,6 +191,7 @@ import {
   executeTransfer,
 } from '../core/signing/localMnemonicSigner';
 import { createTrafficAccountService } from '../core/traffic/trafficAccountService';
+import { createOwnerOnboardingRunner } from '../core/owner/ownerOnboarding';
 import { createTrafficSponsorWritePinResolver } from '../core/subsidy/mvcSponsorWritePin';
 import { normalizeChainWriteRequest, type ChainWriteNetwork } from '../core/chain/writePin';
 import { createDefaultChainAdapterRegistry } from '../core/chain/adapters/registry';
@@ -4072,6 +4073,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       // The publish happens daemon-side (signer + traffic sponsor hook live
       // there); the CLI only forwards the parsed update input.
       update: async (input) => requestJson(context, 'POST', '/api/user/update', input),
+      runOnboarding: async () => requestJson(context, 'POST', '/api/user/onboarding', {}),
     },
     network: {
       listServices: async (input) => {
@@ -5855,13 +5857,18 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         let ownerGlobalMetaId = typeof input.ownerGlobalMetaId === 'string' && input.ownerGlobalMetaId.trim()
           ? input.ownerGlobalMetaId.trim()
           : '';
+        let localOwnerGlobalMetaId = '';
+        if (!input.unbind) {
+          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+          const ownerIdentity = await readOwnerIdentity(systemHomeDir).catch(() => null);
+          localOwnerGlobalMetaId = ownerIdentity?.globalMetaId?.trim() ?? '';
+        }
         if (!input.unbind && !ownerGlobalMetaId) {
           // Default owner: the local human owner identity first, then the
           // Twin Bot identity as a fallback.
-          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-          const ownerIdentity = await readOwnerIdentity(systemHomeDir).catch(() => null);
-          ownerGlobalMetaId = ownerIdentity?.globalMetaId?.trim() ?? '';
+          ownerGlobalMetaId = localOwnerGlobalMetaId;
           if (!ownerGlobalMetaId) {
+            const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
             const [profiles, twinHomeDir] = await Promise.all([
               listIdentityProfiles(systemHomeDir).catch(() => []),
               resolveTwinHomeDir(systemHomeDir),
@@ -5875,6 +5882,19 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
               'No local owner identity or Twin Bot with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.',
             );
           }
+        }
+        // When the binding target is the local owner identity, use the signed
+        // route: the daemon signs the binding statement with the owner's MVC
+        // key, publishes the Bot's /info/owner pin, and syncs the local
+        // ownerGlobalMetaId. Explicit foreign owners and unbind stay on the
+        // local-only PUT path.
+        if (!input.unbind && localOwnerGlobalMetaId && ownerGlobalMetaId.toLowerCase() === localOwnerGlobalMetaId.toLowerCase()) {
+          return requestJson(
+            context,
+            'POST',
+            `/api/bot/profiles/${encodeURIComponent(input.slug)}/bind-owner`,
+            {},
+          );
         }
         return requestJson(
           context,
@@ -6395,6 +6415,23 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const requestMvcGasSubsidy = context.env[TEST_FAKE_SUBSIDY_ENV] === '1'
     ? createTestSubsidyRequester()
     : undefined;
+  // Zero-touch owner onboarding (user account + traffic account + free
+  // grant): the shared runner backs both the daemon-start kick below and the
+  // /api/user/onboarding run verb. Skipped under the fake-chain test env
+  // (dedicated unit tests inject their own traffic/subsidy fakes) and behind
+  // an explicit opt-out for CI/sandboxes.
+  const OWNER_ONBOARDING_DISABLE_ENV = 'METABOT_OWNER_ONBOARDING_DISABLED';
+  const ownerOnboardingDisabled = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+    || context.env[OWNER_ONBOARDING_DISABLE_ENV] === '1';
+  const ownerOnboardingRunner = createOwnerOnboardingRunner({
+    systemHomeDir,
+    trafficAccountService,
+    adapters,
+    resolveSponsorWritePin,
+    ...(requestMvcGasSubsidy ? { requestMvcGasSubsidy } : {}),
+    ...(context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? { chainWriteDelayMs: 0 } : {}),
+    log: (message) => console.log(`[owner onboarding] ${message}`),
+  });
   const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
   const resolvePeerChatPublicKey = createPeerChatPublicKeyResolver({
     systemHomeDir: paths.systemHomeDir,
@@ -6937,6 +6974,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     signer,
     adapters,
     trafficAccountService,
+    ownerOnboardingRunner,
     chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
     socketPresenceApiBaseUrl,
     socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
@@ -7029,6 +7067,13 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   }).catch((error) => {
     console.warn('[daemon lifecycle journal]', error instanceof Error ? error.message : String(error));
   });
+  // Zero-touch owner onboarding: fire-and-forget so the daemon serves
+  // immediately; unconverged steps retry on the next daemon start.
+  if (!ownerOnboardingDisabled) {
+    void ownerOnboardingRunner.run().catch((error) => {
+      console.warn('[owner onboarding] failed:', error instanceof Error ? error.message : String(error));
+    });
+  }
   const onlineServiceCacheStore = createOnlineServiceCacheStore(paths);
   const ratingDetailStateStore = createRatingDetailStateStore(paths);
   const refreshOnlineServiceCache = async () => {

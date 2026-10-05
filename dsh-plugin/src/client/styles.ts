@@ -1469,4 +1469,62 @@ body[data-ds-dark-theme] .oac-mt-tablewrap { border-color: var(--dsw-alias-borde
 .oac-mt-evidence-fail .oac-mt-evidence-label { color: #ef4444; }
 .oac-mt-evidence-sem .oac-mt-evidence-label { color: var(--dsw-alias-label-tertiary); }
 .oac-mt-memberchip-mini { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; padding: 1px 7px; border-radius: 5px; border: 1px solid var(--dsw-alias-border-l2, rgba(15,23,42,.14)); color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-1); }
+
+/* tree-mode structure map (IDBots MetaTaskTreeMap) */
+.oac-mt-treemap { display: flex; flex-direction: column; gap: 8px; }
+.oac-mt-treemap-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.oac-mt-treemap-rootrow { display: flex; justify-content: center; }
+.oac-mt-treemap-root { display: inline-flex; align-items: center; gap: 6px; max-width: 70%; padding: 4px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: transparent; font-family: inherit; font-size: 12px; color: var(--dsw-alias-label-primary); cursor: pointer; }
+.oac-mt-treemap-root:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-mt-treemap-roottitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-mt-treemap-stem { width: 1px; height: 10px; margin: 0 auto; background: var(--dsw-alias-border-l2); }
+.oac-mt-treemap-groups { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.oac-mt-treemap-group { width: 132px; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); box-sizing: border-box; }
+.oac-mt-treemap-leaves { width: auto; }
+.oac-mt-treemap-grouphead { display: block; width: 100%; padding: 0; border: none; background: none; font-family: inherit; text-align: left; cursor: pointer; }
+.oac-mt-treemap-grouprow { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.oac-mt-treemap-groupid { font-size: 11px; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-mt-treemap-groupstats { flex: none; font-size: 10px; }
+.oac-mt-treemap-grouptitle { display: block; margin-top: 1px; font-size: 10px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-mt-treemap-dots { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
+.oac-mt-treemap-dots-wide { max-width: 180px; margin-top: 0; }
+.oac-tm-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; border: none; padding: 0; cursor: pointer; }
+.oac-tm-dot-open { background: #cbd5e1; }
+body[data-ds-dark-theme] .oac-tm-dot-open { background: #475569; }
+.oac-tm-dot-claimed { background: #38bdf8; }
+.oac-tm-dot-verified { background: #34d399; }
+.oac-tm-dot-disputed { box-shadow: 0 0 0 2px #fbbf24; }
+.oac-mt-treemap-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; font-size: 10px; color: var(--dsw-alias-label-secondary); }
+.oac-mt-treemap-legend span { display: inline-flex; align-items: center; gap: 4px; }
+
+/* tree-mode branch node table (IDBots NodeRow/NodeExpanded) */
+.oac-mt-treetable { border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; }
+.oac-mt-treetable > div + div, .oac-mt-treechildren > div + div { border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-mt-treerow { display: flex; align-items: center; gap: 2px; padding: 0 10px; }
+.oac-mt-treerow:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-mt-treerow-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 8px 0; border: none; background: none; font-family: inherit; text-align: left; cursor: pointer; color: inherit; }
+.oac-mt-treerow-lead { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.oac-mt-treerow-id { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.oac-mt-treerow-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--dsw-alias-label-primary); }
+.oac-mt-treerow-weight { flex: none; font-size: 11px; }
+.oac-mt-treerow-holder { flex: none; }
+.oac-mt-treerow-votes { flex: none; width: 56px; text-align: right; font-size: 11px; }
+.oac-mt-treechevron { flex: none; width: 18px; padding: 0; border: none; background: none; font-family: inherit; font-size: 11px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.oac-mt-treechevron-dim { cursor: default; }
+.oac-mt-nodestatus { flex: none; padding: 1px 6px; border-radius: 5px; font-size: 11px; }
+.oac-mt-nodestatus-open { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); }
+.oac-mt-nodestatus-claimed { background: rgba(56,189,248,0.15); color: #0369a1; }
+body[data-ds-dark-theme] .oac-mt-nodestatus-claimed { color: #7dd3fc; }
+.oac-mt-nodestatus-verified { background: rgba(52,211,153,0.16); color: #047857; }
+body[data-ds-dark-theme] .oac-mt-nodestatus-verified { color: #34d399; }
+.oac-mt-treechildren { margin-left: 22px; border-left: 1px solid var(--dsw-alias-border-l2); }
+.oac-mt-treechildren .oac-mt-treerow { padding-right: 0; }
+.oac-mt-treeexpanded { padding: 10px 12px; background: var(--dsw-alias-bg-layer-2); display: flex; flex-direction: column; gap: 10px; font-size: 12px; }
+.oac-mt-treeblock-title { font-weight: 550; color: var(--dsw-alias-label-primary); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.oac-mt-treedef { display: flex; gap: 10px; flex-wrap: wrap; color: var(--dsw-alias-label-secondary); }
+.oac-mt-treespec { word-break: break-all; }
+.oac-mt-treepre { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); font-size: 11px; line-height: 1.5; overflow-x: auto; max-height: 220px; color: var(--dsw-alias-label-primary); }
+.oac-mt-treemeta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-size: 10px; color: var(--dsw-alias-label-secondary); }
+.oac-mt-treevotes { display: flex; flex-direction: column; gap: 4px; }
+.oac-mt-treevote { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 `

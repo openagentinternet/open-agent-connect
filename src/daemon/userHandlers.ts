@@ -25,6 +25,13 @@ import {
 } from '../core/owner/ownerIdentity';
 import { createOwnerSigner } from '../core/owner/ownerSigner';
 import {
+  createOwnerOnboardingRunner,
+  markOwnerOnboardingOptedOut,
+  readOwnerOnboardingStatus,
+  resetOwnerOnboardingAfterManualIdentity,
+  type OwnerOnboardingRunner,
+} from '../core/owner/ownerOnboarding';
+import {
   buildOwnerProfileChainWrites,
   writeOwnerProfileChainRequests,
 } from '../core/owner/ownerProfilePublish';
@@ -33,6 +40,7 @@ import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { ChainWriteResult } from '../core/chain/writePin';
 import type { ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
 import type { Signer } from '../core/signing/signer';
+import type { TrafficAccountService } from '../core/traffic/trafficAccountService';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 
 export interface UserDaemonHandlersInput {
@@ -46,6 +54,10 @@ export interface UserDaemonHandlersInput {
   createSigner?: (owner: OwnerIdentityRecord) => Signer;
   /** Test seam: inter-write delay override for the chain publish. */
   chainWriteDelayMs?: number;
+  /** Traffic account service backing the onboarding runner fallback. */
+  trafficAccountService?: Pick<TrafficAccountService, 'ensureTrafficAccount' | 'claimFreeGrant'>;
+  /** Shared owner-onboarding runner (run verb); constructed on demand when omitted. */
+  ownerOnboardingRunner?: OwnerOnboardingRunner;
 }
 
 function ownerFailure(error: unknown): MetabotCommandResult<never> {
@@ -72,6 +84,9 @@ export function createUserDaemonHandlers(
     create: async (rawInput) => {
       try {
         const record = await createOwnerIdentity(systemHomeDir, { name: normalizeText(rawInput?.name) });
+        // An explicit create re-arms onboarding (clears any opt-out tombstone)
+        // so the account/grant steps still converge on the next daemon start.
+        await resetOwnerOnboardingAfterManualIdentity(systemHomeDir).catch(() => undefined);
         // The mnemonic is shown exactly once, same as the CLI create/import.
         return commandSuccess({ identity: toOwnerIdentityPublic(record), mnemonic: record.mnemonic });
       } catch (error) {
@@ -91,6 +106,7 @@ export function createUserDaemonHandlers(
           mnemonic,
           ...(derivationPath ? { path: derivationPath } : {}),
         });
+        await resetOwnerOnboardingAfterManualIdentity(systemHomeDir).catch(() => undefined);
         return commandSuccess({ identity: toOwnerIdentityPublic(record), mnemonic: record.mnemonic });
       } catch (error) {
         return ownerFailure(error);
@@ -204,9 +220,42 @@ export function createUserDaemonHandlers(
     delete: async () => {
       try {
         await deleteOwnerIdentity(systemHomeDir);
+        // Tombstone the onboarding state: auto-provisioning must never
+        // resurrect an identity the user deliberately removed.
+        await markOwnerOnboardingOptedOut(systemHomeDir);
         return commandSuccess({ deleted: true });
       } catch (error) {
         return ownerFailure(error);
+      }
+    },
+
+    getOnboarding: async () => {
+      try {
+        return commandSuccess(await readOwnerOnboardingStatus(systemHomeDir));
+      } catch (error) {
+        return commandFailed(
+          'owner_onboarding_read_failed',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+
+    runOnboarding: async () => {
+      const runner = input.ownerOnboardingRunner
+        ?? (input.trafficAccountService
+          ? createOwnerOnboardingRunner({ systemHomeDir, trafficAccountService: input.trafficAccountService })
+          : null);
+      if (!runner) {
+        return commandFailed('not_implemented', 'Owner onboarding runner is not configured.');
+      }
+      try {
+        const onboarding = await runner.run();
+        return commandSuccess({ onboarding });
+      } catch (error) {
+        return commandFailed(
+          'owner_onboarding_failed',
+          error instanceof Error ? error.message : String(error),
+        );
       }
     },
   };

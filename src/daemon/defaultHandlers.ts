@@ -76,7 +76,7 @@ import type {
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
 import { normalizeOptionalDshLlmId, normalizeOptionalDshLlmReasoningEffort, readDshLlmBinding } from '../core/bot/dshLlm';
-import { normalizeBotType, normalizeOptionalGlobalMetaId } from '../core/bot/botRole';
+import { mergeBotRoleInfo, normalizeBotType, normalizeOptionalGlobalMetaId, readBotRoleInfo, writeBotRoleInfo } from '../core/bot/botRole';
 import { applyTwinInvariant, resolveCurrentTwinSlug, resolveTwinHomeDir } from '../core/bot/twinRole';
 import { createSurfDaemonHandlers } from './surfHandlers';
 import { createDreamDaemonHandlers } from './dreamHandlers';
@@ -243,6 +243,8 @@ import {
 } from '../core/traffic/trafficAccountService';
 import { normalizeTrafficApiBase, type TrafficAccountRecord } from '../core/traffic/trafficStore';
 import { readOwnerIdentity } from '../core/owner/ownerIdentity';
+import { buildOwnerBindingPublishTarget } from '../core/owner/ownerBinding';
+import { createOwnerOnboardingRunner, type OwnerOnboardingRunner } from '../core/owner/ownerOnboarding';
 import { createTrafficSponsorWritePinResolver } from '../core/subsidy/mvcSponsorWritePin';
 import type { MvcSponsorTrafficDeps } from '../core/subsidy/feeAssist';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
@@ -5182,6 +5184,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   createMvcSponsorClient?: () => MvcSponsorV2DirectUploadClient;
   /** Shared traffic account service (流量); defaults to one instance per daemon process. */
   trafficAccountService?: TrafficAccountService;
+  /** Shared owner-onboarding runner; defaults to one instance per daemon process. */
+  ownerOnboardingRunner?: OwnerOnboardingRunner;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   onIdentityProfileRegistered?: () => Promise<void> | void;
   onBrowserInfrastructureChanged?: () => Promise<void> | void;
@@ -5355,6 +5359,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
     systemHomeDir: normalizedSystemHomeDir,
   });
   const resolveSponsorWritePin = createTrafficSponsorWritePinResolver({ trafficAccountService });
+  // Zero-touch onboarding: one shared runner per daemon process so the
+  // daemon-start kick and the /api/user/onboarding run verb coalesce into a
+  // single in-flight execution.
+  const ownerOnboardingRunner = input.ownerOnboardingRunner ?? createOwnerOnboardingRunner({
+    systemHomeDir: normalizedSystemHomeDir,
+    trafficAccountService,
+    ...(adapters ? { adapters } : {}),
+    resolveSponsorWritePin,
+    ...(input.requestMvcGasSubsidy ? { requestMvcGasSubsidy: input.requestMvcGasSubsidy } : {}),
+    ...(input.identitySyncStepDelayMs !== undefined ? { chainWriteDelayMs: input.identitySyncStepDelayMs } : {}),
+  });
   const mvcSponsorTrafficDeps: MvcSponsorTrafficDeps = {
     resolveTrafficAccount: ({ botAddress, challengeId, botMnemonic, botWalletPath }) =>
       trafficAccountService.resolveSponsorTrafficAccount({ botAddress, challengeId, botMnemonic, botWalletPath }),
@@ -14835,7 +14850,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     // CLI surface over HTTP, additive next to the Bot-profile group above.
     // adapters + the traffic sponsor hook let `user update` publish the owner
     // /info/name + /info/avatar pins with the same billing as Bot writes.
-    user: createUserDaemonHandlers({ systemHomeDir: normalizedSystemHomeDir, adapters, resolveSponsorWritePin }),
+    user: createUserDaemonHandlers({
+      systemHomeDir: normalizedSystemHomeDir,
+      adapters,
+      resolveSponsorWritePin,
+      trafficAccountService,
+      ownerOnboardingRunner,
+    }),
     network: {
       listServices: async ({ online, query, cached }) => {
         const state = await runtimeStateStore.readState();
@@ -18887,6 +18908,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : commandFailed('invalid_metabot_profile_create', message);
         }
         const name = createInput.name;
+        // Zero-touch ownership: a Bot created without an explicit --owner is
+        // owned by the machine's owner identity (the "user account").
+        if (createInput.ownerGlobalMetaId == null) {
+          const localOwner = await readOwnerIdentity(normalizedSystemHomeDir).catch(() => null);
+          if (localOwner) {
+            createInput = { ...createInput, ownerGlobalMetaId: localOwner.globalMetaId };
+          }
+        }
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
         // Hard cap on local Bots: creating beyond the limit fails before any
         // home directory or chain work is reserved.
@@ -18997,6 +19026,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
               chainProfile,
               calculateMetabotCreateInfoFields(createInput),
             );
+            // Owner binding (IDBots port): when the Bot's owner is the local
+            // owner identity, sign the binding statement with the owner's MVC
+            // key and publish it as the Bot's /info/owner pin alongside the
+            // other create pins. The pin is signed by the Bot's key on-chain;
+            // the embedded signature proves the human owner consented.
+            {
+              const localOwner = await readOwnerIdentity(normalizedSystemHomeDir).catch(() => null);
+              const ownerGlobalMetaId = createInput.ownerGlobalMetaId ?? '';
+              if (localOwner && ownerGlobalMetaId.toLowerCase() === localOwner.globalMetaId.toLowerCase()) {
+                profileInfoTargets = [
+                  ...profileInfoTargets,
+                  await buildOwnerBindingPublishTarget(localOwner, identity.globalMetaId),
+                ];
+              }
+            }
             profileChainWrites = await syncMetabotInfoToChain(
               profileSigner,
               chainProfile,
@@ -19061,6 +19105,50 @@ export function createDefaultMetabotDaemonHandlers(input: {
             return commandFailed('name_taken', message);
           }
           return commandFailed('metabot_profile_create_failed', message);
+        }
+      },
+      bindOwner: async ({ slug }) => {
+        try {
+          const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
+          if (!profile) {
+            return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+          }
+          const owner = await readOwnerIdentity(normalizedSystemHomeDir).catch(() => null);
+          if (!owner) {
+            return commandFailed(
+              'owner_missing',
+              'No owner identity exists on this machine. Create one with `metabot user create` first.',
+            );
+          }
+          if (!normalizeText(profile.globalMetaId)) {
+            return commandFailed('identity_missing', 'This MetaBot has no GlobalMetaID yet; finish its setup first.');
+          }
+          const signer = createSignerForProfileHome(profile.homeDir);
+          const target = await buildOwnerBindingPublishTarget(owner, profile.globalMetaId);
+          // Same publish seam as the create flow: the Bot's signer writes the
+          // /info/owner pin (traffic-sponsored first, self-pay fallback) and
+          // the payload-hash dedup makes a re-bind a no-op.
+          const chainWrites = await syncMetabotInfoToChain(signer, profile, [target], {
+            delayMs: input.identitySyncStepDelayMs,
+          });
+          // Keep the local ownerGlobalMetaId binding in sync with the pin.
+          if ((profile.ownerGlobalMetaId ?? '') !== owner.globalMetaId) {
+            const botRolePath = resolveMetabotPaths(profile.homeDir).botRoleStatePath;
+            const currentRole = await readBotRoleInfo(botRolePath);
+            await writeBotRoleInfo(botRolePath, mergeBotRoleInfo(currentRole, { ownerGlobalMetaId: owner.globalMetaId }));
+          }
+          const updated = await getMetabotProfile(normalizedSystemHomeDir, slug);
+          return commandSuccess({
+            profile: updated ?? profile,
+            chainWrites,
+            ownerBinding: {
+              owner: owner.globalMetaId,
+              path: '/info/owner',
+              pinId: chainWrites[0]?.pinId ?? null,
+            },
+          });
+        } catch (error) {
+          return commandFailed('bot_owner_bind_failed', error instanceof Error ? error.message : String(error));
         }
       },
       retryProfileSetup: async ({ slug }) => {

@@ -412,6 +412,28 @@ function convertBits8To5(data: Uint8Array): number[] {
   return result;
 }
 
+function convertBits5To8(data: Uint8Array): Uint8Array {
+  let acc = 0;
+  let bits = 0;
+  const result: number[] = [];
+
+  for (const value of data) {
+    acc = (acc << 5) | value;
+    bits += 5;
+    while (bits >= 8) {
+      bits -= 8;
+      result.push((acc >> bits) & 255);
+    }
+  }
+
+  // Strict padding: leftover bits must be zero, mirroring the IDBots decoder.
+  if (bits >= 5 || ((acc << (8 - bits)) & 255) !== 0) {
+    throw new Error('Invalid IDAddress padding');
+  }
+
+  return new Uint8Array(result);
+}
+
 function encodeIdAddress(version: AddressVersion, data: Uint8Array): string {
   if (version < 0 || version > 5) {
     throw new Error(`Invalid version: ${version}`);
@@ -486,6 +508,47 @@ export function convertToGlobalMetaId(address: string): string {
   } catch {
     throw new Error(`Unsupported address format: ${address}`);
   }
+}
+
+/**
+ * Decode a GlobalMetaId back into its version and payload (pubkey hash /
+ * script hash / witness program). Inverse of encodeIdAddress; returns null
+ * for malformed input or checksum mismatch. Ported from the IDBots
+ * globalMetaid service for offline owner-binding verification.
+ */
+export function decodeGlobalMetaIdPayload(globalMetaId: string): { version: number; payload: Uint8Array } | null {
+  const normalized = normalizeGlobalMetaId(globalMetaId);
+  if (!normalized) return null;
+
+  const version = VERSION_CHARS.indexOf(normalized[2]);
+  if (version < 0) return null;
+
+  // Strip 'id' + versionChar + '1'; the last 6 values are the checksum.
+  const body = normalized.slice(4);
+  if (!body || body.length <= 6) return null;
+
+  const values: number[] = [];
+  for (const char of body) {
+    const index = IDADDRESS_CHARSET.indexOf(char);
+    if (index === -1) return null;
+    values.push(index);
+  }
+
+  const data = values.slice(0, -6);
+  const checksum = values.slice(-6);
+  const expectedChecksum = createIdChecksum(data, version as AddressVersion);
+  for (let index = 0; index < 6; index += 1) {
+    if (checksum[index] !== expectedChecksum[index]) return null;
+  }
+
+  let payload: Uint8Array;
+  try {
+    payload = convertBits5To8(new Uint8Array(data));
+  } catch {
+    return null;
+  }
+  if (payload.length === 0) return null;
+  return { version, payload };
 }
 
 // Derivation memo, keyed by `${mnemonic}\n${path}`. One deriveIdentity call

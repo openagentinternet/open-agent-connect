@@ -40,6 +40,16 @@ function makeElement(tag = 'div') {
 function createHarness(fetchUrls) {
   const board = makeElement('div');
   const boardCards = [];
+  // Selector-specific element sets: each selector match set is distinct so a
+  // stub element never receives handlers meant for another selector (the
+  // real DOM matches each selector against distinct elements).
+  const boardSets = new Map();
+  const boardSetFor = (selector) => {
+    if (!boardSets.has(selector)) boardSets.set(selector, []);
+    return boardSets.get(selector);
+  };
+  boardSetFor('[data-tracking-open]');
+  boardSetFor('[data-mt-view]');
   // One participate button, pre-created so the page wires its click handler
   // onto this exact element during renderBoard.
   const participateButton = makeElement('button');
@@ -47,15 +57,16 @@ function createHarness(fetchUrls) {
     'data-tracking-participate',
     'fad848f86d360fb61f3308b4b9eae7f6c9816eeb8eef86f2bf911c70ab8bed10i0'
   );
+  boardSetFor('[data-tracking-participate]').push(participateButton);
   const boardButtons = [participateButton];
-  board.querySelectorAll = (selector) =>
-    String(selector).includes('participate') ? boardButtons : boardCards;
+  board.querySelectorAll = (selector) => boardSetFor(String(selector));
   const elements = {
     '[data-tracking-status]': makeElement('p'),
     '[data-tracking-refresh]': makeElement('button'),
     '[data-tracking-activation]': makeElement('p'),
     '[data-tracking-board]': board,
     '[data-tracking-detail]': Object.assign(makeElement('div'), { hidden: true }),
+    '[data-tracking-drawer]': Object.assign(makeElement('div'), { hidden: true }),
     '[data-tracking-tab-metatask]': makeElement('button'),
     '[data-tracking-draft]': Object.assign(makeElement('div'), { hidden: true }),
     '[data-tracking-draft-title]': makeElement('h2'),
@@ -102,7 +113,7 @@ function createHarness(fetchUrls) {
   return {
     elements,
     requests,
-    boardCards,
+    boardCards: boardSetFor('[data-tracking-open]'),
     participateButton,
     timers,
     run: async () => {
@@ -270,4 +281,91 @@ test('tracking page: participate button posts /api/metatask/draft and shows the 
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(harness.elements['[data-tracking-draft]'].hidden, false, 'draft overlay shown');
   assert.match(harness.elements['[data-tracking-draft-text]'].value, /COMPETITIVE task/);
+});
+test('tracking page: competitive detail renders the ported fidelity blocks', async () => {
+  const card = makeElement('article');
+  card.setAttribute('data-tracking-open', 'fad848f86d360fb61f3308b4b9eae7f6c9816eeb8eef86f2bf911c70ab8bed10i0');
+  const harness = createHarness([
+    ['/api/metatask/board', boardPayload],
+    ['/api/metatask/task', taskPayload],
+  ]);
+  harness.boardCards.push(card);
+  await harness.run();
+  const click = card.listener('click');
+  assert.ok(click, 'card click handler wired');
+  await click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const detailHtml = harness.elements['[data-tracking-detail]'].innerHTML;
+  assert.match(detailHtml, /oac-mt-detail-head/, 'detail header block');
+  assert.match(detailHtml, /MetaTask v1\.3 pilot/);
+  assert.match(detailHtml, /oac-mt-badge-id/, 'identity badge with name/avatar');
+  assert.match(detailHtml, /Pilot Publisher/);
+  assert.match(detailHtml, /data-mt-chain-canvas/, 'chain canvas for edge overlay');
+  assert.match(detailHtml, /oac-mt-nodesection/, 'node requirement sections');
+  assert.match(detailHtml, /oac-mt-table/, 'roster/settlement tables');
+  assert.match(detailHtml, /oac-mt-cand /, 'chain candidate cards');
+  assert.match(detailHtml, /oac-mt-badge-settled/, 'completed task hides the participate button');
+});
+
+test('tracking page: tree detail renders the structure map and branch node table', async () => {
+  const treeBoard = {
+    ...boardPayload,
+    data: {
+      ...boardPayload.data,
+      tasks: [{
+        ...boardPayload.data.tasks[0],
+        rootPinId: 'treeRoot1',
+        mode: 'tree',
+        title: 'Tree pilot',
+      }],
+    },
+  };
+  const treeTask = {
+    ok: true,
+    state: 'success',
+    data: {
+      rootPinId: 'treeRoot1',
+      title: 'Tree pilot',
+      brief: '',
+      publisher: 'idq1publisherx',
+      tags: [],
+      policy: { mode: 'tree', finalNode: null, claimTtlHours: 24, verifyQuorum: 2, verifyWindowHours: 0, rewardSat: 0, challengeTtlDays: 14, submitterShareBP: 8000, rosterid: null },
+      nodes: [],
+      amendHead: '',
+      nodeStates: {
+        '0': { id: '0', parent: null, title: 'root aggregate', kind: 'aggregate', weight: null, params: null, specid: null, deps: [], status: 'open', disputed: false, holder: null, submission: null, passVotes: 0, failVotes: 0, votes: [], cycleCount: 0 },
+        m1: { id: 'm1', parent: '0', title: 'group one', kind: 'math', weight: 5000, params: { rubric: ['prove it'] }, specid: null, deps: [], status: 'open', disputed: false, holder: null, submission: null, passVotes: 0, failVotes: 0, votes: [], cycleCount: 0 },
+        t1: { id: 't1', parent: 'm1', title: 'leaf one', kind: 'math', weight: 2500, params: null, specid: null, deps: [], status: 'claimed', disputed: true, holder: { pinId: 'c1', claimant: 'idq1worker', sinceMs: 1 }, submission: null, passVotes: 0, failVotes: 0, votes: [], cycleCount: 0 },
+      },
+      progress: { total: 3, verified: 0, claimed: 1, open: 2, disputed: 1, satisfied: 0 },
+      taskComplete: false,
+      participants: [],
+      identities: { idq1publisherx: { name: 'Pilot Publisher', avatar: null }, idq1worker: { name: 'Worker', avatar: null } },
+      settlement: null,
+      estimation: { basis: 'x', shares: [] },
+      freshness: { boundaryBlock: 192278, evaluatedAtMs: 1, eventCount: 12, eventSetHash: 'h', expiryApplied: false },
+      lastActivityMs: 1,
+      ignoredEvents: [],
+    },
+  };
+  const card = makeElement('article');
+  card.setAttribute('data-tracking-open', 'treeRoot1');
+  const harness = createHarness([
+    ['/api/metatask/board', treeBoard],
+    ['/api/metatask/task', treeTask],
+  ]);
+  harness.boardCards.push(card);
+  await harness.run();
+  await card.listener('click')();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const detailHtml = harness.elements['[data-tracking-detail]'].innerHTML;
+  assert.match(detailHtml, /oac-mt-treemap-card/, 'task structure map card');
+  assert.match(detailHtml, /oac-mt-treemap-group/, 'group card in the map');
+  assert.match(detailHtml, /oac-tm-dot-claimed/, 'status dot in the map');
+  assert.match(detailHtml, /oac-mt-treetable/, 'branch node table');
+  assert.match(detailHtml, /oac-mt-node-m1/, 'group row anchor');
+  assert.match(detailHtml, /oac-mt-nodestatus-claimed/, 'node status tone');
+  assert.match(detailHtml, /oac-mt-checklist/, 'pending settlement checklist');
 });

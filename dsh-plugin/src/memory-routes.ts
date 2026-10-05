@@ -525,6 +525,9 @@ export async function dispatchMemoryRoutes(
     if (local) return local
     return run(['user', 'who'], { timeoutMs: LIST_TIMEOUT_MS })
   }
+  if (method === 'user/onboarding') {
+    return run(['user', 'onboarding'], { timeoutMs: LIST_TIMEOUT_MS })
+  }
   if (method === 'user/create') {
     const name = readTrimmed(payload, 'name')
     return run(['user', 'create', '--name', name || 'User'], { timeoutMs: 60_000 })

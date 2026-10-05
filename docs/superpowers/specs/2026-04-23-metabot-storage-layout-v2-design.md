@@ -938,3 +938,51 @@ Rules:
 - no index files; queries are time-windowed scans over month shards only
   (dream day queries, last-2-months pending-summary scans, and the
   default-90-day recall search)
+
+## Amendment 2026-10-06: Owner Onboarding State
+
+This amendment adds one machine-wide file to the existing `owner/` section:
+the zero-touch onboarding journal. The onboarding pipeline (daemon start,
+idempotent) provisions the owner identity, the traffic account, the one-time
+free traffic grant, the MVC gas subsidy, and the owner `/info/name` pin; the
+journal records per-step convergence so a later daemon start retries only
+what has not landed and both UIs can render progress.
+
+### `owner/` addition: `onboarding.json`
+
+Shape (owner-only permissions like the rest of `owner/`, atomic
+write-then-rename):
+
+```json
+{
+  "version": 1,
+  "status": "pending | ready | opted_out",
+  "attempts": 3,
+  "lastAttemptAt": "2026-10-06T00:00:00.000Z",
+  "lastError": null,
+  "steps": {
+    "identity": "pending | done | failed",
+    "trafficAccount": "pending | done | failed",
+    "freeGrant": "pending | claimed | already_claimed | disabled | failed",
+    "subsidy": "pending | done | failed | skipped",
+    "namePin": "pending | done | failed | skipped"
+  },
+  "freeGrantBytes": 10000000,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+Rules:
+
+- `status: "opted_out"` is the tombstone written by `metabot user delete`:
+  auto-provisioning must never resurrect a deliberately deleted identity.
+  An explicit `user create`/`user import` re-arms the state (identity step
+  pre-marked `done`, the rest retried on the next daemon start).
+- `ready` means the identity and traffic account steps are `done` and the
+  grant step reached a terminal state (`claimed`, `already_claimed`, or
+  `disabled`); the subsidy and name-pin steps converge independently and
+  never block readiness.
+- no secrets: the file sits next to `owner/identity.json` purely for
+  locality, and is normalized defensively on read (unknown enum values fall
+  back to `pending`, missing fields to their defaults).

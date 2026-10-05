@@ -243,6 +243,20 @@ export type OwnerWhoPayload = {
   identity: OwnerIdentityRow | null
 }
 
+/** Zero-touch onboarding journal state (owner/onboarding.json). */
+export type OwnerOnboardingState = {
+  status?: 'pending' | 'ready' | 'opted_out'
+  attempts?: number
+  lastError?: string | null
+  steps?: Record<string, string>
+  freeGrantBytes?: number | null
+}
+
+export type OwnerOnboardingPayload = {
+  onboarding: OwnerOnboardingState | null
+  identityPresent?: boolean
+}
+
 export type OwnerWritePayload = {
   identity: OwnerIdentityRow
   /** Returned once on create/import so the UI can drive the backup view. */
@@ -765,6 +779,7 @@ export const api = {
   dreamRun: async (from: string, date: string): Promise<unknown> => post('dream/run', { from, date }),
   twinCurrent: async (): Promise<{ twinSlug?: string | null }> => post('twin/current'),
   userWho: async (): Promise<OwnerWhoPayload> => post('user/who'),
+  userOnboarding: async (): Promise<OwnerOnboardingPayload> => post('user/onboarding'),
   userCreate: async (name: string): Promise<OwnerWritePayload> => post('user/create', { name }),
   userImport: async (input: { name: string; mnemonic: string; path?: string }): Promise<OwnerWritePayload> =>
     post('user/import', input),

@@ -54,17 +54,31 @@ test('GET /ui/schedule serves the Schedule page with console chrome and the sche
   assert.match(html, /<title data-i18n-title="schedule\.title">Schedule — Open Agent Connect<\/title>/);
 });
 
-test('GET /ui/traffic serves the Traffic page with console chrome and the traffic API surface', async (t) => {
+test('GET /ui/traffic redirects to the Settings traffic tab which serves the traffic API surface', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/traffic`);
+  // The legacy Traffic URL is a permanent redirect onto the settings tab
+  // (DSH PluginSettingsPanel parity; bookmarks and `ui open --page traffic`
+  // keep working).
+  const redirect = await fetch(`${server.baseUrl}/ui/traffic`, { redirect: 'manual' });
+  assert.equal(redirect.status, 302);
+  assert.equal(redirect.headers.get('location'), '/ui/settings?tab=traffic');
+  assert.match(redirect.headers.get('cache-control') ?? '', /no-store/);
+  // The lang param passes through.
+  const localized = await fetch(`${server.baseUrl}/ui/traffic?lang=zh-CN`, { redirect: 'manual' });
+  assert.equal(localized.status, 302);
+  assert.equal(localized.headers.get('location'), '/ui/settings?tab=traffic&lang=zh-CN');
+
+  const response = await fetch(`${server.baseUrl}/ui/settings?tab=traffic`);
   const html = await response.text();
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /data-settings-tabs/);
+  assert.match(html, /data-settings-tab="traffic"/);
   assert.match(html, /data-traffic-shell/);
-  // Every verb the page script talks to is wired in.
+  // Every verb the traffic tab script talks to is wired in.
   assert.match(html, /\/api\/traffic\/status/);
   assert.match(html, /\/api\/traffic\/mode/);
   assert.match(html, /\/api\/traffic\/balance/);
@@ -78,7 +92,6 @@ test('GET /ui/traffic serves the Traffic page with console chrome and the traffi
   assert.match(html, /data-traffic-ledger-table/);
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);
-  assert.match(html, /<title data-i18n-title="traffic\.title">Traffic — Open Agent Connect<\/title>/);
 });
 
 test('GET /ui/schedule localizes to Simplified Chinese with lang=zh-CN', async (t) => {
@@ -93,14 +106,14 @@ test('GET /ui/schedule localizes to Simplified Chinese with lang=zh-CN', async (
   assert.match(html, /没有本地 Bot。|选择要管理的 Bot。/);
 });
 
-test('GET /ui/traffic localizes to Simplified Chinese with lang=zh-CN', async (t) => {
+test('GET /ui/settings localizes the Traffic tab to Simplified Chinese with lang=zh-CN', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/traffic?lang=zh-CN`);
+  const response = await fetch(`${server.baseUrl}/ui/settings?tab=traffic&lang=zh-CN`);
   const html = await response.text();
   assert.equal(response.status, 200);
-  assert.match(html, /流量 — Open Agent Connect/);
+  assert.match(html, /data-i18n-key="settings\.tab\.traffic">流量</);
   assert.match(html, /计费模式/);
   assert.match(html, /可用余额/);
   assert.match(html, /兑换码/);
@@ -135,15 +148,19 @@ test('console navigation includes Schedule after Memory and leaves Traffic to th
   assert.doesNotMatch(nav, /href="\/ui\/traffic"/);
 });
 
-test('GET /ui/settings links to the Traffic page without adding it to top navigation', async (t) => {
+test('GET /ui/settings exposes Traffic as an in-page tab without adding it to top navigation', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/settings`);
   const html = await response.text();
   assert.equal(response.status, 200);
-  assert.match(html, /href="\/ui\/traffic"/);
-  assert.match(html, /data-i18n-key="settings\.traffic\.title"/);
+  assert.match(html, /data-settings-tab="user"/);
+  assert.match(html, /data-settings-tab="traffic"/);
+  assert.match(html, /data-settings-tab="general"/);
+  assert.match(html, /data-i18n-key="settings\.tab\.traffic"/);
+  // The identity gate inside the traffic tab links back to the User tab.
+  assert.match(html, /href="\/ui\/settings\?tab=user"/);
   const navMatch = html.match(/<nav class="topbar-nav">([\s\S]*?)<\/nav>/);
   assert.ok(navMatch, 'topbar nav rendered');
   assert.doesNotMatch(navMatch[1], /href="\/ui\/traffic"/);

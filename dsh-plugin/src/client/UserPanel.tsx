@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
-import type { OwnerIdentityRow, OwnerUpdateInput, OwnerUpdatePayload, OwnerWhoPayload, OwnerWritePayload } from './api.ts'
+import type { OwnerIdentityRow, OwnerOnboardingPayload, OwnerUpdateInput, OwnerUpdatePayload, OwnerWhoPayload, OwnerWritePayload } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import type { UserLocaleKey } from './locale-user.ts'
@@ -11,12 +11,33 @@ type View = 'loading' | 'empty' | 'create' | 'import' | 'backup' | 'profile'
 
 export interface UserPanelInjected {
   who: () => Promise<OwnerWhoPayload>
+  /** Zero-touch onboarding progress (optional: older hosts may omit it). */
+  onboarding?: () => Promise<OwnerOnboardingPayload>
   create: (name: string) => Promise<OwnerWritePayload>
   importIdentity: (input: { name: string; mnemonic: string; path?: string }) => Promise<OwnerWritePayload>
   /** Name/avatar profile save; publishes the changed fields on-chain. */
   update: (input: OwnerUpdateInput) => Promise<OwnerUpdatePayload>
   reveal: () => Promise<{ mnemonic: string }>
   deleteIdentity: () => Promise<{ deleted?: boolean }>
+}
+
+/** Compact one-line onboarding summary for the profile header. */
+function onboardingSummaryLine(
+  payload: OwnerOnboardingPayload | null,
+  t: Translate,
+): string | null {
+  const state = payload?.onboarding
+  if (!state || state.status === 'opted_out') return null
+  const granted = Number(state.freeGrantBytes) > 0
+    ? ` ${t('onboardingGranted', { amount: formatOnboardingTraffic(Number(state.freeGrantBytes)) })}`
+    : ''
+  if (state.status === 'ready') return `${t('onboardingReady')}${granted}`
+  return `${t('onboardingPending')}${granted}`
+}
+
+function formatOnboardingTraffic(bytes: number): string {
+  const mb = Math.round((bytes / 1_000_000) * 10) / 10
+  return `${Number.isInteger(mb) ? mb.toFixed(0) : mb.toFixed(1)} MB`
 }
 
 function CopyValue({ value, t }: { value: string; t: Translate }): ReactNode {
@@ -84,10 +105,18 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
   const [revealOpen, setRevealOpen] = useState(false)
   const [revealMnemonic, setRevealMnemonic] = useState('')
   const [logoutOpen, setLogoutOpen] = useState(false)
+  const [onboardingLine, setOnboardingLine] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setView('loading')
     setError(null)
+    // Best-effort onboarding progress (older CLI builds have no verb yet).
+    if (injected.onboarding) {
+      void injected.onboarding().then(
+        (payload) => setOnboardingLine(onboardingSummaryLine(payload, injected.t)),
+        () => setOnboardingLine(null),
+      )
+    }
     void injected.who().then(
       (result) => {
         if (result.identity) {
@@ -230,6 +259,7 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
         </div>
       </div>
       {error ? <div className="oac-error">{error}</div> : null}
+      {onboardingLine ? <p className="oac-hint">{onboardingLine}</p> : null}
 
       {view === 'loading' ? <div className="oac-muted">{t('loading')}</div> : null}
 

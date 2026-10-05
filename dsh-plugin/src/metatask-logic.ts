@@ -250,3 +250,59 @@ export const taskLifecycleOf = (task: {
 
 export const percentOf = (part: number, total: number): number =>
   total > 0 ? Math.round((part / total) * 100) : 0;
+
+// ── tree structure (tree-mode detail: TreeMap + branch node table) ──────────
+
+export interface TreeNodeLike {
+  id: string;
+  parent: string | null;
+  title: string;
+  status: string;
+  disputed: boolean;
+  weight: number | null;
+}
+
+/** parent-id → children map (children sorted by natural node id). */
+export const treeChildrenOf = (nodes: TreeNodeLike[]): Map<string, TreeNodeLike[]> => {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const childrenOf = new Map<string, TreeNodeLike[]>();
+  for (const node of nodes) {
+    if (node.parent && byId.has(node.parent)) {
+      const list = childrenOf.get(node.parent) ?? [];
+      list.push(node);
+      childrenOf.set(node.parent, list);
+    }
+  }
+  for (const list of childrenOf.values()) {
+    list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  }
+  return childrenOf;
+};
+
+/** Verified/total across all descendants (the group node itself excluded). */
+export const treeSubtreeStats = (
+  childrenOf: Map<string, TreeNodeLike[]>,
+  id: string,
+): { verified: number; total: number } => {
+  let verified = 0;
+  let total = 0;
+  const walk = (nid: string): void => {
+    for (const child of childrenOf.get(nid) ?? []) {
+      total += 1;
+      if (child.status === 'verified') verified += 1;
+      walk(child.id);
+    }
+  };
+  walk(id);
+  return { verified, total };
+};
+
+/** A group worth default-expanding: any descendant in flight or disputed. */
+export const treeSubtreeHasAttention = (
+  childrenOf: Map<string, TreeNodeLike[]>,
+  id: string,
+): boolean =>
+  (childrenOf.get(id) ?? []).some(
+    (child) =>
+      child.status === 'claimed' || child.disputed || treeSubtreeHasAttention(childrenOf, child.id),
+  );

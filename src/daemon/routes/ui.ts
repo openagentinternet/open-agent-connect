@@ -14,7 +14,6 @@ import { buildSurfPageDefinition } from '../../ui/pages/surf/app';
 import { buildMemoryPageDefinition } from '../../ui/pages/memory/app';
 import { buildSchedulePageDefinition } from '../../ui/pages/schedule/app';
 import { buildTrackingPageDefinition } from '../../ui/pages/tracking/app';
-import { buildTrafficPageDefinition } from '../../ui/pages/traffic/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
@@ -63,7 +62,6 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'memory': buildMemoryPageDefinition,
   'schedule': buildSchedulePageDefinition,
   'tracking': buildTrackingPageDefinition,
-  'traffic': buildTrafficPageDefinition,
   'settings': buildSettingsPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
@@ -401,6 +399,26 @@ export const handleUiRoutes: RouteHandler = async (context) => {
     const location = new URL('/ui/memory?tab=dream', 'http://placeholder.local');
     const from = url.searchParams.get('from');
     if (from) location.searchParams.set('from', from);
+    const language = url.searchParams.get('lang');
+    if (language) location.searchParams.set('lang', language);
+    context.res.writeHead(302, {
+      'Location': `${location.pathname}${location.search}`,
+      'Cache-Control': 'no-store',
+    });
+    context.res.end();
+    return true;
+  }
+
+  // Traffic is a tab inside the Settings page (DSH PluginSettingsPanel
+  // parity). Keep `/ui/traffic` alive as a permanent redirect so existing
+  // links, bookmarks, and `metabot ui open --page traffic` keep working; the
+  // language param passes through.
+  if (url.pathname === '/ui/traffic') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const location = new URL('/ui/settings?tab=traffic', 'http://placeholder.local');
     const language = url.searchParams.get('lang');
     if (language) location.searchParams.set('lang', language);
     context.res.writeHead(302, {
