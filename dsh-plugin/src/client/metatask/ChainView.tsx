@@ -81,7 +81,8 @@ export function ChainView(props: {
   onOpenCandidate: (pinId: string) => void
 }): ReactNode {
   const { mt, task, byPin, winningSet, race, identityOf, rosterIds, youLabel, onOpenCandidate } = props
-  const containerRef = useRef<HTMLDivElement | null>(null)
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
   const [edgePaths, setEdgePaths] = useState<{ d: string; tone: string }[]>([])
 
   // Topological deps depth (entry nodes = 0). The engine guarantees acyclicity;
@@ -150,20 +151,20 @@ export function ChainView(props: {
   }
 
   const redraw = () => {
-    const container = containerRef.current
-    if (!container) return
-    const svg = container.querySelector('.oac-mt-edges') as SVGSVGElement | null
-    // The SVG lives INSIDE the horizontally-scrolling container: size it to
-    // the full content box (not the visible viewport) and compute every
-    // coordinate against the container's content origin — both rects shift
-    // together when scrolled, so the paths stay glued to the cards.
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const svg = canvas.querySelector('.oac-mt-edges') as SVGSVGElement | null
+    // Content-box geometry (IDBots drawEdges): the SVG is a child of the
+    // w-max canvas and sized to its full scroll box; every coordinate is a
+    // card rect minus the canvas rect, so the overlay scrolls as one literal
+    // unit with the cards and cannot drift.
     if (svg) {
-      svg.style.width = `${container.scrollWidth}px`
-      svg.style.height = `${container.scrollHeight}px`
+      svg.style.width = `${canvas.scrollWidth}px`
+      svg.style.height = `${canvas.scrollHeight}px`
     }
     const rectOf = (pinId: string): DOMRect | null =>
-      container.querySelector(`[data-cand-pin="${CSS.escape(pinId)}"]`)?.getBoundingClientRect() ?? null
-    const base = container.getBoundingClientRect()
+      canvas.querySelector(`[data-cand-pin="${CSS.escape(pinId)}"]`)?.getBoundingClientRect() ?? null
+    const base = canvas.getBoundingClientRect()
     const paths: { d: string; tone: string }[] = []
     for (const node of Object.values(task.nodeStates)) {
       for (const cand of node.submissions ?? []) {
@@ -202,16 +203,17 @@ export function ChainView(props: {
 
   useEffect(() => {
     redraw()
-    const container = containerRef.current
-    if (!container) return
-    // Horizontal scrolling must also re-glue the edge overlay (avatars
-    // arriving or scrollbar appearing can otherwise leave stale coordinates).
-    container.addEventListener('scroll', redraw, { passive: true })
+    const scroller = scrollerRef.current
+    const canvas = canvasRef.current
+    if (!scroller || !canvas) return
+    // Belt and braces: the geometry is scroll-invariant, but avatars arriving
+    // or a scrollbar appearing still trigger a cheap re-glue.
+    scroller.addEventListener('scroll', redraw, { passive: true })
     window.addEventListener('resize', redraw)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { redraw() })
-    if (observer) observer.observe(container)
+    if (observer) observer.observe(canvas)
     return () => {
-      container.removeEventListener('scroll', redraw)
+      scroller.removeEventListener('scroll', redraw)
       window.removeEventListener('resize', redraw)
       observer?.disconnect()
     }
@@ -237,13 +239,13 @@ export function ChainView(props: {
         {mt('mtChainTitle')}
         <small>{mt('mtChainHint')}</small>
       </h3>
-      <div className="oac-mt-chainview-scroll" ref={containerRef}>
-        <svg className="oac-mt-edges" aria-hidden="true">
-          {edgePaths.map((edge, index) => (
-            <path key={index} d={edge.d} className={`oac-edge ${edge.tone}`} />
-          ))}
-        </svg>
-        <div className="oac-mt-columns">
+      <div className="oac-mt-chainview-scroll" ref={scrollerRef}>
+        <div className="oac-mt-columns" ref={canvasRef}>
+          <svg className="oac-mt-edges" aria-hidden="true">
+            {edgePaths.map((edge, index) => (
+              <path key={index} d={edge.d} className={`oac-edge ${edge.tone}`} />
+            ))}
+          </svg>
           {columns.map((node) => {
             const word = stepWord(node)
             const isTerminal = node.id === terminalId

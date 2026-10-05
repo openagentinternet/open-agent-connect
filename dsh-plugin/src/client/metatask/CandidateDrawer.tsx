@@ -165,7 +165,7 @@ export function CandidateDrawer(props: {
           <div className="oac-mt-summary">
             {summary ?? mt(`mtResultTypeDesc_${artifact.kind === 'git' ? 'git' : artifact.kind === 'metafile' ? 'metafile' : artifact.kind === 'metaapp' ? 'metaapp' : 'other'}`)}
           </div>
-          <div className="oac-mt-facts" style={{ marginTop: 6 }}>
+          <div className="oac-mt-drawer-facts">
             <FactRow k={mt('mtFactType')}>{artifact.resultType ?? artifact.kind}</FactRow>
             {artifact.kind === 'git' && commit && (
               <FactRow k={mt('mtGitCommit')}><code title={commit}>{shortHash(commit)}</code></FactRow>
