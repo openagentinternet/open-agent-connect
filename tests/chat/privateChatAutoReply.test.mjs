@@ -155,6 +155,7 @@ async function createAutoReplyHarness(options = {}) {
       : options.logSendFailure ?? undefined,
     chatSkillWaitNotice: options.chatSkillWaitNotice,
     hasActiveOrderWithPeer: options.hasActiveOrderWithPeer,
+    episodeSummaryGenerator: options.episodeSummaryGenerator,
     replyRunner: async (input) => {
       runnerInputs.push(input);
       if (options.replyRunner) {
@@ -172,6 +173,7 @@ async function createAutoReplyHarness(options = {}) {
     defaultStrategyId: options.defaultStrategyId ?? null,
     maxTurns: options.maxTurns,
     cooldownMs: options.cooldownMs,
+    episodeRolloverMessages: options.episodeRolloverMessages,
   });
 
   return {
@@ -3160,4 +3162,82 @@ test('a ticket-gated interim update does not count as the turn answer', async ()
   assert.equal(harness.writes.length, 1, 'the final reply must still be delivered after an interim update');
   const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
   assert.equal(conversation.lastDirection, 'outbound');
+});
+
+// ---- Phase 5: episode rollover (IDBots a2aEpisodeRollover parity) ----
+
+test('a conversation crossing the episode threshold rolls with a handoff summary and pruned engine log', async () => {
+  const now = 1_770_000_000_000;
+  const persistedInputs = [];
+  const harness = await createAutoReplyHarness({
+    now,
+    episodeRolloverMessages: 4,
+    episodeSummaryGenerator: async () => 'The peer asked for a market report; the report draft is owed and the peer prefers bullet points.',
+    a2aConversationPersister: async (input) => {
+      persistedInputs.push(input);
+      return { messageId: input.message.messageId ?? 'persisted-x' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: 'Market Bot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.appendMessages([
+    { conversationId, messageId: 'ep-msg-1', direction: 'inbound', senderGlobalMetaId: harness.peerGlobalMetaId, content: 'topic one', messagePinId: 'ep-pin-1', extensions: null, timestamp: now - 3_000 },
+    { conversationId, messageId: 'ep-msg-2', direction: 'outbound', senderGlobalMetaId: harness.localGlobalMetaId, content: 'answer one', messagePinId: 'ep-pin-2', extensions: null, timestamp: now - 2_000 },
+    { conversationId, messageId: 'ep-msg-3', direction: 'inbound', senderGlobalMetaId: harness.peerGlobalMetaId, content: 'topic two', messagePinId: 'ep-pin-3', extensions: null, timestamp: now - 1_000 },
+  ]);
+
+  // The 4th engine-side message is the inbound driving this turn: 4 >= 4 rolls.
+  await harness.handleInbound({ messagePinId: 'pin-episode-roll', content: 'and the report please' });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.episodeIndex, 1);
+  assert.match(conversation.episodeSummary, /market report/);
+
+  // Engine log pruned: the old episode is gone; the rolled episode starts
+  // with the driving inbound plus this turn's reply. The full thread lives on
+  // in the A2A store and on chain.
+  const remaining = await harness.stateStore.getRecentMessages(conversationId, 50);
+  assert.equal(remaining.length, 2);
+  assert.equal(remaining[0].messageId, 'pin-episode-roll');
+  assert.equal(remaining.some((message) => message.messageId === 'ep-msg-1'), false);
+
+  // The divider line lands in the UI-facing store as a host status message.
+  const divider = persistedInputs.find((input) => input.message.hostStatus === true);
+  assert.ok(divider, 'episode divider host status should be persisted');
+  assert.match(divider.message.content, /Episode 1 ended · handoff summary: /);
+
+  // The next turn's prompt carries the handoff instead of the pruned history.
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.match(harness.runnerInputs[0].episodeSummaryText, /market report/);
+  const promptMessages = harness.runnerInputs[0].recentMessages.map((m) => m.content).join('\n');
+  assert.doesNotMatch(promptMessages, /topic one/);
+});
+
+test('conversations below the episode threshold do not roll', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    episodeRolloverMessages: 50,
+    episodeSummaryGenerator: async () => 'should not be used',
+  });
+
+  await harness.handleInbound({ messagePinId: 'pin-episode-none', content: 'just chatting' });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.episodeIndex ?? 0, 0);
+  assert.equal(harness.runnerInputs[0].episodeSummaryText ?? '', '');
 });

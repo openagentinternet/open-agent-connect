@@ -13,6 +13,10 @@ export interface PrivateChatConversation {
   pendingGuidanceCreatedAt: number | null;
   pendingGuidanceLeaseId?: string | null;
   pendingGuidanceLeaseExpiresAt?: number | null;
+  /** Episode rollover (IDBots parity): 0-based index of the active episode. */
+  episodeIndex?: number;
+  /** LLM handoff summary of the episode that ended before the current one. */
+  episodeSummary?: string | null;
 }
 
 export interface PrivateChatMessage {
@@ -89,6 +93,9 @@ export interface ChatReplyRunnerInput {
   // Host-injected notice appended to the prompt (wake checks, empty-reply
   // retries). Empty/null means a plain turn.
   hostNoticeText?: string | null;
+  // Handoff summary of the previous episode (IDBots rollover parity): shown
+  // to the model as background instead of the pruned raw history.
+  episodeSummaryText?: string | null;
 }
 
 export interface ChatReplyRunnerResult {
@@ -116,4 +123,7 @@ export interface PrivateChatAutoReplyConfig {
   // Wake schedule for silent-but-open conversation tails (IDBots parity).
   // Defaults to DEFAULT_PRIVATE_CHAT_WAKE_DELAYS_MS when absent.
   wakeDelaysMs?: number[];
+  // Episode rollover threshold in messages per conversation (IDBots parity).
+  // Defaults to 1000; values below 2 disable rollover.
+  episodeRolloverMessages?: number;
 }

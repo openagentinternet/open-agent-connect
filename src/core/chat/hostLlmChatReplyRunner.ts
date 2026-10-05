@@ -337,6 +337,17 @@ function buildChatPrompt(
     ].join('\n'));
   }
 
+  // Episode handoff (IDBots rollover parity): background from the episode
+  // that ended before this one, replacing its pruned raw history.
+  const episodeSummaryText = normalizeText(input.episodeSummaryText);
+  if (episodeSummaryText) {
+    sections.push([
+      '## Previous Episode Handoff',
+      'Your previous episode with this peer ended and its raw history was archived. Carry its outcomes and still-open commitments forward:',
+      episodeSummaryText,
+    ].join('\n'));
+  }
+
   sections.push([
     '## Format Rules',
     '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',

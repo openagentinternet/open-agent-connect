@@ -5,6 +5,10 @@ import {
   recordPrivateChatMemoryTurn,
 } from './privateChatMemory';
 import type { ChatSkillWaitNoticeGenerator } from './chatSkillWaitNotice';
+import type {
+  ChatEpisodeSummaryGenerator,
+} from './chatEpisodeSummary';
+import { DEFAULT_EPISODE_ROLLOVER_MESSAGES } from './chatEpisodeSummary';
 import {
   buildPrivateChatEmptyReplyRetryNotice,
   buildPrivateChatWakeNotice,
@@ -141,6 +145,9 @@ export interface PrivateChatAutoReplyDependencies {
   // Persistence for silent-tail wake timers (IDBots parity). Auto-created
   // from `paths` when absent so every orchestrator gets wakes by default.
   wakeStore?: PrivateChatWakeStore;
+  // Episode rollover (IDBots parity): writes the LLM handoff summary when a
+  // conversation crosses the message threshold. Absent = template fallback.
+  episodeSummaryGenerator?: ChatEpisodeSummaryGenerator | null;
   now?: () => number;
 }
 
@@ -709,6 +716,7 @@ export function createPrivateChatAutoReplyOrchestrator(
     onSkillExecutionStart?: () => void;
     memoryContext?: string | null;
     hostNoticeText?: string | null;
+    episodeSummaryText?: string | null;
   }): Promise<PreparedOutboundTurn | null> {
     const conversationCloseAllowed = input.conversationCloseAllowed !== false;
     let runnerResult;
@@ -724,6 +732,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         onSkillExecutionStart: input.onSkillExecutionStart,
         memoryContext: input.memoryContext ?? null,
         hostNoticeText: input.hostNoticeText ?? null,
+        episodeSummaryText: input.episodeSummaryText ?? null,
       });
     } catch (error) {
       // Never let a throwing runner crash the daemon loop, but never leave the
@@ -1093,6 +1102,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
         onSkillExecutionStart,
         hostNoticeText: input.hostNoticeText ?? null,
+        episodeSummaryText: normalizeText(input.conversation.episodeSummary) || null,
         memoryContext: await buildPrivateReplyMemoryContext(deps.paths, {
           peerGlobalMetaId: input.peerGlobalMetaId,
           userText: normalizeText(input.inboundMessage.content),
@@ -1250,6 +1260,72 @@ export function createPrivateChatAutoReplyOrchestrator(
         timestamp: getNow(),
       });
       activeInboundReplies.delete(replyKey);
+    }
+  }
+
+  // ---- Episode rollover (IDBots a2aEpisodeRollover parity) ----
+
+  // Rolls the conversation into a new episode once its engine-side message
+  // log crosses the threshold: an LLM handoff summary replaces the raw
+  // history as prompt background, the engine log is pruned (A2A store and
+  // chain keep the full thread), and a divider line lands in the UI thread.
+  async function maybeRollConversationEpisode(input: {
+    conversation: PrivateChatConversation;
+    selfGlobalMetaId: string;
+  }): Promise<PrivateChatConversation> {
+    try {
+      const threshold = Number.isFinite(config.episodeRolloverMessages)
+        ? Math.floor(config.episodeRolloverMessages as number)
+        : DEFAULT_EPISODE_ROLLOVER_MESSAGES;
+      if (threshold < 2) return input.conversation;
+      const state = await deps.stateStore.readState();
+      const conversationMessages = state.messages
+        .filter((message) => message.conversationId === input.conversation.conversationId)
+        .sort((left, right) => left.timestamp - right.timestamp);
+      if (conversationMessages.length < threshold) return input.conversation;
+
+      const previousEpisodeIndex = input.conversation.episodeIndex ?? 0;
+      const recentForSummary = conversationMessages.slice(-100);
+      const persona = await loadChatPersona(deps.paths);
+      const generated = deps.episodeSummaryGenerator
+        ? await deps.episodeSummaryGenerator({
+          conversation: input.conversation,
+          recentMessages: recentForSummary,
+          persona,
+        })
+        : null;
+      const peerLabel = normalizeText(input.conversation.peerName) || 'the peer';
+      const summary = normalizeText(generated)
+        || `Episode ${previousEpisodeIndex + 1} with ${peerLabel} ran ${conversationMessages.length} messages; treat open threads from the recent history as still standing unless settled.`;
+
+      // Prune the engine-side log: keep only the newest record (the inbound
+      // driving this turn) so staleness checks stay well-defined.
+      const keepMessageIds = new Set(
+        conversationMessages.slice(-1).map((message) => message.messageId),
+      );
+      await deps.stateStore.updateState((current) => ({
+        ...current,
+        messages: current.messages.filter((message) => (
+          message.conversationId !== input.conversation.conversationId
+          || keepMessageIds.has(message.messageId)
+        )),
+      }));
+
+      const rolled: PrivateChatConversation = {
+        ...input.conversation,
+        episodeIndex: previousEpisodeIndex + 1,
+        episodeSummary: summary,
+        updatedAt: getNow(),
+      };
+      await deps.stateStore.upsertConversation(rolled);
+      await recordHostStatusMessage({
+        selfGlobalMetaId: input.selfGlobalMetaId,
+        peerGlobalMetaId: input.conversation.peerGlobalMetaId,
+        text: `[Host] Episode ${previousEpisodeIndex + 1} ended · handoff summary: ${summary.slice(0, 200)}`,
+      });
+      return rolled;
+    } catch {
+      return input.conversation;
     }
   }
 
@@ -1686,6 +1762,13 @@ export function createPrivateChatAutoReplyOrchestrator(
         };
         await deps.stateStore.upsertConversation(conversation);
 
+        // Episode rollover (inside the per-conversation mutex so concurrent
+        // turns cannot double-roll): may prune history and bump episodeIndex.
+        conversation = await maybeRollConversationEpisode({
+          conversation,
+          selfGlobalMetaId,
+        });
+
         // Check for the natural-language closing signal from peer.
         if (hasFinalByeLine(inboundWireContent.content)) {
           conversation = { ...conversation, state: 'closed', updatedAt: now };
@@ -1757,6 +1840,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         strategy,
         inboundMessage: null,
         operatorGuidanceText: guidanceToConsume.guidanceText,
+        episodeSummaryText: normalizeText(conversation.episodeSummary) || null,
         // A guided turn that opens a new session (turnCount 1, fresh or
         // reopened) is the operator reaching out — it must not carry a close
         // marker, or the peer side would instantly re-close the conversation.

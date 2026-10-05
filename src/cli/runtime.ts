@@ -288,6 +288,7 @@ import {
 } from '../core/chat/hostLlmChatReplyRunner';
 import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
 import { createChatSkillWaitNoticeGenerator } from '../core/chat/chatSkillWaitNotice';
+import { createChatEpisodeSummaryGenerator } from '../core/chat/chatEpisodeSummary';
 import { createLlmOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 import {
   PROVIDER_RUN_WORKSPACE_SWEEP_INTERVAL_MS,
@@ -2407,6 +2408,12 @@ export function createPrivateChatAutoReplyProfileDispatcher(
         sessionStateStore: createSessionStateStore(profilePaths),
       }),
       chatSkillWaitNotice: createChatSkillWaitNoticeGenerator({
+        runtimeResolver: profileRuntimeResolver,
+        llmExecutor: input.llmExecutor,
+        metaBotSlug,
+        dshLlmPath: profilePaths.dshLlmPath,
+      }),
+      episodeSummaryGenerator: createChatEpisodeSummaryGenerator({
         runtimeResolver: profileRuntimeResolver,
         llmExecutor: input.llmExecutor,
         metaBotSlug,
@@ -7189,6 +7196,12 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       sessionStateStore: createSessionStateStore(paths),
     }),
     chatSkillWaitNotice: createChatSkillWaitNoticeGenerator({
+      runtimeResolver: llmResolver,
+      llmExecutor,
+      metaBotSlug,
+      dshLlmPath: paths.dshLlmPath,
+    }),
+    episodeSummaryGenerator: createChatEpisodeSummaryGenerator({
       runtimeResolver: llmResolver,
       llmExecutor,
       metaBotSlug,
