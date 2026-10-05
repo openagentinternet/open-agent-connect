@@ -7,7 +7,7 @@
  * ignored events, and the candidate drawer. Renderer-only: every state comes
  * from the daemon projection.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   candidatesByPin,
   raceFrontPath,
@@ -15,6 +15,8 @@ import {
   shortMetaId,
   shortPin,
   taskLifecycleOf,
+  treeChildrenOf,
+  treeSubtreeHasAttention,
 } from '../../metatask-logic.js'
 import { ChainView, type IdentityOf } from './ChainView.tsx'
 import { CandidateDrawer, type DrawerCandidate } from './CandidateDrawer.tsx'
@@ -22,6 +24,8 @@ import { Deliverables } from './Deliverables.tsx'
 import { MtBadge } from './MtBadge.tsx'
 import { NodeSections } from './NodeSections.tsx'
 import { RosterSettlement } from './RosterSettlement.tsx'
+import { TreeMap } from './TreeMap.tsx'
+import { TreeNodeTable } from './TreeNodeTable.tsx'
 import type { BoardData, MetataskApi, MetataskBoardLocale } from './MetataskBoard.tsx'
 
 export interface TaskNodeState {
@@ -128,6 +132,11 @@ export function MetataskDetail(
   const [error, setError] = useState<string | null>(null)
   const [drawer, setDrawer] = useState<{ pinId: string } | null>(null)
   const [briefOpen, setBriefOpen] = useState(false)
+  // Tree mode: per-node expansion + group collapse, mirroring IDBots
+  // (groups with in-flight/disputed descendants default to expanded).
+  const [expandedNode, setExpandedNode] = useState<string | null>(null)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const groupsInitForRef = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     if (!metataskTask) return
@@ -168,6 +177,30 @@ export function MetataskDetail(
     [task],
   )
 
+  // Tree-mode structure helpers (IDBots childrenOf / groups / attention).
+  const treeNodes = useMemo(() => Object.values(task?.nodeStates ?? {}), [task])
+  const childrenOf = useMemo(() => treeChildrenOf(treeNodes), [treeNodes])
+  const rootNode = treeNodes.find((node) => node.parent === null)
+  const childIds = useMemo(
+    () => new Set(Array.from(childrenOf.values()).flat().map((node) => node.id)),
+    [childrenOf],
+  )
+  const baseChildren = useMemo(() => {
+    if (!task) return []
+    return rootNode
+      ? (childrenOf.get(rootNode.id) ?? []).map((child) => task.nodeStates[child.id]).filter(Boolean)
+      : treeNodes.filter((node) => !childIds.has(node.id))
+  }, [task, rootNode, childrenOf, treeNodes, childIds])
+  const groups = useMemo(
+    () => baseChildren.filter((node) => (childrenOf.get(node.id)?.length ?? 0) > 0),
+    [baseChildren, childrenOf],
+  )
+  const groupIdSet = useMemo(() => new Set(groups.map((node) => node.id)), [groups])
+  const topLeaves = useMemo(
+    () => baseChildren.filter((node) => !(childrenOf.get(node.id)?.length ?? 0)),
+    [baseChildren, childrenOf],
+  )
+
   const identityOf = useCallback<IdentityOf>((metaId) => {
     const identity = task?.identities[metaId]
     return { name: identity?.name ?? null, avatar: identity?.avatar ?? null }
@@ -180,6 +213,40 @@ export function MetataskDetail(
 
   if (error) return <div className="oac-mt-empty">{mt('mtLoadError', { message: error })}</div>
   if (!task) return <div className="oac-mt-empty">{mt('mtLoading')}</div>
+
+  // Default group expansion once per task (groups with in-flight or disputed
+  // descendants open; quiet groups stay collapsed); refresh pushes must not
+  // clobber the user's manual toggles.
+  if (groupsInitForRef.current !== task.rootPinId) {
+    groupsInitForRef.current = task.rootPinId
+    setExpandedGroups(new Set(groups.filter((node) => treeSubtreeHasAttention(childrenOf, node.id)).map((node) => node.id)))
+  }
+
+  const toggleGroup = (groupId: string): void => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }
+  const toggleNode = (nodeId: string): void => {
+    setExpandedNode((prev) => (prev === nodeId ? null : nodeId))
+  }
+  const scrollToNode = (nodeId: string): void => {
+    window.setTimeout(() => {
+      document.getElementById(`oac-mt-node-${nodeId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 80)
+  }
+  const groupOfNode = (nodeId: string): string | null => {
+    const node = task.nodeStates[nodeId]
+    return node?.parent && groupIdSet.has(node.parent) ? node.parent : null
+  }
+  const selectNodeFromMap = (nodeId: string, groupId: string | null): void => {
+    if (groupId) setExpandedGroups((prev) => new Set(prev).add(groupId))
+    setExpandedNode(nodeId)
+    scrollToNode(nodeId)
+  }
 
   const { policy, progress } = task
   const lifecycle = mt(`mtLifecycle${taskLifecycleOf({ settlementFinalized: Boolean(task.settlement), taskComplete: task.taskComplete }).charAt(0).toUpperCase()}${taskLifecycleOf({ settlementFinalized: Boolean(task.settlement), taskComplete: task.taskComplete }).slice(1)}`)
@@ -350,6 +417,10 @@ export function MetataskDetail(
               <button key={row.key} type="button" className="oac-mt-minerow"
                 title={row.title}
                 onClick={() => {
+                  if (policy.mode === 'tree') {
+                    selectNodeFromMap(row.nodeId, groupOfNode(row.nodeId))
+                    return
+                  }
                   const node = task.nodeStates[row.nodeId]
                   const lead = node?.submission ?? null
                   if (lead) setDrawer({ pinId: lead.pinId })
@@ -412,21 +483,39 @@ export function MetataskDetail(
           </div>
         )
         : (
-          <div className="oac-mt-sectioncard">
-            <div className="oac-mt-rules">{mt('mtRulesTree')}</div>
-            <div className="oac-mt-nodetable">
-              {Object.values(task.nodeStates).map((node) => (
-                <div key={node.id} className="oac-mt-node-row">
-                  <span className={`oac-mt-dot oac-mt-dot-${node.status}`} />
-                  <span className="oac-mt-node-id">{node.id}</span>
-                  <span className="oac-mt-node-title">{node.title}</span>
-                  <span className="oac-mt-chip">{node.status}{node.disputed ? ` · ${mt('mtDisputed')}` : ''}</span>
-                  <span className="oac-mt-chip">{mt('mtWeight', { weight: node.weight ?? 0 })}</span>
-                  <span className="oac-mt-chip">{node.holder ? nameOf(node.holder.claimant) : node.submission ? nameOf(node.submission.submitter) : '—'}</span>
-                </div>
-              ))}
+          <>
+            <div className="oac-mt-sectioncard">
+              <div className="oac-mt-rules">{mt('mtRulesTree')}</div>
+              <TreeMap
+                mt={mt}
+                root={rootNode}
+                groups={groups}
+                topLeaves={topLeaves}
+                childrenOf={childrenOf}
+                onSelectNode={selectNodeFromMap}
+                onToggleGroup={toggleGroup}
+              />
             </div>
-          </div>
+            <div className="oac-mt-sectioncard">
+              <div className="oac-mt-h3">
+                {mt('mtNodesTitle')}
+                <small>{mt('mtNodesHint')}</small>
+              </div>
+              <TreeNodeTable
+                mt={mt}
+                rootNode={rootNode}
+                baseChildren={baseChildren}
+                childrenOf={childrenOf}
+                nodeById={task.nodeStates}
+                identityOf={identityOf}
+                verifyQuorum={Math.max(1, policy.verifyQuorum)}
+                expandedNode={expandedNode}
+                expandedGroups={expandedGroups}
+                onToggleNode={toggleNode}
+                onToggleGroup={toggleGroup}
+              />
+            </div>
+          </>
         )}
 
       {policy.mode === 'competitive' && (
