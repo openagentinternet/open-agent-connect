@@ -36,6 +36,7 @@ import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { HeaderBotLabel, type HeaderBotLabelInjected } from './HeaderBotLabel.tsx'
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { PluginSettingsPanel } from './PluginSettingsPanel.tsx'
+import { TrackingTasksPanel } from './TrackingTasksPanel.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
 import { A2APanelStore, type A2APanelTarget } from './a2a-panel-store.ts'
 import { ConvTabStore } from './conv-tab-store.ts'
@@ -64,7 +65,7 @@ import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { startHeroIdentityMount } from './hero-identity.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BOTSPAGE_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BOTSPAGE_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, TRACKING_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -94,7 +95,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS + BOTSPAGE_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS + TRACKING_CSS + BOTSPAGE_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -495,6 +496,26 @@ export function apply(ctx: ClientContext): void {
   // PluginSettingsPanel, so this registration carries the union of their
   // injected faces plus their per-tab translators. Order 25 keeps the merged
   // section at the nav's end, where settings-type entries belong.
+  // Tracking Tasks (追踪任务) section: the wide MetaTask board + detail panel
+  // (a Long-term tab is reserved inside). Order 21 = after 我的Bot (20),
+  // before 元应用. The panel fetches its data through the plugin's own
+  // metatask/* host routes (the daemon route behind the same dispatch).
+  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+    name: 'oac.bots.section',
+    id: 'oac-tracking',
+    order: 21,
+    label: () => t('navTracking'),
+    locale: NS,
+    inject: () => ({
+      mt: (key: string, vars?: Record<string, string | number>) => t(key as BotsLocaleKey, vars),
+      metataskBoard: (refresh?: boolean) => api.metataskBoard(refresh),
+      metataskTask: (root: string, refresh?: boolean) => api.metataskTask(root, refresh),
+      mtApi: {
+        metataskTask: (root: string, refresh?: boolean) => api.metataskTask(root, refresh),
+      },
+    }),
+  }, TrackingTasksPanel))
+
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
     id: 'oac-settings',

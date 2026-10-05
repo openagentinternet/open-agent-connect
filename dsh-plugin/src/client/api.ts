@@ -828,6 +828,19 @@ export const api = {
     const rows = Array.isArray(data.tasks) ? data.tasks : []
     return rows.map((row) => normalizeGroupTaskSummary(row))
   },
+
+  /** MetaTask board (`metabot metatask list`) — the Tracking Tasks tab. */
+  metataskBoard: async (refresh = false): Promise<unknown> =>
+    post('metatask/board', { refresh }),
+  /** One MetaTask projection (`metabot metatask get --root`). */
+  metataskTask: async (root: string, refresh = false): Promise<unknown> =>
+    post('metatask/task', { root, refresh }),
+  /** Pure replay view (`metabot metatask replay --root`). */
+  metataskReplay: async (root: string): Promise<unknown> =>
+    post('metatask/replay', { root }),
+  /** Force a chain sweep (`metabot metatask refresh`). */
+  metataskRefresh: async (): Promise<unknown> =>
+    post('metatask/refresh', {}),
   grouptaskDetail: async (chair: string, taskId: number): Promise<GroupTaskDetailPayload> =>
     normalizeGroupTaskDetail(await post('grouptask/detail', { chair, taskId })),
   grouptaskInvites: async (chair: string, taskId: number): Promise<GroupTaskSentInviteRow[]> => {

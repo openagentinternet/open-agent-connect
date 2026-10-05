@@ -56,6 +56,7 @@ import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
 import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 import { dispatchGroupTaskRoutes } from './grouptask.js'
+import { dispatchMetaTaskRoutes } from './metatask-routes.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
 import { dispatchKbRoutes, importKbFile, KB_IMPORT_MAX_BYTES } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
@@ -280,6 +281,8 @@ async function dispatchPost(
   }
   const grouptask = await dispatchGroupTaskRoutes(method, payload)
   if (grouptask !== undefined) return grouptask
+  const metatask = await dispatchMetaTaskRoutes(method, payload)
+  if (metatask !== undefined) return metatask
   const memory = await dispatchMemoryRoutes(method, payload, {
     llm: ctx.llm as unknown as import('./llm-generate.js').LlmStreamLike | undefined,
   })
@@ -849,6 +852,7 @@ export {
 export { PRIVATE_FILE, GROUP_FILE } from './chat-watcher.js'
 export { dispatchSection } from './sections.js'
 export { dispatchGroupTaskRoutes } from './grouptask.js'
+export { dispatchMetaTaskRoutes } from './metatask-routes.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { dispatchKbRoutes, importKbFile, KB_IMPORT_MAX_BYTES } from './kb-routes.js'
 export { dispatchSurfRoutes } from './surf-routes.js'
