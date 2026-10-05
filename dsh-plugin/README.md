@@ -50,7 +50,7 @@ open-agent-connect-dsh`. The 0.2.0 adaptations worth knowing about:
   `@deepseek-ai/dsh-experimental-schedule-bundle` (sidebar "Automation
   tasks" page, model-created `schedule_*` reminders queued back into the
   originating session). It shares nothing with the OAC per-Bot scheduled
-  tasks below (Bots page → 定时任务, `metabot schedule *`, runs
+  tasks below (A2A Chat → 定时任务 tab, `metabot schedule *`, runs
   as NEW DSH conversations) — different names, storage, and semantics, and
   no tool/panel id collisions, so both can coexist; they only sound alike.
 - **Plugin-card polish for the 0.2.0 plugin manager.** The bundle now ships
@@ -457,7 +457,7 @@ data under `~/.metabot/profiles/<slug>/`):
   decay, tombstone purge, knowledge-revision keep-N, dream-run retention); the
   LLM deep-consolidation step runs only when the Bot has an LLM runtime bound
   and is skipped, not failed, otherwise.
-- **Bots page → Memory** — policy card, self-identity card, and the
+- **Bot editor → Memory tab** — policy card, self-identity card, and the
   Knowledge/Contacts/Facts/Dream tabs (incl. manual run-dream). The Dream
   tab lists all recent runs (completed/failed/running, incl. quiet days
   with no diary), the diary/self-identity status line, and a hint when the
@@ -492,8 +492,8 @@ Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 
 ## Scheduled tasks (定时任务)
 
-The Bots page gains a **定时任务** (Scheduled) section right below My Bots —
-every local Bot's scheduled tasks in ONE unified list (no per-Bot filtering;
+The A2A Chat overlay carries a **定时任务** (Scheduled) tab — every local
+Bot's scheduled tasks in ONE unified list (no per-Bot filtering;
 the list comes from `metabot schedule list --all`), fully manageable: create
 (with a Bot picker), inline edit, enable/disable switch, delete (modal
 confirm), Run now, and an in-place expanding prompt + run-history view. The
