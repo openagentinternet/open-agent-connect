@@ -200,6 +200,12 @@ export interface CliDependencies {
     staffingCreate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     staffingSearch?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  metatask?: {
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    get?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    replay?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   conversations?: {
     list?: (input: { local: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     messages?: (input: {
