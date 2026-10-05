@@ -77,6 +77,7 @@
     "test:integration": "pnpm run build && node scripts/run-tests-with-leak-guard.mjs -- pnpm run --silent test:integration:raw",
     "test:integration:raw": "node scripts/run-test-suite.mjs integration",
     "test:contracts": "pnpm run build && node --test tests/contracts/*.test.mjs",
+    "test:metatask": "pnpm run build && node scripts/metatask-vectors.mjs",
     "preverify": "pnpm run test:setup",
     "verify": "pnpm run build && pnpm run build:skillpacks && node scripts/run-tests-with-leak-guard.mjs"
   },
