@@ -4380,6 +4380,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         get: get('/api/metatask/task'),
         replay: get('/api/metatask/replay'),
         refresh: post('/api/metatask/refresh'),
+        draft: post('/api/metatask/draft'),
         claim: post('/api/metatask/claim'),
         submit: post('/api/metatask/submit'),
         verify: post('/api/metatask/verify'),

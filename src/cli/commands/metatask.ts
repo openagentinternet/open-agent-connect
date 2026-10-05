@@ -58,6 +58,15 @@ export async function runMetaTaskCommand(
     return handler({ reason: 'cli-refresh' });
   }
 
+  if (action === 'draft') {
+    const handler = requireHandler(context, 'draft');
+    if (!handler) return commandFailed('not_implemented', 'MetaTask draft handler is not configured.');
+    const root = normalizeText(readFlagValue(args, '--root'));
+    if (!root) return commandMissingFlag('--root');
+    const lang = normalizeText(readFlagValue(args, '--lang'));
+    return handler({ root, ...(lang ? { lang } : {}) });
+  }
+
   if (action === 'claim') {
     const handler = requireHandler(context, 'claim');
     if (!handler) return commandFailed('not_implemented', 'MetaTask claim handler is not configured.');
@@ -107,7 +116,7 @@ export async function runMetaTaskCommand(
 
   return commandFailed(
     'unknown_subcommand',
-    'Unknown metatask subcommand. Use: list | get | replay | refresh | claim | release | submit | verify | publish | publish-spec | amend.'
+    'Unknown metatask subcommand. Use: list | get | replay | refresh | draft | claim | release | submit | verify | publish | publish-spec | amend.'
   );
 }
 

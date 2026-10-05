@@ -205,9 +205,9 @@ export function MetataskBoard(
                 {task.myStats && (
                   <span className="oac-mt-card-share">
                     {task.settlementFinalized
-                      ? <>{mt('mtShareSettled')} <b>{task.myStats.shareBP} bp</b></>
-                      : <>{mt('mtShareEst')} <b>{task.myStats.estShareBP} bp</b></>}
-                    {' · '}{mt('mtMyStats', { verified: task.myStats.verified, reviews: task.myStats.reviewVotes, share: 0 })}
+                      ? <span className="oac-mt-chip oac-mt-chip-role">{mt('mtShareSettled', { pct: (task.myStats.shareBP / 100).toFixed(2) })}</span>
+                      : <span className="oac-mt-chip oac-mt-chip-role">{mt('mtShareEst', { pct: (task.myStats.estShareBP / 100).toFixed(2) })}</span>}
+                    {' · '}{mt('mtMyStats', { verified: task.myStats.verified, reviews: task.myStats.reviewVotes })}
                   </span>
                 )}
                 <span className="oac-mt-card-stamp">{relativeTime(task.lastActivityMs, mt)} · {task.freshness.eventCount} {mt('mtEvents')} @{task.freshness.boundaryBlock}</span>

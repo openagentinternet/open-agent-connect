@@ -275,6 +275,23 @@ export function createMetaTaskDaemonHandlers(input: {
     }
   };
 
+  /**
+   * Serve-time identity backfill for a board payload: any task publisher the
+   * identities map does not cover yet enters the store cache (best-effort)
+   * so cards render a name/avatar instead of a raw metaId.
+   */
+  const ensureBoardIdentities = async (board: Awaited<ReturnType<MetaTaskStore['board']>>): Promise<void> => {
+    const missing = [
+      ...new Set(
+        board.tasks
+          .map((task) => task.publisher)
+          .filter((publisher) => publisher && !board.identities[publisher])
+      ),
+    ];
+    if (missing.length === 0) return;
+    Object.assign(board.identities, await store.ensureIdentities(missing));
+  };
+
   const runWatchTick = async (): Promise<MetabotCommandResult<unknown>> => {
     try {
       await loadRoster();
@@ -299,7 +316,9 @@ export function createMetaTaskDaemonHandlers(input: {
             return commandFailed('metatask_refresh_failed', result.error ?? 'MetaTask refresh failed.');
           }
         }
-        return commandSuccess(await refresher.board());
+        const boardPayload = await refresher.board();
+        await ensureBoardIdentities(boardPayload);
+        return commandSuccess(boardPayload);
       } catch (error) {
         return commandFailed(
           'metatask_board_failed',
@@ -323,7 +342,11 @@ export function createMetaTaskDaemonHandlers(input: {
             `No cached projection for task root ${rootPinId}. Run a refresh first.`
           );
         }
-        const openNodes = Object.values(projection.nodeStates)
+        // Identity merge at the edge: the persisted stamp may predate later
+        // enrichment sweeps (skipped replays never re-stamp), so the served
+        // payload always carries the freshest store identities.
+        const served = await store.withFreshIdentities(projection);
+        const openNodes = Object.values(served.nodeStates)
           .filter((node) => node.status !== 'verified')
           .map((node) => ({
             id: node.id,
@@ -334,8 +357,8 @@ export function createMetaTaskDaemonHandlers(input: {
             deps: node.deps,
           }));
         return commandSuccess({
-          ...projection,
-          estimation: projection.settlement ? null : estimateMetaTaskShares(projection),
+          ...served,
+          estimation: served.settlement ? null : estimateMetaTaskShares(served),
           openNodes,
         });
       } catch (error) {
@@ -370,6 +393,7 @@ export function createMetaTaskDaemonHandlers(input: {
         if (!result.ok) {
           return commandFailed('metatask_refresh_failed', result.error ?? 'MetaTask refresh failed.');
         }
+        if (result.board) await ensureBoardIdentities(result.board);
         return commandSuccess(result.board);
       } catch (error) {
         return commandFailed(

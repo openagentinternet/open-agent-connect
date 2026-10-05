@@ -222,25 +222,51 @@ export function MetataskDetail(
     void nodeId
   }
 
-  // Local-bot activity: holder claims, my candidates, my review votes.
+  // Local-bot activity (IDBots mine list): claims, my candidates, my review
+  // votes — in-flight first (claimed → submitted → voted → verified).
   const mine = Object.values(task.nodeStates).flatMap((node) => {
-    const rows: { key: string; nodeId: string; kind: string; text: string }[] = []
+    const rows: { key: string; nodeId: string; title: string; kind: string; status: string }[] = []
     if (node.holder && rosterIds.has(node.holder.claimant)) {
-      rows.push({ key: `${node.id}-claim`, nodeId: node.id, kind: 'claim', text: `${node.id} · ${nameOf(node.holder.claimant)}` })
+      const remainingMs = policy.claimTtlHours * 3_600_000 - (Date.now() - node.holder.sinceMs)
+      rows.push({
+        key: `${node.id}-claim`,
+        nodeId: node.id,
+        title: node.title,
+        kind: 'claim',
+        status: mt('mtMineClaimed', { hours: Math.max(0, Math.ceil(remainingMs / 3_600_000)) }),
+      })
     }
     for (const cand of node.submissions ?? []) {
       if (!rosterIds.has(cand.submitter)) continue
-      const state = (node.submissions ?? []).length >= 0
-        ? (winningSet?.has(cand.pinId) ? 'winner' : cand.verified && cand.chainValid ? 'verified' : cand.failed ? 'rejected' : cand.superseded ? 'replaced' : 'live')
-        : 'live'
-      rows.push({ key: cand.pinId, nodeId: node.id, kind: `sub-${state}`, text: `${node.id} · ${shortPin(cand.pinId)}` })
+      const state = winningSet?.has(cand.pinId) ? 'winner' : cand.verified && cand.chainValid ? 'verified' : cand.failed ? 'rejected' : cand.superseded ? 'replaced' : 'live'
+      if (state === 'verified' || state === 'winner') {
+        rows.push({ key: cand.pinId, nodeId: node.id, title: node.title, kind: 'sub-verified', status: mt('mtMineVerified') })
+      } else if (state !== 'rejected') {
+        rows.push({
+          key: cand.pinId,
+          nodeId: node.id,
+          title: node.title,
+          kind: `sub-${state}`,
+          status: mt('mtMineSubmitted', { votes: cand.passVotes, quorum: Math.max(1, policy.verifyQuorum) }),
+        })
+      }
     }
-    for (const vote of node.votes) {
-      if (!rosterIds.has(vote.voter)) continue
-      rows.push({ key: vote.pinId, nodeId: node.id, kind: `vote-${vote.verdict}`, text: `${node.id} · ${vote.verdict}${vote.counted ? '' : ` (${vote.ignoreReason ?? '?'})`}` })
+    const effective = node.submission
+    const localVote = effective ? node.votes.find((vote) => rosterIds.has(vote.voter)) : undefined
+    if (localVote) {
+      const verdict = localVote.verdict === 'pass' ? mt('mtMineVotedPass') : mt('mtMineVotedFail')
+      rows.push({
+        key: localVote.pinId,
+        nodeId: node.id,
+        title: node.title,
+        kind: `vote-${localVote.verdict}`,
+        status: localVote.counted ? verdict : verdict + mt('mtMineVoteNotCounted', { reason: localVote.ignoreReason ?? '—' }),
+      })
     }
     return rows
   })
+  const mineOrder: Record<string, number> = { claim: 0, 'sub-live': 1, 'sub-replaced': 1, 'sub-winner': 1, 'sub-verified': 1, 'vote-pass': 2, 'vote-fail': 2 }
+  mine.sort((left, right) => (mineOrder[left.kind] ?? 3) - (mineOrder[right.kind] ?? 3))
 
   const drawerCandidate = drawer
     ? (byPin.get(drawer.pinId) as unknown as DrawerCandidate | undefined) ?? null
@@ -334,45 +360,60 @@ export function MetataskDetail(
       {mine.length > 0 && (
         <section className="oac-mt-mine">
           <div className="oac-mt-h3">{mt('mtMineTitle')}</div>
-          <div className="oac-mt-minerows">
+          <div className="oac-mt-minecard">
             {mine.slice(0, 12).map((row) => (
-              <span key={row.key} className={`oac-mt-chip oac-mt-mine-${row.kind}`}>{row.text}</span>
+              <button key={row.key} type="button" className="oac-mt-minerow"
+                title={row.title}
+                onClick={() => {
+                  const node = task.nodeStates[row.nodeId]
+                  const lead = node?.submission ?? null
+                  if (lead) setDrawer({ pinId: lead.pinId })
+                }}>
+                <i className={`oac-mt-minedot oac-mt-minedot-${row.kind}`} />
+                <span className="oac-mt-minenode">{row.nodeId}</span>
+                <span className="oac-mt-minetext">{row.title}</span>
+                <span className="oac-mt-minestatus">{row.status}</span>
+              </button>
             ))}
-            {mine.length > 12 && <span className="oac-mt-dim">+{mine.length - 12}</span>}
           </div>
+          {mine.length > 12 && <span className="oac-mt-dim">+{mine.length - 12}</span>}
         </section>
       )}
       {mine.length === 0 && rosterIds.size > 0 && (
-        <section className="oac-mt-mine">
+        <section className="oac-mt-mine oac-mt-sectioncard">
           <div className="oac-mt-h3">{mt('mtMineTitle')}</div>
           <div className="oac-mt-dim">{mt('mtMineEmpty')}</div>
         </section>
       )}
 
       {policy.mode === 'competitive' && (
-        <Deliverables
-          mt={mt}
-          task={task}
-          identityOf={identityOf}
-          byPin={byPin}
-          youLabel={youLabel}
-          onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
-        />
+        <div className="oac-mt-sectioncard">
+          <Deliverables
+            mt={mt}
+            task={task}
+            identityOf={identityOf}
+            byPin={byPin}
+            youLabel={youLabel}
+            onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
+          />
+        </div>
       )}
 
       {policy.mode === 'competitive'
         ? (
-          <ChainView
-            mt={mt}
-            task={task}
-            byPin={byPin}
-            winningSet={winningSet}
-            race={race}
-            identityOf={identityOf}
-            rosterIds={rosterIds}
-            youLabel={youLabel}
-            onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
-          />
+          <div className="oac-mt-sectioncard">
+            <ChainView
+              mt={mt}
+              task={task}
+              byPin={byPin}
+              winningSet={winningSet}
+              race={race}
+              identityOf={identityOf}
+              rosterIds={rosterIds}
+              youLabel={youLabel}
+              onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
+            />
+          </div>
         )
         : (
           <div className="oac-mt-nodetable">
@@ -390,22 +431,24 @@ export function MetataskDetail(
         )}
 
       {policy.mode === 'competitive' && (
-        <NodeSections
-          mt={mt}
-          task={task}
-          byPin={byPin}
-          winningSet={winningSet}
-          identityOf={identityOf}
-          rosterIds={rosterIds}
-          youLabel={youLabel}
-          onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
-        />
+        <div className="oac-mt-sectioncard">
+          <NodeSections
+            mt={mt}
+            task={task}
+            byPin={byPin}
+            winningSet={winningSet}
+            identityOf={identityOf}
+            rosterIds={rosterIds}
+            youLabel={youLabel}
+            onOpenCandidate={(pinId) => { setDrawer({ pinId }) }}
+          />
+        </div>
       )}
 
-      <RosterSettlement mt={mt} task={task} identityOf={identityOf} />
+      <RosterSettlement mt={mt} task={task} identityOf={identityOf} rosterIds={rosterIds} youLabel={youLabel} />
 
       {(task.ignoredEvents ?? []).length > 0 && (
-        <div className="oac-mt-ignored">
+        <div className="oac-mt-ignored oac-mt-sectioncard">
           <div className="oac-mt-h3">{mt('mtIgnoredTitle')}</div>
           {task.ignoredEvents.map((entry) => (
             <div key={entry.pinId} className="oac-mt-node-row oac-mt-ignored-row">

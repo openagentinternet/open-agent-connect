@@ -132,6 +132,16 @@ export interface MetaTaskStore {
   getProjection(rootPinId: string): Promise<MetaTaskTaskProjection | null>;
   /** Resolve + stamp display identities onto the projections, then persist rows. */
   enrichIdentities(projections: MetaTaskTaskProjection[]): Promise<void>;
+  /**
+   * Serve-time identity stamp (display sugar, never blocks a read): returns a
+   * COPY of the projection whose `identities` carry the freshest cache rows;
+   * actors missing from the cache are backfilled best-effort (same resolver
+   * tiering + TTL/batch caps as the sweep). The persisted projection file is
+   * left untouched — a skipped replay re-stamp would defeat the skip.
+   */
+  withFreshIdentities(projection: MetaTaskTaskProjection): Promise<MetaTaskTaskProjection>;
+  /** Cached identity rows for the given metaIds, backfilling the cache for the missing ones. */
+  ensureIdentities(metaIds: string[]): Promise<Record<string, MetaTaskIdentity>>;
   board(localRosterMetaIds: string[]): Promise<MetaTaskBoard>;
 
   // ── watch state + alerts (display-only) ────────────────────────────────────
@@ -264,6 +274,53 @@ export function createMetaTaskStore(
   const readIdentities = async (): Promise<IdentitiesFile> =>
     (await readJsonFile<IdentitiesFile>(path.join(root, 'identities.json'))) ?? { identities: {} };
 
+  /**
+   * Identity-resolution core shared by the sweep-time `enrichIdentities` and
+   * the serve-time `ensureIdentities`: merge the cache rows for `metaIds`
+   * (re-resolving rows past the TTL horizon) and persist whatever the remote
+   * tier returned. Failures degrade to the raw metaId — best-effort sugar.
+   */
+  const ensureIdentityRows = async (
+    metaIds: Iterable<string>
+  ): Promise<Record<string, MetaTaskIdentity>> => {
+    const nowMs = options.now?.() ?? Date.now();
+    const identitiesFile = await readIdentities();
+    const merged: Record<string, MetaTaskIdentity> = {};
+    const remote: string[] = [];
+    for (const metaId of new Set(metaIds)) {
+      if (!metaId) continue;
+      const cached = identitiesFile.identities[metaId];
+      if (!cached) {
+        remote.push(metaId);
+        continue;
+      }
+      merged[metaId] = { metaId, name: cached.name, avatar: cached.avatar };
+      // Resolved rows older than the refresh horizon re-enter the remote
+      // tier (they keep displaying from cache until re-resolved).
+      if (nowMs - cached.resolvedAtMs > identityTtlMs) remote.push(metaId);
+    }
+    // Local roster first (unthrottled); the remote tier is capped per sweep.
+    const missing = remote.slice(0, IDENTITY_REMOTE_BATCH_MAX);
+    if (missing.length > 0 && options.resolveIdentities) {
+      try {
+        const resolved = await options.resolveIdentities(missing);
+        const rows = Object.values(resolved).filter((identity) => identity && identity.metaId);
+        for (const identity of rows) {
+          merged[identity.metaId] = identity;
+          identitiesFile.identities[identity.metaId] = {
+            ...identity,
+            source: 'local',
+            resolvedAtMs: nowMs,
+          };
+        }
+        await writeJsonFileAtomic(path.join(root, 'identities.json'), identitiesFile);
+      } catch {
+        // identity enrichment is best-effort display sugar; never fail the sweep
+      }
+    }
+    return merged;
+  };
+
   const store: MetaTaskStore = {
     root,
 
@@ -361,40 +418,7 @@ export function createMetaTaskStore(
       for (const projection of projections) {
         for (const actor of actorsOf(projection)) actors.add(actor);
       }
-      const nowMs = options.now?.() ?? Date.now();
-      const identitiesFile = await readIdentities();
-      const merged: Record<string, MetaTaskIdentity> = {};
-      const remote: string[] = [];
-      for (const metaId of actors) {
-        const cached = identitiesFile.identities[metaId];
-        if (!cached) {
-          remote.push(metaId);
-          continue;
-        }
-        merged[metaId] = { metaId, name: cached.name, avatar: cached.avatar };
-        // Resolved rows older than the refresh horizon re-enter the remote
-        // tier (they keep displaying from cache until re-resolved).
-        if (nowMs - cached.resolvedAtMs > identityTtlMs) remote.push(metaId);
-      }
-      // Local roster first (unthrottled); the remote tier is capped per sweep.
-      const missing = remote.slice(0, IDENTITY_REMOTE_BATCH_MAX);
-      if (missing.length > 0 && options.resolveIdentities) {
-        try {
-          const resolved = await options.resolveIdentities(missing);
-          const rows = Object.values(resolved).filter((identity) => identity && identity.metaId);
-          for (const identity of rows) {
-            merged[identity.metaId] = identity;
-            identitiesFile.identities[identity.metaId] = {
-              ...identity,
-              source: 'local',
-              resolvedAtMs: nowMs,
-            };
-          }
-          await writeJsonFileAtomic(path.join(root, 'identities.json'), identitiesFile);
-        } catch {
-          // identity enrichment is best-effort display sugar; never fail the sweep
-        }
-      }
+      const merged = await ensureIdentityRows(actors);
       for (const projection of projections) {
         const scoped: Record<string, MetaTaskIdentity> = {};
         for (const actor of actorsOf(projection)) {
@@ -402,6 +426,24 @@ export function createMetaTaskStore(
         }
         projection.identities = scoped;
       }
+    },
+
+    async withFreshIdentities(projection) {
+      await ready();
+      const actors = Array.from(actorsOf(projection));
+      const merged = await ensureIdentityRows(actors);
+      // The persisted stamp may predate later enrichment sweeps (a skipped
+      // replay never re-stamps), so the cache always wins.
+      const identities: Record<string, MetaTaskIdentity> = { ...(projection.identities ?? {}) };
+      for (const actor of actors) {
+        if (merged[actor]) identities[actor] = merged[actor];
+      }
+      return { ...projection, identities };
+    },
+
+    async ensureIdentities(metaIds) {
+      await ready();
+      return ensureIdentityRows(metaIds);
     },
 
     async board(localRosterMetaIds) {
@@ -416,6 +458,9 @@ export function createMetaTaskStore(
             (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0)
             || (a.rootPinId < b.rootPinId ? -1 : 1)
         );
+      // The persisted per-task stamps may predate later enrichment sweeps;
+      // the board merges the freshest cache rows for every actor it shows.
+      const identitiesFile = await readIdentities();
       for (const projection of projections) {
         const myRoles: ('publisher' | 'participant')[] = [];
         if (roster.has(projection.publisher)) myRoles.push('publisher');
@@ -468,6 +513,12 @@ export function createMetaTaskStore(
           settlementFinalized: Boolean(projection.settlement),
         });
         Object.assign(identities, projection.identities ?? {});
+        for (const actor of actorsOf(projection)) {
+          const cached = identitiesFile.identities[actor];
+          if (cached && !identities[actor]) {
+            identities[actor] = { metaId: cached.metaId, name: cached.name, avatar: cached.avatar };
+          }
+        }
       }
       return {
         localRosterMetaIds: localRosterMetaIds.filter(Boolean),

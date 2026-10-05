@@ -67,3 +67,61 @@ test('TRACKING_CSS carries the fidelity layer (width lift, step header, state ta
   assert.match(styles, /oac-mt-btn-primary/)
   assert.match(styles, /prefers-reduced-motion/)
 })
+
+test('board cards carry a visible border + radius + hover (IDBots card parity)', async () => {
+  const styles = await read('src/client/styles.ts')
+  assert.match(styles, /\.oac-mt-card \{[^}]*border: 1px solid/)
+  assert.match(styles, /\.oac-mt-card \{[^}]*border-radius: 12px/)
+  assert.match(styles, /\.oac-mt-card:hover/)
+})
+
+test('detail root is the drawer positioning context; the drawer body is the right-side panel', async () => {
+  const styles = await read('src/client/styles.ts')
+  assert.match(styles, /\.oac-mt-detail \{[^}]*position: relative/)
+  assert.match(styles, /\.oac-mt-detail \.oac-gt-drawer \{[^}]*inset: 0/)
+  assert.match(styles, /\.oac-mt-detail \.oac-gt-drawer-body \{[^}]*margin-left: auto/)
+  assert.match(styles, /\.oac-mt-detail \.oac-gt-drawer-body \{[^}]*width: min\(460px, 94%\)/)
+  assert.match(styles, /oac-mt-drawer-in/)
+})
+
+test('detail blocks are carded; roster/settlement render as full-width styled tables', async () => {
+  const styles = await read('src/client/styles.ts')
+  assert.match(styles, /oac-mt-sectioncard/)
+  assert.match(styles, /oac-mt-tablewrap/)
+  assert.match(styles, /\.oac-mt-table \{ width: 100%/)
+  assert.match(styles, /oac-mt-minecard/)
+  assert.match(styles, /oac-mt-pending/)
+})
+
+test('chain view re-glues edges on horizontal scroll and sizes the SVG to the content box', async () => {
+  const chain = await read('src/client/metatask/ChainView.tsx')
+  assert.match(chain, /addEventListener\('scroll', redraw/)
+  assert.match(chain, /scrollWidth/)
+  assert.match(chain, /scrollHeight/)
+})
+
+test('daemon serves merged identities: task/board handlers stamp the freshest store identities', async () => {
+  const handlers = await read('../src/daemon/metataskHandlers.ts')
+  assert.match(handlers, /withFreshIdentities/)
+  assert.match(handlers, /ensureBoardIdentities/)
+  const store = await read('../src/core/metatask/store.ts')
+  assert.match(store, /withFreshIdentities\(projection/)
+  assert.match(store, /ensureIdentities\(metaIds/)
+})
+
+test('candidate drawer renders the IDBots detail-v2 sections (facts, review votes, receipts)', async () => {
+  const drawer = await read('src/client/metatask/CandidateDrawer.tsx')
+  assert.match(drawer, /oac-mt-factrow/)
+  assert.match(drawer, /mtReviewsTitle/)
+  assert.match(drawer, /mtFailreasonLabel/)
+  assert.match(drawer, /mtSemanticLabel/)
+  assert.match(drawer, /mtReceipts/)
+  assert.match(drawer, /mtSubLine/)
+  assert.match(drawer, /mtParentrefsNone/)
+})
+
+test('participate draft route reaches the CLI bridge (metatask/draft)', async () => {
+  const routes = await read('src/metatask-routes.ts')
+  assert.match(routes, /metatask\/draft/)
+  assert.match(routes, /metatask', 'draft', '--root'/)
+})

@@ -6,7 +6,7 @@
  * (git rows show `commit @ baseCommit` + repoHint); while in progress the
  * satisfied nodes' current leaders render under "current output".
  */
-import { type ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import {
   candidateArtifactOf,
   shortPin,
@@ -20,6 +20,24 @@ import type { MetataskBoardLocale } from './MetataskBoard.tsx'
 type Mt = MetataskBoardLocale['mt']
 
 const TYPE_BADGE: Record<string, string> = { git: '⌥', metafile: '▤', metaapp: '▦', other: '·' }
+
+const CopyMiniButton = ({ mt, value }: { mt: Mt; value: string }): ReactNode => {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      className="oac-mt-btn oac-mt-btn-xs"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true)
+          window.setTimeout(() => { setCopied(false) }, 1200)
+        })
+      }}
+    >
+      {copied ? mt('mtCopied') : mt('mtCopy')}
+    </button>
+  )
+}
 
 export function Deliverables(props: {
   mt: Mt
@@ -91,6 +109,7 @@ export function Deliverables(props: {
             {heroArtifact?.metafileUri && (
               <div className="oac-mt-actions">
                 <code className="oac-mt-uri">{heroArtifact.metafileUri}</code>
+                <CopyMiniButton mt={mt} value={heroArtifact.metafileUri} />
                 <a className="oac-mt-btn oac-mt-btn-sm" href={`/oac/api-file/${encodeURIComponent(heroArtifact.metafileUri)}`} download>{mt('mtDownload')}</a>
                 {heroArtifact.metafileViewUrl && (
                   <a className="oac-mt-btn oac-mt-btn-sm" href={heroArtifact.metafileViewUrl} target="_blank" rel="noreferrer">{mt('mtOpenInMetaweb')}</a>
@@ -104,6 +123,7 @@ export function Deliverables(props: {
 
       {chainRows.length > 0 && (
         <div className="oac-mt-dlv-rows">
+          <div className="oac-mt-h4">{mt('mtDlvPerNodeTitle')}</div>
           {chainRows.map(({ pinId, cand }) => {
             const artifact = candidateArtifactOf(cand)
             const commit = typeof cand.result?.commit === 'string' ? cand.result.commit : null
@@ -133,7 +153,7 @@ export function Deliverables(props: {
 
       {inProgressLeaders.length > 0 && (
         <div className="oac-mt-dlv-progress">
-          <div className="oac-mt-dim">{mt('mtDlvCurrentOutput')}</div>
+          <div className="oac-mt-h4">{mt('mtDlvCurrentOutput')}</div>
           {inProgressLeaders.map(({ node, cand }) => {
             const submitter = (cand as { submitter?: string }).submitter ?? ''
             return (

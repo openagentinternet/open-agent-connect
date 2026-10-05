@@ -44,6 +44,10 @@ export function NodeSections(props: {
 
   return (
     <section className="oac-mt-nodesections">
+      <div className="oac-mt-h3">
+        {mt('mtNodeSectionsTitle')}
+        <small>{mt('mtNodeSectionsHint')}</small>
+      </div>
       {Object.values(task.nodeStates)
         .sort((left, right) => (left.id.length !== right.id.length ? left.id.length - right.id.length : left.id < right.id ? -1 : 1))
         .map((node) => {

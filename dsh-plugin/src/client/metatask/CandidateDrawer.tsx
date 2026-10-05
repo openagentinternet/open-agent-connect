@@ -1,17 +1,20 @@
 /**
- * Candidate drawer (F8) — full-fidelity port of IDBots' MetaTaskCandidateDrawer:
- * identity header (avatar + name + YOU chip + state), "what was delivered"
- * (summary + type-aware facts + artifact actions: copy URI / download /
- * open in MetaWeb / open app), parentrefs chips that navigate to the parent
- * candidate, the per-candidate review timeline (voter identity, verdict,
- * time + block, ignore reasons, failreason in a red box, semantic_check
- * evidence in a gray box), and the on-chain credentials.
+ * Candidate drawer (F8) — full-fidelity port of IDBots' MetaTaskCandidateDrawer
+ * (detail v2): slides in from the right over a veil inside the detail view;
+ * the identity header (avatar + name + local chip + state tag), "what was
+ * delivered" (summary box + label/fact rows + artifact actions), parentrefs
+ * chips that navigate to the parent candidate, the per-candidate review
+ * timeline (voter identity, verdict, time + block, ignore reasons, failreason
+ * in a red box, semantic_check evidence in a gray box), and the on-chain
+ * receipts (pin / hash / supersedes, each copyable).
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   candidateArtifactOf,
   candidateState,
   metafileViewUrl,
+  pinViewUrl,
+  shortMetaId,
   shortPin,
   type CandidateLike,
   type NodeLike,
@@ -40,6 +43,7 @@ export interface DrawerCandidate {
   failVotes: number
   verifiedHeight: number | null
   votes?: TaskNodeState['votes']
+  supersedeid?: string
 }
 
 const CopyMini = ({ mt, value }: { mt: Mt; value: string }): ReactNode => {
@@ -58,6 +62,30 @@ const CopyMini = ({ mt, value }: { mt: Mt; value: string }): ReactNode => {
       {copied ? mt('mtCopied') : mt('mtCopy')}
     </button>
   )
+}
+
+const FactRow = (props: { k: string; children: ReactNode }): ReactNode => (
+  <div className="oac-mt-factrow">
+    <span className="oac-mt-factrow-k">{props.k}</span>
+    <span className="oac-mt-factrow-v">{props.children}</span>
+  </div>
+)
+
+const SectionTitle = (props: { children: ReactNode }): ReactNode => (
+  <div className="oac-mt-h4">{props.children}</div>
+)
+
+const shortHash = (hash: string): string => (hash.length > 16 ? `${hash.slice(0, 12)}…` : hash)
+
+const relativeTime = (ms: number, mt: Mt): string => {
+  if (!ms) return '—'
+  const delta = Date.now() - ms
+  const minutes = Math.round(delta / 60_000)
+  if (minutes < 1) return mt('mtJustNow')
+  if (minutes < 60) return mt('mtMinutesAgo', { count: minutes })
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return mt('mtHoursAgo', { count: hours })
+  return mt('mtDaysAgo', { count: Math.round(hours / 24) })
 }
 
 export function CandidateDrawer(props: {
@@ -89,96 +117,190 @@ export function CandidateDrawer(props: {
     : null
   const commit = typeof cand.result?.commit === 'string' ? cand.result.commit : null
   const baseCommit = typeof cand.result?.baseCommit === 'string' ? cand.result.baseCommit : null
+  const repoHint = typeof cand.result?.repoHint === 'string' ? cand.result.repoHint : null
+  const engine = typeof cand.result?.engine === 'string' ? cand.result.engine : null
   const members = Array.isArray(cand.result?.members) ? (cand.result?.members as unknown[]).filter((m): m is string => typeof m === 'string') : []
+  const sha = (typeof cand.result?.releaseSha256 === 'string' ? cand.result.releaseSha256 : null) ?? cand.hash
   const submitterIdentity = identityOf(cand.submitter)
-  const votes = (cand.votes ?? []).slice().sort((left, right) => left.timestampMs - right.timestampMs)
+  const isYou = rosterIds.has(cand.submitter)
+  const parentrefs = Object.entries(cand.parentrefs ?? {})
+  const viewUrl = artifact.metafileViewUrl ?? (metafileViewUrl(cand.attachment ?? '') || pinViewUrl(cand.pinId))
+  const quorum = Math.max(1, task.policy.verifyQuorum)
+  const votes = (cand.votes ?? [])
+    .filter((vote) => !vote.targetid || vote.targetid === cand.pinId)
+    .slice()
+    .sort((left, right) => left.timestampMs - right.timestampMs)
 
   return (
     <div className="oac-gt-drawer" role="dialog" aria-modal="true" aria-label={mt('mtDrawerTitle')}>
       <div className="oac-gt-drawer-veil" onClick={onClose} />
       <div className="oac-gt-drawer-body">
+        <button type="button" className="oac-mt-btn oac-mt-btn-xs oac-mt-drawer-close" onClick={onClose}>
+          {mt('mtClose')} ✕
+        </button>
+
+        {/* Identity header */}
         <div className="oac-mt-drawer-head">
           <MtBadge
             metaId={cand.submitter}
             name={submitterIdentity.name}
             avatar={submitterIdentity.avatar}
             size="md"
-            you={rosterIds.has(cand.submitter)}
-            youLabel={youLabel}
           />
-          <div className="oac-mt-drawer-sub">
-            {node.id} · {node.title} · {new Date(cand.atMs).toLocaleString()}
-            {cand.verified && cand.verifiedHeight !== null && <span className="oac-mt-dim"> · @ {cand.verifiedHeight}</span>}
-          </div>
+        </div>
+        <div className="oac-mt-drawer-sub">
+          {mt('mtSubLine', { node: node.id, title: node.title, when: relativeTime(cand.atMs, mt) })}
+          {cand.verified && cand.verifiedHeight !== null && cand.verifiedHeight >= 0 && (
+            <span className="oac-mt-dim"> · {mt('mtVerifiedBlock', { height: cand.verifiedHeight })}</span>
+          )}
+        </div>
+        <div className="oac-mt-drawer-tags">
           <span className={`oac-mt-statetag oac-mt-statetag-lg oac-tag-cand-${state}`}>{mt(`mtCand_${state}`)}</span>
-          <button type="button" className="oac-mt-btn oac-mt-btn-xs oac-mt-drawer-close" onClick={onClose}>✕</button>
+          {isYou && <span className="oac-mt-you">{youLabel}</span>}
         </div>
 
-        <div className="oac-mt-h3">{mt('mtDrawerDelivered')}</div>
-        <div className="oac-mt-summary">
-          {summary ?? mt('mtResultTypeDefault', { type: artifact.resultType ?? '—' })}
-        </div>
-        <div className="oac-mt-facts">
-          {artifact.kind === 'git' && commit && (
-            <div className="oac-mt-fact">{mt('mtGitCommit')}: <code>{commit.slice(0, 12)}</code>{baseCommit ? <> @ <code>{baseCommit.slice(0, 12)}</code></> : null}</div>
-          )}
-          {artifact.kind === 'metafile' && members.length > 0 && (
-            <div className="oac-mt-fact">{mt('mtMembers', { count: members.length })}</div>
-          )}
-          {typeof cand.result?.releaseSha256 === 'string' && (
-            <div className="oac-mt-fact">sha256: <code>{cand.result.releaseSha256.slice(0, 20)}…</code></div>
-          )}
-        </div>
-        {artifact.metafileUri && (
-          <div className="oac-mt-actions">
-            <code className="oac-mt-uri">{artifact.metafileUri}</code>
-            <CopyMini mt={mt} value={artifact.metafileUri} />
-            <a className="oac-mt-btn oac-mt-btn-sm" href={`/oac/api-file/${encodeURIComponent(artifact.metafileUri)}`} download>{mt('mtDownload')}</a>
-            {metafileViewUrl(artifact.metafileUri) && (
-              <a className="oac-mt-btn oac-mt-btn-sm" href={metafileViewUrl(artifact.metafileUri) as string} target="_blank" rel="noreferrer">{mt('mtOpenInMetaweb')}</a>
-            )}
-            {artifact.metaAppUri && <a className="oac-mt-btn oac-mt-btn-sm oac-mt-btn-primary" href={artifact.metaAppUri}>{mt('mtOpenApp')}</a>}
+        {/* What was delivered */}
+        <div>
+          <SectionTitle>{mt('mtDrawerDelivered')}</SectionTitle>
+          <div className="oac-mt-summary">
+            {summary ?? mt(`mtResultTypeDesc_${artifact.kind === 'git' ? 'git' : artifact.kind === 'metafile' ? 'metafile' : artifact.kind === 'metaapp' ? 'metaapp' : 'other'}`)}
           </div>
-        )}
-
-        {(cand.parentrefs && Object.keys(cand.parentrefs).length > 0) && (
-          <>
-            <div className="oac-mt-h3">{mt('mtDrawerParents')}</div>
-            <div className="oac-mt-parentrefs">
-              {Object.entries(cand.parentrefs).map(([dep, pin]) => (
-                <button key={dep} type="button" className="oac-chip-btn" onClick={() => { onOpenCandidate(pin) }}>
-                  {dep} · {shortPin(pin)} →
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
-        <div className="oac-mt-h3">{mt('mtDrawerReviews')}</div>
-        <div className="oac-timeline">
-          {votes.map((vote) => {
-            const voterIdentity = identityOf(vote.voter)
-            return (
-              <div key={vote.pinId} className={`oac-timeline-item tone-${vote.verdict === 'pass' ? 'ok' : 'warn'}`}>
-                <div className="oac-timeline-head">
-                  <MtBadge metaId={vote.voter} name={voterIdentity.name} avatar={voterIdentity.avatar} />
-                  <span className={`oac-mt-badge oac-mt-badge-verdict-${vote.verdict}`}>{vote.verdict}</span>
-                  <span className="oac-mt-chip oac-mt-mono">{vote.height >= 0 ? `@ ${vote.height}` : 'mempool'}</span>
-                  <span className="oac-mt-dim">{new Date(vote.timestampMs).toLocaleString()}</span>
-                  {!vote.counted && <span className="oac-mt-chip">{vote.ignoreReason}</span>}
-                </div>
-                {vote.failreasonText && <div className="oac-mt-evidence oac-mt-evidence-fail"><b>{mt('mtCand_rejected')}</b> · {vote.failreasonText}</div>}
-                {vote.semanticCheckText && <div className="oac-mt-evidence oac-mt-evidence-sem">{vote.semanticCheckText}</div>}
-              </div>
-            )
-          })}
-          {votes.length === 0 && <div className="oac-mt-empty-inline">{mt('mtNoVotes')}</div>}
+          <div className="oac-mt-facts" style={{ marginTop: 6 }}>
+            <FactRow k={mt('mtFactType')}>{artifact.resultType ?? artifact.kind}</FactRow>
+            {artifact.kind === 'git' && commit && (
+              <FactRow k={mt('mtGitCommit')}><code title={commit}>{shortHash(commit)}</code></FactRow>
+            )}
+            {artifact.kind === 'git' && baseCommit && (
+              <FactRow k="base"><code title={baseCommit}>{shortHash(baseCommit)}</code></FactRow>
+            )}
+            {artifact.kind === 'git' && repoHint && (
+              <FactRow k="repo">
+                {/^https?:\/\//.test(repoHint)
+                  ? <a href={repoHint} target="_blank" rel="noreferrer"><code>{repoHint}</code></a>
+                  : <code>{repoHint}</code>}
+              </FactRow>
+            )}
+            {artifact.kind === 'git' && engine && <FactRow k="engine"><code>{engine}</code></FactRow>}
+            {members.length > 0 && (
+              <FactRow k={mt('mtFactMembers')}>
+                <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+                  {members.map((member) => <span key={member} className="oac-mt-memberchip-mini">{member}</span>)}
+                </span>
+              </FactRow>
+            )}
+            {artifact.metafileUri && (
+              <FactRow k={mt('mtFactArtifact')}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <code style={{ wordBreak: 'break-all' }} title={artifact.metafileUri}>{artifact.metafileUri}</code>
+                  <CopyMini mt={mt} value={artifact.metafileUri} />
+                </span>
+              </FactRow>
+            )}
+            {cand.attachment && cand.attachment !== artifact.metafileUri && (
+              <FactRow k={mt('mtFactAttachment')}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <code style={{ wordBreak: 'break-all' }} title={cand.attachment}>{cand.attachment}</code>
+                  <CopyMini mt={mt} value={cand.attachment} />
+                </span>
+              </FactRow>
+            )}
+            {sha && (
+              <FactRow k="sha256">
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <code title={sha}>{shortHash(sha)}</code>
+                  <CopyMini mt={mt} value={sha} />
+                </span>
+              </FactRow>
+            )}
+          </div>
+          <div className="oac-mt-drawer-actions">
+            {artifact.metaAppUri && (
+              <a className="oac-mt-btn oac-mt-btn-sm oac-mt-btn-primary" href={artifact.metaAppUri}>{mt('mtOpenApp')}</a>
+            )}
+            <a className="oac-mt-btn oac-mt-btn-sm" href={viewUrl} target="_blank" rel="noreferrer">{mt('mtOpenInMetaweb')}</a>
+          </div>
         </div>
 
-        <div className="oac-mt-h3">{mt('mtDrawerCredentials')}</div>
-        <div className="oac-mt-credentials">
-          <div className="oac-mt-cred-row"><code>{cand.pinId}</code><CopyMini mt={mt} value={cand.pinId} /></div>
-          {cand.hash && <div className="oac-mt-cred-row"><code>{cand.hash}</code><CopyMini mt={mt} value={cand.hash} /></div>}
+        {/* What it builds on */}
+        <div>
+          <SectionTitle>{mt('mtDrawerParents')}</SectionTitle>
+          {parentrefs.length > 0 ? (
+            <div className="oac-mt-parentrefs">
+              {parentrefs.map(([dep, pin]) => {
+                const parent = byPin.get(pin)
+                return (
+                  <button key={`${dep}-${pin}`} type="button" title={pin} className="oac-chip-btn"
+                    onClick={() => { onOpenCandidate(pin) }}>
+                    <code>{dep}</code> · {parent ? (identityOf(parent.submitter ?? '').name ?? shortMetaId(parent.submitter ?? '')) : shortPin(pin)} <code>{shortPin(pin)}</code> →
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="oac-mt-empty-inline">{mt('mtParentrefsNone')}</div>
+          )}
+        </div>
+
+        {/* Review timeline */}
+        <div>
+          <SectionTitle>{mt('mtReviewsTitle', { count: votes.length, quorum })}</SectionTitle>
+          {votes.length === 0 ? (
+            <div className="oac-mt-empty-inline">{mt('mtNoVotes')}</div>
+          ) : (
+            <div className="oac-mt-timeline">
+              {votes.map((vote) => {
+                const voterIdentity = identityOf(vote.voter)
+                return (
+                  <div key={vote.pinId} className="oac-mt-timeline-item">
+                    <div className="oac-mt-timeline-head">
+                      <MtBadge metaId={vote.voter} name={voterIdentity.name} avatar={voterIdentity.avatar} />
+                      <span className={`oac-mt-badge oac-mt-badge-verdict-${vote.verdict}`}>
+                        {vote.verdict === 'pass' ? mt('mtVerdictPass') : vote.verdict === 'fail' ? mt('mtVerdictFail') : vote.verdict}
+                      </span>
+                      <span className="oac-mt-dim">
+                        {vote.timestampMs ? relativeTime(vote.timestampMs, mt) : ''}
+                        {typeof vote.height === 'number' && (
+                          <> · {vote.height >= 0 ? mt('mtBlockHeight', { height: vote.height }) : mt('mtMempool')}</>
+                        )}
+                      </span>
+                      {!vote.counted && (
+                        <span className="oac-mt-chip">{mt('mtNotCounted', { reason: vote.ignoreReason ?? '—' })}</span>
+                      )}
+                    </div>
+                    {vote.failreasonText && (
+                      <div className="oac-mt-evidence oac-mt-evidence-fail">
+                        <span className="oac-mt-evidence-label">{mt('mtFailreasonLabel')}</span>
+                        {vote.failreasonText}
+                      </div>
+                    )}
+                    {vote.semanticCheckText && (
+                      <div className="oac-mt-evidence oac-mt-evidence-sem">
+                        <span className="oac-mt-evidence-label">{mt('mtSemanticLabel')}</span>
+                        {vote.semanticCheckText}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* On-chain receipts */}
+        <div>
+          <SectionTitle>{mt('mtReceipts')}</SectionTitle>
+          <FactRow k={mt('mtFactPin')}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <code style={{ wordBreak: 'break-all' }} title={cand.pinId}>{cand.pinId}</code>
+              <CopyMini mt={mt} value={cand.pinId} />
+            </span>
+          </FactRow>
+          {cand.hash && (
+            <FactRow k="hash"><code title={cand.hash}>{shortHash(cand.hash)}</code></FactRow>
+          )}
+          {cand.supersedeid && (
+            <FactRow k={mt('mtSupersede')}><code title={cand.supersedeid}>{shortPin(cand.supersedeid)}</code></FactRow>
+          )}
         </div>
         <div className="oac-mt-freshness">{mt('mtFreshness', { events: task.freshness.eventCount, block: task.freshness.boundaryBlock })}</div>
       </div>
