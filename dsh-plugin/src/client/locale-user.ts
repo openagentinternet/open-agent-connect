@@ -49,6 +49,10 @@ export const userEn = {
   logoutBtn: 'Log out',
   fieldGlobalMetaId: 'GlobalMetaID',
   fieldMvcAddress: 'MVC address',
+  // Zero-touch onboarding progress line.
+  onboardingReady: 'Account ready — traffic billing is active.',
+  onboardingPending: 'Preparing your account and free traffic…',
+  onboardingGranted: 'Free grant: {amount}.',
   // Reveal mnemonic modal.
   revealTitle: 'Your mnemonic',
   revealWarning: 'Anyone with this phrase can control your owner identity. Never share it.',
@@ -107,6 +111,10 @@ export const userZh = {
   logoutBtn: '退出登录',
   fieldGlobalMetaId: 'GlobalMetaID',
   fieldMvcAddress: 'MVC 地址',
+  // 自动开通进度行。
+  onboardingReady: '账号已就绪——流量计费已生效。',
+  onboardingPending: '正在准备你的账号和免费流量…',
+  onboardingGranted: '已赠送 {amount} 流量。',
   // 显示助记词弹窗。
   revealTitle: '你的助记词',
   revealWarning: '拥有这串词的人可以控制你的主人身份。切勿泄露。',

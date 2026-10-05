@@ -314,7 +314,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['bot', 'bind-owner'],
-    summary: 'Bind a local MetaBot to its owner GlobalMetaID (defaults to the local owner or Twin Bot identity).',
+    summary: 'Bind a local MetaBot to its owner GlobalMetaID (defaults to the local owner or Twin Bot identity). When the owner is the local owner identity, the binding is also signed with the owner key and published on-chain as the Bot\u2019s /info/owner pin.',
     usage: 'metabot bot bind-owner --from <bot-slug> [--owner <globalMetaId>] [--unbind]',
     requiredFlags: [FROM_BOT_FLAG],
     optionalFlags: [
@@ -322,7 +322,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--unbind', description: 'Clear the owner binding.' },
       HELP_JSON_FLAG,
     ],
-    successFields: ['profile'],
+    successFields: ['profile', 'chainWrites', 'ownerBinding'],
     examples: ['metabot bot bind-owner --from alice', 'metabot bot bind-owner --from alice --unbind'],
   },
   {
@@ -3610,8 +3610,21 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'update', summary: 'Save the owner name/avatar and publish the changes on-chain.' },
       { name: 'reveal', summary: 'Reveal the stored mnemonic for backup.' },
       { name: 'delete', summary: 'Delete the owner identity (logout). Requires --confirm; the locally stored mnemonic cannot be recovered afterwards — back it up with user reveal first.' },
+      { name: 'onboarding', summary: 'Show the zero-touch onboarding progress (user account, traffic account, free grant). --run advances it in the daemon.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['user', 'onboarding'],
+    summary: 'Zero-touch onboarding progress: owner identity, traffic account, one-time free traffic grant, MVC gas subsidy, and the owner /info/name pin. The daemon runs this automatically on start; unconverged steps retry on the next start.',
+    usage: 'metabot user onboarding [--run]',
+    requiredFlags: [],
+    optionalFlags: [
+      { flag: '--run', description: 'Advance the pipeline in the daemon now (idempotent; same runner the daemon start uses).' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['onboarding', 'identityPresent'],
+    examples: ['metabot user onboarding', 'metabot user onboarding --run'],
   },
   {
     commandPath: ['user', 'update'],

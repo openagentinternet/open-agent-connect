@@ -20,6 +20,7 @@ const POST_VERBS: Record<string, UserVerb> = {
   '/api/user/update': 'update',
   '/api/user/reveal': 'reveal',
   '/api/user/delete': 'delete',
+  '/api/user/onboarding': 'runOnboarding',
 };
 
 function validateInput(verb: UserVerb, input: Record<string, unknown>): void | { code: string; message: string } {
@@ -51,6 +52,21 @@ export const handleUserRoutes: RouteHandler = async (context) => {
     const handler = handlers.user?.who;
     if (!handler) {
       context.sendJson(501, commandFailed('not_implemented', 'User who handler is not configured.'));
+      return true;
+    }
+    context.sendJson(200, await handler());
+    return true;
+  }
+
+  // GET /api/user/onboarding — the zero-touch onboarding progress read.
+  if (url.pathname === '/api/user/onboarding') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const handler = handlers.user?.getOnboarding;
+    if (!handler) {
+      context.sendJson(501, commandFailed('not_implemented', 'User onboarding status handler is not configured.'));
       return true;
     }
     context.sendJson(200, await handler());

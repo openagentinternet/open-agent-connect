@@ -85,6 +85,17 @@ export const handleBotRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  const bindOwnerMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/bind-owner$/);
+  if (bindOwnerMatch && req.method === 'POST') {
+    const slug = normalizeSlug(bindOwnerMatch[1]);
+    const result = handlers.bot?.bindOwner
+      ? await handlers.bot.bindOwner({ slug })
+      : commandFailed('not_implemented', 'MetaBot owner-binding handler not configured.');
+    const status = result.ok ? 200 : result.code === 'profile_not_found' || result.code === 'owner_missing' ? 404 : 400;
+    context.sendJson(status, result);
+    return true;
+  }
+
   const walletMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/wallet$/);
   if (walletMatch && req.method === 'GET') {
     const slug = normalizeSlug(walletMatch[1]);
