@@ -30,6 +30,8 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 - `metabot-simplenote`
 - `metabot-grouptask`
 - `metabot-twin`
+- `metabot-metatask`
+- `metabot-metatask-wizard`
 
 ## Install
 

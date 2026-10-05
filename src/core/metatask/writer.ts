@@ -1140,14 +1140,11 @@ export async function publishMetaTask(
   const roster = seams.localRosterMetaIds().filter(Boolean);
   let rosterid: string | null = null;
   if (roster.length >= 2) {
+    // `groups: string[][]` is exactly what the engine's rosterGroupsFor reads
+    // (and what the collector round-trips).
+    const rosterPayload = { groups: [roster], owner: 'oac-local-roster', createdAt: Date.now() };
     const rosterPin = await seams
-      .writeRawPin(
-        METATASK_ROSTER_PATH,
-        // `groups: string[][]` is exactly what the engine's rosterGroupsFor
-        // reads (and what the collector round-trips).
-        { groups: [roster], owner: 'oac-local-roster', createdAt: Date.now() },
-        'metatask:publish'
-      )
+      .writeRawPin(METATASK_ROSTER_PATH, rosterPayload, 'metatask:publish')
       .catch(() => null);
     rosterid = rosterPin?.pinId ?? null;
   }
