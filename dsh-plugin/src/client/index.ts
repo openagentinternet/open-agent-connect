@@ -510,6 +510,7 @@ export function apply(ctx: ClientContext): void {
       mt: (key: string, vars?: Record<string, string | number>) => t(key as BotsLocaleKey, vars),
       metataskBoard: (refresh?: boolean) => api.metataskBoard(refresh),
       metataskTask: (root: string, refresh?: boolean) => api.metataskTask(root, refresh),
+      metataskDraft: (root: string, lang?: 'en' | 'zh') => api.metataskDraft(root, lang),
       mtApi: {
         metataskTask: (root: string, refresh?: boolean) => api.metataskTask(root, refresh),
       },

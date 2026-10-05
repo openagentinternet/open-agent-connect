@@ -18,6 +18,8 @@ import {
 import { replayMetaTask } from '../core/metatask/engine/engine';
 import { estimateMetaTaskShares } from '../core/metatask/engine/estimate';
 import { H_ACT3 } from '../core/metatask/engine/constants';
+import { buildParticipateDraft } from '../core/metatask/drafts';
+import { getMetaIdDetail } from '../core/metaid/metaIdSearchApi';
 import { MetaTaskWatchService } from '../core/metatask/watch';
 import { MetaTaskRefresher } from '../core/metatask/refresher';
 import { createMetaTaskStore, type MetaTaskStore } from '../core/metatask/store';
@@ -51,6 +53,8 @@ export interface MetaTaskDaemonHandlers {
   amend: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   /** Internal: the watch heartbeat (not routed over HTTP today). */
   watch: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  /** F13: prefilled participation draft for a bot session (never a write). */
+  draft: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 
 function normalizeText(value: unknown): string {
@@ -115,14 +119,34 @@ export function createMetaTaskDaemonHandlers(input: {
     return rosterIds;
   };
   const store: MetaTaskStore = createMetaTaskStore(`${daemonPaths.runtimeRoot}/metatask`, {
-    // Local roster first (the manager's profile registry); remote identity
-    // lookups are P7 hardening — unresolved metaIds simply show their raw id.
+    // Local roster first (the manager's profile registry), then the so.metaid.io
+    // detail endpoint for the rest; the store throttles the remote tier
+    // (6h refresh horizon, 64 per sweep). Failures degrade to the raw metaId.
     resolveIdentities: async (metaIds) => {
-      const out: Record<string, { metaId: string; name: string | null; avatar: null }> = {};
+      const out: Record<string, { metaId: string; name: string | null; avatar: string | null }> = {};
+      const remote: string[] = [];
       for (const metaId of metaIds) {
         const name = profileNames.get(metaId);
-        if (name) out[metaId] = { metaId, name, avatar: null };
+        if (name) {
+          out[metaId] = { metaId, name, avatar: null };
+        } else {
+          remote.push(metaId);
+        }
       }
+      await Promise.all(remote.map(async (metaId) => {
+        try {
+          const detail = await getMetaIdDetail(metaId, { timeoutMs: 6_000 });
+          if (detail?.name || detail?.avatarId) {
+            out[metaId] = {
+              metaId,
+              name: detail?.name || null,
+              avatar: detail?.avatarId ? `metafile://${detail.avatarId}` : null,
+            };
+          }
+        } catch {
+          // unresolved identities display as their raw metaId
+        }
+      }));
       return out;
     },
   });
@@ -457,5 +481,29 @@ export function createMetaTaskDaemonHandlers(input: {
     },
 
     watch: () => runWatchTick(),
+
+    draft: async (rawInput) => {
+      const rootPinId = normalizeText(rawInput.root);
+      if (!rootPinId) return commandFailed('invalid_input', 'A --root task pin id is required.');
+      const lang = normalizeText(rawInput.lang) === 'zh' ? 'zh' : 'en';
+      try {
+        await loadRoster();
+        let projection = await refresher.detail(rootPinId);
+        if (!projection) {
+          await refresher.refreshOnce('draft-miss');
+          projection = await refresher.detail(rootPinId);
+        }
+        if (!projection) {
+          return commandFailed('metatask_not_found', `No cached projection for task root ${rootPinId}.`);
+        }
+        const draft = buildParticipateDraft(projection, { lang });
+        return commandSuccess(draft);
+      } catch (error) {
+        return commandFailed(
+          'metatask_draft_failed',
+          error instanceof Error ? error.message : 'Failed to build the participation draft.'
+        );
+      }
+    },
   };
 }

@@ -386,3 +386,74 @@ test('metatask store: refresh state transitions', async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+// ── identity enrichment throttling (acceptance follow-up 2: 6h / 64-per-sweep) ──
+
+test('metatask store: identity refresh TTL re-resolves stale rows, keeps fresh ones', async () => {
+  const { root } = openStore();
+  try {
+    let clock = 1_000_000;
+    const calls = [];
+    const counted = createMetaTaskStore(path.join(root, 'metatask'), {
+      identityTtlMs: 3_600_000,
+      now: () => clock,
+      resolveIdentities: async (metaIds) => {
+        calls.push([...metaIds]);
+        const out = {};
+        for (const metaId of metaIds) out[metaId] = { metaId, name: `name-${metaId}`, avatar: null };
+        return out;
+      },
+    });
+    const projection = buildProjection();
+    // First pass: nothing cached -> resolver sees the actors.
+    await counted.enrichIdentities([projection]);
+    assert.equal(calls.length, 1);
+    // Second pass immediately: everything fresh -> no resolver call.
+    await counted.enrichIdentities([projection]);
+    assert.equal(calls.length, 1, 'fresh identities stay cached');
+    // Advance past the TTL -> the same actors re-enter the remote tier.
+    clock += 3_600_001;
+    await counted.enrichIdentities([projection]);
+    assert.equal(calls.length, 2, 'stale rows re-resolve after the horizon');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('metatask store: the remote tier is capped at 64 identities per sweep', async () => {
+  const { root } = openStore();
+  try {
+    const calls = [];
+    const counted = createMetaTaskStore(path.join(root, 'metatask'), {
+      resolveIdentities: async (metaIds) => {
+        calls.push(metaIds.length);
+        return {};
+      },
+    });
+    // 100 distinct actors on one projection: only 64 reach the resolver.
+    const nodes = {};
+    const participants = [];
+    for (let index = 0; index < 100; index += 1) {
+      const metaId = `idq1bulk${String(index).padStart(4, '0')}`;
+      participants.push({ metaId, effectiveClaims: 0, submissions: 1, verifiedContrib: 0, reviewVotes: 0, reviewCorrect: 0, reviewTerminal: 0 });
+      nodes[`n${index}`] = {
+        id: `n${index}`, parent: null, title: 'leaf', kind: 'proof', weight: null, params: null, specid: null,
+        status: 'claimed', disputed: false,
+        holder: { pinId: `c${index}`, claimant: metaId, sinceMs: 1 },
+        submission: null, passVotes: 0, failVotes: 0, votes: [], cycleCount: 1,
+      };
+    }
+    const bulk = {
+      ...buildProjection(),
+      participants,
+      nodeStates: nodes,
+      settlement: null,
+    };
+    await counted.enrichIdentities([bulk]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0], 64, '64-per-sweep cap (IDBots parity)');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

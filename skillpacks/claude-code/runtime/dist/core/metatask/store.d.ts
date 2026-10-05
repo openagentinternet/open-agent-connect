@@ -28,6 +28,10 @@
 import type { MetaTaskAlert, MetaTaskBoard, MetaTaskChainEvent, MetaTaskIdentity, MetaTaskTaskProjection } from './engine/types';
 /** Resolves display identities for metaIds (local roster now; MetaSo later). */
 export type MetaTaskIdentityResolver = (metaIds: string[]) => Promise<Record<string, MetaTaskIdentity>>;
+/** Remote identity re-lookups wait out this horizon (IDBots parity: 6h). */
+export declare const IDENTITY_REFRESH_TTL_MS: number;
+/** Remote identity lookups per enrichment pass (IDBots parity: 64 per sweep). */
+export declare const IDENTITY_REMOTE_BATCH_MAX = 64;
 export interface MetaTaskStore {
     /** Absolute metatask store root (…/.metabot/runtime/metatask). */
     readonly root: string;
@@ -69,4 +73,8 @@ export interface MetaTaskStore {
 }
 export declare function createMetaTaskStore(root: string, options?: {
     resolveIdentities?: MetaTaskIdentityResolver;
+    /** Identity refresh horizon (default IDENTITY_REFRESH_TTL_MS; tests shrink it). */
+    identityTtlMs?: number;
+    /** Clock seam (default Date.now). */
+    now?: () => number;
 }): MetaTaskStore;

@@ -116,3 +116,26 @@ test('metatask plugin index: the dispatcher is chained into the host API', () =>
   assert.match(hostIndex, /const metatask = await dispatchMetaTaskRoutes\(method, payload\)/);
   assert.match(hostIndex, /if \(metatask !== undefined\) return metatask/);
 });
+
+
+test('metatask F13: participate draft ships on the DSH surface (api + control + locale)', () => {
+  const api = read('src/client/api.ts');
+  assert.match(api, /metataskDraft: async \(root: string, lang\?: 'en' \| 'zh'\)/, 'client api method');
+  const board = read('src/client/metatask/MetataskBoard.tsx');
+  assert.match(board, /props\.metataskDraft/, 'board consumes the draft api');
+  assert.match(board, /mtParticipate/, 'cards/alerts carry the participate control');
+  assert.match(board, /oac-mt-draftbox/, 'draft dialog rendered');
+  const injected = read('src/client/index.ts');
+  assert.match(injected, /metataskDraft: \(root: string, lang\?: 'en' \| 'zh'\) => api\.metataskDraft/);
+  const locale = read('src/client/locale.ts');
+  for (const key of ['mtParticipate', 'mtDraftTitle', 'mtDraftHint']) {
+    assert.match(locale, new RegExp(`  ${key}: '`), `locale key ${key}`);
+  }
+});
+
+test('metatask F13: the daemon serves POST /api/metatask/draft', () => {
+  const routes = read('../src/daemon/routes/metatask.ts');
+  assert.match(routes, /'\/api\/metatask\/draft': 'draft'/, 'route registered');
+  const handlers = read('../src/daemon/metataskHandlers.ts');
+  assert.match(handlers, /buildParticipateDraft/, 'handler builds the draft');
+});

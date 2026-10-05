@@ -114,6 +114,36 @@
       .muted {
         color: var(--muted);
       }
+      .tracking-draft {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .tracking-draft[hidden] {
+        display: none;
+      }
+      .tracking-draft .card {
+        width: min(680px, 92vw);
+        display: grid;
+        gap: 10px;
+      }
+      .tracking-draft-text {
+        box-sizing: border-box;
+        width: 100%;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 18px;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        resize: vertical;
+      }
     </style>
   </head>
   <body>

@@ -10,6 +10,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleMetaTaskRoutes = void 0;
 const POST_VERBS = {
     '/api/metatask/refresh': 'refresh',
+    '/api/metatask/draft': 'draft',
     '/api/metatask/claim': 'claim',
     '/api/metatask/submit': 'submit',
     '/api/metatask/verify': 'verify',
