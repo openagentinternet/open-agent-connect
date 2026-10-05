@@ -276,7 +276,7 @@ test('runtime discovery uses expanded provider metadata and environment auth che
     await writeFile(cursorPath, '#!/bin/sh\necho "cursor-agent 3.4.5"\n', 'utf8');
     await writeFile(geminiPath, '#!/bin/sh\necho "gemini 2.3.4"\n', 'utf8');
     await writeFile(kiroPath, '#!/bin/sh\necho "kiro-cli 5.6.7"\n', 'utf8');
-    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 1.16.0"\n', 'utf8');
     await writeFile(codeBuddyPath, '#!/bin/sh\necho "CodeBuddy 2.0.0"\n', 'utf8');
     await writeFile(zcodePath, '#!/bin/sh\necho "0.14.8"\n', 'utf8');
     await chmod(copilotPath, 0o755);
@@ -421,7 +421,7 @@ test('runtime discovery honors explicit provider path environment overrides outs
     const binDir = path.join(tempRoot, 'external-bin');
     await mkdir(binDir, { recursive: true });
     const opencodePath = path.join(binDir, 'opencode');
-    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 1.16.0"\n', 'utf8');
     await chmod(opencodePath, 0o755);
 
     const result = await discoverLlmRuntimes({
@@ -757,6 +757,126 @@ test('runtime discovery marks a binary unavailable when version probe exits non-
   });
 });
 
+test('runtime discovery gates parsed versions below the platform minimum as unavailable', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-min-version-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const claudePath = path.join(binDir, 'claude');
+    await writeFile(claudePath, '#!/bin/sh\necho "claude 1.2.3"\n', 'utf8');
+    await chmod(claudePath, 0o755);
+
+    let readinessProbes = 0;
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      now: () => '2026-10-05T00:00:00.000Z',
+      readinessProbe: async () => {
+        readinessProbes += 1;
+        return { ok: true, output: 'OK' };
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'claude-code');
+    assert.equal(result.runtimes[0].version, '1.2.3');
+    assert.equal(result.runtimes[0].health, 'unavailable');
+    assert.match(result.runtimes[0].healthReason, /below the minimum supported version 2\.0\.0/);
+    assert.match(result.runtimes[0].healthReason, /Upgrade Claude Code/);
+    assert.equal(readinessProbes, 0);
+  });
+});
+
+test('runtime discovery fails open when the probed version has no numeric core', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-min-version-open-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const claudePath = path.join(binDir, 'claude');
+    await writeFile(claudePath, '#!/bin/sh\necho "claude-snapshot-nightly"\n', 'utf8');
+    await chmod(claudePath, 0o755);
+
+    let readinessProbes = 0;
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      now: () => '2026-10-05T00:00:00.000Z',
+      readinessProbe: async () => {
+        readinessProbes += 1;
+        return { ok: true, output: 'OK' };
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'claude-code');
+    assert.equal(result.runtimes[0].health, 'healthy');
+    assert.equal(readinessProbes, 1);
+  });
+});
+
+test('runtime discovery skips a below-minimum candidate when a newer binary exists later on PATH', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-min-version-newer-');
+    const oldBinDir = path.join(tempRoot, 'old-bin');
+    const newBinDir = path.join(tempRoot, 'new-bin');
+    await mkdir(oldBinDir, { recursive: true });
+    await mkdir(newBinDir, { recursive: true });
+    const oldCodexPath = path.join(oldBinDir, 'codex');
+    const newCodexPath = path.join(newBinDir, 'codex');
+    await writeFile(oldCodexPath, '#!/bin/sh\necho "codex-cli 0.99.0"\n', 'utf8');
+    await writeFile(newCodexPath, '#!/bin/sh\necho "codex-cli 0.159.3"\n', 'utf8');
+    await chmod(oldCodexPath, 0o755);
+    await chmod(newCodexPath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: [oldBinDir, newBinDir].join(path.delimiter) },
+      now: () => '2026-10-05T00:00:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'codex');
+    assert.equal(result.runtimes[0].binaryPath, newCodexPath);
+    assert.equal(result.runtimes[0].version, '0.159.3');
+    assert.equal(result.runtimes[0].health, 'healthy');
+  });
+});
+
+test('testLlmRuntimeReadiness gates parsed versions below the platform minimum', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-min-version-recheck-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const openclawPath = path.join(binDir, 'openclaw');
+    await writeFile(openclawPath, '#!/bin/sh\necho "openclaw 2026.4.1"\n', 'utf8');
+    await chmod(openclawPath, 0o755);
+
+    let readinessProbes = 0;
+    const result = await testLlmRuntimeReadiness(
+      {
+        id: 'llm_openclaw_probe',
+        provider: 'openclaw',
+        binaryPath: openclawPath,
+        health: 'detected',
+      },
+      {
+        env: { PATH: binDir },
+        now: () => '2026-10-05T00:00:00.000Z',
+        readinessProbe: async () => {
+          readinessProbes += 1;
+          return { ok: true, output: 'OK' };
+        },
+      },
+    );
+
+    assert.equal(result.health, 'unavailable');
+    assert.equal(result.version, '2026.4.1');
+    assert.match(result.healthReason, /below the minimum supported version 2026\.5\.5/);
+    assert.equal(readinessProbes, 0);
+  });
+});
+
 test('runtime discovery marks version-only binaries as detected until readiness succeeds', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
     const tempRoot = await mkdtempTempRoot('oac-provider-detected-readiness-');
@@ -847,7 +967,7 @@ test('runtime discovery probes different providers concurrently', async () => {
     const codexPath = path.join(binDir, 'codex');
     const opencodePath = path.join(binDir, 'opencode');
     await writeFile(codexPath, '#!/bin/sh\necho "codex-cli 0.133.0"\n', 'utf8');
-    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 1.16.0"\n', 'utf8');
     await chmod(codexPath, 0o755);
     await chmod(opencodePath, 0o755);
 
@@ -1135,7 +1255,7 @@ test('runtime discovery resolves probe timeouts from registry probe hints', asyn
     const workbuddyPath = path.join(binDir, 'workbuddy-cli');
     const openclawPath = path.join(binDir, 'openclaw');
     await writeFile(workbuddyPath, '#!/bin/sh\necho "2.103.3"\n', 'utf8');
-    await writeFile(openclawPath, '#!/bin/sh\necho "openclaw 1.2.3"\n', 'utf8');
+    await writeFile(openclawPath, '#!/bin/sh\necho "openclaw 2026.5.5"\n', 'utf8');
     await chmod(workbuddyPath, 0o755);
     await chmod(openclawPath, 0o755);
 
@@ -1266,7 +1386,7 @@ test('runtime discovery skips the login shell when every provider resolves cheap
     const codexPath = path.join(binDir, 'codex');
     const opencodePath = path.join(binDir, 'opencode');
     await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
-    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 1.16.0"\n', 'utf8');
     await chmod(codexPath, 0o755);
     await chmod(opencodePath, 0o755);
     const shellPath = await writeFakeLoginShell(tempRoot);
@@ -1492,7 +1612,7 @@ test('runtime discovery surfaces onRuntimeDiscovered failures without aborting t
     const codexPath = path.join(binDir, 'codex');
     const opencodePath = path.join(binDir, 'opencode');
     await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
-    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 1.16.0"\n', 'utf8');
     await chmod(codexPath, 0o755);
     await chmod(opencodePath, 0o755);
 

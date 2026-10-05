@@ -206,7 +206,7 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(claude.displayName, 'Claude Code');
   assert.equal(claude.executor.kind, 'claude-stream-json');
   assert.equal(claude.executor.backendFactoryExport, 'claudeBackendFactory');
-  assert.equal(claude.executor.launchCommand, 'claude -p --output-format stream-json');
+  assert.equal(claude.executor.launchCommand, 'claude -p --output-format stream-json --input-format stream-json');
   assert.equal(claude.executor.multicaReferencePath, 'agent/claude.go');
 
   assert.equal(codex.id, 'codex');
@@ -221,7 +221,7 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(codebuddy.displayName, 'CodeBuddy');
   assert.equal(codebuddy.executor.kind, 'codebuddy-stream-json');
   assert.equal(codebuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
-  assert.equal(codebuddy.executor.launchCommand, 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions');
+  assert.equal(codebuddy.executor.launchCommand, 'codebuddy -p --output-format stream-json --input-format stream-json --permission-mode bypassPermissions');
 
   const zcode = getPlatformDefinition('zcode');
   assert.equal(zcode.id, 'zcode');
@@ -238,7 +238,7 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(workbuddy.displayName, 'WorkBuddy');
   assert.equal(workbuddy.executor.kind, 'codebuddy-stream-json');
   assert.equal(workbuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
-  assert.equal(workbuddy.executor.launchCommand, 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions');
+  assert.equal(workbuddy.executor.launchCommand, 'codebuddy -p --output-format stream-json --input-format stream-json --permission-mode bypassPermissions');
 
   const opencode = getPlatformDefinition('opencode');
   assert.equal(opencode.executor.launchCommand, 'opencode run --format json --dangerously-skip-permissions --dir <cwd>');
@@ -2467,27 +2467,46 @@ send({ type: 'result', result: 'Final peer reply.' });
   assert.equal(result.output, 'Final peer reply.');
 });
 
-test('CodeBuddy backend launches stream-json print mode and normalizes events', async () => {
+test('CodeBuddy backend launches stdin stream-json print mode and normalizes events', async () => {
   const base = await createTempDir();
   const argsPath = path.join(base, 'args.json');
   const cwdPath = path.join(base, 'cwd.txt');
+  const inputPath = path.join(base, 'input.jsonl');
+  const envPath = path.join(base, 'env.txt');
   const binaryPath = await writeExecutableScript(base, 'fake-codebuddy.js', `#!/usr/bin/env node
 const fs = require('node:fs');
+const readline = require('node:readline');
 fs.writeFileSync(process.env.FAKE_CODEBUDDY_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
 fs.writeFileSync(process.env.FAKE_CODEBUDDY_CWD_PATH, process.cwd());
-function send(message) {
-  process.stdout.write(JSON.stringify(message) + '\\n');
-}
-send({ type: 'system', subtype: 'init', session_id: 'codebuddy-session-1' });
-send({ type: 'assistant', message: { content: [
-  { type: 'thinking', text: 'codebuddy thinking' },
-  { type: 'output_text', text: 'CodeBuddy ' },
-  { type: 'tool_use', id: 'tool-codebuddy', name: 'Read', input: { file: 'x' } }
-] } });
-send({ type: 'tool_result', tool_id: 'tool-codebuddy', output: 'ok' });
-send({ type: 'result', session_id: 'codebuddy-session-result', result: 'CodeBuddy done', usage: { input_tokens: 21, output_tokens: 22 } });
+fs.writeFileSync(process.env.FAKE_CODEBUDDY_ENV_PATH, process.env.CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS || '');
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  fs.writeFileSync(process.env.FAKE_CODEBUDDY_INPUT_PATH, line + '\\n');
+  const message = JSON.parse(line);
+  if (message.type !== 'user') return;
+  function send(entry) {
+    process.stdout.write(JSON.stringify(entry) + '\\n');
+  }
+  send({ type: 'system', subtype: 'init', session_id: 'codebuddy-session-1' });
+  send({ type: 'assistant', message: { content: [
+    { type: 'thinking', text: 'codebuddy thinking' },
+    { type: 'output_text', text: 'CodeBuddy ' },
+    { type: 'tool_use', id: 'tool-codebuddy', name: 'Read', input: { file: 'x' } }
+  ] } });
+  send({ type: 'user', message: { content: [
+    { type: 'tool_result', tool_use_id: 'tool-codebuddy', content: 'ok' }
+  ] } });
+  send({ type: 'result', session_id: 'codebuddy-session-result', result: 'CodeBuddy done', usage: { input_tokens: 21, output_tokens: 22 } });
+});
+rl.on('close', () => process.exit(0));
+setTimeout(() => process.exit(0), 4_000);
 `);
-  const backend = createCodeBuddyBackend(binaryPath, { FAKE_CODEBUDDY_ARGS_PATH: argsPath, FAKE_CODEBUDDY_CWD_PATH: cwdPath });
+  const backend = createCodeBuddyBackend(binaryPath, {
+    FAKE_CODEBUDDY_ARGS_PATH: argsPath,
+    FAKE_CODEBUDDY_CWD_PATH: cwdPath,
+    FAKE_CODEBUDDY_INPUT_PATH: inputPath,
+    FAKE_CODEBUDDY_ENV_PATH: envPath,
+  });
   const events = [];
   const result = await backend.execute(
     {
@@ -2505,19 +2524,38 @@ send({ type: 'result', session_id: 'codebuddy-session-result', result: 'CodeBudd
   );
 
   const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.deepEqual(args.slice(0, 2), ['-p', 'hello codebuddy']);
+  assert.equal(args[0], '-p');
+  assert.equal(args.includes('hello codebuddy'), false);
   assert.ok(args.includes('--output-format'));
   assert.ok(args.includes('stream-json'));
-  assert.ok(args.includes('--dangerously-skip-permissions'));
-  assert.ok(args.includes('--system-prompt'));
+  assert.ok(args.includes('--input-format'));
+  const permissionIndex = args.indexOf('--permission-mode');
+  assert.notEqual(permissionIndex, -1);
+  assert.equal(args[permissionIndex + 1], 'bypassPermissions');
+  const disallowedIndex = args.indexOf('--disallowedTools');
+  assert.notEqual(disallowedIndex, -1);
+  assert.deepEqual(args.slice(disallowedIndex + 1, disallowedIndex + 4), ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']);
+  assert.ok(args.includes('--append-system-prompt'));
   assert.ok(args.includes('system codebuddy'));
+  assert.equal(args.includes('--system-prompt'), false);
   assert.ok(args.includes('--model'));
   assert.ok(args.includes('gpt-5'));
   assert.ok(args.includes('--resume'));
   assert.ok(args.includes('codebuddy-old'));
   assert.ok(args.includes('--debug'));
-  assert.equal(args.filter((arg) => arg === '--dangerously-skip-permissions').length, 1);
+  assert.equal(args.includes('--dangerously-skip-permissions'), false);
   assert.equal(args.includes('text'), false);
+
+  const input = await fs.readFile(inputPath, 'utf8');
+  assert.deepEqual(JSON.parse(input), {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: 'hello codebuddy' }],
+    },
+  });
+  assert.equal(await fs.readFile(envPath, 'utf8'), '1');
+
   await assertSameRealpath(await fs.readFile(cwdPath, 'utf8'), base);
   assert.equal(result.status, 'completed');
   assert.equal(result.output, 'CodeBuddy ');
@@ -3046,7 +3084,7 @@ test('Codex backend returns failed session result when spawn emits an error', as
   assert.match(result.error, /ENOENT|spawn/i);
 });
 
-test('Claude backend passes the prompt with -p, filters blocked args, and returns streamed output', async () => {
+test('Claude backend passes the prompt on stdin stream-json, filters blocked args, and returns streamed output', async () => {
   const base = await createTempDir();
   const argsPath = path.join(base, 'args.json');
   const inputPath = path.join(base, 'input.jsonl');
@@ -3057,10 +3095,10 @@ fs.writeFileSync(process.env.FAKE_CLAUDE_ARGS_PATH, JSON.stringify(process.argv.
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => {
   fs.writeFileSync(process.env.FAKE_CLAUDE_INPUT_PATH, line + '\\n');
-});
-rl.on('close', () => {
-  function send(message) {
-    process.stdout.write(JSON.stringify(message) + '\\n');
+  const message = JSON.parse(line);
+  if (message.type !== 'user') return;
+  function send(entry) {
+    process.stdout.write(JSON.stringify(entry) + '\\n');
   }
   send({ type: 'system', session_id: 'claude-session-1' });
   send({ type: 'assistant', message: { usage: { input_tokens: 5, output_tokens: 1 }, content: [
@@ -3075,8 +3113,9 @@ rl.on('close', () => {
     { type: 'text', text: 'Claude' }
   ] } });
   send({ type: 'result', session_id: 'claude-session-1', result: 'Hello Claude', duration_ms: 123 });
-  setTimeout(() => process.exit(0), 10);
 });
+rl.on('close', () => process.exit(0));
+setTimeout(() => process.exit(0), 4_000);
 `);
 
   const backend = createClaudeBackend(binaryPath, {
@@ -3101,12 +3140,14 @@ rl.on('close', () => {
   );
 
   const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  const promptIndex = args.indexOf('-p');
-  assert.notEqual(promptIndex, -1);
-  assert.equal(args[promptIndex + 1], 'hello claude');
+  assert.equal(args.includes('hello claude'), false);
+  assert.ok(args.includes('-p'));
   assert.ok(args.includes('--output-format'));
   assert.ok(args.includes('stream-json'));
-  assert.equal(args.includes('--input-format'), false);
+  assert.ok(args.includes('--input-format'));
+  const disallowedIndex = args.indexOf('--disallowedTools');
+  assert.notEqual(disallowedIndex, -1);
+  assert.equal(args[disallowedIndex + 1], 'AskUserQuestion');
   assert.ok(args.includes('--max-turns'));
   assert.ok(args.includes('3'));
   assert.ok(args.includes('--model'));
@@ -3114,11 +3155,14 @@ rl.on('close', () => {
   assert.ok(args.includes('--debug'));
   assert.equal(args.includes('ask'), false);
 
-  const input = await fs.readFile(inputPath, 'utf8').catch((error) => {
-    if (error.code === 'ENOENT') return '';
-    throw error;
+  const input = await fs.readFile(inputPath, 'utf8');
+  assert.deepEqual(JSON.parse(input), {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: 'hello claude' }],
+    },
   });
-  assert.equal(input, '');
 
   assert.equal(result.status, 'completed');
   assert.equal(result.output, 'Hello Claude');
@@ -3131,7 +3175,7 @@ rl.on('close', () => {
   assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
 });
 
-test('Claude backend ignores late control_request after closing prompt stdin', async () => {
+test('Claude backend answers control_request frames on the open stdin stream', async () => {
   const base = await createTempDir();
   const responsesPath = path.join(base, 'responses.jsonl');
   const binaryPath = await writeExecutableScript(base, 'fake-claude-control.js', `#!/usr/bin/env node
@@ -3143,19 +3187,17 @@ function send(message) {
 }
 rl.on('line', (line) => {
   const message = JSON.parse(line);
-  if (message.type === 'control_response') {
+  if (message.type === 'user') {
+    send({ type: 'system', session_id: 'claude-control-session' });
+    send({ type: 'control_request', request_id: 'control-1', request: { subtype: 'tool_use', tool_name: 'Bash', input: { command: 'pwd' } } });
+  } else if (message.type === 'control_response') {
     fs.appendFileSync(process.env.FAKE_CLAUDE_RESPONSES_PATH, line + '\\n');
-  }
-});
-rl.on('close', () => {
-  send({ type: 'system', session_id: 'claude-control-session' });
-  send({ type: 'control_request', request_id: 'control-1', request: { subtype: 'tool_use', tool_name: 'Bash', input: { command: 'pwd' } } });
-  setTimeout(() => {
     send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Allowed' }] } });
     send({ type: 'result', session_id: 'claude-control-session', result: 'Allowed', duration_ms: 12 });
-    setTimeout(() => process.exit(0), 10);
-  }, 10);
+  }
 });
+rl.on('close', () => process.exit(0));
+setTimeout(() => process.exit(0), 3_000);
 `);
 
   const backend = createClaudeBackend(binaryPath, { FAKE_CLAUDE_RESPONSES_PATH: responsesPath });
@@ -3171,13 +3213,14 @@ rl.on('close', () => {
     new AbortController().signal,
   );
 
-  const responseLog = await fs.readFile(responsesPath, 'utf8').catch((error) => {
-    if (error.code === 'ENOENT') return '';
-    throw error;
-  });
+  const responseLog = await fs.readFile(responsesPath, 'utf8');
+  const response = JSON.parse(responseLog.trim());
   assert.equal(result.status, 'completed');
   assert.equal(result.output, 'Allowed');
-  assert.equal(responseLog, '');
+  assert.equal(response.type, 'control_response');
+  assert.equal(response.response.request_id, 'control-1');
+  assert.equal(response.response.response.behavior, 'allow');
+  assert.deepEqual(response.response.response.updatedInput, { command: 'pwd' });
 });
 
 test('Claude backend returns timeout promptly when the child ignores SIGTERM', { timeout: 4_000 }, async () => {

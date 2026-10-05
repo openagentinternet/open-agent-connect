@@ -31,13 +31,18 @@ function addUsage(target: LlmTokenUsage, source: unknown): void {
 function buildClaudeArgs(request: LlmExecutionRequest): string[] {
   const args = [
     '-p',
-    request.prompt,
     '--output-format',
+    'stream-json',
+    '--input-format',
     'stream-json',
     '--verbose',
     '--permission-mode',
     'bypassPermissions',
     '--strict-mcp-config',
+    // AskUserQuestion renders only in an interactive UI; headless turns get an
+    // empty answer and the model silently infers instead of asking the user.
+    '--disallowedTools',
+    'AskUserQuestion',
   ];
 
   if (request.maxTurns && request.maxTurns > 0) {
@@ -58,12 +63,29 @@ function buildClaudeArgs(request: LlmExecutionRequest): string[] {
     '--output-format': { takesValue: true },
     '--input-format': { takesValue: true },
     '--permission-mode': { takesValue: true },
+    '--disallowedTools': { takesValue: true },
     '--mcp-config': { takesValue: true },
     '--resume': { takesValue: true },
     '--max-turns': { takesValue: true },
   }));
 
   return args;
+}
+
+/**
+ * Stream-json user message carrying the prompt on stdin. Keeping the prompt
+ * off argv avoids ARG_MAX limits on long task briefs and keeps it out of the
+ * process list; stdin stays open afterwards so control_request frames sent by
+ * the CLI can be answered on the same stream.
+ */
+function buildClaudeUserMessage(prompt: string): Record<string, unknown> {
+  return {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: prompt }],
+    },
+  };
 }
 
 function stringifyToolResultContent(value: unknown): string {
@@ -112,6 +134,12 @@ export function createClaudeBackend(binaryPath: string, env?: Record<string, str
       });
       const childError = new Promise<Error>((resolve) => {
         child.once('error', (error) => resolve(error));
+      });
+      // A CLI that exits before reading its prompt closes the pipe; the exit
+      // path reports the failure, so swallow the async EPIPE instead of
+      // crashing the daemon.
+      child.stdin.on('error', () => {
+        stdinOpen = false;
       });
 
       const writeJsonLine = (message: Record<string, unknown>): void => {
@@ -278,7 +306,7 @@ export function createClaudeBackend(binaryPath: string, env?: Record<string, str
       });
 
       try {
-        closeStdin();
+        writeJsonLine(buildClaudeUserMessage(request.prompt));
         const completion = await Promise.race([
           Promise.all([stdoutDone, childExit]).then(([, exitCode]) => ({ type: 'exit' as const, exitCode })),
           timeout.then(() => ({ type: 'terminal' as const })),
