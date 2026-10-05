@@ -15,6 +15,11 @@ export interface CandidateLike {
   parentrefs: Record<string, string> | null;
   result?: Record<string, unknown> | null;
   attachment?: string | null;
+  /** Display-only extras carried by daemon projections (optional in pure logic). */
+  submitter?: string;
+  atMs?: number;
+  passVotes?: number;
+  failVotes?: number;
 }
 
 export interface NodeLike {

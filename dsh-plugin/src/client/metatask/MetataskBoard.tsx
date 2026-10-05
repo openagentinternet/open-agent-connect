@@ -7,10 +7,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   percentOf,
-  shortMetaId,
   shortPin,
   taskLifecycleOf,
 } from '../../metatask-logic.js'
+import { MtBadge } from './MtBadge.tsx'
 
 export interface BoardTask {
   rootPinId: string
@@ -40,6 +40,8 @@ export interface BoardData {
   tasks: BoardTask[]
   alerts: BoardAlert[]
   identities: Record<string, { name: string | null; avatar: string | null }>
+  /** Local-bot metaIds (the daemon's roster) — drives the YOU chips. */
+  localRosterMetaIds?: string[]
   activation: { hAct2: number | null; hAct3: number | null }
   refresh: { lastRefreshAtMs: number | null; lastError: string | null; boundaryBlock: number | null; refreshing: boolean }
 }
@@ -52,6 +54,7 @@ export interface MetataskBoardLocale {
 
 export interface MetataskApi {
   metataskBoard: (refresh?: boolean) => Promise<unknown>
+  metataskTask?: (root: string, refresh?: boolean) => Promise<unknown>
   metataskDraft?: (root: string, lang?: 'en' | 'zh') => Promise<unknown>
 }
 
@@ -59,9 +62,6 @@ const lifecycleKeyOf = (task: BoardTask): string => {
   const lifecycle = taskLifecycleOf(task)
   return `mtLifecycle${lifecycle.charAt(0).toUpperCase()}${lifecycle.slice(1)}`
 }
-
-const nameOf = (board: BoardData, metaId: string): string =>
-  board.identities[metaId]?.name || shortMetaId(metaId)
 
 const relativeTime = (ms: number, mt: TrackingTranslate): string => {
   if (!ms) return '—'
@@ -157,11 +157,11 @@ export function MetataskBoard(
             <div key={`${alert.rootPinId}-${alert.kind}-${index}`} className="oac-mt-alert">
               <span className="oac-mt-alert-kind">{mt(`mtAlert_${alert.kind.replace(/_/g, '_')}`)}</span>
               <span className="oac-mt-alert-node">{alert.node ? `${shortPin(alert.rootPinId)} · ${alert.node}` : shortPin(alert.rootPinId)}</span>
-              <button type="button" className="oac-btn oac-btn-sm" onClick={() => { onOpen(alert.rootPinId) }}>
+              <button type="button" className="oac-mt-btn oac-mt-btn-sm" onClick={() => { onOpen(alert.rootPinId) }}>
                 {mt('mtAlertOpen')}
               </button>
               {props.metataskDraft && (
-                <button type="button" className="oac-btn oac-btn-sm" disabled={draftBusy}
+                <button type="button" className="oac-mt-btn oac-mt-btn-sm oac-mt-btn-primary" disabled={draftBusy}
                   onClick={(event) => { void participate(event, alert.rootPinId) }}>
                   {mt('mtParticipate')}
                 </button>
@@ -194,14 +194,25 @@ export function MetataskBoard(
                 <span className="oac-mt-progress-text">{satisfied}/{task.progress.total}{task.progress.disputed > 0 ? ` · ${mt('mtDisputedCount', { count: task.progress.disputed })}` : ''}</span>
               </div>
               <div className="oac-mt-card-foot">
-                <span>{mt('mtPublisher')}: {nameOf(board as BoardData, task.publisher)}</span>
+                <span className="oac-mt-card-pub">{mt('mtPublisher')} <MtBadge
+                  metaId={task.publisher}
+                  name={board?.identities[task.publisher]?.name ?? null}
+                  avatar={board?.identities[task.publisher]?.avatar ?? null}
+                  you={(board?.localRosterMetaIds ?? []).includes(task.publisher)}
+                  youLabel={mt('mtYou')}
+                /></span>
                 <span>{mt('mtParticipants', { count: task.participantCount })}</span>
                 {task.myStats && (
-                  <span>{mt('mtMyStats', { verified: task.myStats.verified, reviews: task.myStats.reviewVotes, share: task.settlementFinalized ? task.myStats.shareBP : task.myStats.estShareBP })}</span>
+                  <span className="oac-mt-card-share">
+                    {task.settlementFinalized
+                      ? <>{mt('mtShareSettled')} <b>{task.myStats.shareBP} bp</b></>
+                      : <>{mt('mtShareEst')} <b>{task.myStats.estShareBP} bp</b></>}
+                    {' · '}{mt('mtMyStats', { verified: task.myStats.verified, reviews: task.myStats.reviewVotes, share: 0 })}
+                  </span>
                 )}
                 <span className="oac-mt-card-stamp">{relativeTime(task.lastActivityMs, mt)} · {task.freshness.eventCount} {mt('mtEvents')} @{task.freshness.boundaryBlock}</span>
                 {props.metataskDraft && !task.settlementFinalized && (
-                  <button type="button" className="oac-btn oac-btn-sm" disabled={draftBusy}
+                  <button type="button" className="oac-mt-btn oac-mt-btn-sm oac-mt-btn-primary" disabled={draftBusy}
                     onClick={(event) => { void participate(event, task.rootPinId) }}>
                     {mt('mtParticipate')}
                   </button>
