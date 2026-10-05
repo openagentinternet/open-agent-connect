@@ -277,6 +277,7 @@ export const PRIVATE_FILE_MAX_BYTES = 1024 * 1024;
 
 const FILE_CIPHER_IV = enc.Utf8.parse('0000000000000000');
 
+/** @internal */
 export function encryptPrivateFileHex(fileHex: string, sharedSecretHex: string): string {
   const encrypted = AES.encrypt(
     enc.Hex.parse(String(fileHex ?? '')),
@@ -290,6 +291,7 @@ export function encryptPrivateFileHex(fileHex: string, sharedSecretHex: string):
   return encrypted.ciphertext.toString(enc.Hex);
 }
 
+/** @internal */
 export function decryptPrivateFileHex(cipherHex: string, sharedSecretHex: string): Buffer | null {
   try {
     const cipherParams = (CryptoJS.lib.CipherParams as {
@@ -352,6 +354,7 @@ export function parsePrivateFileChatContent(content: string): PrivateFileChatAtt
   }
 }
 
+/** @internal */
 export interface SendPrivateFileChatInput {
   fromIdentity: {
     globalMetaId: string;
@@ -364,6 +367,7 @@ export interface SendPrivateFileChatInput {
   sharedSecretOverride?: string;
 }
 
+/** @internal */
 export interface SendPrivateFileChatResult {
   fileWrite: {
     operation: 'create';
