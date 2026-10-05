@@ -48,6 +48,16 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
           <div class="conversation-messages" data-conversation-messages></div>
           <div class="conversation-typing" data-conversation-typing hidden aria-live="polite"><span class="conversation-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span><span data-conversation-typing-text></span></div>
           <footer class="conversation-guidance-footer" data-conversation-guidance>
+            <form class="conversation-send-form" data-send-form hidden>
+              <input
+                class="input"
+                type="text"
+                data-send-input
+                placeholder="${i18n.t('conversations.composerPlaceholder')}"
+                aria-label="${i18n.t('conversations.composerPlaceholder')}"
+              />
+              <button class="btn btn-sm" type="submit" data-send-submit data-i18n-key="conversations.send">${i18n.t('conversations.send')}</button>
+            </form>
             <div class="conversation-readonly-status" data-conversation-readonly-status data-i18n-key="conversations.readonlyStatus">${i18n.t('conversations.readonlyStatus')}</div>
             <button class="btn btn-sm" type="button" data-guidance-toggle data-i18n-key="conversations.guidanceToggle">${i18n.t('conversations.guidanceToggle')}</button>
             <form class="conversation-guidance-form" data-guidance-form hidden>
@@ -107,6 +117,9 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     guidanceSend: document.querySelector('[data-guidance-send]'),
     guidanceCancel: document.querySelector('[data-guidance-cancel]'),
     guidanceStatus: document.querySelector('[data-guidance-status]'),
+    sendForm: document.querySelector('[data-send-form]'),
+    sendInput: document.querySelector('[data-send-input]'),
+    sendSubmit: document.querySelector('[data-send-submit]'),
     typing: document.querySelector('[data-conversation-typing]'),
     typingText: document.querySelector('[data-conversation-typing-text]'),
     toast: document.querySelector('[data-copy-toast]'),
@@ -206,6 +219,8 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     guidanceSubmitting: false,
     guidanceStatus: '',
     pendingGuidance: null,
+    sendDraft: '',
+    sending: false,
     // Live reply-turn activity per peer (conversation-reply-state SSE events).
     replyingPeers: {},
     // Live unread counts per peer for the selected local Bot (localStorage).
@@ -629,6 +644,17 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const selected = model.selectedConversation;
     const hasTarget = Boolean(selected && hasGuidanceTarget());
     if (elements.guidance) elements.guidance.hidden = !hasTarget;
+    if (elements.sendForm) elements.sendForm.hidden = !hasTarget;
+    if (elements.sendInput) {
+      elements.sendInput.value = state.sendDraft;
+      elements.sendInput.disabled = state.sending;
+    }
+    if (elements.sendSubmit) {
+      elements.sendSubmit.disabled = state.sending || !state.sendDraft.trim();
+      elements.sendSubmit.textContent = state.sending
+        ? uiText('conversations.sending', 'Sending…')
+        : uiText('conversations.send', 'Send');
+    }
     if (!elements.guidanceToggle || !elements.guidanceForm || !elements.guidanceInput || !elements.guidanceSend || !elements.guidanceCancel || !elements.guidanceStatus) {
       return;
     }
@@ -1157,6 +1183,34 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       render();
     }
   };
+  const submitPeerMessage = async () => {
+    state.sendDraft = String(elements.sendInput && elements.sendInput.value || state.sendDraft || '');
+    if (!hasGuidanceTarget() || !state.sendDraft.trim() || state.sending) return;
+    const targetLocal = state.selectedLocalGlobalMetaId;
+    const targetPeer = state.selectedPeerGlobalMetaId;
+    state.sending = true;
+    render();
+    try {
+      await fetchJson('/api/chat/private', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          from: targetLocal,
+          to: targetPeer,
+          content: state.sendDraft.trim(),
+        }),
+      });
+      state.sendDraft = '';
+      if (state.selectedLocalGlobalMetaId === targetLocal && state.selectedPeerGlobalMetaId === targetPeer) {
+        await loadConversations({ stickToBottom: true });
+      }
+    } catch (error) {
+      state.error = error.message || uiText('conversations.requestFailed', 'Request failed.');
+    } finally {
+      state.sending = false;
+      render();
+    }
+  };
   const selectPeer = async (peerGlobalMetaId) => {
     if (!peerGlobalMetaId || peerGlobalMetaId === state.selectedPeerGlobalMetaId) return;
     state.selectedPeerGlobalMetaId = peerGlobalMetaId;
@@ -1200,6 +1254,18 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
   }
   if (elements.localBotTrigger) {
     elements.localBotTrigger.addEventListener('click', () => setBotPickerOpen(!state.botPickerOpen));
+  }
+  if (elements.sendInput) {
+    elements.sendInput.addEventListener('input', () => {
+      state.sendDraft = String(elements.sendInput && elements.sendInput.value || '');
+      render();
+    });
+  }
+  if (elements.sendForm) {
+    elements.sendForm.addEventListener('submit', async (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      await submitPeerMessage();
+    });
   }
   if (elements.guidanceToggle) {
     elements.guidanceToggle.addEventListener('click', () => {

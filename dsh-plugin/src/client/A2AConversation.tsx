@@ -700,11 +700,34 @@ export function A2AConversation({
                 )}
               </div>
             ) : null}
-            {/* OAC /ui/conversations parity: a selected conversation is
-                Steer-only — no free message composer. The plain composer
-                exists solely to start a brand-new conversation, and with the
-                lists in the left tabs it doubles as the empty state. */}
-            {!selectedPeer ? (
+            {/* IDBots parity: an open thread carries BOTH a message composer
+                (send as the local Bot) and the Steer guidance toggle; the
+                plain-composer-with-peer-input combo only starts brand-new
+                conversations and doubles as the empty state. */}
+            {selectedPeer ? (
+              <div className="oac-a2a-composer-row">
+                <Input
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder={t('messagePlaceholder')}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      if (!busy) void onSend()
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="primary"
+                  icon={<IconSendOutline14 />}
+                  disabled={busy || !from || !draft.trim()}
+                  onClick={() => { void onSend() }}
+                >
+                  {busy ? t('sending') : t('send')}
+                </Button>
+              </div>
+            ) : (
               <>
                 <Input
                   value={peerDraft}
@@ -734,7 +757,7 @@ export function A2AConversation({
                   </Button>
                 </div>
               </>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
