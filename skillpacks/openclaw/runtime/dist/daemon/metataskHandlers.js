@@ -16,6 +16,8 @@ const commandResult_1 = require("../core/contracts/commandResult");
 const engine_1 = require("../core/metatask/engine/engine");
 const estimate_1 = require("../core/metatask/engine/estimate");
 const constants_1 = require("../core/metatask/engine/constants");
+const drafts_1 = require("../core/metatask/drafts");
+const metaIdSearchApi_1 = require("../core/metaid/metaIdSearchApi");
 const watch_1 = require("../core/metatask/watch");
 const refresher_1 = require("../core/metatask/refresher");
 const store_1 = require("../core/metatask/store");
@@ -75,15 +77,36 @@ function createMetaTaskDaemonHandlers(input) {
         return rosterIds;
     };
     const store = (0, store_1.createMetaTaskStore)(`${daemonPaths.runtimeRoot}/metatask`, {
-        // Local roster first (the manager's profile registry); remote identity
-        // lookups are P7 hardening — unresolved metaIds simply show their raw id.
+        // Local roster first (the manager's profile registry), then the so.metaid.io
+        // detail endpoint for the rest; the store throttles the remote tier
+        // (6h refresh horizon, 64 per sweep). Failures degrade to the raw metaId.
         resolveIdentities: async (metaIds) => {
             const out = {};
+            const remote = [];
             for (const metaId of metaIds) {
                 const name = profileNames.get(metaId);
-                if (name)
+                if (name) {
                     out[metaId] = { metaId, name, avatar: null };
+                }
+                else {
+                    remote.push(metaId);
+                }
             }
+            await Promise.all(remote.map(async (metaId) => {
+                try {
+                    const detail = await (0, metaIdSearchApi_1.getMetaIdDetail)(metaId, { timeoutMs: 6_000 });
+                    if (detail?.name || detail?.avatarId) {
+                        out[metaId] = {
+                            metaId,
+                            name: detail?.name || null,
+                            avatar: detail?.avatarId ? `metafile://${detail.avatarId}` : null,
+                        };
+                    }
+                }
+                catch {
+                    // unresolved identities display as their raw metaId
+                }
+            }));
             return out;
         },
     });
@@ -380,5 +403,27 @@ function createMetaTaskDaemonHandlers(input) {
             }));
         },
         watch: () => runWatchTick(),
+        draft: async (rawInput) => {
+            const rootPinId = normalizeText(rawInput.root);
+            if (!rootPinId)
+                return (0, commandResult_1.commandFailed)('invalid_input', 'A --root task pin id is required.');
+            const lang = normalizeText(rawInput.lang) === 'zh' ? 'zh' : 'en';
+            try {
+                await loadRoster();
+                let projection = await refresher.detail(rootPinId);
+                if (!projection) {
+                    await refresher.refreshOnce('draft-miss');
+                    projection = await refresher.detail(rootPinId);
+                }
+                if (!projection) {
+                    return (0, commandResult_1.commandFailed)('metatask_not_found', `No cached projection for task root ${rootPinId}.`);
+                }
+                const draft = (0, drafts_1.buildParticipateDraft)(projection, { lang });
+                return (0, commandResult_1.commandSuccess)(draft);
+            }
+            catch (error) {
+                return (0, commandResult_1.commandFailed)('metatask_draft_failed', error instanceof Error ? error.message : 'Failed to build the participation draft.');
+            }
+        },
     };
 }

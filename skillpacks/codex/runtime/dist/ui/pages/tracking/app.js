@@ -30,6 +30,15 @@ function buildTrackingPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
         <p class="tracking-notice" data-tracking-activation hidden></p>
         <div class="tracking-board" data-tracking-board></div>
         <div class="tracking-detail" data-tracking-detail hidden></div>
+        <div class="tracking-draft" data-tracking-draft hidden>
+          <div class="card">
+            <div class="section-header"><h2 class="section-title" data-tracking-draft-title></h2>
+            <button class="btn btn-sm" type="button" data-tracking-draft-close>✕</button></div>
+            <p class="field-hint" data-tracking-draft-hint></p>
+            <textarea class="tracking-draft-text" readonly rows="8" data-tracking-draft-text></textarea>
+            <div><button class="btn btn-primary btn-sm" type="button" data-tracking-draft-copy></button></div>
+          </div>
+        </div>
       </section>
     `,
         script: `(() => {
@@ -39,6 +48,12 @@ function buildTrackingPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     activation: document.querySelector('[data-tracking-activation]'),
     board: document.querySelector('[data-tracking-board]'),
     detail: document.querySelector('[data-tracking-detail]'),
+    draft: document.querySelector('[data-tracking-draft]'),
+    draftTitle: document.querySelector('[data-tracking-draft-title]'),
+    draftHint: document.querySelector('[data-tracking-draft-hint]'),
+    draftText: document.querySelector('[data-tracking-draft-text]'),
+    draftCopy: document.querySelector('[data-tracking-draft-copy]'),
+    draftClose: document.querySelector('[data-tracking-draft-close]'),
   };
   // Client fallbacks are byte-identical to the en dictionary values of their
   // keys (enforced by tests/ui/pageI18nCoverage.test.mjs).
@@ -104,11 +119,18 @@ function buildTrackingPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
             '<span>' + esc(uiText('tracking.publisher', 'Publisher')) + ': ' + esc(nameOf(board.identities, task.publisher)) + '</span>' +
             '<span>' + esc(uiText('tracking.participants', '{count} participants', { count: task.participantCount })) + '</span>' +
             '<span class="muted">' + esc(uiText('tracking.events', '{count} events', { count: task.freshness.eventCount })) + ' ' + esc(uiText('tracking.boundary', '@ block {block}', { block: task.freshness.boundaryBlock })) + '</span>' +
+            (!task.settlementFinalized ? '<button class="btn btn-sm" type="button" data-tracking-participate="' + esc(task.rootPinId) + '">' + esc(uiText('tracking.participate', 'Have my bot join')) + '</button>' : '') +
           '</div>' +
         '</article>';
     }).join('');
     els.board.querySelectorAll('[data-tracking-open]').forEach((card) => {
       card.addEventListener('click', () => { void loadDetail(card.getAttribute('data-tracking-open')); });
+    });
+    els.board.querySelectorAll('[data-tracking-participate]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void loadDraft(button.getAttribute('data-tracking-participate'));
+      });
     });
   }
 
@@ -159,6 +181,36 @@ function buildTrackingPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
       els.detail.innerHTML = '<div class="card"><p class="table-empty">' + esc(uiText('tracking.loadError', 'Could not load tracking data: {message}', { message: error.message })) + '</p></div>';
     }
   }
+
+  async function loadDraft(root) {
+    const isZh = uiText('tracking.tabLongTerm', 'Long-term') !== 'Long-term';
+    els.draftTitle.textContent = uiText('tracking.draftTitle', 'Participation draft');
+    els.draftHint.textContent = uiText('tracking.draftHint', 'Copy this draft into a bot session to start the task. This page never writes on-chain.');
+    els.draftCopy.textContent = uiText('tracking.copy', 'Copy');
+    els.draftText.value = uiText('tracking.status.loading', 'Loading…');
+    els.draft.hidden = false;
+    try {
+      const draft = await fetchJson('/api/metatask/draft', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ root: root, lang: isZh ? 'zh' : 'en' }),
+      });
+      if (draft && draft.node) {
+        els.draftTitle.textContent = uiText('tracking.draftTitle', 'Participation draft') + ' · ' + draft.node;
+      }
+      els.draftText.value = (draft && draft.text) || '';
+    } catch (error) {
+      els.draftText.value = uiText('tracking.loadError', 'Could not load tracking data: {message}', { message: error.message });
+    }
+  }
+  els.draftClose.addEventListener('click', () => { els.draft.hidden = true; });
+  els.draftCopy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(els.draftText.value);
+      els.draftCopy.textContent = uiText('tracking.copied', 'Copied');
+      window.setTimeout(() => { els.draftCopy.textContent = uiText('tracking.copy', 'Copy'); }, 1500);
+    } catch (_) { /* clipboard unavailable */ }
+  });
 
   els.refresh.addEventListener('click', async () => {
     try {

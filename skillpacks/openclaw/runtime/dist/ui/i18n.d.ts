@@ -54,6 +54,11 @@ export declare const DICTIONARIES: {
         readonly 'tracking.identityCol': "Identity";
         readonly 'tracking.fromCol': "sub + rev";
         readonly 'tracking.ignored': "Ignored chain events";
+        readonly 'tracking.participate': "Have my bot join";
+        readonly 'tracking.draftTitle': "Participation draft";
+        readonly 'tracking.draftHint': "Copy this draft into a bot session to start the task. This page never writes on-chain.";
+        readonly 'tracking.copy': "Copy";
+        readonly 'tracking.copied': "Copied";
         readonly 'action.openBrowser': "Open Browser";
         readonly 'action.openInBrowser': "Open in Browser";
         readonly 'action.openBotPage': "Open Bot Page";
@@ -1607,6 +1612,11 @@ export declare const DICTIONARIES: {
         readonly 'tracking.identityCol': "身份";
         readonly 'tracking.fromCol': "提交 + 复核";
         readonly 'tracking.ignored': "被忽略的链上事件";
+        readonly 'tracking.participate': "让本机 Bot 参与";
+        readonly 'tracking.draftTitle': "参与草稿";
+        readonly 'tracking.draftHint': "把这段草稿复制给 Bot 会话即可开始任务；本页面不做任何链上写入。";
+        readonly 'tracking.copy': "复制";
+        readonly 'tracking.copied': "已复制";
         readonly 'action.openBrowser': "打开浏览器";
         readonly 'action.openInBrowser': "在浏览器中打开";
         readonly 'action.openBotPage': "打开 Bot Page";

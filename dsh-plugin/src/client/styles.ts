@@ -1192,6 +1192,9 @@ export const TRACKING_CSS = `
 .oac-mt-checklist li[data-done='true']::before { content: '✔ '; }
 .oac-mt-checklist li[data-done]::before { content: '◻ '; color: var(--dsw-alias-label-tertiary); }
 .oac-mt-unpaid { font-size: 13px; color: var(--dsw-alias-label-tertiary); }
+.oac-mt-draftbox { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1.5px solid rgba(56,189,248,0.6); border-radius: 10px; background: var(--dsw-alias-fill-card); }
+.oac-mt-draftbox-head { display: flex; align-items: center; justify-content: space-between; }
+.oac-mt-draftbox-text { box-sizing: border-box; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; padding: 10px; border-radius: 8px; border: 1px solid var(--dsw-alias-line-border-card); background: var(--dsw-alias-fill-secondary); color: var(--dsw-alias-label-primary); resize: vertical; }
 .oac-mt-ignored { display: flex; flex-direction: column; gap: 6px; }
 .oac-mt-drawer-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .oac-mt-detail .oac-gt-drawer { position: absolute; inset: 0; z-index: 20; }

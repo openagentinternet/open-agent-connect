@@ -13,6 +13,7 @@ type MetaTaskVerb = keyof MetaTaskHandlerGroup;
 
 const POST_VERBS: Record<string, MetaTaskVerb> = {
   '/api/metatask/refresh': 'refresh',
+  '/api/metatask/draft': 'draft',
   '/api/metatask/claim': 'claim',
   '/api/metatask/submit': 'submit',
   '/api/metatask/verify': 'verify',

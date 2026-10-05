@@ -43,6 +43,11 @@ import type {
 /** Resolves display identities for metaIds (local roster now; MetaSo later). */
 export type MetaTaskIdentityResolver = (metaIds: string[]) => Promise<Record<string, MetaTaskIdentity>>;
 
+/** Remote identity re-lookups wait out this horizon (IDBots parity: 6h). */
+export const IDENTITY_REFRESH_TTL_MS = 6 * 3_600_000;
+/** Remote identity lookups per enrichment pass (IDBots parity: 64 per sweep). */
+export const IDENTITY_REMOTE_BATCH_MAX = 64;
+
 interface ProjectionFile {
   dirtyKey: string;
   savedAtMs: number;
@@ -145,8 +150,15 @@ export interface MetaTaskStore {
 
 export function createMetaTaskStore(
   root: string,
-  options: { resolveIdentities?: MetaTaskIdentityResolver } = {}
+  options: {
+    resolveIdentities?: MetaTaskIdentityResolver;
+    /** Identity refresh horizon (default IDENTITY_REFRESH_TTL_MS; tests shrink it). */
+    identityTtlMs?: number;
+    /** Clock seam (default Date.now). */
+    now?: () => number;
+  } = {}
 ): MetaTaskStore {
+  const identityTtlMs = options.identityTtlMs ?? IDENTITY_REFRESH_TTL_MS;
   const eventsDir = path.join(root, 'events');
   const projectionsDir = path.join(root, 'projections');
 
@@ -344,17 +356,28 @@ export function createMetaTaskStore(
     },
 
     async enrichIdentities(projections) {
+      await ready();
       const actors = new Set<string>();
       for (const projection of projections) {
         for (const actor of actorsOf(projection)) actors.add(actor);
       }
+      const nowMs = options.now?.() ?? Date.now();
       const identitiesFile = await readIdentities();
       const merged: Record<string, MetaTaskIdentity> = {};
+      const remote: string[] = [];
       for (const metaId of actors) {
         const cached = identitiesFile.identities[metaId];
-        if (cached) merged[metaId] = { metaId, name: cached.name, avatar: cached.avatar };
+        if (!cached) {
+          remote.push(metaId);
+          continue;
+        }
+        merged[metaId] = { metaId, name: cached.name, avatar: cached.avatar };
+        // Resolved rows older than the refresh horizon re-enter the remote
+        // tier (they keep displaying from cache until re-resolved).
+        if (nowMs - cached.resolvedAtMs > identityTtlMs) remote.push(metaId);
       }
-      const missing = Array.from(actors).filter((metaId) => !merged[metaId]);
+      // Local roster first (unthrottled); the remote tier is capped per sweep.
+      const missing = remote.slice(0, IDENTITY_REMOTE_BATCH_MAX);
       if (missing.length > 0 && options.resolveIdentities) {
         try {
           const resolved = await options.resolveIdentities(missing);
@@ -364,7 +387,7 @@ export function createMetaTaskStore(
             identitiesFile.identities[identity.metaId] = {
               ...identity,
               source: 'local',
-              resolvedAtMs: Date.now(),
+              resolvedAtMs: nowMs,
             };
           }
           await writeJsonFileAtomic(path.join(root, 'identities.json'), identitiesFile);

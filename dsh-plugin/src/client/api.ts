@@ -841,6 +841,9 @@ export const api = {
   /** Force a chain sweep (`metabot metatask refresh`). */
   metataskRefresh: async (): Promise<unknown> =>
     post('metatask/refresh', {}),
+  /** F13: prefilled participation draft (never a write). */
+  metataskDraft: async (root: string, lang?: 'en' | 'zh'): Promise<unknown> =>
+    post('metatask/draft', { root, ...(lang ? { lang } : {}) }),
   grouptaskDetail: async (chair: string, taskId: number): Promise<GroupTaskDetailPayload> =>
     normalizeGroupTaskDetail(await post('grouptask/detail', { chair, taskId })),
   grouptaskInvites: async (chair: string, taskId: number): Promise<GroupTaskSentInviteRow[]> => {

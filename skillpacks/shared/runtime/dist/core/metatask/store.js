@@ -30,12 +30,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.IDENTITY_REMOTE_BATCH_MAX = exports.IDENTITY_REFRESH_TTL_MS = void 0;
 exports.createMetaTaskStore = createMetaTaskStore;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const constants_1 = require("./engine/constants");
 const engine_1 = require("./engine/engine");
 const estimate_1 = require("./engine/estimate");
+/** Remote identity re-lookups wait out this horizon (IDBots parity: 6h). */
+exports.IDENTITY_REFRESH_TTL_MS = 6 * 3_600_000;
+/** Remote identity lookups per enrichment pass (IDBots parity: 64 per sweep). */
+exports.IDENTITY_REMOTE_BATCH_MAX = 64;
 async function readJsonFile(filePath) {
     try {
         const raw = await node_fs_1.promises.readFile(filePath, 'utf8');
@@ -68,6 +73,7 @@ const eventsEqual = (a, b) => a.pinId === b.pinId
     && JSON.stringify(a.body) === JSON.stringify(b.body);
 const GOOD_BODY = (body) => Object.keys(body).length > 0;
 function createMetaTaskStore(root, options = {}) {
+    const identityTtlMs = options.identityTtlMs ?? exports.IDENTITY_REFRESH_TTL_MS;
     const eventsDir = node_path_1.default.join(root, 'events');
     const projectionsDir = node_path_1.default.join(root, 'projections');
     /** events by pinId — the effective (last-wins) view of the jsonl files. */
@@ -261,19 +267,30 @@ function createMetaTaskStore(root, options = {}) {
             return file?.projection ?? null;
         },
         async enrichIdentities(projections) {
+            await ready();
             const actors = new Set();
             for (const projection of projections) {
                 for (const actor of actorsOf(projection))
                     actors.add(actor);
             }
+            const nowMs = options.now?.() ?? Date.now();
             const identitiesFile = await readIdentities();
             const merged = {};
+            const remote = [];
             for (const metaId of actors) {
                 const cached = identitiesFile.identities[metaId];
-                if (cached)
-                    merged[metaId] = { metaId, name: cached.name, avatar: cached.avatar };
+                if (!cached) {
+                    remote.push(metaId);
+                    continue;
+                }
+                merged[metaId] = { metaId, name: cached.name, avatar: cached.avatar };
+                // Resolved rows older than the refresh horizon re-enter the remote
+                // tier (they keep displaying from cache until re-resolved).
+                if (nowMs - cached.resolvedAtMs > identityTtlMs)
+                    remote.push(metaId);
             }
-            const missing = Array.from(actors).filter((metaId) => !merged[metaId]);
+            // Local roster first (unthrottled); the remote tier is capped per sweep.
+            const missing = remote.slice(0, exports.IDENTITY_REMOTE_BATCH_MAX);
             if (missing.length > 0 && options.resolveIdentities) {
                 try {
                     const resolved = await options.resolveIdentities(missing);
@@ -283,7 +300,7 @@ function createMetaTaskStore(root, options = {}) {
                         identitiesFile.identities[identity.metaId] = {
                             ...identity,
                             source: 'local',
-                            resolvedAtMs: Date.now(),
+                            resolvedAtMs: nowMs,
                         };
                     }
                     await writeJsonFileAtomic(node_path_1.default.join(root, 'identities.json'), identitiesFile);

@@ -130,6 +130,7 @@ export interface MetabotDaemonHttpHandlers {
     publishSpec?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     amend?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     watch?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    draft?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   surf?: {
     status?: (input: { from?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;

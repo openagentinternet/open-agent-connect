@@ -25,6 +25,8 @@ export interface MetaTaskDaemonHandlers {
     amend: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     /** Internal: the watch heartbeat (not routed over HTTP today). */
     watch: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    /** F13: prefilled participation draft for a bot session (never a write). */
+    draft: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 /**
  * Build the MetaTask handler group: one system-level store, one refresher

@@ -52,6 +52,7 @@ export interface MetataskBoardLocale {
 
 export interface MetataskApi {
   metataskBoard: (refresh?: boolean) => Promise<unknown>
+  metataskDraft?: (root: string, lang?: 'en' | 'zh') => Promise<unknown>
 }
 
 const lifecycleKeyOf = (task: BoardTask): string => {
@@ -101,6 +102,23 @@ export function MetataskBoard(
     return () => { window.clearInterval(timer) }
   }, [load])
 
+  const [draft, setDraft] = useState<{ text: string; node: string | null } | null>(null)
+  const [draftBusy, setDraftBusy] = useState(false)
+  const isZh = mt('mtViewSquare') === '任务广场'
+  const participate = async (event: { stopPropagation: () => void }, rootPinId: string) => {
+    event.stopPropagation()
+    if (!props.metataskDraft || draftBusy) return
+    setDraftBusy(true)
+    try {
+      const result = await props.metataskDraft(rootPinId, isZh ? 'zh' : 'en') as { text: string; node: string | null }
+      setDraft(result ?? null)
+    } catch {
+      setDraft(null)
+    } finally {
+      setDraftBusy(false)
+    }
+  }
+
   const tasks = (board?.tasks ?? []).filter((task) => !mineOnly || task.myRoles.length > 0)
   const hAct3 = board?.activation.hAct3 ?? null
   const boundary = board?.refresh.boundaryBlock ?? null
@@ -142,6 +160,12 @@ export function MetataskBoard(
               <button type="button" className="oac-btn oac-btn-sm" onClick={() => { onOpen(alert.rootPinId) }}>
                 {mt('mtAlertOpen')}
               </button>
+              {props.metataskDraft && (
+                <button type="button" className="oac-btn oac-btn-sm" disabled={draftBusy}
+                  onClick={(event) => { void participate(event, alert.rootPinId) }}>
+                  {mt('mtParticipate')}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -176,11 +200,31 @@ export function MetataskBoard(
                   <span>{mt('mtMyStats', { verified: task.myStats.verified, reviews: task.myStats.reviewVotes, share: task.settlementFinalized ? task.myStats.shareBP : task.myStats.estShareBP })}</span>
                 )}
                 <span className="oac-mt-card-stamp">{relativeTime(task.lastActivityMs, mt)} · {task.freshness.eventCount} {mt('mtEvents')} @{task.freshness.boundaryBlock}</span>
+                {props.metataskDraft && !task.settlementFinalized && (
+                  <button type="button" className="oac-btn oac-btn-sm" disabled={draftBusy}
+                    onClick={(event) => { void participate(event, task.rootPinId) }}>
+                    {mt('mtParticipate')}
+                  </button>
+                )}
               </div>
             </div>
           )
         })}
       </div>
+
+      {draft && (
+        <div className="oac-mt-draftbox" role="dialog" aria-label={mt('mtDraftTitle')}>
+          <div className="oac-mt-draftbox-head">
+            <span className="oac-mt-section-title" style={{ marginTop: 0 }}>{mt('mtDraftTitle')}{draft.node ? ` · ${draft.node}` : ''}</span>
+            <button type="button" className="oac-btn oac-btn-sm" onClick={() => { setDraft(null) }}>✕</button>
+          </div>
+          <p className="oac-mt-empty-inline">{mt('mtDraftHint')}</p>
+          <textarea className="oac-mt-draftbox-text" readOnly rows={8} value={draft.text} />
+          <button type="button" className="oac-btn oac-btn-sm oac-copy-mini" onClick={() => { void navigator.clipboard?.writeText(draft.text) }}>
+            {mt('mtCopy')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

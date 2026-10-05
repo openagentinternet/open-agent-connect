@@ -40,7 +40,16 @@ function makeElement(tag = 'div') {
 function createHarness(fetchUrls) {
   const board = makeElement('div');
   const boardCards = [];
-  board.querySelectorAll = () => boardCards;
+  // One participate button, pre-created so the page wires its click handler
+  // onto this exact element during renderBoard.
+  const participateButton = makeElement('button');
+  participateButton.setAttribute(
+    'data-tracking-participate',
+    'fad848f86d360fb61f3308b4b9eae7f6c9816eeb8eef86f2bf911c70ab8bed10i0'
+  );
+  const boardButtons = [participateButton];
+  board.querySelectorAll = (selector) =>
+    String(selector).includes('participate') ? boardButtons : boardCards;
   const elements = {
     '[data-tracking-status]': makeElement('p'),
     '[data-tracking-refresh]': makeElement('button'),
@@ -48,6 +57,12 @@ function createHarness(fetchUrls) {
     '[data-tracking-board]': board,
     '[data-tracking-detail]': Object.assign(makeElement('div'), { hidden: true }),
     '[data-tracking-tab-metatask]': makeElement('button'),
+    '[data-tracking-draft]': Object.assign(makeElement('div'), { hidden: true }),
+    '[data-tracking-draft-title]': makeElement('h2'),
+    '[data-tracking-draft-hint]': makeElement('p'),
+    '[data-tracking-draft-text]': Object.assign(makeElement('textarea'), { value: '' }),
+    '[data-tracking-draft-copy]': makeElement('button'),
+    '[data-tracking-draft-close]': makeElement('button'),
   };
   const requests = [];
   const fetchImpl = async (url, options) => {
@@ -88,6 +103,7 @@ function createHarness(fetchUrls) {
     elements,
     requests,
     boardCards,
+    participateButton,
     timers,
     run: async () => {
       const definition = buildTrackingPageDefinition();
@@ -117,13 +133,24 @@ const boardPayload = {
         freshness: { boundaryBlock: 192278, evaluatedAtMs: 1, eventCount: 79 },
         myRoles: [],
         myStats: null,
-        settlementFinalized: true,
+        settlementFinalized: false,
       },
     ],
     identities: { idq1publisherx: { name: 'Pilot Publisher', avatar: null } },
     alerts: [],
     activation: { hAct2: 191500, hAct3: 192800 },
     refresh: { lastRefreshAtMs: 1, lastOkAtMs: 1, lastError: null, boundaryBlock: 192278, refreshing: false },
+  },
+};
+
+const draftPayload = {
+  ok: true,
+  state: 'success',
+  data: {
+    lang: 'en',
+    mode: 'competitive',
+    node: 'S1',
+    text: 'Please have the local MetaBot join the on-chain COMPETITIVE task…',
   },
 };
 
@@ -214,4 +241,33 @@ test('chainview: raceTip picks max coverage, then passVotes, then earliest', () 
   assert.equal(raceTip([shallow, deep, deepTie, verified, failed]).pinId, 'deepTie');
   // Nothing live → null.
   assert.equal(raceTip([verified]), null);
+});
+
+
+test('tracking page: participate button posts /api/metatask/draft and shows the copyable draft', async () => {
+  const harness = createHarness([
+    ['/api/metatask/board', boardPayload],
+    ['/api/metatask/draft', draftPayload],
+  ]);
+  await harness.run();
+  const boardHtml = harness.elements['[data-tracking-board]'].innerHTML;
+  assert.match(boardHtml, /data-tracking-participate=/, 'unsettled card carries a participate button');
+  assert.match(boardHtml, /Have my bot join/);
+
+  // Click the wired participate button (the page registered the listener on
+  // this element during renderBoard); the click flow must fetch the draft and
+  // surface it in the copyable overlay.
+  const click = harness.participateButton.listener('click');
+  assert.ok(click, 'participate click handler wired');
+  await click({ stopPropagation: () => undefined });
+  const participateFetch = harness.requests.find((request) => request.url === '/api/metatask/draft');
+  assert.ok(participateFetch, 'draft endpoint called');
+  assert.equal(participateFetch.options.method, 'POST');
+  const draftBody = String(participateFetch.options.body);
+  assert.match(draftBody, /"lang":"en"/);
+  assert.match(draftBody, /fad848f86d360fb6/);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(harness.elements['[data-tracking-draft]'].hidden, false, 'draft overlay shown');
+  assert.match(harness.elements['[data-tracking-draft-text]'].value, /COMPETITIVE task/);
 });
