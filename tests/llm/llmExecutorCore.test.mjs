@@ -3011,6 +3011,62 @@ rl.on('line', (line) => {
   assert.equal(result.output, 'Done');
 });
 
+test('Codex backend survives willRetry error notifications and surfaces nested error messages', async () => {
+  const base = await createTempDir();
+  const binaryPath = await writeExecutableScript(base, 'fake-codex-reconnect.js', `#!/usr/bin/env node
+const readline = require('node:readline');
+const rl = readline.createInterface({ input: process.stdin });
+const threadId = 'thread-codex-reconnect';
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+rl.on('line', (line) => {
+  const request = JSON.parse(line);
+  if (request.method === 'initialize') {
+    send({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: 'test' } });
+    return;
+  }
+  if (request.method === 'thread/start') {
+    send({ jsonrpc: '2.0', id: request.id, result: { thread: { id: threadId } } });
+    return;
+  }
+  if (request.method === 'turn/start') {
+    send({ jsonrpc: '2.0', id: request.id, result: { turn: { id: 'turn-1' } } });
+    send({ jsonrpc: '2.0', method: 'turn/started', params: { threadId, turn: { id: 'turn-1' } } });
+    // codex 0.159.x streams transient upstream failures as error
+    // notifications with willRetry=true at the params level
+    // ("Reconnecting... 1/5") before the terminal one; the turn must
+    // outlive the retries.
+    send({ jsonrpc: '2.0', method: 'error', params: { threadId, willRetry: true, error: { message: 'Reconnecting... 1/5' } } });
+    send({ jsonrpc: '2.0', method: 'error', params: { threadId, willRetry: true, error: { message: 'Reconnecting... 2/5' } } });
+    send({ jsonrpc: '2.0', method: 'thread/status/changed', params: { threadId, status: { type: 'active', activeFlags: [] } } });
+    send({ jsonrpc: '2.0', method: 'error', params: { threadId, willRetry: false, error: { message: 'unexpected status 403 Forbidden: upstream rejected the route' } } });
+    send({ jsonrpc: '2.0', method: 'turn/completed', params: { threadId, turn: { id: 'turn-1', status: 'failed', error: { message: 'unexpected status 403 Forbidden: upstream rejected the route' } } } });
+    setTimeout(() => process.exit(0), 10);
+  }
+});
+`);
+
+  const backend = createCodexBackend(binaryPath);
+  const events = [];
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_codex',
+      runtime: { ...runtime, provider: 'codex', binaryPath },
+      prompt: 'hello codex',
+      cwd: base,
+      timeout: 5_000,
+    },
+    { emit: (event) => events.push(event) },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /403 Forbidden: upstream rejected the route/);
+  const warningLogs = events.filter((event) => event.type === 'log' && event.level === 'warning');
+  assert.deepEqual(warningLogs.map((event) => event.message), ['Reconnecting... 1/5', 'Reconnecting... 2/5']);
+});
+
 test('Codex backend returns timeout promptly when the child ignores SIGTERM', { timeout: 4_000 }, async () => {
   const base = await createTempDir();
   const binaryPath = await writeExecutableScript(base, 'fake-codex-ignore-sigterm.js', `#!/usr/bin/env node

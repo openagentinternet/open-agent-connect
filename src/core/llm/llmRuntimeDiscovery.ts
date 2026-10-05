@@ -432,6 +432,15 @@ function cliVersionBelowMinimum(actual: string | undefined, minimum: string): bo
 }
 
 /**
+ * Version floor check shared with the model catalog (e.g. the codex
+ * `debug models` gate). Unparsable versions fail open, mirroring the
+ * minimum-version gate semantics.
+ */
+export function cliVersionAtLeast(actual: string | undefined, minimum: string): boolean {
+  return !cliVersionBelowMinimum(actual, minimum);
+}
+
+/**
  * Minimum-CLI-version gate (mirrors multica's BelowMinimumError semantics): a
  * parsed-but-below-floor version produces an unavailable health reason with an
  * upgrade hint so users see an actionable message instead of a cryptic

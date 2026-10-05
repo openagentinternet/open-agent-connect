@@ -85,3 +85,24 @@ Surface via daemon API + `oac` CLI; use to warn on unknown configured models (ne
 1. P2 scope at release: (a) full catalog layer, (b) claude + codex + cursor only (recommended), or (c) defer all of P2.
 2. Gemini: keep as supported (flags verified current) — confirm.
 3. New platforms (P4 list): confirm deferral to post-release.
+
+## P1 Findings — live smoke matrix (2026-10-05, this machine)
+
+Ran `scripts/smoke-llm-runtimes.mjs` (full discovery + one-shot readiness turns) plus direct backend drives and manual CLI comparisons.
+
+**Code-level outcomes:**
+
+- **WorkBuddy (bundle CLI v2.115.0): PASS** — the rewritten codebuddy backend (stdin stream-json prompt, bypassPermissions, per-tool --disallowedTools, forced CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS) completed a real turn.
+- **Kimi 2.0.2: PASS in isolation** — backend drive with the real HOME ("OK" in 13.5s) and with a probe-style redirected+seeded HOME (6.2s) both succeed; the concurrent-sweep timeout was load-related, not an adapter break.
+- **Codex 0.159.3: protocol fully compatible, adapter polish applied.** Manual JSON-RPC drive confirmed initialize → thread/start (`result.thread.id`, already handled) → turn/start → item events all work. The turn itself failed only because this machine's codex routes through a third-party relay (`ls-qihang.cn`) that answers 403. Surfaced three real adapter gaps, now fixed: error notifications carry the message at `params.error.message` (OAC read `params.message` and showed a bare "codex error"), `willRetry: true` reconnect notifications are transient (OAC failed on the first one), and `turn.error` / `thread/status/changed.status` arrive as objects on this CLI line.
+- **Claude Code 2.1.286: no shape regression.** Old argv shape and new stdin shape behave identically live (both reach the API and enter the same retry loop) — the readiness timeout on this machine is a network/account issue, not the invocation change.
+- **Cursor 2026.07.23: flags verified current** (flag parsing precedes the auth check; both OAC's and multica's shapes parse). Full E2E needs `agent login`.
+- **opencode 1.16.0, openclaw 2026.5.5, zcode (bundle), gemini 0.46.0: environment/account issues, not invocation breaks** — DeepSeek-side 402 insufficient balance (openclaw, opencode's default provider, zcode), opencode works with an explicit free model, gemini has no auth method configured, cursor not logged in.
+
+**Release checklist for the user's machine:** top up DeepSeek/bigmodel balance (openclaw, zcode, opencode default), fix or disable the codex relay route (or use official auth), restore Anthropic connectivity for claude, run `gemini` once to auth, `cursor-agent login` for cursor. After those, re-run `node scripts/smoke-llm-runtimes.mjs --models` and expect all installed platforms PASS.
+
+## P2/P3 delivery (2026-10-05)
+
+- `src/core/llm/modelCatalog.ts`: live discovery for claude-code (stream-json `list_models` control request), codex (`debug models` live → `--bundled` → static, gated at 0.122.0), and cursor (`--list-models` rows), each degrading to a flagged static fallback that callers must never persist or hard-validate against. Static lists ported from multica's 2026-10 catalog. Surfaced via `scripts/smoke-llm-runtimes.mjs --models`; daemon/API/UI surfacing is a post-release follow-up.
+- Live-verified locally: codex catalog came back `live` with 8 models (gpt-6-astra, gpt-6.1-sol, gpt-6-sol, gpt-6-luna, ...) against codex-cli 0.159.3.
+- P3 turned out to be mostly covered by the existing fixture suite (copilot/hermes/pi/kiro fakes run in the fast tier); this round added the codex 0.159.3 drift shapes (params-level `willRetry`, nested `error.message`, object `turn.error`, object thread status) as regression fixtures.
