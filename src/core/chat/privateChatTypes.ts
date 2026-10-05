@@ -86,10 +86,19 @@ export interface ChatReplyRunnerInput {
   // orchestrator uses it to send the peer a short wait notice before a long
   // skill execution; it must never break the reply path.
   onSkillExecutionStart?: () => void;
+  // Host-injected notice appended to the prompt (wake checks, empty-reply
+  // retries). Empty/null means a plain turn.
+  hostNoticeText?: string | null;
 }
 
 export interface ChatReplyRunnerResult {
-  state: 'reply' | 'end_conversation' | 'skip';
+  // 'reply': deliver content. 'end_conversation': deliver content and close.
+  // 'no_reply': the model deliberately chose silence ([NO_REPLY]) — record a
+  // local marker, deliver nothing, and arm a wake (IDBots parity).
+  // 'empty_reply': the LLM completed but emitted no final text (reasoning-only
+  // completion) — retryable with a host notice; never deliverable.
+  // 'skip': no reply could be produced at all (no runtime, runner failure).
+  state: 'reply' | 'end_conversation' | 'no_reply' | 'empty_reply' | 'skip';
   content?: string;
   extensions?: Record<string, unknown>;
 }
@@ -104,4 +113,7 @@ export interface PrivateChatAutoReplyConfig {
   defaultStrategyId: string | null;
   maxTurns?: number;
   cooldownMs?: number;
+  // Wake schedule for silent-but-open conversation tails (IDBots parity).
+  // Defaults to DEFAULT_PRIVATE_CHAT_WAKE_DELAYS_MS when absent.
+  wakeDelaysMs?: number[];
 }

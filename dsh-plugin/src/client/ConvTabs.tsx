@@ -43,6 +43,7 @@ import { pickDefaultAvailableBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import { timestampLabel } from './api.ts'
 import type { UnreadState } from '../unread-logic.ts'
+import { sumPrivateUnreadCounts } from '../unread-logic.ts'
 import { CONV_TABS, loadConvFrom, saveConvFrom, type ConvTab } from '../conv-tab-logic.ts'
 import type { ConvTabState } from './conv-tab-store.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
@@ -96,16 +97,17 @@ const GROUP_STATUS_KEY: Record<GroupTaskStatus, ConversationsLocaleKey> = {
   cancelled: 'gtStatusCancelled',
 }
 
-/** The three-cell strip; dots mark unread online chats / group tasks. */
+/** The three-cell strip; the 线上对话 tab shows the unread message count,
+    the 群任务 tab a dot (group events carry no counts). */
 function TabStrip({
   tab,
-  hasOnlineUnread,
+  onlineUnreadCount,
   hasGroupUnread,
   onSelect,
   t,
 }: {
   tab: ConvTab
-  hasOnlineUnread: boolean
+  onlineUnreadCount: number
   hasGroupUnread: boolean
   onSelect: (tab: ConvTab) => void
   t: ConvTabsTranslate
@@ -113,7 +115,8 @@ function TabStrip({
   return (
     <div className="oac-conv-tablist" role="tablist" aria-label={t('convTabStripLabel')}>
       {CONV_TABS.map((key) => {
-        const dot = key === 'online' ? hasOnlineUnread : key === 'group' ? hasGroupUnread : false
+        const dot = key === 'group' ? hasGroupUnread : false
+        const count = key === 'online' ? onlineUnreadCount : 0
         return (
           <button
             key={key}
@@ -125,6 +128,9 @@ function TabStrip({
             onClick={() => { onSelect(key) }}
           >
             <span className="oac-conv-tab-label">{t(TAB_LABEL_KEY[key])}</span>
+            {count > 0
+              ? <span className="oac-unread-count" aria-label={t('unread')}>{count > 99 ? '99+' : count}</span>
+              : null}
             {dot ? <span className="oac-conv-tab-dot" aria-hidden="true" /> : null}
           </button>
         )
@@ -308,7 +314,14 @@ function OnlineList({
                 <span className="oac-a2a-row-text">{row.latestText}</span>
               </span>
               {unread.private[`${from}:${row.peerGlobalMetaId}`]
-                ? <span className="oac-unread-dot" aria-label={t('unread')} />
+                ? (
+                  <span className="oac-unread-count" aria-label={t('unread')}>
+                    {(() => {
+                      const count = Math.trunc(Number(unread.privateCounts[`${from}:${row.peerGlobalMetaId}`]) || 0)
+                      return count > 99 ? '99+' : Math.max(1, count)
+                    })()}
+                  </span>
+                )
                 : null}
               {/* No `time`: the row top already carries the relative label
                   (oac-conv-row-time), so the trail's swap-label would double
@@ -781,13 +794,13 @@ export function ConvTabs({
 }: ConvTabsInjected & { t: ConvTabsTranslate }): ReactNode {
   const tab = useSyncExternalStore(hooks.tabs.subscribe, () => hooks.tabs.getSnapshot().tab)
   const unread = useSyncExternalStore(hooks.unread.subscribe, hooks.unread.getSnapshot)
-  const hasOnlineUnread = Object.keys(unread.private).length > 0
+  const onlineUnreadCount = sumPrivateUnreadCounts(unread)
   const hasGroupUnread = Object.keys(unread.group).length > 0
   return (
     <div className="oac-conv-tabs-host">
       <TabStrip
         tab={tab}
-        hasOnlineUnread={hasOnlineUnread}
+        onlineUnreadCount={onlineUnreadCount}
         hasGroupUnread={hasGroupUnread}
         onSelect={setTab}
         t={t}

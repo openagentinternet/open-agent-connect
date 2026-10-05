@@ -32,7 +32,8 @@ export interface AutomationConfig {
 
 export const AUTO_REPLY_MAX_TURNS_OPTIONS: readonly number[] = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
 export const AUTO_REPLY_COOLDOWN_MS_OPTIONS: readonly number[] = [60_000, 300_000, 600_000, 1_800_000, 3_600_000];
-export const DEFAULT_AUTO_REPLY_MAX_TURNS = 10;
+// IDBots parity: 50 turns per active private-chat session by default.
+export const DEFAULT_AUTO_REPLY_MAX_TURNS = 50;
 export const DEFAULT_AUTO_REPLY_COOLDOWN_MS = 60_000;
 
 export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';

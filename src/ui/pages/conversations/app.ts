@@ -46,6 +46,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
             </div>
           </header>
           <div class="conversation-messages" data-conversation-messages></div>
+          <div class="conversation-typing" data-conversation-typing hidden aria-live="polite"><span class="conversation-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span><span data-conversation-typing-text></span></div>
           <footer class="conversation-guidance-footer" data-conversation-guidance>
             <div class="conversation-readonly-status" data-conversation-readonly-status data-i18n-key="conversations.readonlyStatus">${i18n.t('conversations.readonlyStatus')}</div>
             <button class="btn btn-sm" type="button" data-guidance-toggle data-i18n-key="conversations.guidanceToggle">${i18n.t('conversations.guidanceToggle')}</button>
@@ -106,6 +107,8 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     guidanceSend: document.querySelector('[data-guidance-send]'),
     guidanceCancel: document.querySelector('[data-guidance-cancel]'),
     guidanceStatus: document.querySelector('[data-guidance-status]'),
+    typing: document.querySelector('[data-conversation-typing]'),
+    typingText: document.querySelector('[data-conversation-typing-text]'),
     toast: document.querySelector('[data-copy-toast]'),
   };
   const escapeHtml = (value) => String(value == null ? '' : value)
@@ -203,6 +206,29 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     guidanceSubmitting: false,
     guidanceStatus: '',
     pendingGuidance: null,
+    // Live reply-turn activity per peer (conversation-reply-state SSE events).
+    replyingPeers: {},
+    // Live unread counts per peer for the selected local Bot (localStorage).
+    unreadByPeer: {},
+  };
+
+  const UNREAD_STORAGE_KEY = 'oac-conversations-unread-v1';
+  const loadUnreadState = () => {
+    try {
+      const raw = window.localStorage.getItem(UNREAD_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      state.unreadByPeer = (parsed && parsed[state.selectedLocalGlobalMetaId]) || {};
+    } catch {
+      state.unreadByPeer = {};
+    }
+  };
+  const saveUnreadState = () => {
+    try {
+      const raw = window.localStorage.getItem(UNREAD_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsed[state.selectedLocalGlobalMetaId] = state.unreadByPeer;
+      window.localStorage.setItem(UNREAD_STORAGE_KEY, JSON.stringify(parsed));
+    } catch {}
   };
 
   let nextGuidanceSubmissionToken = 0;
@@ -542,6 +568,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       return;
     }
     model.conversations.forEach((conversation) => {
+      const unreadCount = Math.max(0, Math.trunc(Number(state.unreadByPeer[conversation.peerGlobalMetaId]) || 0));
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'conversation-row';
@@ -554,7 +581,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
         ' data-bot-browser-open="' + escapeHtml(conversation.peerGlobalMetaId) + '"',
       ) +
         '<div class="conversation-row-main">' +
-          '<div class="conversation-row-identity"><strong>' + escapeHtml(conversation.peerLabel) + '</strong></div>' +
+          '<div class="conversation-row-identity"><strong>' + escapeHtml(conversation.peerLabel) + '</strong>' + (unreadCount ? '<span class="conversation-row-unread">' + unreadCount + '</span>' : '') + '</div>' +
           '<p>' + escapeHtml(conversation.latestText) + '</p>' +
           '<div class="conversation-kind-list">' + conversation.kinds.map((kind) => '<span>' + escapeHtml(localizeKnownText(kind)) + '</span>').join('') + '</div>' +
         '</div>' +
@@ -566,6 +593,38 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       elements.list.appendChild(button);
     });
   };
+  const renderTypingIndicator = () => {
+    if (!elements.typing || !elements.typingText) return;
+    const replying = Boolean(
+      state.selectedPeerGlobalMetaId
+      && state.replyingPeers[state.selectedPeerGlobalMetaId]
+    );
+    elements.typing.hidden = !replying;
+    if (replying) {
+      elements.typingText.textContent = uiText('conversations.replyingStatus', 'Local Bot is replying…');
+    }
+  };
+  const updateJumpLatestButton = () => {
+    if (!jumpLatestButton || !elements.messages) return;
+    jumpLatestButton.hidden = isScrollNearBottom(elements.messages);
+  };
+  // Floating back-to-bottom control (IDBots parity): lives INSIDE the
+  // messages scroll container as a sticky tail child, so it floats over the
+  // thread wherever history is scrolled up. renderDetail re-appends it after
+  // each render because the container is wiped on every refresh.
+  const jumpLatestButton = document.createElement('button');
+  jumpLatestButton.type = 'button';
+  jumpLatestButton.className = 'conversation-jump-latest';
+  jumpLatestButton.hidden = true;
+  jumpLatestButton.addEventListener('click', () => {
+    scrollToBottom();
+    updateJumpLatestButton();
+  });
+  const refreshJumpLatestLabel = () => {
+    jumpLatestButton.textContent = uiText('conversations.jumpToLatest', 'Jump to latest');
+    jumpLatestButton.title = jumpLatestButton.textContent;
+  };
+  refreshJumpLatestLabel();
   const renderGuidanceComposer = (model) => {
     const selected = model.selectedConversation;
     const hasTarget = Boolean(selected && hasGuidanceTarget());
@@ -615,6 +674,23 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const html = [];
     let paragraph = [];
     let listType = '';
+    // Fenced code blocks (triple-backtick fences): the fence lines themselves
+    // never render, and the code body is escaped verbatim without inline
+    // markdown.
+    const codeTick = String.fromCharCode(96);
+    let codeLines = null;
+    const isFenceLine = (value) => value.trim().indexOf(codeTick + codeTick + codeTick) === 0;
+    const isClosingFence = (value) => {
+      const trimmed = value.trim();
+      return trimmed.length > 0 && trimmed.split('').every((char) => char === codeTick);
+    };
+    const flushCode = () => {
+      if (codeLines === null) return;
+      if (codeLines.length) {
+        html.push('<pre class="md-code-block"><code>' + escapeHtml(codeLines.join('\\n')) + '</code></pre>');
+      }
+      codeLines = null;
+    };
     const flushParagraph = () => {
       if (!paragraph.length) return;
       html.push('<p>' + paragraph.map(renderInlineMarkdown).join('<br>') + '</p>');
@@ -633,6 +709,17 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       html.push('<' + type + '>');
     };
     lines.forEach((line) => {
+      if (codeLines !== null) {
+        if (isFenceLine(line) && isClosingFence(line)) flushCode();
+        else codeLines.push(line);
+        return;
+      }
+      if (isFenceLine(line)) {
+        flushParagraph();
+        flushList();
+        codeLines = [];
+        return;
+      }
       if (!line.trim()) {
         flushParagraph();
         flushList();
@@ -668,6 +755,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       flushList();
       paragraph.push(line);
     });
+    flushCode();
     flushParagraph();
     flushList();
     return html.join('');
@@ -747,6 +835,12 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     '</div>';
   };
   const renderMessage = (message, selected, model) => {
+    // Local-only host status lines (wake checks, retries, withheld replies)
+    // render as centered internal notes, never as chat bubbles (IDBots
+    // internal-status parity).
+    if (message.hostStatus) {
+      return '<div class="msg-host-status">' + escapeHtml(message.content) + '</div>';
+    }
     const isLocal = message.directionLabel === 'Bot' || message.direction === 'outgoing' || message.direction === 'outbound';
     const local = model.localBots.find((bot) => bot.globalMetaId === model.selectedLocalGlobalMetaId) || null;
     const fallbackName = isLocal
@@ -765,7 +859,13 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       ? '<span class="msg-txid"><span class="msg-txid-text" data-message-txid-preview>txid: ' + escapeHtml(message.txidPreview) + '</span>' + copyButton(message.txid, uiText('conversations.copyTxid', 'Copy txid'), 'copy-txid', uiText('conversations.txidCopied', 'TxID copied')) + '</span>'
       : '<span class="msg-txid msg-txid-empty">txid: -</span>';
     const timeHtml = '<span class="msg-time">' + escapeHtml(message.timestampLabel) + '</span>';
-    const metaHtml = isLocal ? txidHtml + timeHtml : timeHtml + txidHtml;
+    let deliveryHtml = '';
+    if (isLocal && message.deliveryStatus === 'pending') {
+      deliveryHtml = '<span class="msg-delivery msg-delivery-pending">' + escapeHtml(uiText('conversations.sending', 'Sending…')) + '</span>';
+    } else if (isLocal && message.deliveryStatus === 'failed') {
+      deliveryHtml = '<span class="msg-delivery msg-delivery-failed">' + escapeHtml(uiText('conversations.deliveryFailed', 'Failed to send')) + '</span>';
+    }
+    const metaHtml = isLocal ? txidHtml + timeHtml + deliveryHtml : timeHtml + txidHtml;
     return '<article class="msg-row ' + (isLocal ? 'msg-local' : 'msg-peer') + '" data-message-direction="' + (isLocal ? 'local' : 'peer') + '">' +
       avatarHtml +
       '<div class="msg-body">' +
@@ -802,6 +902,8 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const wrapper = document.createElement('div');
     wrapper.innerHTML = model.messages.map((message) => renderMessage(message, selected, model)).join('');
     while (wrapper.firstChild) elements.messages.appendChild(wrapper.firstChild);
+    elements.messages.appendChild(jumpLatestButton);
+    updateJumpLatestButton();
   };
   const render = () => {
     const model = buildModel();
@@ -812,6 +914,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     renderList(model);
     renderDetail(model);
     renderGuidanceComposer(model);
+    renderTypingIndicator();
     hydrateAvatarFallbacks(document);
   };
 
@@ -959,8 +1062,35 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
         stickToBottom: wasNearBottom,
       });
     };
-    source.addEventListener('conversation-message', refresh);
+    source.addEventListener('conversation-message', (event) => {
+      // Unread counting: only peer-authored messages light a badge, and never
+      // for the thread currently on screen (it is being read).
+      try {
+        const data = JSON.parse(event.data);
+        const peer = normalizeText(data && data.peerGlobalMetaId);
+        if (
+          peer
+          && normalizeText(data && data.direction) === 'incoming'
+          && peer !== state.selectedPeerGlobalMetaId
+        ) {
+          state.unreadByPeer[peer] = (Number(state.unreadByPeer[peer]) || 0) + 1;
+          saveUnreadState();
+          renderList(buildModel());
+        }
+      } catch {}
+      refresh();
+    });
     source.addEventListener('conversation-update', refresh);
+    source.addEventListener('conversation-reply-state', (event) => {
+      // Live activity (IDBots StreamingActivityBar parity): toggle the
+      // "local bot is replying" indicator without a data reload.
+      try {
+        const data = JSON.parse(event.data);
+        const peer = normalizeText(data && data.peerGlobalMetaId);
+        if (peer) state.replyingPeers[peer] = data.replying === true;
+      } catch {}
+      renderTypingIndicator();
+    });
     source.onerror = () => {
       if (state.eventSource !== source) source.close();
     };
@@ -1034,6 +1164,11 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     state.beforeCursor = null;
     state.afterCursor = null;
     state.hasMoreBefore = false;
+    // Opening a thread reads it: clear its unread badge.
+    if (state.unreadByPeer[peerGlobalMetaId]) {
+      state.unreadByPeer[peerGlobalMetaId] = 0;
+      saveUnreadState();
+    }
     resetGuidanceComposer();
     setUrlState();
     render();
@@ -1047,6 +1182,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     state.beforeCursor = null;
     state.afterCursor = null;
     state.hasMoreBefore = false;
+    loadUnreadState();
     resetGuidanceComposer();
     setUrlState();
     openEvents();
@@ -1110,12 +1246,16 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       if (elements.messages.scrollTop <= 0 && state.hasMoreBefore && !state.loadingMessages && !state.loadingOlder) {
         loadMessages({ appendOlder: true });
       }
+      updateJumpLatestButton();
     });
   }
   window.addEventListener('beforeunload', () => {
     if (state.eventSource) state.eventSource.close();
   });
-  window.addEventListener('oac:i18n-changed', () => render());
+  window.addEventListener('oac:i18n-changed', () => {
+    refreshJumpLatestLabel();
+    render();
+  });
 
   // ── Group task section (DSH GroupTaskView parity) ──────────────────────────
   const gtElements = {
@@ -1481,6 +1621,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
   loadProfiles()
     .then(() => {
       setUrlState();
+      loadUnreadState();
       openEvents();
       return loadConversations({ stickToBottom: true });
     })

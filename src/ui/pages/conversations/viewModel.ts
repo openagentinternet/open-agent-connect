@@ -39,6 +39,8 @@ export interface ConversationMessageViewModel {
   txid: string;
   txidPreview: string;
   timestampLabel: string;
+  hostStatus: boolean;
+  deliveryStatus: string;
 }
 
 export interface ConversationsEmptyStateViewModel {
@@ -378,6 +380,8 @@ function buildMessage(row: unknown): ConversationMessageViewModel {
     txid,
     txidPreview: formatTxidPreview(txid),
     timestampLabel: formatTimestamp(timestamp || normalizeTimestampMs(sender.timestamp)),
+    hostStatus: record.hostStatus === true,
+    deliveryStatus: normalizeText(record.deliveryStatus),
   };
 }
 

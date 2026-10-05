@@ -351,7 +351,9 @@ import {
   persistA2AConversationMessageBestEffort,
   publishA2AConversationPersistenceEvent,
   subscribeA2AConversationPersistenceEvents,
+  subscribeA2AConversationReplyState,
   type A2AConversationPersistenceEvent,
+  type A2AConversationReplyStateEvent,
   type A2AConversationMessagePersister,
 } from '../core/a2a/conversationPersistence';
 import {
@@ -5600,11 +5602,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
     llmFallbackProvider: string;
   };
 
-  type ConversationEvent = A2AConversationPersistenceEvent | {
-    type: 'conversation-update';
-    localGlobalMetaId: string;
-    timestamp: number;
-  };
+  type ConversationEvent =
+    | A2AConversationPersistenceEvent
+    | A2AConversationReplyStateEvent
+    | {
+      type: 'conversation-update';
+      localGlobalMetaId: string;
+      timestamp: number;
+    };
 
   const conversationProfileUpdateListeners = new Map<
     string,
@@ -5671,6 +5676,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         clearTimeout(conversationWatchTimer);
         conversationWatchTimer = null;
       }
+      queue.push(event);
+      wake();
+    });
+    // Live reply-turn activity (IDBots StreamingActivityBar parity) rides the
+    // same stream so UIs can show a "local bot is working" indicator.
+    const unsubscribeReplyState = subscribeA2AConversationReplyState(normalizedLocal, (event) => {
       queue.push(event);
       wake();
     });
@@ -5752,6 +5763,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       conversationWatcher?.close();
       unsubscribe();
       unsubscribeProfileUpdates();
+      unsubscribeReplyState();
     }
   }
 
@@ -5769,6 +5781,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           timestamp: message.timestamp,
           kind: message.kind,
           protocolTag: message.protocolTag ?? null,
+          direction: message.direction,
         });
       }
     }
@@ -17581,6 +17594,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             replyPinId: request.replyPin || null,
             chain: normalizeText(chatWrite.network) || 'mvc',
             timestamp: Date.now(),
+            deliveryStatus: 'sent',
             raw: {
               chainWrite: {
                 path: sent.path,

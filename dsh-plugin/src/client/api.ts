@@ -302,6 +302,10 @@ export type ConversationMessage = {
   txid?: string | null
   timestamp: number
   sender: ConversationActor
+  /** Delivery lifecycle for outgoing messages (pending/sent/failed). */
+  deliveryStatus?: 'pending' | 'sent' | 'failed' | null
+  /** Local-only host status line (wake checks, retries, withheld replies). */
+  hostStatus?: boolean
 }
 
 export type ConversationThread = {
@@ -1553,6 +1557,7 @@ function normalizeMessage(value: unknown): ConversationMessage {
   const rawContent = textOf(record.content) || textOf(record.text) || textOf(record.body)
   const key = orderProgressKey(record)
   const content = key ? rawContent.replace(ORDER_STATUS_TAG, '').trim() || rawContent : rawContent
+  const deliveryStatus = textOf(record.deliveryStatus)
   return {
     messageId: textOf(record.messageId) || textOf(record.id) || textOf(record.pinId) || textOf(record.messagePinId),
     direction: textOf(record.direction).toLowerCase(),
@@ -1562,6 +1567,10 @@ function normalizeMessage(value: unknown): ConversationMessage {
     txid: txidOf(record) || null,
     timestamp: toTimestampMs(record.timestamp || record.createdAt),
     sender: normalizeActor(record.sender),
+    ...(deliveryStatus === 'pending' || deliveryStatus === 'sent' || deliveryStatus === 'failed'
+      ? { deliveryStatus }
+      : {}),
+    ...(record.hostStatus === true ? { hostStatus: true } : {}),
   }
 }
 

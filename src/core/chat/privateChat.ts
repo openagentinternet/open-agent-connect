@@ -163,7 +163,10 @@ function buildPrivateMsgPayload(
     to: toGlobalMetaId,
     timestamp,
     content: encryptedContent,
-    contentType: 'text/plain',
+    // IDBots parity: private-chat bodies are markdown; receivers (including
+    // the IDBots app and the DSH plugin) gate markdown rendering on this
+    // value. text/plain bodies would render verbatim with raw asterisks.
+    contentType: 'text/markdown',
     encrypt: 'ecdh',
     replyPin: replyPinId,
   });

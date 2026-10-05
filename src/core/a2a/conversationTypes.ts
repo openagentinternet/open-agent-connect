@@ -41,6 +41,15 @@ export interface A2AConversationMessage {
   sender: A2AConversationActor;
   recipient: A2AConversationActor;
   raw?: Record<string, unknown> | null;
+  /** Delivery lifecycle for outgoing messages (IDBots parity): pending
+   * before the chain write settles, sent after it lands, failed when the
+   * write was rejected. Absent on incoming messages and legacy records. */
+  deliveryStatus?: 'pending' | 'sent' | 'failed' | null;
+  deliveryError?: string | null;
+  /** Local-only host notice (wake checks, empty-reply retries, withheld echo
+   * replies): never pinned on-chain and rendered as an internal status line
+   * rather than a chat bubble. */
+  hostStatus?: boolean;
 }
 
 export interface A2AConversationLocalProfile extends A2AConversationActor {

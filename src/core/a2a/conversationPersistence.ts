@@ -49,6 +49,9 @@ export interface PersistA2AConversationMessageInput {
     orderPinId?: string | null;
     paymentTxid?: string | null;
     raw?: Record<string, unknown> | null;
+    deliveryStatus?: 'pending' | 'sent' | 'failed' | null;
+    deliveryError?: string | null;
+    hostStatus?: boolean;
   };
   orderSession?: Partial<A2AOrderConversationSession> | null;
   replaceExistingMessage?: boolean;
@@ -66,6 +69,25 @@ export interface A2AConversationPersistenceEvent {
   timestamp: number;
   kind: string;
   protocolTag: string | null;
+  /** 'incoming' | 'outgoing' when known; lets UIs count only peer messages
+   * as unread instead of their own sends. */
+  direction?: string | null;
+}
+
+/**
+ * Live reply-turn activity (IDBots StreamingActivityBar parity): the
+ * auto-reply orchestrator publishes `replying: true` when a turn starts
+ * composing for a peer and `replying: false` when it settles. The events ride
+ * the same per-Bot conversation SSE stream as persistence events, so UIs can
+ * show a "local bot is working" indicator without polling. In-memory only:
+ * a daemon restart simply means no state until the next turn.
+ */
+export interface A2AConversationReplyStateEvent {
+  type: 'conversation-reply-state';
+  localGlobalMetaId: string;
+  peerGlobalMetaId: string;
+  replying: boolean;
+  timestamp: number;
 }
 
 export interface PersistA2AConversationMessageBestEffortResult {
@@ -75,6 +97,7 @@ export interface PersistA2AConversationMessageBestEffortResult {
 }
 
 const conversationPersistenceSubscribers = new Set<(event: A2AConversationPersistenceEvent) => void>();
+const conversationReplyStateSubscribers = new Set<(event: A2AConversationReplyStateEvent) => void>();
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -119,6 +142,34 @@ export function subscribeA2AConversationPersistenceEvents(
   conversationPersistenceSubscribers.add(filteredSubscriber);
   return () => {
     conversationPersistenceSubscribers.delete(filteredSubscriber);
+  };
+}
+
+export function publishA2AConversationReplyState(
+  event: A2AConversationReplyStateEvent,
+): void {
+  for (const subscriber of conversationReplyStateSubscribers) {
+    try {
+      subscriber(event);
+    } catch {
+      // One disconnected consumer must not block reply-state publishing.
+    }
+  }
+}
+
+export function subscribeA2AConversationReplyState(
+  localGlobalMetaId: string,
+  subscriber: (event: A2AConversationReplyStateEvent) => void,
+): () => void {
+  const normalizedLocal = normalizeText(localGlobalMetaId);
+  const filteredSubscriber = (event: A2AConversationReplyStateEvent) => {
+    if (event.localGlobalMetaId === normalizedLocal) {
+      subscriber(event);
+    }
+  };
+  conversationReplyStateSubscribers.add(filteredSubscriber);
+  return () => {
+    conversationReplyStateSubscribers.delete(filteredSubscriber);
   };
 }
 
@@ -314,6 +365,9 @@ export async function persistA2AConversationMessage(
     sender,
     recipient,
     raw: sanitizeA2ARawMetadata(input.message.raw),
+    ...(input.message.deliveryStatus ? { deliveryStatus: input.message.deliveryStatus } : {}),
+    ...(input.message.deliveryError ? { deliveryError: normalizeText(input.message.deliveryError) } : {}),
+    ...(input.message.hostStatus ? { hostStatus: true } : {}),
   };
 
   const store = createA2AConversationStore({ paths, local, peer });
@@ -418,6 +472,7 @@ export async function persistA2AConversationMessage(
     timestamp: message.timestamp,
     kind: message.kind,
     protocolTag: message.protocolTag ?? null,
+    direction: message.direction,
   });
   return message;
 }

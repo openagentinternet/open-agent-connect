@@ -2415,6 +2415,9 @@ export function createPrivateChatAutoReplyProfileDispatcher(
     }, profileAutoReplyConfig);
 
     orchestrators.set(cacheKey, orchestrator);
+    // Wake timers re-drive silent-but-open conversation tails (IDBots parity).
+    // Optional-call: injected test orchestrators may not implement the loop.
+    orchestrator.startWakeLoop?.();
     return orchestrator;
   }
 
@@ -7181,6 +7184,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       dshLlmPath: paths.dshLlmPath,
     }),
   }, sharedAutoReplyConfig);
+  // Wake timers re-drive silent-but-open conversation tails (IDBots parity);
+  // the loop no-ops when no wake records exist.
+  chatAutoReplyOrchestrator.startWakeLoop();
   const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
     autoReplyConfig: sharedAutoReplyConfig,
     resolvePeerChatPublicKey,

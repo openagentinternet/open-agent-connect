@@ -89,6 +89,13 @@ function MessageRow({
   const isImage = (message.contentType ?? '').toLowerCase().startsWith('image/')
   const isMarkdown = message.contentType === 'text/markdown'
   const mdLabels = useMemo(() => markdownLabels(t), [t])
+  // Local-only host status lines (wake checks, retries, withheld replies)
+  // render as centered internal notes, never as chat bubbles (IDBots
+  // internal-status parity).
+  if (message.hostStatus === true) {
+    return <div className="oac-a2a-host-status">{message.content}</div>
+  }
+  const deliveryStatus = message.deliveryStatus
   return (
     <div className={isLocal ? 'oac-a2a-msg oac-a2a-msg-local' : 'oac-a2a-msg oac-a2a-msg-peer'}>
       {senderGlobalMetaId
@@ -120,6 +127,12 @@ function MessageRow({
                 <span className="oac-a2a-msg-txid-empty">txid: -</span>
               )}
             </span>
+            {isLocal && deliveryStatus === 'pending' ? (
+              <span className="oac-a2a-delivery oac-a2a-delivery-pending">{t('sending')}</span>
+            ) : null}
+            {isLocal && deliveryStatus === 'failed' ? (
+              <span className="oac-a2a-delivery oac-a2a-delivery-failed">{t('deliveryFailed')}</span>
+            ) : null}
             <span className="oac-a2a-msg-time" title={timestampLabel(message.timestamp)}>
               {relativeTimeLabel(message.timestamp)}
             </span>
@@ -192,6 +205,10 @@ export function A2AConversation({
   // The group task the user opened last; its live updates stay read while it
   // is on screen.
   const [taskKey, setTaskKey] = useState('')
+  // Live reply-turn activity per peer (conversation-reply-state SSE events,
+  // IDBots StreamingActivityBar parity) and the back-to-bottom affordance.
+  const [replyingPeers, setReplyingPeers] = useState<Record<string, boolean>>({})
+  const [showJumpLatest, setShowJumpLatest] = useState(false)
   const unread = useUnread((state) => state)
   const panelTarget = usePanel((state) => state.target)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -347,7 +364,9 @@ export function A2AConversation({
   const onMessagesScroll = useCallback((): void => {
     const el = messagesRef.current
     if (!el) return
-    pinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    pinnedToBottomRef.current = nearBottom
+    setShowJumpLatest((prev) => (prev === !nearBottom ? prev : !nearBottom))
   }, [])
 
   useEffect(() => {
@@ -384,6 +403,19 @@ export function A2AConversation({
       }, 400)
     }
     source.addEventListener('conversation-update', onUpdate)
+    // Live reply-turn activity: toggle the "local bot is working" indicator
+    // without a data reload.
+    source.addEventListener('conversation-reply-state', (event) => {
+      try {
+        const data = JSON.parse(event.data) as { peerGlobalMetaId?: string; replying?: boolean }
+        const peer = (data.peerGlobalMetaId ?? '').trim()
+        if (!peer) return
+        const replying = data.replying === true
+        setReplyingPeers((prev) => (prev[peer] === replying ? prev : { ...prev, [peer]: replying }))
+      } catch {
+        // Ignore malformed activity events.
+      }
+    })
     return () => {
       if (timer !== null) clearTimeout(timer)
       source?.close()
@@ -593,7 +625,28 @@ export function A2AConversation({
                 t={t}
               />
             ))}
+            {threadStatus === 'ready' && replyingPeers[selectedPeer] === true ? (
+              <div className="oac-a2a-typing" aria-live="polite">
+                <span className="oac-a2a-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                <span>{t('workingStatus')}</span>
+              </div>
+            ) : null}
           </div>
+          {showJumpLatest ? (
+            <button
+              type="button"
+              className="oac-a2a-jump-latest"
+              onClick={() => {
+                const el = messagesRef.current
+                if (!el) return
+                el.scrollTop = el.scrollHeight
+                pinnedToBottomRef.current = true
+                setShowJumpLatest(false)
+              }}
+            >
+              {t('jumpToLatest')}
+            </button>
+          ) : null}
           <div className="oac-a2a-composer">
             {selectedPeer ? (
               <div className="oac-a2a-guidance">

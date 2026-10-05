@@ -199,7 +199,7 @@ test('buildChatPrompt handles empty persona gracefully', () => {
 
 test('buildChatPrompt handles missing strategy', () => {
   const prompt = buildChatPrompt(makeInput({ strategy: null }));
-  assert.ok(prompt.includes('Current turn: 5 / 30'));
+  assert.ok(prompt.includes('Current turn: 5 / 50'));
   assert.ok(!prompt.includes('Conversation objective'));
 });
 
@@ -233,9 +233,19 @@ test('parseRunnerOutput detects Bye only on the final non-empty line', () => {
   assert.equal(result.content, 'Goodbye! It was nice chatting.\nBye');
 });
 
-test('parseRunnerOutput returns skip for empty output', () => {
+test('parseRunnerOutput returns empty_reply for empty output', () => {
   const result = parseRunnerOutput('');
-  assert.equal(result.state, 'skip');
+  assert.equal(result.state, 'empty_reply');
+});
+
+test('parseRunnerOutput detects the [NO_REPLY] sentinel exactly', () => {
+  assert.equal(parseRunnerOutput('[NO_REPLY]').state, 'no_reply');
+  assert.equal(parseRunnerOutput('  `[NO_REPLY]` ').state, 'no_reply');
+  assert.equal(parseRunnerOutput('[no_reply].').state, 'no_reply');
+  // Any prose around the sentinel is a real reply and must be delivered.
+  const prose = parseRunnerOutput('[NO_REPLY] — actually, one more thing: sure.');
+  assert.equal(prose.state, 'reply');
+  assert.equal(prose.content, '[NO_REPLY] — actually, one more thing: sure.');
 });
 
 test('parseRunnerOutput ignores inline Bye text as a close signal', () => {
@@ -829,7 +839,7 @@ test('host LLM chat runner does not globally mark a strict scoped runtime unavai
   assert.deepEqual(resolverCalls.markRuntimeUnavailable ?? [], []);
 });
 
-test('host LLM chat runner treats completed empty output as unavailable and tries fallback', async () => {
+test('host LLM chat runner returns empty_reply for completed empty output without marking the runtime unavailable', async () => {
   const primaryRuntime = {
     id: 'llm-runtime-primary',
     provider: 'codebuddy',
@@ -911,13 +921,15 @@ test('host LLM chat runner treats completed empty output as unavailable and trie
 
   const result = await runner(makeInput());
 
-  assert.deepEqual(result, { state: 'reply', content: 'Fallback reply works.' });
+  // A completed-but-empty final text (reasoning-only completion) is a verdict,
+  // not a runtime failure: the orchestrator retries it with a host notice, so
+  // no fallback runtime is burned and the runtime stays selectable.
+  assert.deepEqual(result, { state: 'empty_reply' });
   assert.deepEqual(executorCalls.map((request) => request.runtimeId), [
     primaryRuntime.id,
-    fallbackRuntime.id,
   ]);
-  assert.deepEqual(resolverCalls.markRuntimeUnavailable, [primaryRuntime.id]);
-  assert.deepEqual(resolverCalls.markBindingUsed, ['binding-fallback']);
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable, []);
+  assert.deepEqual(resolverCalls.markBindingUsed, ['binding-primary']);
 });
 
 test('host LLM chat runner skips unavailable runtimes before executing', async () => {
