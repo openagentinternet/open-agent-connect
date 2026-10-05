@@ -69,16 +69,17 @@ After install, the left rail gains a **Bots** row directly below 插件. It
 opens the plugin's own Bots page, whose left nav hosts these sections:
 
 - My Bots (我的 Bot)
-- 定时任务 (Scheduled — every local Bot's tasks in one list)
-- Memory
-- User
 - MetaApps (元应用 — two tabs: 链上元应用, the global on-chain feed with author
   cards, and 本机元应用, the per-Bot published apps)
-- Traffic (流量)
+- Plugin Settings (插件设置 — the former User and Traffic sections, merged as
+  two top tabs: 用户, the owner-identity panel, and 流量, the account-quota
+  billing panel)
 
-(Services stays hidden until the service plugin matures; A2A Chat opens from
-the conversation-list 线上对话 / 群任务 tabs, not from the Bots page.) DSH
-Settings stays stock — there is no OAC footprint in it.
+Per-Bot surfaces live inside each Bot's editor: the 定时任务 (Scheduled) list
+for all local Bots is the 定时任务 tab of the A2A Chat overlay (opened from
+the conversation-list 线上对话 / 群任务 tabs), and Memory is a Memory tab in
+each Bot's editor. (Services stays hidden until the service plugin matures.)
+DSH Settings stays stock — there is no OAC footprint in it.
 
 ## Memory, dreams, and the Twin Bot
 
@@ -101,12 +102,12 @@ Every Bot gets the ported IDBots memory system automatically:
   profile), dream memories, knowledge points, person impressions, and the
   evolving self-identity. Requires the Bot's DSH provider/model on its
   profile (set at creation).
-- **Bots page → Memory**: per-Bot policy card, the read-only self-identity,
+- **Bot editor → Memory tab**: per-Bot policy card, the read-only self-identity,
   and the Knowledge/Contacts/Facts/Dream tabs (with a manual "run dream"
   date picker). Facts can be added/edited by hand with a usage-class
   (personal fact / preference / operational preference / work review / value
   boundary).
-- **Bots page → User**: the local human **owner** identity — the person who
+- **Bots page → Plugin Settings → User tab**: the local human **owner** identity — the person who
   talks to the Bots, not a Bot. Create a new identity (fresh mnemonic) or
   import one from a BIP39 mnemonic, back up the mnemonic, and rename it. It
   is stored once per machine at `~/.metabot/owner/identity.json` (mode 0600)
