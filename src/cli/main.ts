@@ -16,6 +16,7 @@ import { runChainCommand } from './commands/chain';
 import { runTrafficCommand } from './commands/traffic';
 import { runChatCommand } from './commands/chat';
 import { runGroupTaskCommand } from './commands/grouptask';
+import { runMetaTaskCommand } from './commands/metatask';
 import { runConversationsCommand } from './commands/conversations';
 import { runMemoryCommand } from './commands/memory';
 import { runChainhistoryCommand } from './commands/chainhistory';
@@ -132,6 +133,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'grouptask':
           result = await runGroupTaskCommand(rest, context);
+          break;
+        case 'metatask':
+          result = await runMetaTaskCommand(rest, context);
           break;
         case 'conversations':
           result = await runConversationsCommand(rest, context);

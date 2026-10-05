@@ -1,0 +1,65 @@
+/**
+ * /api/metatask/* routes. Thin dispatch onto handlers.metatask; every response
+ * is a MetabotCommandResult JSON body with HTTP 200 (the result envelope
+ * carries success/failure), matching the grouptask route style. The board and
+ * task shapes are the shared data contract for both UIs (DSH plugin panel +
+ * src/ui tracking page) and the CLI read verbs.
+ */
+
+import type { MetabotDaemonHttpHandlers, RouteHandler } from './types';
+
+type MetaTaskHandlerGroup = NonNullable<MetabotDaemonHttpHandlers['metatask']>;
+type MetaTaskVerb = keyof MetaTaskHandlerGroup;
+
+const POST_VERBS: Record<string, MetaTaskVerb> = {
+  '/api/metatask/refresh': 'refresh',
+};
+
+const GET_VERBS: Record<string, MetaTaskVerb> = {
+  '/api/metatask/board': 'board',
+  '/api/metatask/task': 'task',
+  '/api/metatask/replay': 'replay',
+};
+
+function queryToInput(url: URL): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+  url.searchParams.forEach((value, key) => {
+    input[key] = value;
+  });
+  return input;
+}
+
+export const handleMetaTaskRoutes: RouteHandler = async (context) => {
+  const { req, url, handlers } = context;
+  if (!url.pathname.startsWith('/api/metatask/')) {
+    return false;
+  }
+
+  const postVerb = POST_VERBS[url.pathname];
+  const getVerb = GET_VERBS[url.pathname];
+  if (!postVerb && !getVerb) {
+    return false;
+  }
+
+  const expectedMethod = postVerb ? 'POST' : 'GET';
+  if (req.method !== expectedMethod) {
+    context.sendMethodNotAllowed([expectedMethod]);
+    return true;
+  }
+
+  const verb = (postVerb ?? getVerb) as MetaTaskVerb;
+  const handler = handlers.metatask?.[verb];
+  if (!handler) {
+    context.sendJson(501, {
+      ok: false,
+      code: 'not_implemented',
+      message: `MetaTask handler is not configured: ${String(verb)}`,
+    });
+    return true;
+  }
+
+  const input = postVerb ? await context.readJsonBody() : queryToInput(url);
+  const result = await handler(input);
+  context.sendJson(200, result);
+  return true;
+};

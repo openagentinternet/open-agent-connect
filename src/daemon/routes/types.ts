@@ -116,6 +116,12 @@ export interface MetabotDaemonHttpHandlers {
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  metatask?: {
+    board?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    task?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    replay?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   surf?: {
     status?: (input: { from?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     run?: (input: {

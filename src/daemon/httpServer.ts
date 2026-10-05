@@ -18,6 +18,7 @@ import { handleKbRoutes } from './routes/kb';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
 import { handleGroupTaskRoutes } from './routes/grouptask';
+import { handleMetaTaskRoutes } from './routes/metatask';
 import { handleScheduleRoutes } from './routes/schedule';
 import { handleConversationRoutes } from './routes/conversations';
 import { handleFileRoutes } from './routes/file';
@@ -53,6 +54,7 @@ const ROUTES: RouteHandler[] = [
   handleDaemonRoutes,
   handleChatRoutes,
   handleGroupTaskRoutes,
+  handleMetaTaskRoutes,
   handleScheduleRoutes,
   handleConversationRoutes,
   handleFileRoutes,

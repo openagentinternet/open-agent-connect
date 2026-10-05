@@ -4363,6 +4363,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         staffingSearch: post('/api/grouptask/staffing/search'),
       };
     })(),
+    metatask: (() => {
+      const get = (routePath: string) => async (input: Record<string, unknown>) => {
+        const params = new URLSearchParams();
+        for (const [key, value] of Object.entries(input)) {
+          if (value == null || value === '') continue;
+          params.set(key, String(value));
+        }
+        const suffix = params.size ? `?${params.toString()}` : '';
+        return requestJsonForSelectedActor('GET', `${routePath}${suffix}`);
+      };
+      return {
+        list: get('/api/metatask/board'),
+        get: get('/api/metatask/task'),
+        replay: get('/api/metatask/replay'),
+        refresh: async (input: Record<string, unknown> = {}) =>
+          requestJsonForSelectedActor('POST', '/api/metatask/refresh', undefined, input),
+      };
+    })(),
     conversations: {
       list: async (input) => {
         const params = new URLSearchParams();
@@ -6303,6 +6321,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
     grouptask: { ...defaults.grouptask, ...provided.grouptask },
+    metatask: { ...defaults.metatask, ...provided.metatask },
     conversations: { ...defaults.conversations, ...provided.conversations },
     memory: { ...defaults.memory, ...provided.memory },
     chainhistory: { ...defaults.chainhistory, ...provided.chainhistory },
@@ -8028,6 +8047,29 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   // policy `dreamEnabled` and the availability toggle are respected exactly
   // like the plugin scheduler. 10-min cadence + one boot pass; crash safety
   // relies on the existing 30-min stale-running sweeps (no new locks).
+  // MetaTask chain sweep (IDBots metatask parity, read path): 5-min cadence +
+  // one boot pass, driving the SAME daemon handler as /api/metatask/refresh
+  // with bypassMinInterval (its own cadence already spaces it out; ordinary
+  // HTTP callers coalesce behind the refresher's 60s window). The daemon is
+  // the sole writer of the shared system-level projection cache, so no DSH
+  // stand-down applies — the host reads the same public chain truth.
+  const metataskTickLoop = handlers.metatask
+    ? startAutomationTickLoop(
+      async () => {
+        const result = await handlers.metatask!.refresh!({ bypassMinInterval: true, reason: 'tick-refresh' });
+        if (result.ok !== true && result.state === 'failed') {
+          groupTaskEngineLog(`[MetaTask] tick refresh failed: ${result.message ?? 'unknown error'}`);
+        }
+      },
+      {
+        tickMs: 5 * 60_000,
+        bootDelayMs: 90_000,
+        log: (message) => groupTaskEngineLog(message),
+      },
+    )
+    : null;
+  void metataskTickLoop;
+
   const dreamAutomationTickLoop = handlers.dream && handlers.memory && handlers.surf
     ? startAutomationTickLoop(
       () => runDreamAutomationTick({

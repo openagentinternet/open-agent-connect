@@ -229,6 +229,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'provider', summary: 'Inspect local provider orders and settle seller-side refunds.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
     { name: 'grouptask', summary: 'Create and run on-chain group tasks chaired by a local Bot.' },
+    { name: 'metatask', summary: 'Read on-chain MetaTasks: board, task detail, pure replay, chain refresh.' },
     { name: 'memory', summary: 'Inspect and manage a MetaBot\'s scoped long-term memories, policies, and transcripts.' },
     { name: 'chainhistory', summary: 'Record and inspect a MetaBot\'s on-chain read/write history ledger.' },
     { name: 'dream', summary: 'Nightly dream consolidation: due dates, plan/commit runs, diaries, and self-identity.' },
@@ -2741,6 +2742,22 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'staffing search', summary: 'Seat candidate search: local workers + online bot search + impression verdicts.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['metatask'],
+    summary: 'MetaTask read verbs: replay the on-chain event set (both modes) from the shared projection cache.',
+    usage: 'metabot metatask <subcommand>',
+    subcommands: [
+      { name: 'list', summary: 'Board: tasks with progress, my roles, my stats (est. share), alerts, boundary block.' },
+      { name: 'get', summary: 'Full projection for one task root: nodes, votes, settlement, open nodes, estimation.' },
+      { name: 'replay', summary: 'Pure replay of the cached event set: node table, settlement manifest, ignored events.' },
+      { name: 'refresh', summary: 'Force a chain sweep (collect + dirty replay) and return the refreshed board.' },
+    ],
+    optionalFlags: [
+      { flag: '--root', value: '<pinId>', description: 'Task root pin id (get, replay).' },
+      { flag: '--refresh', description: 'Sweep the chain before reading (list, get).' },
+      HELP_JSON_FLAG,
+    ],
   },
   {
     commandPath: ['grouptask', 'invite'],
