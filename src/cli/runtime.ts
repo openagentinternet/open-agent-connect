@@ -4373,12 +4373,20 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const suffix = params.size ? `?${params.toString()}` : '';
         return requestJsonForSelectedActor('GET', `${routePath}${suffix}`);
       };
+      const post = (routePath: string) => async (input: Record<string, unknown> = {}) =>
+        requestJsonForSelectedActor('POST', routePath, undefined, input);
       return {
         list: get('/api/metatask/board'),
         get: get('/api/metatask/task'),
         replay: get('/api/metatask/replay'),
-        refresh: async (input: Record<string, unknown> = {}) =>
-          requestJsonForSelectedActor('POST', '/api/metatask/refresh', undefined, input),
+        refresh: post('/api/metatask/refresh'),
+        claim: post('/api/metatask/claim'),
+        submit: post('/api/metatask/submit'),
+        verify: post('/api/metatask/verify'),
+        release: post('/api/metatask/release'),
+        publish: post('/api/metatask/publish'),
+        publishSpec: post('/api/metatask/publish-spec'),
+        amend: post('/api/metatask/amend'),
       };
     })(),
     conversations: {

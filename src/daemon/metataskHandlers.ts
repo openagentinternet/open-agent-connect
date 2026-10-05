@@ -17,16 +17,37 @@ import {
 } from '../core/contracts/commandResult';
 import { replayMetaTask } from '../core/metatask/engine/engine';
 import { estimateMetaTaskShares } from '../core/metatask/engine/estimate';
+import { H_ACT3 } from '../core/metatask/engine/constants';
 import { MetaTaskRefresher } from '../core/metatask/refresher';
 import { createMetaTaskStore, type MetaTaskStore } from '../core/metatask/store';
-import { listMetabotProfiles } from '../core/bot/metabotProfileManager';
+import {
+  amendMetaTask,
+  claimMetaTaskNode,
+  publishMetaTask,
+  publishMetaTaskSpec,
+  releaseMetaTaskClaim,
+  submitMetaTaskWork,
+  verifyMetaTaskSubmission,
+  type MetaTaskWriteOutcome,
+  type MetaTaskWriteSeams,
+} from '../core/metatask/writer';
+import type { ChainWriteRequest, ChainWriteResult } from '../core/chain/writePin';
+import { listMetabotProfiles, getMetabotProfile } from '../core/bot/metabotProfileManager';
 import { resolveMetabotDaemonPaths } from '../core/state/paths';
+import type { Signer } from '../core/signing/signer';
 
 export interface MetaTaskDaemonHandlers {
   board: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   task: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   replay: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   refresh: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  claim: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  submit: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  verify: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  release: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  publish: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  publishSpec: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  amend: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 
 function normalizeText(value: unknown): string {
@@ -72,6 +93,8 @@ export function createMetaTaskDaemonHandlers(input: {
   systemHomeDir: string;
   /** Minimum sweep spacing for ordinary HTTP callers (tests drop it to 0). */
   minIntervalMs?: number;
+  /** Writes need a per-profile signer factory (the daemon owns all chain writes). */
+  createSignerForProfileHome?: (homeDir: string) => Signer | Promise<Signer>;
   log?: (message: string) => void;
 }): MetaTaskDaemonHandlers {
   const daemonPaths = resolveMetabotDaemonPaths(input.systemHomeDir);
@@ -106,12 +129,118 @@ export function createMetaTaskDaemonHandlers(input: {
     rosterMetaIds: () => rosterIds,
     minIntervalMs: input.minIntervalMs ?? 60_000,
   });
+  // The H_ACT3 write gate reads the boundary block from the same refresh state
+  // the board reports; refreshed lazily per write call.
+  let activationBoundaryCache: number | null = null;
+  const syncActivationBoundary = async (): Promise<void> => {
+    activationBoundaryCache = (await store.refreshInfo()).boundaryBlock;
+  };
+
+  /**
+   * Resolve the acting profile for a write verb: `from` slug, else the single
+   * available on-chain-initialized profile (ambiguous rosters must name one).
+   * Returns the signer seams the writer needs.
+   */
+  const resolveWriteSeams = async (
+    rawInput: Record<string, unknown>
+  ): Promise<{ ok: true; seams: MetaTaskWriteSeams } | { ok: false; failure: MetabotCommandResult<never> }> => {
+    if (!input.createSignerForProfileHome) {
+      return {
+        ok: false,
+        failure: commandFailed('not_implemented', 'MetaTask write handlers are not configured (no signer factory).'),
+      };
+    }
+    // Every write reads the CURRENT roster (publish roster decisions and the
+    // same-side review check both derive from it).
+    await loadRoster();
+    const fromSlug = normalizeText(rawInput.from);
+    let profile: Awaited<ReturnType<typeof getMetabotProfile>> = null;
+    if (fromSlug) {
+      profile = await getMetabotProfile(input.systemHomeDir, fromSlug).catch(() => null);
+      if (!profile) {
+        return { ok: false, failure: commandFailed('profile_not_found', `MetaBot profile not found: ${fromSlug}`) };
+      }
+    } else {
+      const profiles = (await listMetabotProfiles(input.systemHomeDir).catch(() => [])).filter((candidate) => candidate.globalMetaId);
+      if (profiles.length !== 1) {
+        return {
+          ok: false,
+          failure: commandFailed(
+            'actor_required',
+            `Pass --from <bot-slug> to pick the acting MetaBot (${profiles.length} local profiles carry a globalMetaId).`
+          ),
+        };
+      }
+      profile = profiles[0];
+    }
+    if (!profile.globalMetaId) {
+      return {
+        ok: false,
+        failure: commandFailed(
+          'actor_not_on_chain',
+          `MetaBot ${profile.slug} has no globalMetaId yet — it must be initialized on-chain before participating in MetaTasks.`
+        ),
+      };
+    }
+    const signer = await input.createSignerForProfileHome(profile.homeDir);
+    const writeRequest = (pathValue: string, payload: Record<string, unknown>): ChainWriteRequest => ({
+      operation: 'create',
+      path: pathValue,
+      encryption: '0',
+      version: '1.1.0',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      encoding: 'utf-8',
+      network: 'mvc',
+    });
+    const seams: MetaTaskWriteSeams = {
+      actorGlobalMetaId: profile.globalMetaId,
+      localRosterMetaIds: () => rosterIds,
+      loadEvents: () => store.loadEvents(),
+      getProjection: (rootPinId) => store.getProjection(rootPinId),
+      activation: () => ({ hAct3: H_ACT3, boundaryBlock: activationBoundaryCache }),
+      writeProtocolPin: async (subpath, payload, origin) => {
+        input.log?.(`[metatask] write ${subpath} as ${profile?.slug} (${origin})`);
+        const write: ChainWriteResult = await signer.writePin(writeRequest(`/protocols/metatask/${subpath}`, payload));
+        return { pinId: write.pinId, txids: write.txids, totalCost: write.totalCost };
+      },
+      writeRawPin: async (protocolPath, payload, origin) => {
+        input.log?.(`[metatask] write ${protocolPath} as ${profile?.slug} (${origin})`);
+        const write: ChainWriteResult = await signer.writePin(writeRequest(protocolPath, payload));
+        return { pinId: write.pinId, txids: write.txids, totalCost: write.totalCost };
+      },
+      refreshInBackground: (reason) => {
+        void refresher.refreshOnce(reason).catch(() => undefined);
+      },
+    };
+    return { ok: true, seams };
+  };
+
+  const runWrite = async <T>(
+    rawInput: Record<string, unknown>,
+    verb: (seams: MetaTaskWriteSeams) => Promise<MetaTaskWriteOutcome<T>>
+  ): Promise<MetabotCommandResult<unknown>> => {
+    try {
+      const actor = await resolveWriteSeams(rawInput);
+      if (!actor.ok) return actor.failure;
+      const outcome = await verb(actor.seams);
+      if (outcome.ok === false) {
+        return commandFailed('metatask_refused', outcome.refusal);
+      }
+      return commandSuccess(outcome.data);
+    } catch (error) {
+      return commandFailed(
+        'metatask_write_failed',
+        error instanceof Error ? error.message : 'MetaTask write failed.'
+      );
+    }
+  };
 
   return {
     board: async (rawInput) => {
       try {
+        await loadRoster();
         if (readBool(rawInput.refresh)) {
-          await loadRoster();
           const result = await refresher.refreshOnce('board-refresh');
           if (!result.ok) {
             return commandFailed('metatask_refresh_failed', result.error ?? 'MetaTask refresh failed.');
@@ -130,8 +259,8 @@ export function createMetaTaskDaemonHandlers(input: {
       const rootPinId = normalizeText(rawInput.root);
       if (!rootPinId) return commandFailed('invalid_input', 'A --root task pin id is required.');
       try {
+        await loadRoster();
         if (readBool(rawInput.refresh)) {
-          await loadRoster();
           await refresher.refreshOnce('task-refresh');
         }
         const projection = await refresher.detail(rootPinId);
@@ -195,6 +324,107 @@ export function createMetaTaskDaemonHandlers(input: {
           error instanceof Error ? error.message : 'MetaTask refresh failed.'
         );
       }
+    },
+
+    claim: (rawInput) => {
+      void syncActivationBoundary();
+      return runWrite(rawInput, (seams) => claimMetaTaskNode(seams, {
+        rootPinId: normalizeText(rawInput.root),
+        node: normalizeText(rawInput.node),
+      }));
+    },
+
+    submit: (rawInput) => {
+      void syncActivationBoundary();
+      return runWrite(rawInput, (seams) => submitMetaTaskWork(seams, {
+        rootPinId: normalizeText(rawInput.root),
+        node: normalizeText(rawInput.node),
+        result: (rawInput.result && typeof rawInput.result === 'object' && !Array.isArray(rawInput.result)
+          ? rawInput.result
+          : {}) as Record<string, unknown>,
+        contentType: normalizeText(rawInput.contentType) || undefined,
+        attachment: normalizeText(rawInput.attachment) || undefined,
+        claimPinId: normalizeText(rawInput.claimPinId) || undefined,
+        childIds: Array.isArray(rawInput.childIds) ? rawInput.childIds.map(String) : undefined,
+        parentRefs: (rawInput.parentRefs && typeof rawInput.parentRefs === 'object' && !Array.isArray(rawInput.parentRefs)
+          ? rawInput.parentRefs
+          : undefined) as Record<string, string> | undefined,
+        supersedePinId: normalizeText(rawInput.supersedePinId) || undefined,
+      }));
+    },
+
+    verify: (rawInput) => {
+      void syncActivationBoundary();
+      return runWrite(rawInput, (seams) => verifyMetaTaskSubmission(seams, {
+        targetPinId: normalizeText(rawInput.targetPinId),
+        verdict: rawInput.verdict === 'fail' ? 'fail' : 'pass',
+        method: normalizeText(rawInput.method),
+        semanticCheck: normalizeText(rawInput.semanticCheck),
+        failReason: normalizeText(rawInput.failReason) || undefined,
+        evidence: normalizeText(rawInput.evidence) || undefined,
+      }));
+    },
+
+    release: (rawInput) => {
+      void syncActivationBoundary();
+      return runWrite(rawInput, (seams) => releaseMetaTaskClaim(seams, {
+        rootPinId: normalizeText(rawInput.root),
+        node: normalizeText(rawInput.node),
+        claimPinId: normalizeText(rawInput.claimPinId),
+      }));
+    },
+
+    publish: (rawInput) => {
+      void syncActivationBoundary();
+      return runWrite(rawInput, (seams) => publishMetaTask(seams, {
+        title: normalizeText(rawInput.title) || undefined,
+        brief: normalizeText(rawInput.brief) || undefined,
+        nodes: Array.isArray(rawInput.nodes) ? (rawInput.nodes as Array<Record<string, unknown>>) : undefined,
+        spec: (rawInput.spec && typeof rawInput.spec === 'object' && !Array.isArray(rawInput.spec)
+          ? rawInput.spec
+          : undefined) as Record<string, unknown> | undefined,
+        policy: (rawInput.policy && typeof rawInput.policy === 'object' && !Array.isArray(rawInput.policy)
+          ? rawInput.policy
+          : undefined) as Record<string, unknown> | undefined,
+        tags: Array.isArray(rawInput.tags) ? rawInput.tags.map(String) : undefined,
+        allowPreActivation: rawInput.allowPreActivation === true || rawInput.allowPreActivation === 'true',
+        draftsFile: normalizeText(rawInput.draftsFile) || undefined,
+        taskId: normalizeText(rawInput.taskId) || undefined,
+        specPinByKey: (rawInput.specPinByKey && typeof rawInput.specPinByKey === 'object' && !Array.isArray(rawInput.specPinByKey)
+          ? rawInput.specPinByKey
+          : undefined) as Record<string, string> | undefined,
+      }));
+    },
+
+    publishSpec: (rawInput) => {
+      void syncActivationBoundary();
+      return runWrite(rawInput, (seams) => publishMetaTaskSpec(seams, {
+        name: normalizeText(rawInput.name) || undefined,
+        lang: normalizeText(rawInput.lang) || undefined,
+        entry: normalizeText(rawInput.entry) || undefined,
+        script: typeof rawInput.script === 'string' ? rawInput.script : undefined,
+        input: rawInput.input,
+        output: rawInput.output,
+        workspace: (rawInput.workspace && typeof rawInput.workspace === 'object' && !Array.isArray(rawInput.workspace)
+          ? rawInput.workspace
+          : undefined) as Record<string, unknown> | undefined,
+        validation: (rawInput.validation && typeof rawInput.validation === 'object' && !Array.isArray(rawInput.validation)
+          ? rawInput.validation
+          : undefined) as Record<string, unknown> | undefined,
+        enforceHAct2Validation: rawInput.enforceHAct2Validation === false || rawInput.enforceHAct2Validation === 'false'
+          ? false
+          : undefined,
+        draftsFile: normalizeText(rawInput.draftsFile) || undefined,
+        specKey: normalizeText(rawInput.specKey) || undefined,
+      }));
+    },
+
+    amend: (rawInput) => {
+      void syncActivationBoundary();
+      return runWrite(rawInput, (seams) => amendMetaTask(seams, {
+        rootPinId: normalizeText(rawInput.root),
+        ops: Array.isArray(rawInput.ops) ? (rawInput.ops as Array<Record<string, unknown>>) : [],
+      }));
     },
   };
 }
