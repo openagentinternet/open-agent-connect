@@ -554,6 +554,31 @@ metabot skills resolve --skill metabot-network-directory --format markdown
 
 Use explicit `--host` only when you need to inspect one host override path.
 
+## Automatic User Account And Traffic
+
+The first daemon start automatically provisions the machine's user account —
+no user action required:
+
+- a machine-wide owner identity (default name `User`; the user can rename it
+  later via Settings → User or `metabot user rename`)
+- a traffic account for that identity, including the one-time free traffic
+  grant (server-configured, currently 10 MB) and the MVC gas subsidy
+- every Bot created afterwards is owned by this account, and MVC pin fees are
+  billed to the shared traffic balance first (each Bot's own wallet is only
+  spent when the traffic balance runs out)
+
+Check the progress with:
+
+```bash
+metabot user onboarding
+```
+
+The command reports the per-step state (identity, traffic account, free
+grant, subsidy, owner name pin). Unconverged steps retry automatically on the
+next daemon start; `metabot user onboarding --run` advances them on demand.
+Deleting the owner identity (`metabot user delete --confirm`) turns automatic
+provisioning off for good; an explicit `user create`/`user import` re-arms it.
+
 ## First-Run Bot Handoff
 
 After base install verification succeeds, check whether this machine already

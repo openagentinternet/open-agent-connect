@@ -10,6 +10,11 @@ import {
   revealOwnerMnemonic,
   toOwnerIdentityPublic,
 } from '../../core/owner/ownerIdentity';
+import {
+  markOwnerOnboardingOptedOut,
+  readOwnerOnboardingStatus,
+  resetOwnerOnboardingAfterManualIdentity,
+} from '../../core/owner/ownerOnboarding';
 import { normalizeSystemHomeDir } from '../../core/state/homeSelection';
 import { commandMissingFlag, commandUnknownSubcommand, hasFlag, readFlagValue, readJsonFile, readStdinText, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
@@ -34,6 +39,8 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
     const name = readFlagValue(args, '--name') ?? '';
     try {
       const record = await createOwnerIdentity(systemHomeDir, { name });
+      // An explicit create re-arms onboarding (clears any opt-out tombstone).
+      await resetOwnerOnboardingAfterManualIdentity(systemHomeDir).catch(() => undefined);
       return commandSuccess({ identity: toOwnerIdentityPublic(record), mnemonic: record.mnemonic });
     } catch (error) {
       return ownerFailure(error);
@@ -86,6 +93,7 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
       ?? (typeof payload.path === 'string' && payload.path.trim() ? payload.path.trim() : undefined);
     try {
       const record = await importOwnerIdentity(systemHomeDir, { name, mnemonic, path: derivationPath });
+      await resetOwnerOnboardingAfterManualIdentity(systemHomeDir).catch(() => undefined);
       return commandSuccess({ identity: toOwnerIdentityPublic(record), mnemonic: record.mnemonic });
     } catch (error) {
       return ownerFailure(error);
@@ -97,6 +105,9 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
     const before = await readOwnerIdentity(systemHomeDir);
     try {
       const record = await ensureOwnerIdentity(systemHomeDir, { name });
+      if (before === null) {
+        await resetOwnerOnboardingAfterManualIdentity(systemHomeDir).catch(() => undefined);
+      }
       return commandSuccess({ identity: toOwnerIdentityPublic(record), created: before === null });
     } catch (error) {
       return ownerFailure(error);
@@ -161,7 +172,23 @@ export async function runUserCommand(args: string[], context: CliRuntimeContext)
       return commandFailed('confirmation_required', 'user delete removes the owner identity, and its locally stored mnemonic cannot be recovered. Back the mnemonic up with `metabot user reveal` first, then retry with --confirm.');
     }
     await deleteOwnerIdentity(systemHomeDir);
+    // Tombstone the onboarding state so auto-provisioning stays off.
+    await markOwnerOnboardingOptedOut(systemHomeDir).catch(() => undefined);
     return commandSuccess({ deleted: true });
+  }
+
+  // Zero-touch onboarding progress: user account + traffic account + free
+  // grant. `--run` advances the pipeline in the daemon (same idempotent
+  // runner the daemon start uses); the default read is local-only.
+  if (subcommand === 'onboarding') {
+    if (hasFlag(args, '--run')) {
+      const handler = context.dependencies.user?.runOnboarding;
+      if (!handler) {
+        return commandFailed('not_implemented', 'User onboarding run handler is not configured.');
+      }
+      return handler();
+    }
+    return commandSuccess(await readOwnerOnboardingStatus(systemHomeDir));
   }
 
   return commandUnknownSubcommand(`user ${redactSensitiveArgs(args).join(' ')}`.trim());

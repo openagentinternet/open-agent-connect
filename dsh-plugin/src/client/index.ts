@@ -527,6 +527,7 @@ export function apply(ctx: ClientContext): void {
       userT: tUser,
       trafficT: tTraffic,
       who: () => api.userWho(),
+      onboarding: () => api.userOnboarding(),
       create: (name: string) => api.userCreate(name),
       importIdentity: (input: { name: string; mnemonic: string; path?: string }) => api.userImport(input),
       update: (input: { name?: string; avatarDataUrl?: string }) => api.userUpdate(input),

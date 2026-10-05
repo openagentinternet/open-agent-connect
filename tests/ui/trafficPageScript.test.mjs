@@ -4,11 +4,14 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
-const { buildTrafficPageDefinition } = require('../../dist/ui/pages/traffic/app.js');
+// The Traffic page is now the Traffic tab of the Settings page (DSH
+// PluginSettingsPanel parity); its script ships inside the settings builder.
+const { buildSettingsPageDefinition } = require('../../dist/ui/pages/settings/app.js');
 const { translate } = require('../../dist/ui/i18n.js');
 
 function makeElement(tag = 'div') {
   const listeners = new Map();
+  const children = new Map();
   return {
     tagName: tag,
     textContent: '',
@@ -23,6 +26,10 @@ function makeElement(tag = 'div') {
     getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; },
     addEventListener: (eventName, handler) => listeners.set(eventName, handler),
     listener: (eventName) => listeners.get(eventName),
+    querySelector: (selector) => {
+      if (!children.has(selector)) children.set(selector, makeElement());
+      return children.get(selector);
+    },
     querySelectorAll: () => [],
   };
 }
@@ -82,6 +89,19 @@ function createHarness(fetchImpl, options = {}) {
     '[data-traffic-api-save]': makeElement('button'),
     '[data-traffic-api-reset]': makeElement('button'),
     '[data-traffic-api-status]': makeElement(),
+    // Settings-page chrome the merged script also binds (tab shell, the
+    // general-tab status codes, and the two live cards in the User tab).
+    '[data-settings-status]': makeElement('p'),
+    '[data-settings-refresh]': makeElement('button'),
+    '[data-settings-config-status]': makeElement('code'),
+    '[data-settings-llm-status]': makeElement('code'),
+    '[data-settings-network-status]': makeElement('code'),
+    '[data-settings-tabs]': makeElement('div'),
+    '[data-settings-tabpanel="user"]': makeElement('div'),
+    '[data-settings-tabpanel="traffic"]': makeElement('div'),
+    '[data-settings-tabpanel="general"]': makeElement('div'),
+    '[data-user-live]': makeElement('div'),
+    '[data-onboarding-live]': makeElement('div'),
   };
   const calls = [];
   const listeners = new Map();
@@ -169,6 +189,32 @@ function ledgerEntry(overrides = {}) {
   };
 }
 
+/** Settings-page chrome the merged script loads alongside the traffic tab. */
+function settingsChromePayloads(identity) {
+  return {
+    '/api/config': { ok: true, state: 'success', data: {} },
+    '/api/llm/runtimes': { ok: true, state: 'success', data: { runtimes: [] } },
+    '/api/network/sources': { ok: true, state: 'success', data: { sources: [] } },
+    '/api/user/who': { ok: true, state: 'success', data: { identity } },
+    '/api/user/onboarding': {
+      ok: true,
+      state: 'success',
+      data: {
+        onboarding: {
+          status: 'ready',
+          attempts: 1,
+          lastError: null,
+          steps: { identity: 'done', trafficAccount: 'done', freeGrant: 'claimed', subsidy: 'done', namePin: 'done' },
+          freeGrantBytes: 10_000_000,
+        },
+        identityPresent: Boolean(identity),
+      },
+    },
+  };
+}
+
+const CHROME_OWNER_IDENTITY = { name: 'Owner', globalMetaId: 'idq1owner', mvcAddress: 'mvc-owner-address' };
+
 function fullHarness(overrides = {}) {
   const state = {
     balanceBytes: 10_000_000,
@@ -178,6 +224,8 @@ function fullHarness(overrides = {}) {
   const calls = [];
   const h = createHarness(async (url, options = {}) => {
     calls.push({ url, options });
+    const chrome = settingsChromePayloads(CHROME_OWNER_IDENTITY);
+    if (chrome[url]) return jsonResponse(chrome[url]);
     if (url === '/api/traffic/status') return jsonResponse(statusPayload({ account: createAccount(state.balanceBytes) }));
     if (url === '/api/traffic/balance') {
       return jsonResponse({ ok: true, state: 'success', data: { account: createAccount(state.balanceBytes), featureUnavailable: false } });
@@ -224,7 +272,7 @@ const flush = async () => {
 
 test('traffic page loads the account, renders balance and usage, and offers the free grant', async () => {
   const h = fullHarness();
-  vm.runInNewContext(buildTrafficPageDefinition().script, h.context);
+  vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
   await flush();
 
   const { elements } = h;
@@ -261,7 +309,7 @@ test('traffic page loads the account, renders balance and usage, and offers the 
 
 test('traffic page claims the free grant and shows the result envelope plainly', async () => {
   const h = fullHarness();
-  vm.runInNewContext(buildTrafficPageDefinition().script, h.context);
+  vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
   await flush();
 
   const { elements } = h;
@@ -275,7 +323,7 @@ test('traffic page claims the free grant and shows the result envelope plainly',
 
 test('traffic page redeems a code and shows the result envelope plainly', async () => {
   const h = fullHarness();
-  vm.runInNewContext(buildTrafficPageDefinition().script, h.context);
+  vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
   await flush();
 
   const { elements } = h;
@@ -298,7 +346,7 @@ test('traffic page redeems a code and shows the result envelope plainly', async 
 
 test('traffic page switches billing mode with a visible confirm note and bind summary', async () => {
   const h = fullHarness();
-  vm.runInNewContext(buildTrafficPageDefinition().script, h.context);
+  vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
   await flush();
 
   const { elements } = h;
@@ -318,7 +366,7 @@ test('traffic page switches billing mode with a visible confirm note and bind su
 
 test('traffic page pages the ledger with the cursor', async () => {
   const h = fullHarness();
-  vm.runInNewContext(buildTrafficPageDefinition().script, h.context);
+  vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
   await flush();
 
   const { elements } = h;
@@ -337,12 +385,14 @@ test('traffic page pages the ledger with the cursor', async () => {
 test('traffic page gates on the owner identity and surfaces backend error codes', async () => {
   // No identity: full-page gate, sections stay hidden.
   const gated = createHarness(async (url) => {
+    const chrome = settingsChromePayloads(null);
+    if (chrome[url]) return jsonResponse(chrome[url]);
     if (url === '/api/traffic/status') {
       return jsonResponse(statusPayload({ identity: null, account: null, freeGrant: null }));
     }
     throw new Error(`Unexpected request: ${url}`);
   });
-  vm.runInNewContext(buildTrafficPageDefinition().script, gated.context);
+  vm.runInNewContext(buildSettingsPageDefinition().script, gated.context);
   await flush();
   assert.equal(gated.elements['[data-traffic-gate]'].hidden, false);
   assert.equal(gated.elements['[data-traffic-content]'].hidden, true);
@@ -363,7 +413,7 @@ test('traffic page gates on the owner identity and surfaces backend error codes'
     }
     return original(url, options);
   };
-  vm.runInNewContext(buildTrafficPageDefinition().script, h.context);
+  vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
   await flush();
   h.elements['[data-traffic-redeem-input]'].value = 'USED-CODE';
   await h.elements['[data-traffic-redeem-form]'].listener('submit')({ preventDefault() {} });

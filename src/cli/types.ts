@@ -100,6 +100,8 @@ export interface CliDependencies {
   user?: {
     /** Name/avatar profile save with on-chain publish (daemon-backed). */
     update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Advance the zero-touch onboarding pipeline in the daemon (idempotent). */
+    runOnboarding?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;

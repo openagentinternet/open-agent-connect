@@ -45,7 +45,6 @@ const TITLE_KEY_PAGES = [
   ['surf', 'buildSurfPageDefinition', 'surf.title'],
   ['memory', 'buildMemoryPageDefinition', 'memory.title'],
   ['schedule', 'buildSchedulePageDefinition', 'schedule.title'],
-  ['traffic', 'buildTrafficPageDefinition', 'traffic.title'],
 ];
 
 // Non-copy literals that legitimately never enter the dictionary: brand and

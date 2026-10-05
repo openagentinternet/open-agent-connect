@@ -164,6 +164,10 @@ export interface MetabotDaemonHttpHandlers {
     update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     reveal?: () => Awaitable<MetabotCommandResult<unknown>>;
     delete?: () => Awaitable<MetabotCommandResult<unknown>>;
+    /** Zero-touch onboarding status (owner/traffic account + free grant). */
+    getOnboarding?: () => Awaitable<MetabotCommandResult<unknown>>;
+    /** Advance the onboarding pipeline on demand (idempotent, shared runner). */
+    runOnboarding?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -478,6 +482,8 @@ export interface MetabotDaemonHttpHandlers {
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
     getProfile?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Sign + publish the /info/owner owner-binding pin for an existing Bot. */
+    bindOwner?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     retryProfileSetup?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     updateProfile?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     uploadHomepageFile?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
