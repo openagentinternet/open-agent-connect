@@ -40,6 +40,7 @@ import { BOTS_PANEL_ROW_MARK } from './a2a-panel-row.ts'
 import type { BotsPagePanelState } from './bots-page-store.ts'
 import {
   IconAgentPresetOutline16,
+  IconBranchOutline16,
   IconGlobeOutline16,
   IconSettingsOutline16,
   type CompatIconProps,
@@ -111,6 +112,7 @@ const SECTION_ICONS: Readonly<Record<string, ComponentType<CompatIconProps>>> = 
   'oac-bots': IconAgentPresetOutline16,
   'oac-apps': IconGlobeOutline16,
   'oac-settings': IconSettingsOutline16,
+  'oac-tracking': IconBranchOutline16,
 }
 
 function readActiveSection(): string | null {
