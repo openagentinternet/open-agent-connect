@@ -13,6 +13,13 @@ type MetaTaskVerb = keyof MetaTaskHandlerGroup;
 
 const POST_VERBS: Record<string, MetaTaskVerb> = {
   '/api/metatask/refresh': 'refresh',
+  '/api/metatask/claim': 'claim',
+  '/api/metatask/submit': 'submit',
+  '/api/metatask/verify': 'verify',
+  '/api/metatask/release': 'release',
+  '/api/metatask/publish': 'publish',
+  '/api/metatask/publish-spec': 'publishSpec',
+  '/api/metatask/amend': 'amend',
 };
 
 const GET_VERBS: Record<string, MetaTaskVerb> = {

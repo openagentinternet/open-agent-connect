@@ -17363,6 +17363,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }),
     metatask: createMetaTaskDaemonHandlers({
       systemHomeDir: normalizedSystemHomeDir,
+      createSignerForProfileHome,
       log: (message) => console.warn(message),
     }),
     schedule: createScheduleDaemonHandlers({

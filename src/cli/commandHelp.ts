@@ -2752,6 +2752,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'get', summary: 'Full projection for one task root: nodes, votes, settlement, open nodes, estimation.' },
       { name: 'replay', summary: 'Pure replay of the cached event set: node table, settlement manifest, ignored events.' },
       { name: 'refresh', summary: 'Force a chain sweep (collect + dirty replay) and return the refreshed board.' },
+      { name: 'claim', summary: 'Claim an open node (replay-guarded; intent-only in competitive mode).' },
+      { name: 'release', summary: 'Voluntarily release your effective claim (tree mode only).' },
+      { name: 'submit', summary: 'Submit a node work certificate (--request-file; hash assembly per the frozen canon).' },
+      { name: 'verify', summary: 'Cast an independent review vote (--request-file; #8/#9 gates enforced).' },
+      { name: 'publish', summary: 'Publish a task (roster+tree+spec+task pins; all invariants checked before the first pin).' },
+      { name: 'publish-spec', summary: 'Publish a standalone verifier spec pin (validation block enforced).' },
+      { name: 'amend', summary: 'Publisher-only tree amend (--request-file with ops[]; bases auto-filled).' },
     ],
     optionalFlags: [
       { flag: '--root', value: '<pinId>', description: 'Task root pin id (get, replay).' },

@@ -7,7 +7,7 @@
  */
 
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import { commandMissingFlag, hasFlag, readFlagValue } from './helpers';
+import { commandMissingFlag, hasFlag, readFlagValue, readJsonFile } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
 type MetaTaskDeps = NonNullable<CliRuntimeContext['dependencies']['metatask']>;
@@ -58,8 +58,61 @@ export async function runMetaTaskCommand(
     return handler({ reason: 'cli-refresh' });
   }
 
+  if (action === 'claim') {
+    const handler = requireHandler(context, 'claim');
+    if (!handler) return commandFailed('not_implemented', 'MetaTask claim handler is not configured.');
+    const root = normalizeText(readFlagValue(args, '--root'));
+    if (!root) return commandMissingFlag('--root');
+    const node = normalizeText(readFlagValue(args, '--node'));
+    if (!node) return commandMissingFlag('--node');
+    return handler({ root, node, ...actorArg(args) });
+  }
+
+  if (action === 'release') {
+    const handler = requireHandler(context, 'release');
+    if (!handler) return commandFailed('not_implemented', 'MetaTask release handler is not configured.');
+    const root = normalizeText(readFlagValue(args, '--root'));
+    if (!root) return commandMissingFlag('--root');
+    const node = normalizeText(readFlagValue(args, '--node'));
+    if (!node) return commandMissingFlag('--node');
+    const claimPinId = normalizeText(readFlagValue(args, '--claim'));
+    if (!claimPinId) return commandMissingFlag('--claim');
+    return handler({ root, node, claimPinId, ...actorArg(args) });
+  }
+
+  if (action === 'submit' || action === 'verify' || action === 'publish'
+    || action === 'publish-spec' || action === 'amend') {
+    const verb = action === 'publish-spec' ? 'publishSpec' : action;
+    const handler = requireHandler(context, verb as 'submit');
+    if (!handler) return commandFailed('not_implemented', `MetaTask ${action} handler is not configured.`);
+    const requestFile = normalizeText(readFlagValue(args, '--request-file'));
+    if (!requestFile) return commandMissingFlag('--request-file');
+    let body: Record<string, unknown>;
+    try {
+      body = await readJsonFile(context, requestFile);
+    } catch (error) {
+      return commandFailed('invalid_request_file', error instanceof Error ? error.message : 'Cannot read the request file.');
+    }
+    // Canonical aliases: --root feeds rootPinId; publish accepts the
+    // --allow-pre-activation escape hatch as a flag override.
+    if (!body.root && (action === 'submit' || action === 'amend')) {
+      const root = normalizeText(readFlagValue(args, '--root'));
+      if (root) body.root = root;
+    }
+    if (action === 'publish' && hasFlag(args, '--allow-pre-activation')) {
+      body.allowPreActivation = true;
+    }
+    return handler({ ...body, ...actorArg(args) });
+  }
+
   return commandFailed(
     'unknown_subcommand',
-    'Unknown metatask subcommand. Use: list | get | replay | refresh.'
+    'Unknown metatask subcommand. Use: list | get | replay | refresh | claim | release | submit | verify | publish | publish-spec | amend.'
   );
+}
+
+/** `--from <bot-slug>` selects the acting MetaBot for write verbs. */
+function actorArg(args: string[]): Record<string, unknown> {
+  const from = normalizeText(readFlagValue(args, '--from'));
+  return from ? { from } : {};
 }
