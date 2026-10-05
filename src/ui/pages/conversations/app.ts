@@ -13,10 +13,6 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     description: i18n.t('conversations.description'),
     panels: [],
     contentHtml: `
-      <div class="conversations-view-toggle" role="tablist" aria-label="${i18n.t('conversations.grouptask.viewsAria')}">
-        <button class="conversations-view-btn active" type="button" data-view-toggle="conversations" data-i18n-key="conversations.grouptask.viewConversations">${i18n.t('conversations.grouptask.viewConversations')}</button>
-        <button class="conversations-view-btn" type="button" data-view-toggle="grouptask" data-i18n-key="conversations.grouptask.viewGroupTasks">${i18n.t('conversations.grouptask.viewGroupTasks')}</button>
-      </div>
       <section class="conversations-shell" data-conversations-shell>
         <aside class="conversation-sidebar" aria-label="${i18n.t('conversations.sidebarAria')}">
           <div class="conversation-local-picker">
