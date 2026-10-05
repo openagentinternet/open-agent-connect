@@ -30,4 +30,5 @@ export declare function usageRecordHasTokens(usage: LlmTokenUsage): boolean;
 export declare function resolveJsonProcessError(processResult: JsonProcessRunResult, protocolStatus: LlmExecutionResult['status'], protocolError: string | undefined): string | undefined;
 export declare function stringifyContent(value: unknown): string;
 export declare function hasArg(args: string[] | undefined, flag: string): boolean;
+export declare function stripStreamPrefix(line: string): string;
 export declare function runJsonLineProcess(input: JsonProcessRunInput): Promise<JsonProcessRunResult>;

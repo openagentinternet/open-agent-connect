@@ -49,9 +49,13 @@ async function writeJsonFileAtomic(filePath, value) {
     await writeTextFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 async function writeTextFileAtomic(filePath, text) {
-    await node_fs_1.promises.mkdir(node_path_1.default.dirname(filePath), { recursive: true });
+    const dir = node_path_1.default.dirname(filePath);
+    await node_fs_1.promises.mkdir(dir, { recursive: true });
     const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
     await node_fs_1.promises.writeFile(tmpPath, text, 'utf8');
+    // The directory may have been removed between mkdir and rename (a test
+    // tearing down its temp home while a background init is in flight).
+    await node_fs_1.promises.mkdir(dir, { recursive: true });
     await node_fs_1.promises.rename(tmpPath, filePath);
 }
 const safeFileSegment = (segment) => segment.replace(/[^a-z0-9-]/gi, '_');
@@ -68,14 +72,28 @@ function createMetaTaskStore(root, options = {}) {
     const projectionsDir = node_path_1.default.join(root, 'projections');
     /** events by pinId — the effective (last-wins) view of the jsonl files. */
     const eventsByPin = new Map();
-    // Lazy init (mkdir + version stamp + event-file load): every method awaits
-    // it, so the factory stays synchronous for the daemon handler assembly.
-    const ready = (async () => {
-        await node_fs_1.promises.mkdir(eventsDir, { recursive: true });
-        await node_fs_1.promises.mkdir(projectionsDir, { recursive: true });
-        await writeJsonFileAtomic(node_path_1.default.join(root, 'version.json'), { version: engine_1.PROJECTION_FORMAT_VERSION });
-        await loadAllEvents();
-    })();
+    // Lazy init (mkdir + version stamp + event-file load), started on FIRST
+    // USE so constructing the daemon handler group alone performs no IO; every
+    // method awaits it, so the factory stays synchronous for the daemon handler
+    // assembly. A vanished root (temp-home teardown mid-init) degrades to an
+    // empty store instead of an unhandled rejection.
+    let readyPromise = null;
+    const ready = () => {
+        if (!readyPromise) {
+            readyPromise = (async () => {
+                try {
+                    await node_fs_1.promises.mkdir(eventsDir, { recursive: true });
+                    await node_fs_1.promises.mkdir(projectionsDir, { recursive: true });
+                    await writeJsonFileAtomic(node_path_1.default.join(root, 'version.json'), { version: engine_1.PROJECTION_FORMAT_VERSION }).catch(() => undefined);
+                    await loadAllEvents();
+                }
+                catch {
+                    // The root disappeared under us: operate on the in-memory view.
+                }
+            })();
+        }
+        return readyPromise;
+    };
     const segmentFile = (segment) => node_path_1.default.join(eventsDir, `${safeFileSegment(segment)}.jsonl`);
     async function loadEventSegment(file) {
         let raw;
@@ -156,7 +174,7 @@ function createMetaTaskStore(root, options = {}) {
     const store = {
         root,
         async upsertEvents(events) {
-            await ready;
+            await ready();
             if (events.length === 0)
                 return 0;
             // Merge the whole batch in memory first: an anti-downgrade row keeps the
@@ -195,7 +213,7 @@ function createMetaTaskStore(root, options = {}) {
             return appended.size;
         },
         async loadEvents() {
-            await ready;
+            await ready();
             return Array.from(eventsByPin.values());
         },
         async saveProjections(projections, saveOptions = {}) {

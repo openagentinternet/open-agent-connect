@@ -16,6 +16,7 @@ const commandResult_1 = require("../core/contracts/commandResult");
 const engine_1 = require("../core/metatask/engine/engine");
 const estimate_1 = require("../core/metatask/engine/estimate");
 const constants_1 = require("../core/metatask/engine/constants");
+const watch_1 = require("../core/metatask/watch");
 const refresher_1 = require("../core/metatask/refresher");
 const store_1 = require("../core/metatask/store");
 const writer_1 = require("../core/metatask/writer");
@@ -90,6 +91,18 @@ function createMetaTaskDaemonHandlers(input) {
         store: () => store,
         rosterMetaIds: () => rosterIds,
         minIntervalMs: input.minIntervalMs ?? 60_000,
+    });
+    // The watch heartbeat shares the refresher's store and roster: alerts are
+    // display-only rows in the same board payload both UIs read.
+    const watcher = new watch_1.MetaTaskWatchService({
+        store: () => store,
+        rosterMetaIds: async () => {
+            await loadRoster();
+            return rosterIds;
+        },
+        onAlerts: (alerts) => {
+            input.log?.(`[metatask] ${alerts.length} new alert(s): ${alerts.map((alert) => alert.kind).join(', ')}`);
+        },
     });
     // The H_ACT3 write gate reads the boundary block from the same refresh state
     // the board reports; refreshed lazily per write call.
@@ -182,6 +195,17 @@ function createMetaTaskDaemonHandlers(input) {
         }
         catch (error) {
             return (0, commandResult_1.commandFailed)('metatask_write_failed', error instanceof Error ? error.message : 'MetaTask write failed.');
+        }
+    };
+    const runWatchTick = async () => {
+        try {
+            await loadRoster();
+            await watcher.run(Date.now());
+            return (0, commandResult_1.commandSuccess)({ ok: true });
+        }
+        catch (error) {
+            input.log?.(`[metatask] watch tick failed: ${error instanceof Error ? error.message : String(error)}`);
+            return (0, commandResult_1.commandFailed)('metatask_watch_failed', error instanceof Error ? error.message : 'MetaTask watch tick failed.');
         }
     };
     return {
@@ -355,5 +379,6 @@ function createMetaTaskDaemonHandlers(input) {
                 ops: Array.isArray(rawInput.ops) ? rawInput.ops : [],
             }));
         },
+        watch: () => runWatchTick(),
     };
 }

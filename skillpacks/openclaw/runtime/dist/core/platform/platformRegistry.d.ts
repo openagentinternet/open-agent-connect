@@ -13,6 +13,13 @@ export interface PlatformDefinition {
         envAliases?: string[];
         pathSearchBinaryNames?: string[];
         defaultExecutablePaths?: string[];
+        /**
+         * Minimum CLI version a discovered binary must report. A parsed version
+         * below this floor marks the runtime unavailable with an upgrade hint
+         * (readiness is not attempted); an unparsable or missing version fails
+         * open and the runtime is treated exactly as before.
+         */
+        minimumCliVersion?: string;
         /** Minimum Node.js version for CLIs launched through a Node shebang. */
         nodeRuntime?: {
             minimumVersion: string;

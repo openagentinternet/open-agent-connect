@@ -19,9 +19,10 @@ const app_10 = require("../../ui/pages/kb/app");
 const app_11 = require("../../ui/pages/surf/app");
 const app_12 = require("../../ui/pages/memory/app");
 const app_13 = require("../../ui/pages/schedule/app");
-const app_14 = require("../../ui/pages/traffic/app");
-const app_15 = require("../../ui/pages/services/app");
-const app_16 = require("../../ui/pages/settings/app");
+const app_14 = require("../../ui/pages/tracking/app");
+const app_15 = require("../../ui/pages/traffic/app");
+const app_16 = require("../../ui/pages/services/app");
+const app_17 = require("../../ui/pages/settings/app");
 const browser_1 = require("@openagentinternet/agent-browser-ui/browser");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
@@ -50,14 +51,15 @@ const PAGE_BUILDERS = {
     'refund': app_4.buildRefundPageDefinition,
     'bot': app_6.buildBotPageDefinition,
     'conversations': app_7.buildConversationsPageDefinition,
-    'services': app_15.buildServicesPageDefinition,
+    'services': app_16.buildServicesPageDefinition,
     'apps': app_8.buildAppsPageDefinition,
     'kb': app_10.buildKbPageDefinition,
     'surf': app_11.buildSurfPageDefinition,
     'memory': app_12.buildMemoryPageDefinition,
     'schedule': app_13.buildSchedulePageDefinition,
-    'traffic': app_14.buildTrafficPageDefinition,
-    'settings': app_16.buildSettingsPageDefinition,
+    'tracking': app_14.buildTrackingPageDefinition,
+    'traffic': app_15.buildTrafficPageDefinition,
+    'settings': app_17.buildSettingsPageDefinition,
     'metaapps': app_9.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
@@ -65,6 +67,7 @@ const NAV_ITEMS = [
     { page: 'conversations', labelKey: 'nav.conversations' },
     { page: 'apps', labelKey: 'nav.apps' },
     { page: 'schedule', labelKey: 'nav.schedule' },
+    { page: 'tracking', labelKey: 'nav.tracking' },
 ];
 const HIDDEN_UI_PAGES = new Set();
 function escapeHtml(value) {

@@ -23,6 +23,8 @@ export interface MetaTaskDaemonHandlers {
     publish: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     publishSpec: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     amend: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    /** Internal: the watch heartbeat (not routed over HTTP today). */
+    watch: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 /**
  * Build the MetaTask handler group: one system-level store, one refresher
