@@ -197,7 +197,7 @@ test('settings user section guards the reveal, rename, and delete actions', asyn
   // Reveal is a two-step guard and lands masked.
   assert.ok(live.querySelector('[data-user-reveal]').listener('click'), 'reveal button bound');
   live.querySelector('[data-user-reveal]').listener('click')();
-  assert.match(live.innerHTML, /Click again to reveal/);
+  assert.match(live.innerHTML, /Click again to view/);
   assert.ok(!h.calls.some((call) => call.url === '/api/user/reveal'), 'first click only arms the guard');
   live.querySelector('[data-user-reveal-confirm]').listener('click')();
   await waitForMicrotasks();

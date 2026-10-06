@@ -88,7 +88,7 @@ test('GET /ui/traffic redirects to the Settings traffic tab which serves the tra
   assert.match(html, /\/api\/traffic\/redeem/);
   assert.match(html, /\/api\/traffic\/api-base/);
   assert.match(html, /data-traffic-mode-seg/);
-  assert.match(html, /data-traffic-meter/);
+  assert.match(html, /data-traffic-balance-value/);
   assert.match(html, /data-traffic-ledger-table/);
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);

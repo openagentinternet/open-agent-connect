@@ -47,7 +47,7 @@ test('sendPrivateChat builds an encrypted simplemsg payload that receivePrivateC
   assert.equal(payload.to, 'bob-global-metaid');
   assert.equal(payload.replyPin, 'reply-pin-1');
   assert.equal(payload.encrypt, 'ecdh');
-  assert.equal(payload.contentType, 'text/plain');
+  assert.equal(payload.contentType, 'text/markdown');
   assert.notEqual(payload.content, 'hello from alice');
 
   const inbound = receivePrivateChat({

@@ -59,8 +59,6 @@ function createHarness(fetchImpl, options = {}) {
     '[data-traffic-mode-hint]': makeElement(),
     '[data-traffic-mode-status]': makeElement(),
     '[data-traffic-balance-value]': makeElement('div'),
-    '[data-traffic-meter]': makeElement('div'),
-    '[data-traffic-meter-fill]': makeElement('div'),
     '[data-traffic-balance-stats]': makeElement('p'),
     '[data-traffic-balance-refresh]': makeElement('button'),
     '[data-traffic-balance-status]': makeElement(),
@@ -279,10 +277,8 @@ test('traffic page loads the account, renders balance and usage, and offers the 
   assert.equal(elements['[data-traffic-status]'].textContent, 'Traffic account loaded.');
   assert.equal(elements['[data-traffic-gate]'].hidden, true);
   assert.equal(elements['[data-traffic-content]'].hidden, false);
-  // Balance with the metered share bar.
+  // Balance card.
   assert.equal(elements['[data-traffic-balance-value]'].textContent, '10 MB');
-  assert.equal(elements['[data-traffic-meter]'].hidden, false);
-  assert.equal(elements['[data-traffic-meter-fill]'].style.width, '100%');
   assert.match(elements['[data-traffic-balance-stats]'].textContent, /Reserved 0 B · Total spent 0 B/);
   // Free grant claimable.
   assert.equal(elements['[data-traffic-grant]'].hidden, false);

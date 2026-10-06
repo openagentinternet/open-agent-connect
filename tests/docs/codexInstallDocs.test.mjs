@@ -117,11 +117,11 @@ test('unified install guide documents registry-driven bare install and force hos
   );
 
   assert.match(readme, /npm i -g open-agent-connect@latest && oac install/);
-  assert.match(readme, /OAC works with Codex[\s\S]*WorkBuddy\./i);
+  assert.match(readme, /OAC works today with \d+ agent platforms[\s\S]*WorkBuddy/i);
   assert.doesNotMatch(readme, /~\/\.metabot\/skills/i);
   assert.doesNotMatch(readme, /host roots contain symlinks/i);
   assert.doesNotMatch(readme, /~\/\.metabot\/skills\/metabot-\*/);
-  assert.doesNotMatch(readme, /~\/\.agents\/skills/i);
+  assert.match(readme, /~\/\.agents\/skills/);
   assert.doesNotMatch(readme, /platformRegistry\.ts/);
 
   assert.match(guide, /npm i -g open-agent-connect@latest && oac install/);

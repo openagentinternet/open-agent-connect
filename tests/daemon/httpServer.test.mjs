@@ -3420,7 +3420,7 @@ test('GET /ui/conversations renders the local-Bot scoped IM conversations worksp
   assert.match(html, /data-guidance-send/);
   assert.match(html, /data-guidance-cancel/);
   assert.match(html, /data-guidance-status/);
-  assert.match(html, /You can steer the Bot&#39;s conversation/);
+  assert.match(html, /Send as this Bot, or steer its replies/);
   assert.match(html, /Guide/);
   assert.match(html, /Send/);
   assert.match(html, /Cancel/);
@@ -3433,7 +3433,11 @@ test('GET /ui/conversations renders the local-Bot scoped IM conversations worksp
   assert.match(html, /txidPreview/);
   assert.doesNotMatch(html, /data-conversation-input/);
   assert.doesNotMatch(html, /data-conversation-send/);
-  assert.doesNotMatch(html, /\/api\/chat\/private/);
+  assert.match(html, /data-send-form/);
+  assert.match(html, /data-send-input/);
+  assert.match(html, /data-send-submit/);
+  assert.match(html, /\/api\/chat\/private/);
+  assert.match(html, /\/api\/chat\/private\/file/);
   assert.match(html, /\/api\/bot\/profiles/);
   assert.match(html, /\/api\/conversations\?local=/);
   assert.match(html, /\/api\/conversations\/messages\?local=/);
@@ -3465,7 +3469,7 @@ test('GET /ui/conversations supports zh-CN page copy beyond the shared nav', asy
   assert.match(html, /data-i18n-key="conversations\.refresh">刷新<\/button>/);
   assert.match(html, /data-i18n-key="conversations\.selectConversation">选择一个对话<\/h2>/);
   assert.match(html, /data-i18n-key="conversations\.chooseRemoteBot">选择远程 Bot<\/span>/);
-  assert.match(html, /data-i18n-key="conversations\.readonlyStatus">你可以引导 Bot 的对话<\/div>/);
+  assert.match(html, /data-i18n-key="conversations\.readonlyStatus">以该 Bot 身份发送，或引导它的回复<\/div>/);
   assert.match(html, /data-i18n-key="conversations\.guidanceToggle">引导<\/button>/);
   assert.match(html, /data-i18n-key="conversations\.guidanceSend">发送<\/button>/);
   assert.match(html, /data-i18n-key="conversations\.guidanceCancel">取消<\/button>/);
