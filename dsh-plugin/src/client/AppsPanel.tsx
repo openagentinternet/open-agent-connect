@@ -45,6 +45,7 @@ import { BotPicker, pickDefaultAvailableBotSlug } from './BotPicker.tsx'
 import type { AppsLocaleKey } from './locale-apps.ts'
 import { interpolate } from './parse.ts'
 import { MetaAppForm } from './MetaAppForm.tsx'
+import { useBotsRevision } from './bot-catalog.ts'
 
 type Translate = (key: AppsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
@@ -188,6 +189,10 @@ export function AppsPanel({
 
   useEffect(() => () => closeChainSource(), [])
 
+  // Bot set refresh: a Bot created after this section mounted (visited
+  // sections stay mounted) appears in the from-Bot picker without a reload.
+  const botsRevision = useBotsRevision()
+
   useEffect(() => {
     let current = true
     void bots().then(
@@ -205,7 +210,7 @@ export function AppsPanel({
       },
     )
     return () => { current = false }
-  }, [bots, retryTick])
+  }, [bots, retryTick, botsRevision])
 
   useEffect(() => {
     if (!from) return

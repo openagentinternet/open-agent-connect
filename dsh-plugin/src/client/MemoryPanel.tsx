@@ -20,6 +20,7 @@ import type {
 } from './api.ts'
 import type { MemoryLocaleKey } from './locale-memory.ts'
 import { BotPicker, pickDefaultAvailableBotSlug } from './BotPicker.tsx'
+import { useBotsRevision } from './bot-catalog.ts'
 
 type Translate = (key: MemoryLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
@@ -120,6 +121,10 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
 
+  // Bot set refresh: a Bot created after this panel mounted appears in the
+  // Bot picker without a reload (skipped when a fixed botSlug was injected).
+  const botsRevision = useBotsRevision()
+
   useEffect(() => {
     if (botSlug) {
       setSlug(botSlug)
@@ -139,7 +144,7 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
       (cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : String(cause)) },
     )
     return () => { current = false }
-  }, [injected, botSlug])
+  }, [injected, botSlug, botsRevision])
 
   const reload = (): void => setTick((value) => value + 1)
 

@@ -45,6 +45,7 @@ import { currentMainViewSessionId } from '../current-session.ts'
 import { BOTS_PANEL_ROW_MARK, SHOW_A2A_PANELLIST_ROW, startA2APanelRowInterceptor, startPanelRowInterceptor } from './a2a-panel-row.ts'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
+import { subscribeToBotChanges } from './bot-catalog.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
 import { BotBrowserIframeBridge } from './browser-iframe.ts'
 import {
@@ -604,6 +605,10 @@ export function apply(ctx: ClientContext): void {
 
     scope.effect(() => {
       const stop = sessionsList.subscribe(() => { void seat.apply() })
+      // A Bot created after the chip mounted (the Bots page overlays the
+      // hero; 新会话 reuses the blank session) must appear in the picker
+      // without a reload: reload roster + Bots on every bots-changed push.
+      const stopBotsFeed = subscribeToBotChanges(() => { void seat.load() })
       const headerId = scope.slots.register({
         name: 'conversation.session.header.actions',
         id: 'oac-session-id',
@@ -631,6 +636,7 @@ export function apply(ctx: ClientContext): void {
       }, HeaderBotLabel)
       return () => {
         stop()
+        stopBotsFeed()
         chip()
         headerId()
         label()
