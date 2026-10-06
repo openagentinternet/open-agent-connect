@@ -422,6 +422,8 @@
       .traffic-intro-actions p { margin: 0; font-family: var(--mono); font-size: 10px; color: var(--dim); }
       .traffic-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-dim); }
       .traffic-grid { gap: 16px; align-items: stretch; }
+      /* neutralize shared .card + .card spacing: inside the grid it offsets and shrinks the second card */
+      .traffic-grid > .card + .card { margin-top: 0; }
       .traffic-grid > .traffic-card { min-height: 240px; }
       .traffic-card { gap: 14px; padding: 21px 22px; height: 100%; }
       .traffic-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
