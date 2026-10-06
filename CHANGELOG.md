@@ -5,6 +5,25 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
+## Unreleased
+
+### Changed
+
+- Integrated Agent Browser Core 0.7.0 across the root package and all skillpack
+  runtimes (no breaking API changes). The three upstream changes verified
+  against OAC: (1) MetaApp preview sandboxes now surface blocked external-link
+  clicks to the host as `postMessage({ type:
+  'agent-browser:external-link-denied', version: 1, href, text })` — additive,
+  and OAC consumes no window `message` events from preview frames today, so
+  behavior is unchanged (a toast/copy affordance can be layered on later);
+  (2) the MetaApp artifact cache key now folds in the head modify pinId, so the
+  first access to a previously modified MetaApp after upgrading re-unpacks the
+  bundle once (expected one-time cost) before caching resumes as before; (3)
+  the Browser UI tab strip gained a context menu with pin / rename / undo
+  close, and `TabInfo` carries new optional `pinned`/`label` fields — additive
+  on a backward-compatible contract, and OAC's compile-only UI shim references
+  no tab types.
+
 ## 0.9.1 - 2026-10-03
 
 ### Added
