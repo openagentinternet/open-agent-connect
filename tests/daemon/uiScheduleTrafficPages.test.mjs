@@ -49,7 +49,7 @@ test('GET /ui/schedule serves the Schedule page with console chrome and the sche
   // Topbar chrome: logo, injected controls, and the console nav.
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);
-  assert.match(html, /data-settings-modal/);
+  assert.match(html, /data-settings-link/);
   assert.match(html, /href="\/ui\/schedule"[^>]*class="active"|class="active"[^>]*href="\/ui\/schedule"/);
   assert.match(html, /<title data-i18n-title="schedule\.title">Schedule — Open Agent Connect<\/title>/);
 });
@@ -161,6 +161,12 @@ test('GET /ui/settings exposes Traffic as an in-page tab without adding it to to
   assert.match(html, /data-i18n-key="settings\.tab\.traffic"/);
   // The identity gate inside the traffic tab links back to the User tab.
   assert.match(html, /href="\/ui\/settings\?tab=user"/);
+  // The General tab hosts the browser infrastructure base URLs (the former
+  // topbar settings modal fields).
+  assert.match(html, /data-infra-form/);
+  assert.match(html, /data-settings-field="metasoP2PBaseUrl"/);
+  assert.match(html, /data-settings-field="metafileContentBaseUrl"/);
+  assert.match(html, /data-settings-field="manApiBaseUrl"/);
   const navMatch = html.match(/<nav class="topbar-nav">([\s\S]*?)<\/nav>/);
   assert.ok(navMatch, 'topbar nav rendered');
   assert.doesNotMatch(navMatch[1], /href="\/ui\/traffic"/);

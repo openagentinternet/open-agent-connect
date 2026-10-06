@@ -53,7 +53,7 @@ test('GET /ui/memory serves the Memory page with console chrome and all five tab
   // Topbar chrome: logo, injected controls, and the console nav.
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);
-  assert.match(html, /data-settings-modal/);
+  assert.match(html, /data-settings-link/);
   assert.doesNotMatch(html, /href="\/ui\/memory"[^>]*class="active"|class="active"[^>]*href="\/ui\/memory"/);
   assert.match(html, /<title data-i18n-title="memory\.title">Memory — Open Agent Connect<\/title>/);
 });

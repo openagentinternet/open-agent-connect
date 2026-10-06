@@ -43,6 +43,10 @@ function createHarness(fetchImpl) {
     '[data-settings-llm-status]': makeElement(),
     '[data-settings-network-status]': makeElement(),
     '[data-user-live]': makeElement(),
+    '[data-onboarding-live]': makeElement(),
+    '[data-infra-form]': makeElement('form'),
+    '[data-infra-status]': makeElement('p'),
+    '[data-infra-save]': makeElement('button'),
   };
   const calls = [];
   const listeners = new Map();
@@ -252,4 +256,62 @@ test('settings user section surfaces server errors with a fix hint', async () =>
     live.innerHTML,
     /An owner identity already exists on this machine\..*delete it first/,
   );
+});
+
+test('settings General tab loads and saves the browser infrastructure base URLs', async () => {
+  const settings = {
+    browser: {
+      metasoP2PBaseUrl: 'https://so.metaid.io',
+      metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
+      manApiBaseUrl: 'https://manapi.metaid.io',
+    },
+    effectiveBrowser: {},
+    defaults: {
+      metasoP2PBaseUrl: 'https://default-so.metaid.io',
+      metafileContentBaseUrl: 'https://default-file.metaid.io/metafile-indexer',
+      manApiBaseUrl: 'https://default-manapi.metaid.io',
+    },
+  };
+  const h = createHarness(async (url, options = {}) => {
+    if (url === '/api/user/who') return jsonResponse({ ok: true, state: 'success', data: { identity: identityPayload.data.identity } });
+    if (url === '/api/user/onboarding') return jsonResponse({ ok: true, state: 'success', data: { onboarding: null, identityPresent: true } });
+    if (url === '/api/config') return jsonResponse({ ok: true, state: 'success', data: {} });
+    if (url === '/api/llm/runtimes') return jsonResponse({ ok: true, state: 'success', data: { runtimes: [] } });
+    if (url === '/api/network/sources') return jsonResponse({ ok: true, state: 'success', data: { sources: [] } });
+    if (url === '/api/browser/settings') {
+      if (options.method === 'PUT') {
+        settings.browser = { ...settings.browser, ...JSON.parse(options.body).browser };
+      }
+      // The save path reads the native Response ok/status fields.
+      return { ok: true, status: 200, json: async () => ({ ok: true, state: 'success', data: settings }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
+  await waitForMicrotasks();
+  await waitForMicrotasks();
+
+  const form = h.elements['[data-infra-form]'];
+  // The saved browser value wins; defaults become placeholders.
+  assert.equal(form.querySelector('[data-settings-field="metasoP2PBaseUrl"]').value, 'https://so.metaid.io');
+  assert.equal(form.querySelector('[data-settings-field="metafileContentBaseUrl"]').value, 'https://file.metaid.io/metafile-indexer');
+  assert.equal(form.querySelector('[data-settings-field="manApiBaseUrl"]').value, 'https://manapi.metaid.io');
+  assert.equal(form.querySelector('[data-settings-field="manApiBaseUrl"]').placeholder, 'https://default-manapi.metaid.io');
+
+  form.querySelector('[data-settings-field="metasoP2PBaseUrl"]').value = 'https://so.example.test';
+  await form.listener('submit')({ preventDefault() {} });
+  await waitForMicrotasks();
+
+  const saveCall = h.calls.find((call) => call.url === '/api/browser/settings' && call.options && call.options.method === 'PUT');
+  assert.ok(saveCall, 'infrastructure save should PUT /api/browser/settings');
+  assert.deepEqual(JSON.parse(saveCall.options.body), {
+    browser: {
+      metasoP2PBaseUrl: 'https://so.example.test',
+      metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
+      manApiBaseUrl: 'https://manapi.metaid.io',
+    },
+  });
+  const status = h.elements['[data-infra-status]'];
+  assert.match(status.textContent, /Base URLs saved\./);
+  assert.equal(form.querySelector('[data-settings-field="metasoP2PBaseUrl"]').value, 'https://so.example.test');
 });

@@ -4,9 +4,11 @@ import type { LocalUiI18nContext } from '../../i18n';
 
 // Settings page: three tabs mirroring the DSH PluginSettingsPanel —
 // User (owner identity + onboarding progress), Traffic (the former
-// /ui/traffic page, merged in-place), and General (language, network,
-// wallet, LLM, browser, discovery, diagnostics). /ui/traffic stays alive
-// as a permanent redirect to /ui/settings?tab=traffic.
+// /ui/traffic page, merged in-place), and General (language, the browser
+// infrastructure base URLs formerly edited in the topbar modal, network,
+// wallet, LLM, browser, discovery, diagnostics). The topbar gear navigates
+// here; /ui/traffic stays alive as a permanent redirect to
+// /ui/settings?tab=traffic.
 export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18nContext()): LocalUiPageDefinition {
   return {
     page: 'settings',
@@ -131,6 +133,35 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
                   ${renderLanguageOptions(i18n)}
                 </select>
               </label>
+            </article>
+            <article class="settings-panel" data-infrastructure-section>
+              <div>
+                <h2 data-i18n-key="settings.infrastructure.title">${i18n.t('settings.infrastructure.title')}</h2>
+                <p data-i18n-key="settings.infrastructure.body">${i18n.t('settings.infrastructure.body')}</p>
+              </div>
+              <form class="settings-infra-form" data-infra-form>
+                <label class="settings-infra-field">
+                  <span data-i18n-key="settings.infrastructure.metasoP2PBaseUrl">${i18n.t('settings.infrastructure.metasoP2PBaseUrl')}</span>
+                  <input type="url" inputmode="url" autocomplete="url" data-settings-field="metasoP2PBaseUrl" />
+                </label>
+                <label class="settings-infra-field">
+                  <span data-i18n-key="settings.infrastructure.metafileBaseUrl">${i18n.t('settings.infrastructure.metafileBaseUrl')}</span>
+                  <input type="url" inputmode="url" autocomplete="url" data-settings-field="metafileContentBaseUrl" />
+                </label>
+                <label class="settings-infra-field">
+                  <span data-i18n-key="settings.infrastructure.manApiBaseUrl">${i18n.t('settings.infrastructure.manApiBaseUrl')}</span>
+                  <input type="url" inputmode="url" autocomplete="url" data-settings-field="manApiBaseUrl" />
+                </label>
+                <p class="settings-user-note">
+                  <span data-i18n-key="settings.infrastructure.prefix">${i18n.t('settings.infrastructure.prefix')}</span>
+                  <a href="https://github.com/orgs/openagentinternet/repositories" target="_blank" rel="noopener">GitHub</a>
+                  <span data-i18n-key="settings.infrastructure.suffix">${i18n.t('settings.infrastructure.suffix')}</span>
+                </p>
+                <p class="status-msg" data-infra-status role="status" aria-live="polite" hidden></p>
+                <div class="settings-user-actions">
+                  <button class="btn btn-primary btn-sm" type="submit" data-infra-save data-i18n-key="settings.infrastructure.save">${i18n.t('settings.infrastructure.save')}</button>
+                </div>
+              </form>
             </article>
             <article class="settings-panel">
               <div>
@@ -740,6 +771,102 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
     }
   };
 
+  // ---- General tab: browser infrastructure base URLs (topbar modal port).
+
+  const infraForm = document.querySelector('[data-infra-form]');
+  const infraStatus = document.querySelector('[data-infra-status]');
+  const infraSave = document.querySelector('[data-infra-save]');
+  const INFRA_FIELD_KEYS = ['metasoP2PBaseUrl', 'metafileContentBaseUrl', 'manApiBaseUrl'];
+  const infraState = { busy: false, note: { kind: '', text: '' } };
+
+  const infraInput = (key) => (infraForm ? infraForm.querySelector('[data-settings-field="' + key + '"]') : null);
+
+  const renderInfrastructure = () => {
+    if (infraStatus) {
+      infraStatus.textContent = infraState.note.text;
+      infraStatus.className = 'status-msg' + (infraState.note.kind ? ' ' + infraState.note.kind : '');
+      infraStatus.hidden = !infraState.note.text;
+    }
+    if (infraSave) infraSave.disabled = infraState.busy;
+    INFRA_FIELD_KEYS.forEach((key) => {
+      const input = infraInput(key);
+      if (input) input.disabled = infraState.busy;
+    });
+  };
+
+  const populateInfrastructure = (settings) => {
+    const record = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+    const browser = record(settings.browser);
+    const effective = record(settings.effectiveBrowser);
+    const defaults = record(settings.defaults);
+    INFRA_FIELD_KEYS.forEach((key) => {
+      const input = infraInput(key);
+      if (!input) return;
+      input.value = Object.prototype.hasOwnProperty.call(browser, key)
+        ? String(browser[key] || '').trim()
+        : String(effective[key] || '').trim();
+      input.placeholder = String(defaults[key] || '').trim();
+    });
+  };
+
+  const loadInfrastructure = async () => {
+    try {
+      const payload = await fetchJson('/api/browser/settings');
+      if (!payload || payload.ok === false) {
+        throw new Error((payload && payload.message) || uiText('settings.infrastructure.unknownError', 'Unknown error'));
+      }
+      populateInfrastructure(payload.data || payload);
+      infraState.note = { kind: '', text: '' };
+    } catch (error) {
+      infraState.note = {
+        kind: 'error',
+        text: uiText('settings.infrastructure.loadFailed', 'Failed to load Base URLs: {message}', {
+          message: (error && error.message) || uiText('settings.infrastructure.unknownError', 'Unknown error'),
+        }),
+      };
+    }
+    renderInfrastructure();
+  };
+
+  const saveInfrastructure = async (event) => {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    if (infraState.busy) return;
+    infraState.busy = true;
+    infraState.note = { kind: '', text: uiText('settings.infrastructure.saving', 'Saving Base URLs...') };
+    renderInfrastructure();
+    try {
+      const browser = {};
+      INFRA_FIELD_KEYS.forEach((key) => {
+        const input = infraInput(key);
+        browser[key] = input ? input.value : '';
+      });
+      const response = await fetch('/api/browser/settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ browser }),
+      });
+      let payload = null;
+      try { payload = await response.json(); } catch {}
+      if (!response.ok || !payload || payload.ok === false) {
+        throw new Error((payload && payload.message) || ('HTTP ' + response.status));
+      }
+      populateInfrastructure(payload.data || payload);
+      infraState.busy = false;
+      infraState.note = { kind: 'success', text: uiText('settings.infrastructure.saved', 'Base URLs saved.') };
+    } catch (error) {
+      infraState.busy = false;
+      infraState.note = {
+        kind: 'error',
+        text: uiText('settings.infrastructure.saveFailed', 'Failed to save Base URLs: {message}', {
+          message: (error && error.message) || uiText('settings.infrastructure.unknownError', 'Unknown error'),
+        }),
+      };
+    }
+    renderInfrastructure();
+  };
+
+  if (infraForm) infraForm.addEventListener('submit', saveInfrastructure);
+
   const load = async () => {
     setStatusKey('settings.status.loading');
     try {
@@ -763,6 +890,7 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
     }
     loadUser().catch(() => undefined);
     loadOnboarding().catch(() => undefined);
+    loadInfrastructure().catch(() => undefined);
   };
 
   if (refresh) refresh.addEventListener('click', load);
@@ -770,6 +898,7 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
     renderStatus();
     renderUser();
     renderOnboarding();
+    renderInfrastructure();
   });
   load();
 })();

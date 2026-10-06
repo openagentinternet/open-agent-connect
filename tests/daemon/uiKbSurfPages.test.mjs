@@ -41,7 +41,7 @@ test('GET /ui/kb serves the Knowledge page with console chrome', async (t) => {
   // Topbar chrome: logo, injected controls, and the console nav.
   assert.match(html, /topbar-logo/);
   assert.match(html, /data-language-toggle/);
-  assert.match(html, /data-settings-modal/);
+  assert.match(html, /data-settings-link/);
   assert.doesNotMatch(html, /href="\/ui\/kb"[^>]*class="active"|class="active"[^>]*href="\/ui\/kb"/);
   // The client i18n script re-applies the tab title from this key.
   assert.match(html, /<title data-i18n-title="kb\.title">Knowledge — Open Agent Connect<\/title>/);
