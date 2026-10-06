@@ -20,11 +20,13 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
     contentHtml: `
       <section class="settings-shell" data-settings-shell>
         <div class="settings-toolbar">
-          <div>
+          <div class="settings-heading-block">
+            <span class="settings-kicker" data-i18n-key="settings.eyebrow">${i18n.t('settings.eyebrow')}</span>
             <h1 data-i18n-key="settings.heading">${i18n.t('settings.heading')}</h1>
-            <p data-settings-status data-i18n-key="settings.status.loading">${i18n.t('settings.status.loading')}</p>
+            <p class="settings-heading-copy" data-i18n-key="settings.description">${i18n.t('settings.description')}</p>
+            <p class="settings-status-line" data-settings-status data-i18n-key="settings.status.loading">${i18n.t('settings.status.loading')}</p>
           </div>
-          <button class="btn" type="button" data-settings-refresh data-i18n-key="settings.refresh">${i18n.t('settings.refresh')}</button>
+          <button class="btn settings-refresh" type="button" data-settings-refresh data-i18n-key="settings.refresh">${i18n.t('settings.refresh')}</button>
         </div>
         <div class="settings-tabs" role="tablist" data-settings-tabs>
           <button class="settings-tab" type="button" role="tab" data-settings-tab="user" data-active="false" aria-selected="false" data-i18n-key="settings.tab.user">${i18n.t('settings.tab.user')}</button>
@@ -48,9 +50,17 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
           </article>
         </div>
         <div class="settings-tabpanel traffic-pane" data-settings-tabpanel="traffic" data-traffic-shell hidden>
-          <div class="settings-tab-toolbar">
-            <p data-traffic-status data-i18n-key="traffic.status.loading">${i18n.t('traffic.status.loading')}</p>
-            <button class="btn" type="button" data-traffic-refresh data-i18n-key="traffic.refresh">${i18n.t('traffic.refresh')}</button>
+          <div class="traffic-intro">
+            <div>
+              <span class="settings-kicker" data-i18n-key="traffic.eyebrow">${i18n.t('traffic.eyebrow')}</span>
+              <h2 data-i18n-key="traffic.heading">${i18n.t('traffic.heading')}</h2>
+              <p data-i18n-key="traffic.description">${i18n.t('traffic.description')}</p>
+            </div>
+            <div class="traffic-intro-actions">
+              <span class="traffic-status-dot" aria-hidden="true"></span>
+              <p data-traffic-status data-i18n-key="traffic.status.loading">${i18n.t('traffic.status.loading')}</p>
+              <button class="btn btn-sm" type="button" data-traffic-refresh data-i18n-key="traffic.refresh">${i18n.t('traffic.refresh')}</button>
+            </div>
           </div>
           <article class="card traffic-card" data-traffic-gate hidden>
             <h2 class="card-title" data-i18n-key="traffic.identityRequired.title">${i18n.t('traffic.identityRequired.title')}</h2>
@@ -59,8 +69,14 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
           </article>
           <div class="traffic-grid" data-traffic-content hidden>
             <article class="card traffic-card">
-              <h2 class="card-title" data-i18n-key="traffic.modeTitle">${i18n.t('traffic.modeTitle')}</h2>
-              <div class="traffic-seg" role="group" data-traffic-mode-seg>
+              <div class="traffic-card-heading">
+                <div>
+                  <span class="traffic-card-index">01</span>
+                  <h2 class="card-title" data-i18n-key="traffic.modeTitle">${i18n.t('traffic.modeTitle')}</h2>
+                </div>
+                <span class="traffic-card-label" data-i18n-key="traffic.modeLabel">${i18n.t('traffic.modeLabel')}</span>
+              </div>
+              <div class="traffic-seg" role="group" data-traffic-mode-seg aria-label="Billing mode">
                 <button class="traffic-seg-btn" type="button" data-traffic-mode="traffic" data-active="false" data-i18n-key="traffic.modeTraffic">${i18n.t('traffic.modeTraffic')}</button>
                 <button class="traffic-seg-btn" type="button" data-traffic-mode="selfpay" data-active="false" data-i18n-key="traffic.modeSelfpay">${i18n.t('traffic.modeSelfpay')}</button>
               </div>
@@ -68,9 +84,14 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
               <p class="status-msg" data-traffic-mode-status role="status" aria-live="polite"></p>
             </article>
             <article class="card traffic-card">
-              <h2 class="card-title" data-i18n-key="traffic.balanceTitle">${i18n.t('traffic.balanceTitle')}</h2>
+              <div class="traffic-card-heading">
+                <div>
+                  <span class="traffic-card-index">02</span>
+                  <h2 class="card-title" data-i18n-key="traffic.balanceTitle">${i18n.t('traffic.balanceTitle')}</h2>
+                </div>
+                <span class="traffic-card-label" data-i18n-key="traffic.balanceLabel">${i18n.t('traffic.balanceLabel')}</span>
+              </div>
               <div class="traffic-balance-value" data-traffic-balance-value title="">—</div>
-              <div class="traffic-meter" data-traffic-meter hidden><div class="traffic-meter-fill" data-traffic-meter-fill style="width:0%"></div></div>
               <p class="traffic-balance-stats" data-traffic-balance-stats></p>
               <div class="schedule-row-actions">
                 <button class="btn btn-sm" type="button" data-traffic-balance-refresh data-i18n-key="traffic.balanceRefresh">${i18n.t('traffic.balanceRefresh')}</button>
@@ -86,10 +107,19 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
             </article>
           </div>
           <article class="card traffic-card" data-traffic-redeem-card hidden>
-            <h2 class="card-title" data-i18n-key="traffic.redeemTitle">${i18n.t('traffic.redeemTitle')}</h2>
+            <div class="traffic-card-heading">
+              <div>
+                <span class="traffic-card-index">03</span>
+                <h2 class="card-title" data-i18n-key="traffic.redeemTitle">${i18n.t('traffic.redeemTitle')}</h2>
+              </div>
+              <span class="traffic-card-label" data-i18n-key="traffic.redeemLabel">${i18n.t('traffic.redeemLabel')}</span>
+            </div>
             <p class="field-hint" data-i18n-key="traffic.redeemBody">${i18n.t('traffic.redeemBody')}</p>
             <form class="traffic-redeem-row" data-traffic-redeem-form>
-              <input type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" data-traffic-redeem-input />
+              <label class="traffic-code-input">
+                <span aria-hidden="true">✦</span>
+                <input type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" data-traffic-redeem-input />
+              </label>
               <button class="btn btn-primary btn-sm" type="submit" data-traffic-redeem-submit data-i18n-key="traffic.redeemSubmit">${i18n.t('traffic.redeemSubmit')}</button>
             </form>
             <p class="status-msg" data-traffic-redeem-status role="status" aria-live="polite"></p>
@@ -912,8 +942,6 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
     modeHint: document.querySelector('[data-traffic-mode-hint]'),
     modeStatus: document.querySelector('[data-traffic-mode-status]'),
     balanceValue: document.querySelector('[data-traffic-balance-value]'),
-    balanceMeter: document.querySelector('[data-traffic-meter]'),
-    balanceMeterFill: document.querySelector('[data-traffic-meter-fill]'),
     balanceStats: document.querySelector('[data-traffic-balance-stats]'),
     balanceRefresh: document.querySelector('[data-traffic-balance-refresh]'),
     balanceStatus: document.querySelector('[data-traffic-balance-status]'),
@@ -1091,12 +1119,6 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
     if (account) {
       elements.balanceValue.textContent = formatTraffic(account.balanceBytes);
       elements.balanceValue.setAttribute('title', formatBytesExact(account.balanceBytes));
-      if (elements.balanceMeter && elements.balanceMeterFill) {
-        const total = (Number(account.balanceBytes) || 0) + (Number(account.spentBytesTotal) || 0);
-        const share = total > 0 ? Math.max(0, Math.min(100, Math.round((Number(account.balanceBytes) || 0) * 100 / total))) : 0;
-        elements.balanceMeter.hidden = false;
-        elements.balanceMeterFill.style.width = share + '%';
-      }
       if (elements.balanceStats) {
         elements.balanceStats.textContent = uiText('traffic.balanceStats', 'Reserved {reserved} · Total spent {spent}', {
           reserved: formatTraffic(account.reservedBytes),
@@ -1107,7 +1129,6 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
     } else {
       elements.balanceValue.textContent = '—';
       elements.balanceValue.setAttribute('title', '');
-      if (elements.balanceMeter) elements.balanceMeter.hidden = true;
       if (elements.balanceStats) elements.balanceStats.textContent = '';
       if (elements.low) elements.low.hidden = true;
     }
