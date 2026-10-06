@@ -56,29 +56,6 @@
         font-size: 12px;
         line-height: 1.5;
       }
-      .settings-panel code {
-        max-width: 220px;
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--dim);
-        overflow-wrap: anywhere;
-        text-align: right;
-      }
-      .settings-links {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 8px;
-      }
-      .settings-links a {
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--muted);
-        text-decoration: none;
-      }
-      .settings-links a:hover {
-        color: var(--text);
-      }
       .settings-panel[data-user-section] {
         flex-direction: column;
         align-items: stretch;
@@ -329,12 +306,6 @@
         }
         .settings-panel {
           display: grid;
-        }
-        .settings-panel code,
-        .settings-links {
-          max-width: none;
-          text-align: left;
-          justify-content: flex-start;
         }
         .settings-infra-field {
           grid-template-columns: 1fr;
