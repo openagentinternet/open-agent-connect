@@ -1632,7 +1632,7 @@ function buildAppsPageRuntimeSource(
         (coverSrc ? '<img class="apps-chain-cover-img" src="' + escapeHtml(coverSrc) + '" alt="" loading="lazy" data-apps-image-fallback="">' : '') +
         '<span class="apps-state-pill">' + escapeHtml(uiText('apps.runnable', UI_TEXT.runnable)) + '</span>' +
       '</div>' +
-      '<div class="apps-chain-body">' +
+      '<div class="apps-chain-card-body">' +
         '<div class="apps-chain-title">' +
           imageMarkup('apps-chain-icon', row && row.icon, title, '') +
           '<div class="apps-chain-title-copy"><h3>' + escapeHtml(title) + '</h3><p>' + escapeHtml(subtitle) + '</p></div>' +
