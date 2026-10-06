@@ -66,8 +66,8 @@ test('GET /ui/conversations serves the group-task section with console chrome', 
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /data-view-toggle="conversations"/);
-  assert.match(html, /data-view-toggle="grouptask"/);
+  // The Conversations/Group Task toggle is hidden; the group-task view stays reachable only via ?view=grouptask.
+  assert.doesNotMatch(html, /data-view-toggle="/);
   assert.match(html, /data-grouptask-shell/);
   assert.match(html, /\/api\/grouptask\/list/);
   assert.match(html, /\/api\/grouptask\/detail/);

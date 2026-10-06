@@ -31,7 +31,7 @@
         padding: 16px 24px 24px;
       }
       .conversations-shell {
-        height: calc(100% - 46px);
+        height: 100%;
         min-height: 0;
         display: grid;
         grid-template-columns: 340px minmax(0, 1fr);
@@ -44,33 +44,6 @@
       }
       .conversations-shell[hidden] {
         display: none;
-      }
-      .conversations-view-toggle {
-        display: inline-flex;
-        gap: 2px;
-        margin-bottom: 10px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--surface);
-        padding: 3px;
-      }
-      .conversations-view-btn {
-        border: 0;
-        background: transparent;
-        padding: 4px 12px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--muted);
-        cursor: pointer;
-        transition: color .12s, background .12s;
-      }
-      .conversations-view-btn:hover {
-        color: var(--text);
-      }
-      .conversations-view-btn.active {
-        background: var(--accent-dim);
-        color: var(--accent);
       }
       .grouptask-list {
         flex: 1;
