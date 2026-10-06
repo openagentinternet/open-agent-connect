@@ -262,6 +262,22 @@ export const handleMetaAppRoutes = async (context: RouteContext): Promise<boolea
     return true;
   }
 
+  if (url.pathname === '/api/metaapp/search') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const cursor = readTrimmedQueryValue(url.searchParams.get('cursor'));
+    const result = handlers.metaapp?.search
+      ? await handlers.metaapp.search({
+        size: readPositiveInteger(url.searchParams.get('size'), 12),
+        ...(cursor ? { cursor } : {}),
+      })
+      : commandFailed('not_implemented', 'MetaApp search handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname === '/api/metaapp/delete') {
     if (req.method !== 'POST') {
       context.sendMethodNotAllowed(['POST']);

@@ -299,6 +299,7 @@ import {
 } from '../core/metaapp/ownerService';
 import { createMetaAppManOwnerClient, type MetaAppOwnerListRecord } from '../core/metaapp/manOwnerList';
 import { materializeMetaAppSource } from '../core/metaapp/metaAppSource';
+import { searchMetaApps, trimMetaAppSearchItems } from '../core/metaapp/metaAppSearchApi';
 import { normalizeMetaAppPinIdOrUri } from '../core/metaapp/pinId';
 import {
   commentMetaApp,
@@ -14139,6 +14140,43 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return actor.failure;
         }
         return listMetaAppsForActor(actor, rawInput);
+      },
+      // Global on-chain feed (metaso aggregation API), not bot-scoped: the
+      // same trimmed projection + link decoration as the `metabot metaapp
+      // search` CLI envelope, minus the CLI's daemon-reachability probe (this
+      // daemon is the link target).
+      search: async (rawInput) => {
+        try {
+          const [page, ownGlobalMetaIds] = await Promise.all([
+            searchMetaApps({
+              size: typeof rawInput.size === 'number' && rawInput.size > 0 ? rawInput.size : undefined,
+              cursor: normalizeText(rawInput.cursor) || undefined,
+            }),
+            listIdentityProfiles(normalizedSystemHomeDir).catch(() => [] as IdentityProfileRecord[]).then((profiles) => new Set(
+              profiles
+                .map((profile) => normalizeText(profile.globalMetaId))
+                .filter(Boolean),
+            )),
+          ]);
+          return commandSuccess({
+            items: trimMetaAppSearchItems(page.items, ownGlobalMetaIds).map((item) => ({
+              ...item,
+              ...(item.pinId
+                ? { localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), `/browser/metaapp/${encodeURIComponent(item.pinId)}`) ?? `/browser/metaapp/${encodeURIComponent(item.pinId)}` }
+                : {}),
+              ...(item.publisherGlobalMetaId
+                ? { publisherLocalUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), `/browser/metaid/${encodeURIComponent(item.publisherGlobalMetaId)}`) ?? `/browser/metaid/${encodeURIComponent(item.publisherGlobalMetaId)}` }
+                : {}),
+            })),
+            hasMore: page.hasMore,
+            nextCursor: page.nextCursor,
+          });
+        } catch (error) {
+          return commandFailed(
+            'metaapp_search_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       },
     },
     buzz: {

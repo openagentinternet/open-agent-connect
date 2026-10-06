@@ -326,6 +326,39 @@ test('GET /api/metaapp/list forwards owner list query params to metaapp.list', a
   assert.deepEqual(calls, [{ scope: 'owner', from: 'alice', cursor: 'cursor-1', size: 12, refresh: true }]);
 });
 
+test('GET /api/metaapp/search forwards size and cursor to metaapp.search', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    metaapp: {
+      search: async (input) => {
+        calls.push(input);
+        return commandSuccess({ items: [], hasMore: true, nextCursor: 'chain-cursor-2' });
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/metaapp/search?size=12&cursor=chain-cursor-1`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(calls, [{ size: 12, cursor: 'chain-cursor-1' }]);
+  assert.deepEqual(payload.data, { items: [], hasMore: true, nextCursor: 'chain-cursor-2' });
+});
+
+test('GET /api/metaapp/search without a handler reports not implemented', async (t) => {
+  const server = await startServer({});
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/metaapp/search?size=12`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'not_implemented');
+});
+
 test('POST /api/metaapp/delete forwards JSON body to metaapp.delete', async (t) => {
   const calls = [];
   const server = await startServer({
