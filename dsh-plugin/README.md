@@ -254,6 +254,17 @@ reconcile: the shared bare `oac` preset ("Open Agent Connect (MetaBot)")
 from pre-per-Bot installs is removed, and an `agent-presets.default: oac`
 setting pointing at it heals to `standard`.
 
+**Bot-set pushes keep every picker live.** Pickers fetch their lists once
+on mount and stay mounted across Bot edits (the Bots page overlays the
+conversation column, visited sections stay alive, 新会话 reuses the blank
+session), so the chip and every shared-picker surface (MetaApps, Memory,
+线上对话, the A2A composer default, the group-task worker picker, the My
+Bots list) refetch on each `/oac/api/bots/events` `bots-changed` push.
+The mutation routes notify directly; a host-lifetime watch of the bot
+registry files catches CLI/daemon writes and re-runs the preset reconcile
+first, so a `metabot bot create` from a terminal gets its `oac-*` preset
+registered and every picker updated without restarting DSH.
+
 ## LLM resolution: who generates what
 
 Two LLM chains coexist, and every generation site uses exactly one of them:
@@ -765,6 +776,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/llm/host-status` | daemon `/api/llm/host-executor/status` (connected-executor count) for the Bot editor's reply-model lines |
 | GET | `/oac/api/chat/events?from=<slug>` | SSE proxy of the daemon's `/api/conversations/events` (`conversation-update` on stored-row changes and chain-profile warm-up completions) |
 | GET | `/oac/api/chat/events/all` | SSE unread feed: the host fs-watches every profile's a2a conversation store and the synced grouptask stores (one recursive watcher) and pushes `private-conversations-changed` per Bot plus pre-diffed `group-task-update` frames — push-only by design, the 2026-09-07 polling badge stays dead |
+| GET | `/oac/api/bots/events` | SSE bot-set feed: `bots-changed` pushed after every successful `bots/create`\|`update`\|`delete` route and after the host's debounced watch of the bot registry files (the manager `identity-profiles.json` index plus each profile's `.runtime/bot-role.json`/`dsh-llm.json`) re-runs the preset reconcile — every mounted Bot picker (the new-session chip included) refetches on it, so a new Bot is selectable without a DSH reload |
 | GET | `/oac/api/metaapp/events?op=<id>` | SSE proxy of the daemon's `/api/metaapp/events` (per-op publish stage events: `archive`/`upload`/`write` then `done`/`error`) |
 | GET | `/oac/api/file/avatar?ref=<pin>` | same-origin proxy of the daemon's `/api/file/avatar`, so chain avatar pin references render in the panels |
 | POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |

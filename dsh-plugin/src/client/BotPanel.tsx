@@ -29,6 +29,7 @@ import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
 import type { BotsLocaleKey } from './locale.ts'
 import type { MemoryLocaleKey } from './locale-memory.ts'
 import type { MemoryPanelInjected } from './MemoryPanel.tsx'
+import { useBotsRevision } from './bot-catalog.ts'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
@@ -147,6 +148,10 @@ export function BotPanel({
   const [canCreate, setCanCreate] = useState(false)
   const [tick, setTick] = useState(0)
 
+  // Bot set refresh: CLI/daemon-side Bot writes update the My Bots list
+  // without a manual refresh (route-driven creates already reload via tick).
+  const botsRevision = useBotsRevision()
+
   useEffect(() => {
     let current = true
     void list().then(
@@ -154,7 +159,7 @@ export function BotPanel({
       (cause: unknown) => { if (current) setError(errorText(cause)) },
     )
     return () => { current = false }
-  }, [list, tick])
+  }, [list, tick, botsRevision])
 
   useEffect(() => {
     void llmDirectory().then(setDirectory).catch(() => setDirectory({ providers: [], modelsByProvider: {} }))

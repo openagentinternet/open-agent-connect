@@ -4,6 +4,7 @@ import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotRow, CommandEnvelope } from './api.ts'
 import type { ServicesLocaleKey } from './locale-services.ts'
 import { asRecordArray, interpolate, textOf } from './parse.ts'
+import { useBotsRevision } from './bot-catalog.ts'
 
 type Translate = (key: ServicesLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
@@ -51,12 +52,16 @@ export function ServicesPanel({
   const [spendCurrency, setSpendCurrency] = useState('SPACE')
   const [lastRequest, setLastRequest] = useState<Record<string, unknown> | null>(null)
 
+  // Bot set refresh: a Bot created after this panel mounted appears in the
+  // from-Bot picker without a reload.
+  const botsRevision = useBotsRevision()
+
   useEffect(() => {
     void bots().then((list) => {
       setProfiles(list)
       setFrom((current) => current || list[0]?.slug || '')
     }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
-  }, [bots])
+  }, [bots, botsRevision])
 
   useEffect(() => {
     if (!from || tab !== 'owned') return

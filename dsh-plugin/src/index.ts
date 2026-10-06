@@ -16,6 +16,7 @@ import {
   resolveMetaAppSource,
 } from './browser-tools.js'
 import { bindMetawebToolInstall } from './metaweb-tools.js'
+import { BotChangeEventHub, streamBotEvents, watchBotRegistry } from './bot-events.js'
 import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { bindQaToolInstall } from './qa-tools.js'
@@ -108,6 +109,7 @@ async function dispatchPost(
   method: string,
   payload: unknown,
   browserHub: BrowserEventHub,
+  botHub: BotChangeEventHub,
 ): Promise<MetabotCommandResult> {
   if (method === 'browser/open') {
     const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
@@ -158,7 +160,9 @@ async function dispatchPost(
     return runMetabot(['bot', 'show', '--from', slug])
   }
   if (method === 'bots/create') {
-    return createBot(ctx, payload)
+    const result = await createBot(ctx, payload)
+    if (result.ok && result.state === 'success') botHub.notify()
+    return result
   }
   if (method === 'bots/update') {
     const body = payload as { slug?: unknown; patch?: unknown }
@@ -167,14 +171,18 @@ async function dispatchPost(
     const patch = body.patch !== null && typeof body.patch === 'object' && !Array.isArray(body.patch)
       ? body.patch as Record<string, unknown>
       : {}
-    return updateBot(ctx, slug, patch)
+    const result = await updateBot(ctx, slug, patch)
+    if (result.ok && result.state === 'success') botHub.notify()
+    return result
   }
   if (method === 'bots/delete') {
     const slug = typeof (payload as { slug?: unknown })?.slug === 'string'
       ? (payload as { slug: string }).slug.trim()
       : ''
     if (!slug) return { ok: false, state: 'failed', code: 'missing_slug', message: 'slug is required' }
-    return deleteBot(ctx, slug)
+    const result = await deleteBot(ctx, slug)
+    if (result.ok && result.state === 'success') botHub.notify()
+    return result
   }
   const botAdvanced = await dispatchBotAdvancedRoutes(method, payload)
   if (botAdvanced !== undefined) return botAdvanced
@@ -375,6 +383,7 @@ function registerApi(
   ctx: HostContext,
   getHealth: () => HealthPayload,
   browserHub: BrowserEventHub,
+  botHub: BotChangeEventHub,
 ): () => void {
   const fence = (req: PluginHttpRequest): boolean =>
     isTrustedApiRequest(req, ctx.webRuntime.trustedHosts)
@@ -398,6 +407,14 @@ function registerApi(
           return
         }
         streamBrowserEvents(req, res, browserHub)
+        return
+      }
+      if (method === 'bots/events') {
+        if (req.method !== 'GET') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+          return
+        }
+        streamBotEvents(req, res, botHub)
         return
       }
       if (method === 'chat/events') {
@@ -483,7 +500,7 @@ function registerApi(
           req,
           method === 'bots/homepage-upload' ? HOMEPAGE_UPLOAD_REQUEST_MAX_BYTES : undefined,
         )
-        const result = await dispatchPost(ctx, method, payload, browserHub)
+        const result = await dispatchPost(ctx, method, payload, browserHub, botHub)
         const status = result.code === 'not-found' ? 404 : 200
         writeJson(res, status, result)
       } catch (error) {
@@ -585,6 +602,9 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   configureMessageSources(registryBackendOf(ctx.agentPresets) !== undefined)
   let health: HealthPayload = emptyHealth()
   const browserHub = new BrowserEventHub()
+  // Bot-set push feed: route mutations notify directly; the host-lifetime
+  // registry watch below covers CLI/daemon writes and reconciles presets.
+  const botHub = new BotChangeEventHub()
   const sourceCache = createBrowserSourceCache()
   if (!config.skipBootstrap) {
     ctx.effect(() => {
@@ -633,11 +653,18 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     } else if (ctx.agentPresets === undefined) {
       health.presets = { ok: false, message: 'agentPresets not available' }
     }
+    // Bot registry watch (push-only Bot picker refresh): catches bot
+    // create/update/delete writes from outside the plugin's routes — the
+    // metabot CLI and the daemon — reconciling the matching `oac-*` presets
+    // before notifying connected clients.
+    if (ctx.agentPresets !== undefined && health.cliPath !== null) {
+      ctx.effect(() => watchBotRegistry(ctx, botHub), 'oac-dsh: bot registry watch')
+    }
   }
   if (!config.skipBootstrap && ctx.get?.('schedule')) {
     void migrateLegacyScheduleTasks(ctx)
   }
-  ctx.effect(() => registerApi(ctx, () => health, browserHub), 'oac-dsh: /oac/api routes')
+  ctx.effect(() => registerApi(ctx, () => health, browserHub, botHub), 'oac-dsh: /oac/api routes')
 
   // Memory system: per-turn injection, post-turn extraction, and per-agent
   // memory tools for oac-* preset sessions. Each piece is config-gated and
@@ -800,6 +827,14 @@ export {
   wrapKnownCatalogTitles,
 } from './browser-protocol.js'
 export { BrowserEventHub, resolveDaemonBaseUrl, type BrowserOpenEvent } from './browser-bridge.js'
+export {
+  BotChangeEventHub,
+  isBotRegistryPath,
+  streamBotEvents,
+  watchBotRegistry,
+  type BotRegistryWatchOptions,
+} from './bot-events.js'
+export { localIdentityManagerPaths } from './local-read.js'
 export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } from './cli-bridge.js'
 export { DAEMON_PINNED_SKIP, runMetabotPinned } from './daemon-pinned-run.js'
 export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'

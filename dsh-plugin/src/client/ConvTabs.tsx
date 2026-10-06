@@ -47,6 +47,7 @@ import { sumPrivateUnreadCounts } from '../unread-logic.ts'
 import { CONV_TABS, loadConvFrom, saveConvFrom, type ConvTab } from '../conv-tab-logic.ts'
 import type { ConvTabState } from './conv-tab-store.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
+import { useBotsRevision } from './bot-catalog.ts'
 
 export type ConvTabsTranslate =
   (key: ConversationsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
@@ -161,6 +162,10 @@ function OnlineList({
   const [renameDraft, setRenameDraft] = useState('')
   const [renameBusy, setRenameBusy] = useState(false)
 
+  // Bot set refresh: a Bot created after the strip mounted appears in the
+  // 线上对话 from-Bot picker without a reload.
+  const botsRevision = useBotsRevision()
+
   useEffect(() => {
     let current = true
     void bots().then((rows) => {
@@ -174,7 +179,7 @@ function OnlineList({
       if (current) setListError(errorText(cause))
     })
     return () => { current = false }
-  }, [bots])
+  }, [bots, botsRevision])
 
   useEffect(() => {
     if (!from) return undefined

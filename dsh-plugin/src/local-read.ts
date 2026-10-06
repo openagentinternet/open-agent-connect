@@ -84,6 +84,25 @@ export function localProfilesRoot(): string | null {
   }
 }
 
+/**
+ * The identity manager layout (`~/.metabot/manager` + its
+ * `identity-profiles.json` index — the authoritative Bot set) or null. The
+ * bot-registry watcher reads the index through this, never a guessed path.
+ */
+export function localIdentityManagerPaths(): { managerRoot: string; profilesPath: string } | null {
+  try {
+    if (process.env.OAC_DSH_NO_LOCAL_READ) return null
+    const identityProfiles = core('core/identity/identityProfiles.js')
+    const resolve = fn<(home: string) => { managerRoot: string; profilesPath: string }>(
+      identityProfiles,
+      'resolveIdentityManagerPaths',
+    )
+    return resolve(systemHomeDir())
+  } catch {
+    return null
+  }
+}
+
 /** Resolve a `--from` slug/name to a profile homeDir, mirroring the CLI. */
 export async function localActorHomeDir(from: string): Promise<string | null> {
   try {

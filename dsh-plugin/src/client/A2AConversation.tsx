@@ -21,6 +21,7 @@ import type { A2APanelState } from './a2a-panel-store.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
+import { useBotsRevision } from './bot-catalog.ts'
 
 type Translate = (key: ConversationsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
@@ -292,6 +293,11 @@ export function A2AConversation({
     return () => setView(null)
   }, [mode, from, selectedPeer, taskKey, setView])
 
+  // Bot set refresh: a Bot created after this panel mounted (e.g. through
+  // the Bots page) appears in the from-Bot picker and the group-task
+  // worker picker without a reload.
+  const botsRevision = useBotsRevision()
+
   useEffect(() => {
     let current = true
     setGuidanceStatus(null)
@@ -306,7 +312,7 @@ export function A2AConversation({
       if (current) setListError(errorText(cause))
     })
     return () => { current = false }
-  }, [bots])
+  }, [bots, botsRevision])
 
   // Opening a task clears its badge AND pins it as "being read" so live
   // updates for that task stay read while it is on screen.

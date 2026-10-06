@@ -163,7 +163,9 @@ test('the Bots page projects the section ledger into a keep-alive vertical nav',
   assert.match(styles, /\.oac-bots-page-nav-item:hover \{ background: var\(--dsw-specific-sidebar-nav-item-hover/)
   assert.match(styles, /\.oac-bots-page-content > \[role='tabpanel'\] \{ max-width: 720px; margin-inline: auto; \}/)
   const index = await readFile(join(root, 'src/client/index.ts'), 'utf8')
-  assert.match(index, /CONVTABS_CSS \+ BOTSPAGE_CSS/)
+  // (Tracking split the concat when its section landed; the point is that
+  // the Bots-page CSS rides the injected style tag.)
+  assert.match(index, /CONVTABS_CSS \+ TRACKING_CSS \+ BOTSPAGE_CSS/)
   // The first nav item reads 我的 Bot / My Bots; the rail row keeps "Bots".
   assert.match(index, /label: \(\) => t\('navSection'\)/)
 })
@@ -311,8 +313,9 @@ test('the MetaApps local list retries transient daemon-replacement failures, bou
   assert.match(panel, /LOCAL_LOAD_RETRIES = 4/)
   assert.match(panel, /LOCAL_RETRY_BASE_MS = 3_000/)
   // Both initial loads retry (bots + first page); pagination keeps its
-  // manual retry so a retry never yanks the user back to page one.
-  assert.match(panel, /\[bots, retryTick\]/)
+  // manual retry so a retry never yanks the user back to page one. The
+  // bots load also refetches on every bots-changed push (useBotsRevision).
+  assert.match(panel, /\[bots, retryTick, botsRevision\]/)
   assert.match(panel, /\[from, list, retryTick\]/)
   // A fresh Bot selection opens a fresh retry window.
   assert.match(panel, /useEffect\(\(\) => \{\s*retryAttemptsRef\.current = 0\s*\}, \[from\]\)/)
