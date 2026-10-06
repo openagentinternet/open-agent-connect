@@ -344,6 +344,40 @@ function profilesPayload(profiles = [
   };
 }
 
+function chainPayload(overrides = {}) {
+  return {
+    ok: true,
+    state: 'success',
+    data: {
+      items: [],
+      hasMore: false,
+      nextCursor: '',
+      ...overrides,
+    },
+  };
+}
+
+function chainItem(overrides = {}) {
+  return {
+    pinId: PIN,
+    title: 'Chain Wave',
+    appName: 'chain-wave',
+    intro: 'A global on-chain MetaApp.',
+    icon: 'metafile://cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccci0',
+    coverImg: 'https://example.com/cover.png',
+    tags: ['tools', 'demo'],
+    runtime: 'browser',
+    version: 'v1.2.0',
+    updatedAt: 1_777_600_000_000,
+    publisherGlobalMetaId: 'idq1satoshi',
+    publisherName: 'Satoshi',
+    publisherAvatarId: 'ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddi0',
+    forkedFrom: '',
+    isOwn: false,
+    ...overrides,
+  };
+}
+
 function createAppsPageContext(options = {}) {
   const documentListeners = new Map();
   const windowListeners = new Map();
@@ -351,13 +385,23 @@ function createAppsPageContext(options = {}) {
   const body = new FakeElement();
   const elements = {
     '[data-apps-shell]': new FakeElement({ 'data-apps-shell': '' }),
-    '[data-apps-notice]': new FakeElement({ 'data-apps-notice': '' }),
+    '[data-apps-notice]': new FakeElement({ 'data-apps-notice': '', hidden: '' }),
+    '[data-apps-chain-notice]': new FakeElement({ 'data-apps-chain-notice': '', hidden: '' }),
+    '[data-apps-tab="chain"]': new FakeElement({ 'data-apps-tab': 'chain', 'data-active': 'true', 'aria-selected': 'true' }),
+    '[data-apps-tab="local"]': new FakeElement({ 'data-apps-tab': 'local', 'aria-selected': 'false' }),
+    '[data-apps-tabpanel="chain"]': new FakeElement({ 'data-apps-tabpanel': 'chain' }),
+    '[data-apps-tabpanel="local"]': new FakeElement({ 'data-apps-tabpanel': 'local', hidden: '' }),
     '[data-apps-grid]': new FakeElement({ 'data-apps-grid': '' }),
     '[data-apps-grid-count]': new FakeElement({ 'data-apps-grid-count': '' }),
+    '[data-apps-chain-grid]': new FakeElement({ 'data-apps-chain-grid': '' }),
+    '[data-apps-chain-grid-count]': new FakeElement({ 'data-apps-chain-grid-count': '' }),
     '[data-apps-refresh]': new FakeElement({ 'data-apps-refresh': '' }),
     '[data-apps-page-prev]': new FakeElement({ 'data-apps-page-prev': '' }),
     '[data-apps-page-next]': new FakeElement({ 'data-apps-page-next': '' }),
     '[data-apps-page-label]': new FakeElement({ 'data-apps-page-label': '' }),
+    '[data-apps-chain-page-prev]': new FakeElement({ 'data-apps-chain-page-prev': '' }),
+    '[data-apps-chain-page-next]': new FakeElement({ 'data-apps-chain-page-next': '' }),
+    '[data-apps-chain-page-label]': new FakeElement({ 'data-apps-chain-page-label': '' }),
     '[data-apps-bot-picker]': new FakeElement({ 'data-apps-bot-picker': '' }),
     '[data-apps-publish-open]': new FakeElement({ 'data-apps-publish-open': '' }),
     '[data-apps-modal-root]': new FakeElement({ 'data-apps-modal-root': '' }),
@@ -380,6 +424,9 @@ function createAppsPageContext(options = {}) {
   };
   elements['[data-apps-grid]'].onInnerHTML = (html) => {
     elements['[data-apps-grid]'].children = buildFakeElementsFromHtml(html, document);
+  };
+  elements['[data-apps-chain-grid]'].onInnerHTML = (html) => {
+    elements['[data-apps-chain-grid]'].children = buildFakeElementsFromHtml(html, document);
   };
 
   const fetchUrls = [];
@@ -445,6 +492,12 @@ function createAppsPageContext(options = {}) {
       }
       if (String(url) === '/api/bot/profiles') {
         return Promise.resolve(response(options.profiles ?? profilesPayload()));
+      }
+      if (String(url).startsWith('/api/metaapp/search?')) {
+        if (typeof options.fetchChain === 'function') {
+          return Promise.resolve(options.fetchChain(String(url))).then((payload) => response(payload));
+        }
+        return Promise.resolve(response(options.chain ?? chainPayload()));
       }
       if (String(url).startsWith('/api/metaapp/list?')) {
         if (typeof options.fetchApps === 'function') {
@@ -557,6 +610,20 @@ function createAppsPageContext(options = {}) {
     clickGridAction: async (selector) => {
       const element = elements['[data-apps-grid]'].querySelector(selector);
       assert.ok(element, `${selector} rendered action missing`);
+      await dispatchDocumentEvent('click', { target: element });
+    },
+    clickChainGridAction: async (selector) => {
+      const element = elements['[data-apps-chain-grid]'].querySelector(selector);
+      assert.ok(element, `${selector} rendered chain action missing`);
+      await dispatchDocumentEvent('click', { target: element });
+    },
+    keydownChainGridAction: async (selector, key) => {
+      const element = elements['[data-apps-chain-grid]'].querySelector(selector);
+      assert.ok(element, `${selector} rendered chain element missing`);
+      await dispatchDocumentEvent('keydown', { target: element, key, preventDefault() {} });
+    },
+    clickTab: async (tab) => {
+      const element = tab === 'chain' ? elements['[data-apps-tab="chain"]'] : elements['[data-apps-tab="local"]'];
       await dispatchDocumentEvent('click', { target: element });
     },
   };
@@ -1753,4 +1820,215 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.deepEqual(request.introImgs, [`metafile://${firstUploadedPin}.png`, `metafile://${secondUploadedPin}.png`]);
+});
+
+test('apps page opens on the chain tab and loads the global feed first page', async () => {
+  const context = createAppsPageContext({
+    chain: chainPayload({ items: [chainItem()] }),
+  });
+  context.run();
+
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/search?')), 'chain search request');
+  assert.equal(new URL(context.fetchUrls.find((url) => url.startsWith('/api/metaapp/search?')), 'http://localhost').searchParams.get('size'), '12');
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-card]'),
+    'chain card render',
+  );
+  assert.equal(context.elements['[data-apps-chain-grid-count]'].textContent, '1');
+  assert.equal(context.elements['[data-apps-tabpanel="local"]'].hidden, true);
+  assert.equal(context.elements['[data-apps-tabpanel="chain"]'].hidden, false);
+  assert.equal(context.elements['[data-apps-publish-open]'].hidden, true);
+  // The local Bot list still loads eagerly behind its tab.
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'local list request');
+});
+
+test('chain cards port the DSH card: icon, cover, author row, run/fork/share foot', async () => {
+  const context = createAppsPageContext({
+    chain: chainPayload({ items: [chainItem({ title: 'Wave Deck' })] }),
+  });
+  context.run();
+
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-card]'),
+    'chain card render',
+  );
+  const gridHtml = context.elements['[data-apps-chain-grid]'].innerHTML;
+  const card = context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-card]');
+  assert.equal(card.getAttribute('data-apps-chain-card'), PIN);
+  assert.ok(gridHtml.includes('Wave Deck'), 'card title');
+  assert.ok(gridHtml.includes('v1.2.0 / browser'), 'version / runtime subtitle');
+  assert.ok(gridHtml.includes('/api/file/avatar?ref=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccci0'), 'icon resolves through the avatar proxy');
+  assert.ok(gridHtml.includes('https://example.com/cover.png'), 'cover image url');
+  assert.ok(gridHtml.includes('Satoshi'), 'author name');
+  const author = context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-author]');
+  assert.equal(author.getAttribute('data-apps-chain-author'), 'idq1satoshi');
+  assert.ok(context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-run]'), 'run button');
+  assert.ok(context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-fork]'), 'fork button');
+  assert.ok(context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-share]'), 'share button');
+  assert.ok(gridHtml.includes('data-apps-copy-pin="' + PIN + '"'), 'pin copy button');
+});
+
+test('chain card Run and author row open the local Browser pages', async () => {
+  const context = createAppsPageContext({
+    chain: chainPayload({ items: [chainItem()] }),
+  });
+  context.run();
+
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-run]'),
+    'chain card render',
+  );
+  await context.clickChainGridAction('[data-apps-chain-run]');
+  assert.equal(context.locationUrl.pathname, '/browser/metaapp/' + PIN);
+
+  context.locationUrl.href = 'http://localhost/ui/apps';
+  await context.clickChainGridAction('[data-apps-chain-author]');
+  assert.equal(context.locationUrl.pathname, '/browser/metaid/idq1satoshi');
+
+  context.locationUrl.href = 'http://localhost/ui/apps';
+  await context.clickChainGridAction('[data-apps-chain-card]');
+  assert.equal(context.locationUrl.pathname, '/browser/metaapp/' + PIN);
+
+  context.locationUrl.href = 'http://localhost/ui/apps';
+  await context.keydownChainGridAction('[data-apps-chain-card]', 'Enter');
+  assert.equal(context.locationUrl.pathname, '/browser/metaapp/' + PIN);
+});
+
+test('chain feed follows the cursor across pages and back', async () => {
+  const context = createAppsPageContext({
+    fetchChain: (url) => {
+      const cursor = new URL(url, 'http://localhost').searchParams.get('cursor') || '';
+      return cursor === ''
+        ? chainPayload({ items: [chainItem({ title: 'Page One' })], hasMore: true, nextCursor: 'chain-cursor-2' })
+        : chainPayload({ items: [chainItem({ pinId: 'e'.repeat(64) + 'i0', title: 'Page Two' })] });
+    },
+  });
+  context.run();
+
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-card]'),
+    'first chain page render',
+  );
+  await context.elements['[data-apps-chain-page-next]'].dispatchEvent('click', { target: context.elements['[data-apps-chain-page-next]'] });
+  await context.waitFor(
+    () => context.fetchUrls.some((url) => url.includes('cursor=chain-cursor-2')),
+    'second page request',
+  );
+  assert.equal(context.elements['[data-apps-chain-page-label]'].textContent, 'Page 2');
+  assert.ok(context.elements['[data-apps-chain-grid]'].innerHTML.includes('Page Two'), 'second page rows');
+
+  await context.elements['[data-apps-chain-page-prev]'].dispatchEvent('click', { target: context.elements['[data-apps-chain-page-prev]'] });
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].innerHTML.includes('Page One'),
+    'first page restored',
+  );
+  assert.equal(context.elements['[data-apps-chain-page-label]'].textContent, 'Page 1');
+});
+
+test('chain feed treats a spurious trailing cursor as the end', async () => {
+  const context = createAppsPageContext({
+    fetchChain: (url) => {
+      const cursor = new URL(url, 'http://localhost').searchParams.get('cursor') || '';
+      return cursor === ''
+        ? chainPayload({ items: [chainItem()], hasMore: true, nextCursor: 'chain-trailing' })
+        : chainPayload({ items: [] });
+    },
+  });
+  context.run();
+
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-card]'),
+    'first chain page render',
+  );
+  await context.elements['[data-apps-chain-page-next]'].dispatchEvent('click', { target: context.elements['[data-apps-chain-page-next]'] });
+  await context.waitFor(
+    () => context.fetchUrls.some((url) => url.includes('cursor=chain-trailing')),
+    'trailing cursor request',
+  );
+  assert.equal(context.elements['[data-apps-chain-grid]'].querySelectorAll('[data-apps-chain-card]').length, 1, 'previous rows kept');
+  assert.equal(context.elements['[data-apps-chain-page-next]'].hidden, true, 'next hidden at the end');
+});
+
+test('switching to the local tab reveals the Bot picker and publish button', async () => {
+  const context = createAppsPageContext({
+    chain: chainPayload({ items: [chainItem()] }),
+  });
+  context.run();
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-card]'),
+    'chain card render',
+  );
+
+  await context.clickTab('local');
+  assert.equal(context.elements['[data-apps-tabpanel="local"]'].hidden, false);
+  assert.equal(context.elements['[data-apps-tabpanel="chain"]'].hidden, true);
+  assert.equal(context.elements['[data-apps-publish-open]'].hidden, false);
+  assert.equal(context.elements['[data-apps-tab="local"]'].dataset.active, 'true');
+  assert.equal(context.elements['[data-apps-tab="chain"]'].dataset.active, 'false');
+
+  await context.clickTab('chain');
+  assert.equal(context.elements['[data-apps-tabpanel="chain"]'].hidden, false);
+  assert.equal(context.elements['[data-apps-publish-open]'].hidden, true);
+});
+
+test('chain share modal exposes the MetaApp protocol links from the search row', async () => {
+  const context = createAppsPageContext({
+    chain: chainPayload({ items: [chainItem()] }),
+  });
+  context.run();
+
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-share]'),
+    'chain card render',
+  );
+  await context.clickChainGridAction('[data-apps-chain-share]');
+  const modalHtml = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.ok(modalHtml.includes('metaapp://' + PIN), 'metaapp uri');
+  assert.ok(modalHtml.includes('https://openagentinternet.org/browser/metaapp/' + PIN), 'public web url');
+});
+
+test('chain fork posts to /api/metaapp/fork with the selected Bot', async () => {
+  const context = createAppsPageContext({
+    chain: chainPayload({ items: [chainItem({ title: 'Forkable Wave' })] }),
+  });
+  context.run();
+
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-fork]'),
+    'chain card render',
+  );
+  await context.clickChainGridAction('[data-apps-chain-fork]');
+  await context.waitFor(
+    () => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/fork'),
+    'fork request',
+  );
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/fork').body;
+  assert.deepEqual(request, {
+    from: 'alice',
+    pinId: PIN,
+    title: 'Forkable Wave',
+  });
+  assert.ok(context.elements['[data-apps-modal-root]'].innerHTML.includes('/home/alice/workspace/metaapps/'), 'fork directory shown');
+});
+
+test('chain feed failures surface in the chain notice without touching the local notice', async () => {
+  const context = createAppsPageContext({
+    fetchChain: () => ({
+      ok: false,
+      state: 'failed',
+      message: 'metaso unreachable',
+    }),
+  });
+  context.run();
+
+  await context.waitFor(
+    () => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/search?')),
+    'chain search request',
+  );
+  await context.waitFor(
+    () => context.elements['[data-apps-chain-notice]'].hidden === false,
+    'chain notice visible',
+  );
+  assert.ok(context.elements['[data-apps-chain-notice]'].innerHTML.includes('metaso unreachable'));
+  assert.equal(context.elements['[data-apps-notice]'].hidden, true);
 });

@@ -99,6 +99,8 @@ export interface MetabotDaemonHttpHandlers {
     update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Global on-chain feed (metaso aggregation) — the Apps page chain tab. */
+    search?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     publishProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     updateProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
