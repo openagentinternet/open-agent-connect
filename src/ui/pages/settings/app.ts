@@ -463,11 +463,11 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
       renameBlock = '<button class="btn btn-sm" type="button" data-user-rename' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.rename', 'Rename')) + '</button>';
     }
     const revealBlock = userState.revealArmed
-      ? '<button class="btn btn-danger btn-sm" type="button" data-user-reveal-confirm' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.revealConfirm', 'Click again to reveal — anyone with these words controls this identity')) + '</button>'
-      : '<button class="btn btn-sm" type="button" data-user-reveal' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.reveal', 'Reveal mnemonic')) + '</button>';
+      ? '<button class="btn btn-danger btn-sm settings-user-reveal" type="button" data-user-reveal-confirm' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.revealConfirm', 'Click again to view — anyone with these words controls this identity')) + '</button>'
+      : '<button class="btn btn-sm settings-user-reveal" type="button" data-user-reveal' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.reveal', 'View mnemonic')) + '</button>';
     const deleteBlock = userState.deleteArmed
-      ? '<button class="btn btn-danger btn-sm" type="button" data-user-delete-confirm' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.deleteConfirm', 'This removes the owner identity from this machine. Click again to confirm.')) + '</button>'
-      : '<button class="btn btn-danger btn-sm" type="button" data-user-delete' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.delete', 'Delete identity')) + '</button>';
+      ? '<button class="btn btn-danger btn-sm settings-user-delete" type="button" data-user-delete-confirm' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.deleteConfirm', 'This removes the owner identity from this machine. Click again to confirm.')) + '</button>'
+      : '<button class="btn btn-danger btn-sm settings-user-delete" type="button" data-user-delete' + (busy ? ' disabled' : '') + '>' + escapeHtml(uiText('settings.user.delete', 'Delete identity')) + '</button>';
     const revealed = userState.revealedMnemonic
       ? '<div class="settings-user-mnemonic">'
         + '<p class="mono settings-user-mnemonic-words">' + escapeHtml(userState.revealedMnemonicVisible ? userState.revealedMnemonic : maskMnemonic(userState.revealedMnemonic)) + '</p>'
@@ -477,10 +477,12 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
 
     userLive.innerHTML = message
       + identityRows(identity)
-      + renameBlock
-      + '<div class="settings-user-actions">'
-      + revealBlock
-      + deleteBlock
+      + '<div class="settings-user-controls">'
+      + '<div class="settings-user-action-group">'
+      + '<span class="settings-user-actions-label">' + escapeHtml(uiText('settings.user.actions', 'Identity actions')) + '</span>'
+      + '<div class="settings-user-main-actions">' + renameBlock + revealBlock + '</div>'
+      + '</div>'
+      + '<div class="settings-user-danger-actions">' + deleteBlock + '</div>'
       + '</div>'
       + revealed
       + mnemonicBanner();

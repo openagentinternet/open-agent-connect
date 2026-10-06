@@ -384,6 +384,30 @@
       }
       .settings-panel { padding: 20px 22px; }
       .settings-panel h2, .card-title { letter-spacing: -.015em; }
+      .settings-user-controls {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 18px;
+        padding-top: 15px;
+        border-top: 1px solid var(--border);
+      }
+      .settings-user-action-group { display: grid; gap: 7px; min-width: 0; }
+      .settings-user-actions-label {
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .1em;
+        text-transform: uppercase;
+      }
+      .settings-user-main-actions, .settings-user-danger-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .settings-user-main-actions .btn { min-width: 0; }
+      .settings-user-danger-actions { padding-left: 16px; border-left: 1px solid var(--border); }
+      .settings-user-delete { white-space: normal; text-align: left; }
+      .settings-user-rename { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+      .settings-user-rename input { width: min(220px, 100%); height: 32px; padding: 0 10px; border: 1px solid var(--border2); border-radius: 9px; background: var(--surface3); color: var(--text); font: 12px/1.2 var(--sans); }
+      .settings-user-rename input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
       .traffic-pane { gap: 16px; }
       .traffic-intro {
         display: flex;
@@ -397,15 +421,15 @@
       .traffic-intro-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
       .traffic-intro-actions p { margin: 0; font-family: var(--mono); font-size: 10px; color: var(--dim); }
       .traffic-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-dim); }
-      .traffic-grid { gap: 16px; }
-      .traffic-card { gap: 14px; padding: 21px 22px; }
+      .traffic-grid { gap: 16px; align-items: stretch; grid-auto-rows: 1fr; }
+      .traffic-card { gap: 14px; padding: 21px 22px; height: 100%; }
       .traffic-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
       .traffic-card-heading > div { display: flex; align-items: baseline; gap: 8px; }
       .traffic-card-index { color: var(--accent); font-family: var(--mono); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
       .traffic-card .card-title { margin: 0; font-size: 15px; }
       .traffic-card-label { color: var(--dim); font-size: 9px; letter-spacing: .1em; }
       .traffic-seg { padding: 3px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface2); gap: 3px; overflow: visible; }
-      .traffic-seg-btn { min-width: 92px; border-radius: 8px; padding: 7px 12px; background: transparent; color: var(--muted); transition: background .15s, color .15s, box-shadow .15s; }
+      .traffic-seg-btn { min-width: 0; border-radius: 8px; padding: 7px 15px; background: transparent; color: var(--muted); transition: background .15s, color .15s, box-shadow .15s; }
       .traffic-seg-btn[data-active="true"] { background: var(--text); color: #fff; box-shadow: 0 3px 9px rgba(22, 33, 50, .2); }
       .traffic-balance-value { font-size: 38px; letter-spacing: -.045em; line-height: 1; }
       .traffic-balance-stats { padding-top: 12px; border-top: 1px solid var(--border); color: var(--dim); }
@@ -425,8 +449,10 @@
         .settings-tabs { width: 100%; }
         .settings-tab { flex: 1; padding-inline: 8px; }
         .traffic-intro-actions { justify-content: flex-start; }
-        .traffic-card { padding: 18px; }
+        .traffic-card { height: auto; padding: 18px; }
         .traffic-card-label { display: none; }
+        .settings-user-controls { align-items: stretch; flex-direction: column; }
+        .settings-user-danger-actions { padding: 12px 0 0; border-top: 1px solid var(--border); border-left: 0; }
       }
     </style>
   </head>
