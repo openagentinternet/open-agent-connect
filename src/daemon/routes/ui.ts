@@ -21,11 +21,7 @@ import { normalizeBrowserTheme } from '@openagentinternet/agent-browser-ui/brows
 import { renderBrowserPageHtml } from '../../browser/page';
 import { createI18nContext, renderClientI18nScript } from '../../ui/i18n';
 import type { I18nKey, LocalUiI18nContext } from '../../ui/i18n';
-import {
-  renderTopbarControls,
-  renderTopbarSettingsModal,
-  renderTopbarSettingsScript,
-} from '../../ui/topbarChrome';
+import { renderTopbarControls } from '../../ui/topbarChrome';
 import type { MetabotUiPageName, RouteHandler } from './types';
 import { handleBundledMetaAppRoutes } from './uiMetaApps';
 
@@ -109,9 +105,7 @@ function injectTopbarChrome(html: string, i18n: LocalUiI18nContext): string {
     /<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/,
     '<a class="topbar-logo" href="/ui/bot">Open Agent Connect</a>',
   );
-  return withLogo
-    .replace('</nav>', `</nav>${renderTopbarControls(i18n)}`)
-    .replace('</main>', `</main>${renderTopbarSettingsModal(i18n)}`);
+  return withLogo.replace('</nav>', `</nav>${renderTopbarControls(i18n)}`);
 }
 
 function applyStaticI18n(html: string, i18n: LocalUiI18nContext): string {
@@ -172,7 +166,7 @@ async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: s
   // inject only the page-specific content HTML. Otherwise fall back to the
   // legacy hero wrapper for templates that don't have __PAGE_CONTENT__.
   const content = definition.contentHtml ?? '';
-  const script = `${renderClientI18nScript(i18n)}\n${definition.script}\n;\n${renderTopbarSettingsScript()}`;
+  const script = `${renderClientI18nScript(i18n)}\n${definition.script}`;
   const html = template
     .replace(/<html lang="en">/g, `<html lang="${escapeHtml(i18n.language)}">`)
     .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))

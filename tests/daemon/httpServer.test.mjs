@@ -2348,15 +2348,14 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.doesNotMatch(nav, /href="\/ui\/metaapps"/);
   assert.match(html, /data-language-toggle/);
   assert.doesNotMatch(html, /class="topbar-language-select"/);
-  assert.match(html, /data-settings-open/);
-  assert.match(html, /data-settings-modal hidden/);
-  assert.match(html, />Metaso P2P Base URL<\/span>/);
-  assert.match(html, />Metafile Base URL<\/span>/);
-  assert.match(html, />ManAPI Base URL<\/span>/);
-  assert.match(html, /The infrastructure of the Open Agent Internet is decentralized\. Build your own via/);
-  assert.match(html, /\n;\n\(\(\) => \{\n  const modal = document\.querySelector/);
-  assert.ok(html.indexOf('data-language-toggle') < html.indexOf('data-settings-open'));
-  assert.ok(html.indexOf('data-settings-open') < html.indexOf('href="/browser"'));
+  // The gear navigates to the Settings page; the former topbar settings
+  // modal (and its base-URL fields) now lives in the Settings General tab.
+  assert.match(html, /href="\/ui\/settings" data-settings-link/);
+  assert.doesNotMatch(html, /data-settings-modal/);
+  assert.doesNotMatch(html, />Metaso P2P Base URL<\/span>/);
+  assert.doesNotMatch(html, /\n;\n\(\(\) => \{\n  const modal = document\.querySelector/);
+  assert.ok(html.indexOf('data-language-toggle') < html.indexOf('data-settings-link'));
+  assert.ok(html.indexOf('data-settings-link') < html.indexOf('href="/browser"'));
   assert.match(html, /href="\/browser"[^>]*>Open Browser<\/a>/);
   assert.doesNotMatch(html, /href="\/ui\/browser"[^>]*>Open Browser<\/a>/);
   assert.match(html, /Local Bots/);

@@ -114,6 +114,43 @@
         font-size: 11px;
         line-height: 1.5;
       }
+      .settings-panel[data-infrastructure-section] {
+        flex-direction: column;
+        align-items: stretch;
+        grid-column: 1 / -1;
+      }
+      .settings-infra-form {
+        display: grid;
+        gap: 12px;
+      }
+      .settings-infra-field {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 1fr);
+        align-items: center;
+        gap: 12px;
+      }
+      .settings-infra-field span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .settings-infra-field input {
+        width: 100%;
+        min-width: 0;
+        height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface3);
+        color: var(--text);
+        padding: 0 10px;
+        font: 12px/1.2 var(--mono);
+      }
+      .settings-infra-field input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(46, 111, 237, .12);
+        outline: none;
+      }
+      .settings-infra-field input:disabled { opacity: .65; }
       .settings-tabs {
         display: flex;
         gap: 6px;
@@ -311,6 +348,10 @@
           max-width: none;
           text-align: left;
           justify-content: flex-start;
+        }
+        .settings-infra-field {
+          grid-template-columns: 1fr;
+          gap: 5px;
         }
         .traffic-summary-grid {
           grid-template-columns: 1fr;
