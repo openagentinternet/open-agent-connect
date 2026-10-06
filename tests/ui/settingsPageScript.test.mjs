@@ -39,9 +39,6 @@ function createHarness(fetchImpl) {
   const elements = {
     '[data-settings-status]': makeElement(),
     '[data-settings-refresh]': makeElement(),
-    '[data-settings-config-status]': makeElement(),
-    '[data-settings-llm-status]': makeElement(),
-    '[data-settings-network-status]': makeElement(),
     '[data-user-live]': makeElement(),
     '[data-onboarding-live]': makeElement(),
     '[data-infra-form]': makeElement('form'),
@@ -141,8 +138,6 @@ test('settings user section invites action when no identity exists, then creates
       });
     }
     if (url === '/api/config') return jsonResponse({ ok: true, state: 'success', data: {} });
-    if (url === '/api/llm/runtimes') return jsonResponse({ ok: true, state: 'success', data: { runtimes: [] } });
-    if (url === '/api/network/sources') return jsonResponse({ ok: true, state: 'success', data: { sources: [] } });
     throw new Error(`Unexpected request: ${url}`);
   });
   vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
@@ -189,8 +184,6 @@ test('settings user section guards the reveal, rename, and delete actions', asyn
       return jsonResponse({ ok: true, state: 'success', data: { deleted: true } });
     }
     if (url === '/api/config') return jsonResponse({ ok: true, state: 'success', data: {} });
-    if (url === '/api/llm/runtimes') return jsonResponse({ ok: true, state: 'success', data: { runtimes: [] } });
-    if (url === '/api/network/sources') return jsonResponse({ ok: true, state: 'success', data: { sources: [] } });
     throw new Error(`Unexpected request: ${url}`);
   });
   vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
@@ -241,8 +234,6 @@ test('settings user section surfaces server errors with a fix hint', async () =>
       });
     }
     if (url === '/api/config') return jsonResponse({ ok: true, state: 'success', data: {} });
-    if (url === '/api/llm/runtimes') return jsonResponse({ ok: true, state: 'success', data: { runtimes: [] } });
-    if (url === '/api/network/sources') return jsonResponse({ ok: true, state: 'success', data: { sources: [] } });
     throw new Error(`Unexpected request: ${url}`);
   });
   vm.runInNewContext(buildSettingsPageDefinition().script, h.context);
@@ -276,8 +267,6 @@ test('settings General tab loads and saves the browser infrastructure base URLs'
     if (url === '/api/user/who') return jsonResponse({ ok: true, state: 'success', data: { identity: identityPayload.data.identity } });
     if (url === '/api/user/onboarding') return jsonResponse({ ok: true, state: 'success', data: { onboarding: null, identityPresent: true } });
     if (url === '/api/config') return jsonResponse({ ok: true, state: 'success', data: {} });
-    if (url === '/api/llm/runtimes') return jsonResponse({ ok: true, state: 'success', data: { runtimes: [] } });
-    if (url === '/api/network/sources') return jsonResponse({ ok: true, state: 'success', data: { sources: [] } });
     if (url === '/api/browser/settings') {
       if (options.method === 'PUT') {
         settings.browser = { ...settings.browser, ...JSON.parse(options.body).browser };
