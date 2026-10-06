@@ -125,6 +125,7 @@ const platformRegistry_1 = require("../core/platform/platformRegistry");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const trafficAccountService_1 = require("../core/traffic/trafficAccountService");
+const ownerOnboarding_1 = require("../core/owner/ownerOnboarding");
 const mvcSponsorWritePin_1 = require("../core/subsidy/mvcSponsorWritePin");
 const writePin_1 = require("../core/chain/writePin");
 const registry_2 = require("../core/chain/adapters/registry");
@@ -163,6 +164,7 @@ const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
 const privateChatAllowedSkills_1 = require("../core/chat/privateChatAllowedSkills");
 const chatSkillWaitNotice_1 = require("../core/chat/chatSkillWaitNotice");
+const chatEpisodeSummary_1 = require("../core/chat/chatEpisodeSummary");
 const orderProtocolTextGenerator_1 = require("../core/a2a/orderProtocolTextGenerator");
 const providerWorkspaceCleanup_1 = require("../core/a2a/provider/providerWorkspaceCleanup");
 const servicePayment_1 = require("../core/payments/servicePayment");
@@ -1840,8 +1842,17 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
                 metaBotSlug,
                 dshLlmPath: profilePaths.dshLlmPath,
             }),
+            episodeSummaryGenerator: (0, chatEpisodeSummary_1.createChatEpisodeSummaryGenerator)({
+                runtimeResolver: profileRuntimeResolver,
+                llmExecutor: input.llmExecutor,
+                metaBotSlug,
+                dshLlmPath: profilePaths.dshLlmPath,
+            }),
         }, profileAutoReplyConfig);
         orchestrators.set(cacheKey, orchestrator);
+        // Wake timers re-drive silent-but-open conversation tails (IDBots parity).
+        // Optional-call: injected test orchestrators may not implement the loop.
+        orchestrator.startWakeLoop?.();
         return orchestrator;
     }
     return {
@@ -3212,6 +3223,7 @@ function createDefaultCliDependencies(context) {
             // The publish happens daemon-side (signer + traffic sponsor hook live
             // there); the CLI only forwards the parsed update input.
             update: async (input) => requestJson(context, 'POST', '/api/user/update', input),
+            runOnboarding: async () => requestJson(context, 'POST', '/api/user/onboarding', {}),
         },
         network: {
             listServices: async (input) => {
@@ -3377,6 +3389,12 @@ function createDefaultCliDependencies(context) {
                 }
                 return requestJsonForSelectedActor('POST', '/api/chat/private', typeof input.from === 'string' ? input.from : undefined, input);
             },
+            interim: async (input) => {
+                // Bot-initiated interim updates ride the ticket-gated daemon route;
+                // inside a reply turn this is the ONLY sanctioned send surface (the
+                // plain private send above stays blocked there).
+                return requestJsonForSelectedActor('POST', '/api/chat/interim', typeof input.from === 'string' ? input.from : undefined, input);
+            },
             conversations: async (input = {}) => {
                 const params = new URLSearchParams();
                 if (input.from)
@@ -3460,6 +3478,7 @@ function createDefaultCliDependencies(context) {
                 get: get('/api/metatask/task'),
                 replay: get('/api/metatask/replay'),
                 refresh: post('/api/metatask/refresh'),
+                draft: post('/api/metatask/draft'),
                 claim: post('/api/metatask/claim'),
                 submit: post('/api/metatask/submit'),
                 verify: post('/api/metatask/verify'),
@@ -4923,13 +4942,18 @@ function createDefaultCliDependencies(context) {
                 let ownerGlobalMetaId = typeof input.ownerGlobalMetaId === 'string' && input.ownerGlobalMetaId.trim()
                     ? input.ownerGlobalMetaId.trim()
                     : '';
+                let localOwnerGlobalMetaId = '';
+                if (!input.unbind) {
+                    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+                    const ownerIdentity = await (0, ownerIdentity_1.readOwnerIdentity)(systemHomeDir).catch(() => null);
+                    localOwnerGlobalMetaId = ownerIdentity?.globalMetaId?.trim() ?? '';
+                }
                 if (!input.unbind && !ownerGlobalMetaId) {
                     // Default owner: the local human owner identity first, then the
                     // Twin Bot identity as a fallback.
-                    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-                    const ownerIdentity = await (0, ownerIdentity_1.readOwnerIdentity)(systemHomeDir).catch(() => null);
-                    ownerGlobalMetaId = ownerIdentity?.globalMetaId?.trim() ?? '';
+                    ownerGlobalMetaId = localOwnerGlobalMetaId;
                     if (!ownerGlobalMetaId) {
+                        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
                         const [profiles, twinHomeDir] = await Promise.all([
                             (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir).catch(() => []),
                             (0, twinRole_1.resolveTwinHomeDir)(systemHomeDir),
@@ -4940,6 +4964,14 @@ function createDefaultCliDependencies(context) {
                     if (!ownerGlobalMetaId) {
                         return (0, commandResult_1.commandFailed)('identity_unavailable', 'No local owner identity or Twin Bot with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.');
                     }
+                }
+                // When the binding target is the local owner identity, use the signed
+                // route: the daemon signs the binding statement with the owner's MVC
+                // key, publishes the Bot's /info/owner pin, and syncs the local
+                // ownerGlobalMetaId. Explicit foreign owners and unbind stay on the
+                // local-only PUT path.
+                if (!input.unbind && localOwnerGlobalMetaId && ownerGlobalMetaId.toLowerCase() === localOwnerGlobalMetaId.toLowerCase()) {
+                    return requestJson(context, 'POST', `/api/bot/profiles/${encodeURIComponent(input.slug)}/bind-owner`, {});
                 }
                 return requestJson(context, 'PUT', `/api/bot/profiles/${encodeURIComponent(input.slug)}`, { ownerGlobalMetaId: input.unbind ? null : ownerGlobalMetaId });
             },
@@ -5426,6 +5458,23 @@ async function serveCliDaemonProcess(context) {
     const requestMvcGasSubsidy = context.env[TEST_FAKE_SUBSIDY_ENV] === '1'
         ? createTestSubsidyRequester()
         : undefined;
+    // Zero-touch owner onboarding (user account + traffic account + free
+    // grant): the shared runner backs both the daemon-start kick below and the
+    // /api/user/onboarding run verb. Skipped under the fake-chain test env
+    // (dedicated unit tests inject their own traffic/subsidy fakes) and behind
+    // an explicit opt-out for CI/sandboxes.
+    const OWNER_ONBOARDING_DISABLE_ENV = 'METABOT_OWNER_ONBOARDING_DISABLED';
+    const ownerOnboardingDisabled = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+        || context.env[OWNER_ONBOARDING_DISABLE_ENV] === '1';
+    const ownerOnboardingRunner = (0, ownerOnboarding_1.createOwnerOnboardingRunner)({
+        systemHomeDir,
+        trafficAccountService,
+        adapters,
+        resolveSponsorWritePin,
+        ...(requestMvcGasSubsidy ? { requestMvcGasSubsidy } : {}),
+        ...(context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? { chainWriteDelayMs: 0 } : {}),
+        log: (message) => console.log(`[owner onboarding] ${message}`),
+    });
     const fetchPeerChatPublicKey = createTestProviderChatPublicKeyFetcher(context.env);
     const resolvePeerChatPublicKey = createPeerChatPublicKeyResolver({
         systemHomeDir: paths.systemHomeDir,
@@ -5947,6 +5996,7 @@ async function serveCliDaemonProcess(context) {
         signer,
         adapters,
         trafficAccountService,
+        ownerOnboardingRunner,
         chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
         socketPresenceApiBaseUrl,
         socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
@@ -6036,6 +6086,13 @@ async function serveCliDaemonProcess(context) {
     }).catch((error) => {
         console.warn('[daemon lifecycle journal]', error instanceof Error ? error.message : String(error));
     });
+    // Zero-touch owner onboarding: fire-and-forget so the daemon serves
+    // immediately; unconverged steps retry on the next daemon start.
+    if (!ownerOnboardingDisabled) {
+        void ownerOnboardingRunner.run().catch((error) => {
+            console.warn('[owner onboarding] failed:', error instanceof Error ? error.message : String(error));
+        });
+    }
     const onlineServiceCacheStore = (0, onlineServiceCache_1.createOnlineServiceCacheStore)(paths);
     const ratingDetailStateStore = (0, ratingDetailState_1.createRatingDetailStateStore)(paths);
     const refreshOnlineServiceCache = async () => {
@@ -6209,7 +6266,16 @@ async function serveCliDaemonProcess(context) {
             metaBotSlug,
             dshLlmPath: paths.dshLlmPath,
         }),
+        episodeSummaryGenerator: (0, chatEpisodeSummary_1.createChatEpisodeSummaryGenerator)({
+            runtimeResolver: llmResolver,
+            llmExecutor,
+            metaBotSlug,
+            dshLlmPath: paths.dshLlmPath,
+        }),
     }, sharedAutoReplyConfig);
+    // Wake timers re-drive silent-but-open conversation tails (IDBots parity);
+    // the loop no-ops when no wake records exist.
+    chatAutoReplyOrchestrator.startWakeLoop();
     const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
         autoReplyConfig: sharedAutoReplyConfig,
         resolvePeerChatPublicKey,

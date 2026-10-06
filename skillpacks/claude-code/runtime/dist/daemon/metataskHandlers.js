@@ -220,6 +220,21 @@ function createMetaTaskDaemonHandlers(input) {
             return (0, commandResult_1.commandFailed)('metatask_write_failed', error instanceof Error ? error.message : 'MetaTask write failed.');
         }
     };
+    /**
+     * Serve-time identity backfill for a board payload: any task publisher the
+     * identities map does not cover yet enters the store cache (best-effort)
+     * so cards render a name/avatar instead of a raw metaId.
+     */
+    const ensureBoardIdentities = async (board) => {
+        const missing = [
+            ...new Set(board.tasks
+                .map((task) => task.publisher)
+                .filter((publisher) => publisher && !board.identities[publisher])),
+        ];
+        if (missing.length === 0)
+            return;
+        Object.assign(board.identities, await store.ensureIdentities(missing));
+    };
     const runWatchTick = async () => {
         try {
             await loadRoster();
@@ -241,7 +256,9 @@ function createMetaTaskDaemonHandlers(input) {
                         return (0, commandResult_1.commandFailed)('metatask_refresh_failed', result.error ?? 'MetaTask refresh failed.');
                     }
                 }
-                return (0, commandResult_1.commandSuccess)(await refresher.board());
+                const boardPayload = await refresher.board();
+                await ensureBoardIdentities(boardPayload);
+                return (0, commandResult_1.commandSuccess)(boardPayload);
             }
             catch (error) {
                 return (0, commandResult_1.commandFailed)('metatask_board_failed', error instanceof Error ? error.message : 'Failed to read the MetaTask board.');
@@ -260,7 +277,11 @@ function createMetaTaskDaemonHandlers(input) {
                 if (!projection) {
                     return (0, commandResult_1.commandFailed)('metatask_not_found', `No cached projection for task root ${rootPinId}. Run a refresh first.`);
                 }
-                const openNodes = Object.values(projection.nodeStates)
+                // Identity merge at the edge: the persisted stamp may predate later
+                // enrichment sweeps (skipped replays never re-stamp), so the served
+                // payload always carries the freshest store identities.
+                const served = await store.withFreshIdentities(projection);
+                const openNodes = Object.values(served.nodeStates)
                     .filter((node) => node.status !== 'verified')
                     .map((node) => ({
                     id: node.id,
@@ -271,8 +292,8 @@ function createMetaTaskDaemonHandlers(input) {
                     deps: node.deps,
                 }));
                 return (0, commandResult_1.commandSuccess)({
-                    ...projection,
-                    estimation: projection.settlement ? null : (0, estimate_1.estimateMetaTaskShares)(projection),
+                    ...served,
+                    estimation: served.settlement ? null : (0, estimate_1.estimateMetaTaskShares)(served),
                     openNodes,
                 });
             }
@@ -302,6 +323,8 @@ function createMetaTaskDaemonHandlers(input) {
                 if (!result.ok) {
                     return (0, commandResult_1.commandFailed)('metatask_refresh_failed', result.error ?? 'MetaTask refresh failed.');
                 }
+                if (result.board)
+                    await ensureBoardIdentities(result.board);
                 return (0, commandResult_1.commandSuccess)(result.board);
             }
             catch (error) {

@@ -40,3 +40,15 @@ minimumReleaseAgeExclude:
   - '@openagentinternet/agent-browser-renderers@0.6.3 || 0.7.0'
   - '@openagentinternet/agent-browser-ui@0.6.3 || 0.7.0'
   - '@openagentinternet/agent-browser-test-harness@0.6.3 || 0.7.0'
+
+# Audit waivers for advisories with no patched upstream release (checked
+# 2026-10-07). Both are DoS-class issues in transitive dependencies:
+#   - GHSA-vfj7-8cjw-p6xm: braces <=3.0.3 stack exhaustion, reached only via
+#     meta-contract > mvc-scrypt > patch-package (postinstall workspace-root
+#     detection); braces has no fixed version.
+#   - GHSA-hp3w-g68c-fv3c: sprintf-js <=1.1.3 unbounded precision, reached via
+#     mammoth > argparse (docx text extraction); no fixed version.
+audit:
+  ignore:
+    - GHSA-vfj7-8cjw-p6xm
+    - GHSA-hp3w-g68c-fv3c

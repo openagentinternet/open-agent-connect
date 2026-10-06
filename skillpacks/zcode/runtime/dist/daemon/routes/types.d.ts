@@ -84,6 +84,8 @@ export interface MetabotDaemonHttpHandlers {
         update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Global on-chain feed (metaso aggregation) — the Apps page chain tab. */
+        search?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         publishProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         updateProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -166,6 +168,10 @@ export interface MetabotDaemonHttpHandlers {
         update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         reveal?: () => Awaitable<MetabotCommandResult<unknown>>;
         delete?: () => Awaitable<MetabotCommandResult<unknown>>;
+        /** Zero-touch onboarding status (owner/traffic account + free grant). */
+        getOnboarding?: () => Awaitable<MetabotCommandResult<unknown>>;
+        /** Advance the onboarding pipeline on demand (idempotent, shared runner). */
+        runOnboarding?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
     network?: {
         listServices?: (input: {
@@ -267,6 +273,27 @@ export interface MetabotDaemonHttpHandlers {
     };
     chat?: {
         private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        privateFile?: (input: {
+            from?: string;
+            to: string;
+            dataBase64: string;
+            fileType: string;
+            peerChatPublicKey?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        media?: (input: {
+            from?: string;
+            peer: string;
+            ref: string;
+            contentType?: string;
+        }) => Awaitable<MetabotCommandResult<{
+            dataBase64: string;
+            contentType: string;
+        }>>;
+        interim?: (input: {
+            turnFile: string;
+            text: string;
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         privateConversation?: (input: {
             from?: string;
             peer: string;
@@ -670,6 +697,10 @@ export interface MetabotDaemonHttpHandlers {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Sign + publish the /info/owner owner-binding pin for an existing Bot. */
+        bindOwner?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         retryProfileSetup?: (input: {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;

@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.publishA2AConversationPersistenceEvent = publishA2AConversationPersistenceEvent;
 exports.subscribeA2AConversationPersistenceEvents = subscribeA2AConversationPersistenceEvents;
+exports.publishA2AConversationReplyState = publishA2AConversationReplyState;
+exports.subscribeA2AConversationReplyState = subscribeA2AConversationReplyState;
 exports.sanitizeA2ARawMetadata = sanitizeA2ARawMetadata;
 exports.buildA2APeerSessionId = buildA2APeerSessionId;
 exports.buildA2AOrderSessionId = buildA2AOrderSessionId;
@@ -28,6 +30,7 @@ const SENSITIVE_RAW_METADATA_KEYS = new Set([
     'privatekeyhex',
 ]);
 const conversationPersistenceSubscribers = new Set();
+const conversationReplyStateSubscribers = new Set();
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -63,6 +66,28 @@ function subscribeA2AConversationPersistenceEvents(localGlobalMetaId, subscriber
     conversationPersistenceSubscribers.add(filteredSubscriber);
     return () => {
         conversationPersistenceSubscribers.delete(filteredSubscriber);
+    };
+}
+function publishA2AConversationReplyState(event) {
+    for (const subscriber of conversationReplyStateSubscribers) {
+        try {
+            subscriber(event);
+        }
+        catch {
+            // One disconnected consumer must not block reply-state publishing.
+        }
+    }
+}
+function subscribeA2AConversationReplyState(localGlobalMetaId, subscriber) {
+    const normalizedLocal = normalizeText(localGlobalMetaId);
+    const filteredSubscriber = (event) => {
+        if (event.localGlobalMetaId === normalizedLocal) {
+            subscriber(event);
+        }
+    };
+    conversationReplyStateSubscribers.add(filteredSubscriber);
+    return () => {
+        conversationReplyStateSubscribers.delete(filteredSubscriber);
     };
 }
 function isSensitiveRawMetadataKey(key) {
@@ -226,6 +251,9 @@ async function persistA2AConversationMessage(input) {
         sender,
         recipient,
         raw: sanitizeA2ARawMetadata(input.message.raw),
+        ...(input.message.deliveryStatus ? { deliveryStatus: input.message.deliveryStatus } : {}),
+        ...(input.message.deliveryError ? { deliveryError: normalizeText(input.message.deliveryError) } : {}),
+        ...(input.message.hostStatus ? { hostStatus: true } : {}),
     };
     const store = (0, conversationStore_1.createA2AConversationStore)({ paths, local, peer });
     if (input.replaceExistingMessage) {
@@ -330,6 +358,7 @@ async function persistA2AConversationMessage(input) {
         timestamp: message.timestamp,
         kind: message.kind,
         protocolTag: message.protocolTag ?? null,
+        direction: message.direction,
     });
     return message;
 }

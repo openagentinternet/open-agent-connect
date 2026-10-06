@@ -84,6 +84,8 @@ const uploadFile_1 = require("../core/files/uploadFile");
 const trafficAccountService_1 = require("../core/traffic/trafficAccountService");
 const trafficStore_1 = require("../core/traffic/trafficStore");
 const ownerIdentity_1 = require("../core/owner/ownerIdentity");
+const ownerBinding_1 = require("../core/owner/ownerBinding");
+const ownerOnboarding_1 = require("../core/owner/ownerOnboarding");
 const mvcSponsorWritePin_1 = require("../core/subsidy/mvcSponsorWritePin");
 const postBuzz_1 = require("../core/buzz/postBuzz");
 const publish_1 = require("../core/simplenote/publish");
@@ -104,6 +106,7 @@ const stageEvents_1 = require("../core/metaapp/stageEvents");
 const ownerService_1 = require("../core/metaapp/ownerService");
 const manOwnerList_1 = require("../core/metaapp/manOwnerList");
 const metaAppSource_1 = require("../core/metaapp/metaAppSource");
+const metaAppSearchApi_1 = require("../core/metaapp/metaAppSearchApi");
 const pinId_1 = require("../core/metaapp/pinId");
 const publish_4 = require("../core/metaapp/publish");
 const skillPublish_1 = require("../core/skills/skillPublish");
@@ -114,6 +117,8 @@ const onlineServiceCache_1 = require("../core/discovery/onlineServiceCache");
 const socketPresenceDirectory_1 = require("../core/discovery/socketPresenceDirectory");
 const sessionStateStore_1 = require("../core/a2a/sessionStateStore");
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
+const privateChat_2 = require("../core/chat/privateChat");
+const privateChatInterimTurn_1 = require("../core/chat/privateChatInterimTurn");
 const sessionEngine_1 = require("../core/a2a/sessionEngine");
 const publicStatus_1 = require("../core/a2a/publicStatus");
 const serviceRunnerContracts_1 = require("../core/a2a/provider/serviceRunnerContracts");
@@ -4009,6 +4014,17 @@ function createDefaultMetabotDaemonHandlers(input) {
         systemHomeDir: normalizedSystemHomeDir,
     });
     const resolveSponsorWritePin = (0, mvcSponsorWritePin_1.createTrafficSponsorWritePinResolver)({ trafficAccountService });
+    // Zero-touch onboarding: one shared runner per daemon process so the
+    // daemon-start kick and the /api/user/onboarding run verb coalesce into a
+    // single in-flight execution.
+    const ownerOnboardingRunner = input.ownerOnboardingRunner ?? (0, ownerOnboarding_1.createOwnerOnboardingRunner)({
+        systemHomeDir: normalizedSystemHomeDir,
+        trafficAccountService,
+        ...(adapters ? { adapters } : {}),
+        resolveSponsorWritePin,
+        ...(input.requestMvcGasSubsidy ? { requestMvcGasSubsidy: input.requestMvcGasSubsidy } : {}),
+        ...(input.identitySyncStepDelayMs !== undefined ? { chainWriteDelayMs: input.identitySyncStepDelayMs } : {}),
+    });
     const mvcSponsorTrafficDeps = {
         resolveTrafficAccount: ({ botAddress, challengeId, botMnemonic, botWalletPath }) => trafficAccountService.resolveSponsorTrafficAccount({ botAddress, challengeId, botMnemonic, botWalletPath }),
         recordSpend: (entry) => trafficAccountService.recordLocalTrafficSpend(entry),
@@ -4287,6 +4303,12 @@ function createDefaultMetabotDaemonHandlers(input) {
             queue.push(event);
             wake();
         });
+        // Live reply-turn activity (IDBots StreamingActivityBar parity) rides the
+        // same stream so UIs can show a "local bot is working" indicator.
+        const unsubscribeReplyState = (0, conversationPersistence_1.subscribeA2AConversationReplyState)(normalizedLocal, (event) => {
+            queue.push(event);
+            wake();
+        });
         const unsubscribeProfileUpdates = subscribeConversationProfileUpdates(normalizedLocal, (event) => {
             queue.push(event);
             wake();
@@ -4361,6 +4383,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             conversationWatcher?.close();
             unsubscribe();
             unsubscribeProfileUpdates();
+            unsubscribeReplyState();
         }
     }
     const a2aConversationPersister = async (persistInput) => {
@@ -4377,6 +4400,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     timestamp: message.timestamp,
                     kind: message.kind,
                     protocolTag: message.protocolTag ?? null,
+                    direction: message.direction,
                 });
             }
         }
@@ -11799,6 +11823,39 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 return listMetaAppsForActor(actor, rawInput);
             },
+            // Global on-chain feed (metaso aggregation API), not bot-scoped: the
+            // same trimmed projection + link decoration as the `metabot metaapp
+            // search` CLI envelope, minus the CLI's daemon-reachability probe (this
+            // daemon is the link target).
+            search: async (rawInput) => {
+                try {
+                    const [page, ownGlobalMetaIds] = await Promise.all([
+                        (0, metaAppSearchApi_1.searchMetaApps)({
+                            size: typeof rawInput.size === 'number' && rawInput.size > 0 ? rawInput.size : undefined,
+                            cursor: normalizeText(rawInput.cursor) || undefined,
+                        }),
+                        (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []).then((profiles) => new Set(profiles
+                            .map((profile) => normalizeText(profile.globalMetaId))
+                            .filter(Boolean))),
+                    ]);
+                    return (0, commandResult_1.commandSuccess)({
+                        items: (0, metaAppSearchApi_1.trimMetaAppSearchItems)(page.items, ownGlobalMetaIds).map((item) => ({
+                            ...item,
+                            ...(item.pinId
+                                ? { localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), `/browser/metaapp/${encodeURIComponent(item.pinId)}`) ?? `/browser/metaapp/${encodeURIComponent(item.pinId)}` }
+                                : {}),
+                            ...(item.publisherGlobalMetaId
+                                ? { publisherLocalUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), `/browser/metaid/${encodeURIComponent(item.publisherGlobalMetaId)}`) ?? `/browser/metaid/${encodeURIComponent(item.publisherGlobalMetaId)}` }
+                                : {}),
+                        })),
+                        hasMore: page.hasMore,
+                        nextCursor: page.nextCursor,
+                    });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('metaapp_search_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
         },
         buzz: {
             post: async (rawInput) => {
@@ -12448,7 +12505,13 @@ function createDefaultMetabotDaemonHandlers(input) {
         // CLI surface over HTTP, additive next to the Bot-profile group above.
         // adapters + the traffic sponsor hook let `user update` publish the owner
         // /info/name + /info/avatar pins with the same billing as Bot writes.
-        user: (0, userHandlers_1.createUserDaemonHandlers)({ systemHomeDir: normalizedSystemHomeDir, adapters, resolveSponsorWritePin }),
+        user: (0, userHandlers_1.createUserDaemonHandlers)({
+            systemHomeDir: normalizedSystemHomeDir,
+            adapters,
+            resolveSponsorWritePin,
+            trafficAccountService,
+            ownerOnboardingRunner,
+        }),
         network: {
             listServices: async ({ online, query, cached }) => {
                 const state = await runtimeStateStore.readState();
@@ -15027,6 +15090,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         replyPinId: request.replyPin || null,
                         chain: normalizeText(chatWrite.network) || 'mvc',
                         timestamp: Date.now(),
+                        deliveryStatus: 'sent',
                         raw: {
                             chainWrite: {
                                 path: sent.path,
@@ -15133,6 +15197,383 @@ function createDefaultMetabotDaemonHandlers(input) {
                     ? Math.max(1, Math.trunc(msgInput.limit))
                     : 50);
                 return (0, commandResult_1.commandSuccess)({ messages });
+            },
+            privateFile: async (rawInput) => {
+                // Private file message (IDBots simplefilemsg parity): the file is
+                // ECDH-encrypted and pinned under /file, then a plaintext
+                // simplefilemsg pin carries the metafile:// attachment pointer.
+                const to = normalizeText(rawInput.to);
+                const dataBase64 = typeof rawInput.dataBase64 === 'string' ? rawInput.dataBase64 : '';
+                const fileType = normalizeText(rawInput.fileType) || 'application/octet-stream';
+                if (!to || !dataBase64) {
+                    return (0, commandResult_1.commandFailed)('invalid_chat_file_request', 'File chat request must include to and dataBase64.');
+                }
+                const fileSize = Buffer.byteLength(dataBase64, 'base64');
+                if (fileSize <= 0 || fileSize > privateChat_2.PRIVATE_FILE_MAX_BYTES) {
+                    return (0, commandResult_1.commandFailed)('chat_file_too_large', `Private file messages must be 1-${privateChat_2.PRIVATE_FILE_MAX_BYTES} bytes.`);
+                }
+                if (!/^(?:image|video|audio)\/[a-z0-9.+-]+$|^application\/pdf$|^text\/plain$/iu.test(fileType)) {
+                    return (0, commandResult_1.commandFailed)('chat_file_type_rejected', 'Private file messages accept images, video, audio, PDF, and plain text only.');
+                }
+                const actor = await resolveActorChatContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before sending private chat.');
+                }
+                let privateChatIdentity;
+                try {
+                    privateChatIdentity = await actor.signer.getPrivateChatIdentity();
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('identity_secret_missing', error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.');
+                }
+                let peerChatPublicKey = rawInput.peerChatPublicKey;
+                if (!peerChatPublicKey && to === state.identity.globalMetaId) {
+                    peerChatPublicKey = state.identity.chatPublicKey;
+                }
+                if (!peerChatPublicKey) {
+                    const outcome = await lookupPeerChatPublicKey(to, {
+                        chainApiBaseUrl: input.chainApiBaseUrl,
+                    });
+                    if (outcome.status === 'found') {
+                        peerChatPublicKey = outcome.chatPublicKey;
+                    }
+                }
+                if (!peerChatPublicKey) {
+                    return (0, commandResult_1.commandFailed)('peer_chat_public_key_missing', 'Target has no chat public key on chain and none was provided.');
+                }
+                const sentFile = (0, privateChat_2.sendPrivateFileChat)({
+                    fromIdentity: {
+                        globalMetaId: privateChatIdentity.globalMetaId,
+                        privateKeyHex: privateChatIdentity.privateKeyHex,
+                    },
+                    toGlobalMetaId: to,
+                    peerChatPublicKey,
+                    fileDataBase64: dataBase64,
+                    fileType,
+                });
+                let fileWrite;
+                try {
+                    fileWrite = await actor.signer.writePin({
+                        operation: 'create',
+                        path: sentFile.fileWrite.path,
+                        encryption: sentFile.fileWrite.encryption,
+                        contentType: sentFile.fileWrite.contentType,
+                        payload: sentFile.fileWrite.payload,
+                        encoding: sentFile.fileWrite.encoding,
+                        network: 'mvc',
+                    });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('chat_file_broadcast_failed', error instanceof Error ? error.message : 'Failed to broadcast the encrypted file to chain.');
+                }
+                const attachment = (0, privateChat_2.attachmentUriFromFileWrite)(fileWrite, fileType);
+                if (!attachment) {
+                    return (0, commandResult_1.commandFailed)('chat_file_pin_missing', 'The /file pin write returned no pin id.');
+                }
+                const msgPayload = (0, privateChat_2.buildPrivateFileMsgPayload)({
+                    toGlobalMetaId: to,
+                    attachment,
+                    fileType,
+                    timestamp: Math.floor(Date.now() / 1000),
+                });
+                let msgWrite;
+                try {
+                    msgWrite = await actor.signer.writePin({
+                        operation: 'create',
+                        path: sentFile.msgWrite.path,
+                        encryption: sentFile.msgWrite.encryption,
+                        version: sentFile.msgWrite.version,
+                        contentType: sentFile.msgWrite.contentType,
+                        payload: msgPayload,
+                        encoding: 'utf-8',
+                        network: 'mvc',
+                    });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('chat_broadcast_failed', error instanceof Error ? error.message : 'Failed to broadcast the file message pointer to chain.');
+                }
+                const msgTxids = Array.isArray(msgWrite.txids)
+                    ? msgWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+                    : [];
+                const pinId = normalizeText(msgWrite.pinId) || null;
+                const timestamp = Date.now();
+                await (0, privateChatStateStore_1.createPrivateChatStateStore)(actor.runtimeStateStore.paths).appendMessages([{
+                        conversationId: `pc-${state.identity.globalMetaId}-${to}`,
+                        messageId: pinId || `file-${timestamp}`,
+                        direction: 'outbound',
+                        senderGlobalMetaId: state.identity.globalMetaId,
+                        content: `[File message: ${attachment}]`,
+                        messagePinId: pinId,
+                        extensions: { chatAttachment: { attachment, fileType } },
+                        timestamp,
+                    }]).catch(() => undefined);
+                await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                    paths: actor.runtimeStateStore.paths,
+                    local: {
+                        profileSlug: node_path_1.default.basename(actor.runtimeStateStore.paths.profileRoot),
+                        globalMetaId: state.identity.globalMetaId,
+                        name: state.identity.name,
+                        chatPublicKey: state.identity.chatPublicKey,
+                    },
+                    peer: {
+                        globalMetaId: to,
+                        chatPublicKey: peerChatPublicKey,
+                    },
+                    message: {
+                        messageId: pinId || `file-${timestamp}`,
+                        direction: 'outgoing',
+                        content: attachment,
+                        contentType: fileType,
+                        pinId,
+                        txid: msgTxids[0] || null,
+                        txids: msgTxids,
+                        chain: 'mvc',
+                        timestamp,
+                        deliveryStatus: 'sent',
+                        raw: { chatAttachment: { attachment, fileType } },
+                    },
+                }, a2aConversationPersister);
+                return (0, commandResult_1.commandSuccess)({
+                    sent: true,
+                    to,
+                    attachment,
+                    filePinId: normalizeText(fileWrite.pinId) || null,
+                    pinId,
+                    txids: msgTxids,
+                });
+            },
+            media: async (rawInput) => {
+                // Decrypts one private-chat attachment for the UIs: fetches the
+                // encrypted hex from the /file pin via the content gateways, decrypts
+                // with the conversation's ECDH secret, returns the bytes + type.
+                const peer = normalizeText(rawInput.peer);
+                const reference = normalizeText(rawInput.ref);
+                const fallbackType = normalizeText(rawInput.contentType) || 'application/octet-stream';
+                if (!peer || !reference) {
+                    return (0, commandResult_1.commandFailed)('invalid_chat_media_request', 'chat media requires peer and ref.');
+                }
+                const parsed = (0, privateChat_2.parseMetafileAttachmentUri)(reference);
+                if (!parsed) {
+                    return (0, commandResult_1.commandFailed)('invalid_chat_media_ref', 'ref must be a metafile:// pin reference.');
+                }
+                const actor = await resolveActorChatContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity first.');
+                }
+                let privateChatIdentity;
+                try {
+                    privateChatIdentity = await actor.signer.getPrivateChatIdentity();
+                }
+                catch {
+                    return (0, commandResult_1.commandFailed)('identity_secret_missing', 'Local private chat key is missing.');
+                }
+                let peerChatPublicKey = await lookupPeerChatPublicKey(peer, {
+                    chainApiBaseUrl: input.chainApiBaseUrl,
+                }).then((outcome) => (outcome.status === 'found' ? outcome.chatPublicKey : null));
+                if (!peerChatPublicKey) {
+                    const cachedConversation = await (0, conversationStore_1.createA2AConversationStore)({
+                        paths: actor.runtimeStateStore.paths,
+                        local: {
+                            globalMetaId: state.identity.globalMetaId,
+                            name: state.identity.name,
+                            chatPublicKey: state.identity.chatPublicKey,
+                        },
+                        peer: { globalMetaId: peer },
+                    }).readConversation().catch(() => null);
+                    peerChatPublicKey = normalizeText(cachedConversation?.peer?.chatPublicKey) || null;
+                }
+                if (!peerChatPublicKey) {
+                    return (0, commandResult_1.commandFailed)('peer_chat_public_key_missing', 'Could not resolve the peer chat key for decryption.');
+                }
+                const sentFile = (0, privateChat_2.sendPrivateFileChat)({
+                    fromIdentity: {
+                        globalMetaId: privateChatIdentity.globalMetaId,
+                        privateKeyHex: privateChatIdentity.privateKeyHex,
+                    },
+                    toGlobalMetaId: peer,
+                    peerChatPublicKey,
+                    fileDataBase64: '',
+                    fileType: fallbackType,
+                });
+                const sharedSecret = sentFile.sharedSecret;
+                const encodedPinId = encodeURIComponent(parsed.pinId);
+                const localBase = normalizeText(process.env.METABOT_P2P_LOCAL_BASE) || 'http://localhost:7281';
+                const contentUrls = [
+                    `${localBase.replace(/\/+$/u, '')}/content/${encodedPinId}`,
+                    `https://file.metaid.io/metafile-indexer/content/${encodedPinId}`,
+                    `https://file.metaid.io/metafile-indexer/api/v1/files/content/${encodedPinId}`,
+                ];
+                let cipherHex = null;
+                for (const contentUrl of contentUrls) {
+                    try {
+                        const controller = new AbortController();
+                        const timeout = setTimeout(() => controller.abort(), 8000);
+                        try {
+                            const response = await fetch(contentUrl, { signal: controller.signal });
+                            if (!response.ok)
+                                continue;
+                            const body = Buffer.from(await response.arrayBuffer());
+                            const text = body.toString('utf8').trim();
+                            if (/^[0-9a-f]+$/iu.test(text) && text.length >= 32) {
+                                cipherHex = text;
+                                break;
+                            }
+                        }
+                        finally {
+                            clearTimeout(timeout);
+                        }
+                    }
+                    catch {
+                        // Try the next gateway.
+                    }
+                }
+                if (!cipherHex) {
+                    return (0, commandResult_1.commandFailed)('chat_media_not_found', `Encrypted content was not found for ${parsed.pinId}.`);
+                }
+                const plain = (0, privateChat_2.decryptPrivateFileHex)(cipherHex, sharedSecret);
+                if (!plain || !plain.length) {
+                    return (0, commandResult_1.commandFailed)('chat_media_decrypt_failed', 'The attachment could not be decrypted with this conversation key.');
+                }
+                return (0, commandResult_1.commandSuccess)({
+                    dataBase64: plain.toString('base64'),
+                    contentType: fallbackType,
+                });
+            },
+            interim: async (rawInput) => {
+                // Bot-initiated interim private-chat update (IDBots send_private_chat
+                // parity): gated by the host-issued turn ticket the reply runner
+                // wrote into the chat workspace. The recipient comes from the ticket,
+                // never from the request.
+                const turnFile = normalizeText(rawInput.turnFile);
+                if (!turnFile) {
+                    return (0, commandResult_1.commandFailed)('missing_turn_file', 'chat interim requires --turn-file pointing at the turn ticket.');
+                }
+                const textResult = (0, privateChatInterimTurn_1.normalizeInterimMessageText)(rawInput.text);
+                if (!textResult.ok) {
+                    return (0, commandResult_1.commandFailed)('invalid_interim_text', textResult.error);
+                }
+                const quota = await (0, privateChatInterimTurn_1.consumePrivateChatTurnQuota)({ turnFilePath: turnFile });
+                if (!quota.ok) {
+                    const messages = {
+                        ticket_not_found: 'No valid turn ticket at the given path — interim sends only work inside an active chat reply turn.',
+                        ticket_expired: 'The turn ticket expired — interim sends only work inside the issuing reply turn.',
+                        ticket_exhausted: 'The turn ticket has no interim sends left.',
+                    };
+                    return (0, commandResult_1.commandFailed)('interim_' + quota.error, messages[quota.error]);
+                }
+                const ticket = quota.context;
+                const actor = await resolveActorChatContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before sending private chat.');
+                }
+                if (ticket.peerGlobalMetaId === state.identity.globalMetaId) {
+                    return (0, commandResult_1.commandFailed)('interim_self_send', 'The turn ticket does not address a peer conversation.');
+                }
+                let privateChatIdentity;
+                try {
+                    privateChatIdentity = await actor.signer.getPrivateChatIdentity();
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('identity_secret_missing', error instanceof Error ? error.message : 'Local private chat key is missing from the secret store.');
+                }
+                let peerChatPublicKey = null;
+                const outcome = await lookupPeerChatPublicKey(ticket.peerGlobalMetaId, {
+                    chainApiBaseUrl: input.chainApiBaseUrl,
+                });
+                if (outcome.status === 'found') {
+                    peerChatPublicKey = outcome.chatPublicKey;
+                }
+                if (!peerChatPublicKey) {
+                    return (0, commandResult_1.commandFailed)('peer_chat_public_key_lookup_unreachable', 'Could not resolve the peer chat public key for the interim send; please retry shortly.', { data: { target: ticket.peerGlobalMetaId, errors: outcome.errors } });
+                }
+                const extensions = { [privateChatInterimTurn_1.CHAT_INTERIM_EXTENSION]: true };
+                const sent = (0, privateChat_1.sendPrivateChat)({
+                    fromIdentity: {
+                        globalMetaId: privateChatIdentity.globalMetaId,
+                        privateKeyHex: privateChatIdentity.privateKeyHex,
+                    },
+                    toGlobalMetaId: ticket.peerGlobalMetaId,
+                    peerChatPublicKey,
+                    content: JSON.stringify({ content: textResult.text, extensions }),
+                });
+                let chatWrite;
+                try {
+                    chatWrite = await actor.signer.writePin({
+                        operation: 'create',
+                        path: sent.path,
+                        encryption: sent.encryption,
+                        version: sent.version,
+                        contentType: sent.contentType,
+                        payload: sent.payload,
+                        encoding: 'utf-8',
+                        network: 'mvc',
+                    });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('chat_broadcast_failed', error instanceof Error ? error.message : 'Failed to broadcast interim private chat to chain.');
+                }
+                const chatTxids = Array.isArray(chatWrite.txids)
+                    ? chatWrite.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+                    : [];
+                const timestamp = Date.now();
+                const pinId = normalizeText(chatWrite.pinId) || null;
+                // Local records: the auto-reply state store (prompt history + echo
+                // guard see the delivered text) and the UI-facing A2A store.
+                await (0, privateChatStateStore_1.createPrivateChatStateStore)(actor.runtimeStateStore.paths).appendMessages([{
+                        conversationId: ticket.conversationId,
+                        messageId: pinId || `interim-${timestamp}`,
+                        direction: 'outbound',
+                        senderGlobalMetaId: state.identity.globalMetaId,
+                        content: textResult.text,
+                        messagePinId: pinId,
+                        extensions,
+                        timestamp,
+                    }]).catch(() => undefined);
+                await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                    paths: actor.runtimeStateStore.paths,
+                    local: {
+                        profileSlug: node_path_1.default.basename(actor.runtimeStateStore.paths.profileRoot),
+                        globalMetaId: state.identity.globalMetaId,
+                        name: state.identity.name,
+                        chatPublicKey: state.identity.chatPublicKey,
+                    },
+                    peer: {
+                        globalMetaId: ticket.peerGlobalMetaId,
+                        chatPublicKey: peerChatPublicKey,
+                    },
+                    message: {
+                        messageId: pinId || `interim-${timestamp}`,
+                        direction: 'outgoing',
+                        content: textResult.text,
+                        contentType: 'text/markdown',
+                        pinId,
+                        txid: chatTxids[0] || null,
+                        txids: chatTxids,
+                        chain: 'mvc',
+                        timestamp,
+                        deliveryStatus: 'sent',
+                        raw: { interim: true },
+                    },
+                }, a2aConversationPersister);
+                return (0, commandResult_1.commandSuccess)({
+                    sent: true,
+                    peerGlobalMetaId: ticket.peerGlobalMetaId,
+                    pinId,
+                    txids: chatTxids,
+                    remainingInterimSends: quota.context.remaining,
+                });
             },
             autoReplyStatus: async (rawInput = {}) => {
                 const actor = await resolveActorChatContext(rawInput.from);
@@ -15828,6 +16269,14 @@ function createDefaultMetabotDaemonHandlers(input) {
                         : (0, commandResult_1.commandFailed)('invalid_metabot_profile_create', message);
                 }
                 const name = createInput.name;
+                // Zero-touch ownership: a Bot created without an explicit --owner is
+                // owned by the machine's owner identity (the "user account").
+                if (createInput.ownerGlobalMetaId == null) {
+                    const localOwner = await (0, ownerIdentity_1.readOwnerIdentity)(normalizedSystemHomeDir).catch(() => null);
+                    if (localOwner) {
+                        createInput = { ...createInput, ownerGlobalMetaId: localOwner.globalMetaId };
+                    }
+                }
                 const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
                 // Hard cap on local Bots: creating beyond the limit fails before any
                 // home directory or chain work is reserved.
@@ -15926,6 +16375,21 @@ function createDefaultMetabotDaemonHandlers(input) {
                         });
                         await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)({ homeDir: profileHomeDir }, bootstrapInfoTargets, bootstrap.sync?.chainWrites ?? []);
                         profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(chainProfile, calculateMetabotCreateInfoFields(createInput));
+                        // Owner binding (IDBots port): when the Bot's owner is the local
+                        // owner identity, sign the binding statement with the owner's MVC
+                        // key and publish it as the Bot's /info/owner pin alongside the
+                        // other create pins. The pin is signed by the Bot's key on-chain;
+                        // the embedded signature proves the human owner consented.
+                        {
+                            const localOwner = await (0, ownerIdentity_1.readOwnerIdentity)(normalizedSystemHomeDir).catch(() => null);
+                            const ownerGlobalMetaId = createInput.ownerGlobalMetaId ?? '';
+                            if (localOwner && ownerGlobalMetaId.toLowerCase() === localOwner.globalMetaId.toLowerCase()) {
+                                profileInfoTargets = [
+                                    ...profileInfoTargets,
+                                    await (0, ownerBinding_1.buildOwnerBindingPublishTarget)(localOwner, identity.globalMetaId),
+                                ];
+                            }
+                        }
                         profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, profileInfoTargets, {
                             delayMs: input.identitySyncStepDelayMs,
                             operation: 'create',
@@ -15979,6 +16443,48 @@ function createDefaultMetabotDaemonHandlers(input) {
                         return (0, commandResult_1.commandFailed)('name_taken', message);
                     }
                     return (0, commandResult_1.commandFailed)('metabot_profile_create_failed', message);
+                }
+            },
+            bindOwner: async ({ slug }) => {
+                try {
+                    const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                    if (!profile) {
+                        return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+                    }
+                    const owner = await (0, ownerIdentity_1.readOwnerIdentity)(normalizedSystemHomeDir).catch(() => null);
+                    if (!owner) {
+                        return (0, commandResult_1.commandFailed)('owner_missing', 'No owner identity exists on this machine. Create one with `metabot user create` first.');
+                    }
+                    if (!normalizeText(profile.globalMetaId)) {
+                        return (0, commandResult_1.commandFailed)('identity_missing', 'This MetaBot has no GlobalMetaID yet; finish its setup first.');
+                    }
+                    const signer = createSignerForProfileHome(profile.homeDir);
+                    const target = await (0, ownerBinding_1.buildOwnerBindingPublishTarget)(owner, profile.globalMetaId);
+                    // Same publish seam as the create flow: the Bot's signer writes the
+                    // /info/owner pin (traffic-sponsored first, self-pay fallback) and
+                    // the payload-hash dedup makes a re-bind a no-op.
+                    const chainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(signer, profile, [target], {
+                        delayMs: input.identitySyncStepDelayMs,
+                    });
+                    // Keep the local ownerGlobalMetaId binding in sync with the pin.
+                    if ((profile.ownerGlobalMetaId ?? '') !== owner.globalMetaId) {
+                        const botRolePath = (0, paths_1.resolveMetabotPaths)(profile.homeDir).botRoleStatePath;
+                        const currentRole = await (0, botRole_1.readBotRoleInfo)(botRolePath);
+                        await (0, botRole_1.writeBotRoleInfo)(botRolePath, (0, botRole_1.mergeBotRoleInfo)(currentRole, { ownerGlobalMetaId: owner.globalMetaId }));
+                    }
+                    const updated = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                    return (0, commandResult_1.commandSuccess)({
+                        profile: updated ?? profile,
+                        chainWrites,
+                        ownerBinding: {
+                            owner: owner.globalMetaId,
+                            path: '/info/owner',
+                            pinId: chainWrites[0]?.pinId ?? null,
+                        },
+                    });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('bot_owner_bind_failed', error instanceof Error ? error.message : String(error));
                 }
             },
             retryProfileSetup: async ({ slug }) => {

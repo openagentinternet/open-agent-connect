@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runUserCommand = runUserCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const ownerIdentity_1 = require("../../core/owner/ownerIdentity");
+const ownerOnboarding_1 = require("../../core/owner/ownerOnboarding");
 const homeSelection_1 = require("../../core/state/homeSelection");
 const helpers_1 = require("./helpers");
 function ownerFailure(error) {
@@ -22,6 +23,8 @@ async function runUserCommand(args, context) {
         const name = (0, helpers_1.readFlagValue)(args, '--name') ?? '';
         try {
             const record = await (0, ownerIdentity_1.createOwnerIdentity)(systemHomeDir, { name });
+            // An explicit create re-arms onboarding (clears any opt-out tombstone).
+            await (0, ownerOnboarding_1.resetOwnerOnboardingAfterManualIdentity)(systemHomeDir).catch(() => undefined);
             return (0, commandResult_1.commandSuccess)({ identity: (0, ownerIdentity_1.toOwnerIdentityPublic)(record), mnemonic: record.mnemonic });
         }
         catch (error) {
@@ -77,6 +80,7 @@ async function runUserCommand(args, context) {
             ?? (typeof payload.path === 'string' && payload.path.trim() ? payload.path.trim() : undefined);
         try {
             const record = await (0, ownerIdentity_1.importOwnerIdentity)(systemHomeDir, { name, mnemonic, path: derivationPath });
+            await (0, ownerOnboarding_1.resetOwnerOnboardingAfterManualIdentity)(systemHomeDir).catch(() => undefined);
             return (0, commandResult_1.commandSuccess)({ identity: (0, ownerIdentity_1.toOwnerIdentityPublic)(record), mnemonic: record.mnemonic });
         }
         catch (error) {
@@ -88,6 +92,9 @@ async function runUserCommand(args, context) {
         const before = await (0, ownerIdentity_1.readOwnerIdentity)(systemHomeDir);
         try {
             const record = await (0, ownerIdentity_1.ensureOwnerIdentity)(systemHomeDir, { name });
+            if (before === null) {
+                await (0, ownerOnboarding_1.resetOwnerOnboardingAfterManualIdentity)(systemHomeDir).catch(() => undefined);
+            }
             return (0, commandResult_1.commandSuccess)({ identity: (0, ownerIdentity_1.toOwnerIdentityPublic)(record), created: before === null });
         }
         catch (error) {
@@ -152,7 +159,22 @@ async function runUserCommand(args, context) {
             return (0, commandResult_1.commandFailed)('confirmation_required', 'user delete removes the owner identity, and its locally stored mnemonic cannot be recovered. Back the mnemonic up with `metabot user reveal` first, then retry with --confirm.');
         }
         await (0, ownerIdentity_1.deleteOwnerIdentity)(systemHomeDir);
+        // Tombstone the onboarding state so auto-provisioning stays off.
+        await (0, ownerOnboarding_1.markOwnerOnboardingOptedOut)(systemHomeDir).catch(() => undefined);
         return (0, commandResult_1.commandSuccess)({ deleted: true });
+    }
+    // Zero-touch onboarding progress: user account + traffic account + free
+    // grant. `--run` advances the pipeline in the daemon (same idempotent
+    // runner the daemon start uses); the default read is local-only.
+    if (subcommand === 'onboarding') {
+        if ((0, helpers_1.hasFlag)(args, '--run')) {
+            const handler = context.dependencies.user?.runOnboarding;
+            if (!handler) {
+                return (0, commandResult_1.commandFailed)('not_implemented', 'User onboarding run handler is not configured.');
+            }
+            return handler();
+        }
+        return (0, commandResult_1.commandSuccess)(await (0, ownerOnboarding_1.readOwnerOnboardingStatus)(systemHomeDir));
     }
     return (0, helpers_1.commandUnknownSubcommand)(`user ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
 }

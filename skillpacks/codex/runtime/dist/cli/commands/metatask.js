@@ -49,6 +49,16 @@ async function runMetaTaskCommand(args, context) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'MetaTask refresh handler is not configured.');
         return handler({ reason: 'cli-refresh' });
     }
+    if (action === 'draft') {
+        const handler = requireHandler(context, 'draft');
+        if (!handler)
+            return (0, commandResult_1.commandFailed)('not_implemented', 'MetaTask draft handler is not configured.');
+        const root = normalizeText((0, helpers_1.readFlagValue)(args, '--root'));
+        if (!root)
+            return (0, helpers_1.commandMissingFlag)('--root');
+        const lang = normalizeText((0, helpers_1.readFlagValue)(args, '--lang'));
+        return handler({ root, ...(lang ? { lang } : {}) });
+    }
     if (action === 'claim') {
         const handler = requireHandler(context, 'claim');
         if (!handler)
@@ -104,7 +114,7 @@ async function runMetaTaskCommand(args, context) {
         }
         return handler({ ...body, ...actorArg(args) });
     }
-    return (0, commandResult_1.commandFailed)('unknown_subcommand', 'Unknown metatask subcommand. Use: list | get | replay | refresh | claim | release | submit | verify | publish | publish-spec | amend.');
+    return (0, commandResult_1.commandFailed)('unknown_subcommand', 'Unknown metatask subcommand. Use: list | get | replay | refresh | draft | claim | release | submit | verify | publish | publish-spec | amend.');
 }
 /** `--from <bot-slug>` selects the acting MetaBot for write verbs. */
 function actorArg(args) {

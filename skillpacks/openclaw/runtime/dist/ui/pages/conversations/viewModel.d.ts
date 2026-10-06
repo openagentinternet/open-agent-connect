@@ -37,6 +37,9 @@ export interface ConversationMessageViewModel {
     txid: string;
     txidPreview: string;
     timestampLabel: string;
+    hostStatus: boolean;
+    deliveryStatus: string;
+    isAttachment: boolean;
 }
 export interface ConversationsEmptyStateViewModel {
     title: string;

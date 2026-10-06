@@ -13,6 +13,7 @@ import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { uploadLargeFileToChain, type MvcSponsorV2DirectUploadClient, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
 import { type TrafficAccountService } from '../core/traffic/trafficAccountService';
+import { type OwnerOnboardingRunner } from '../core/owner/ownerOnboarding';
 import { createMetaAppManOwnerClient } from '../core/metaapp/manOwnerList';
 import { materializeMetaAppSource } from '../core/metaapp/metaAppSource';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
@@ -96,6 +97,8 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     createMvcSponsorClient?: () => MvcSponsorV2DirectUploadClient;
     /** Shared traffic account service (流量); defaults to one instance per daemon process. */
     trafficAccountService?: TrafficAccountService;
+    /** Shared owner-onboarding runner; defaults to one instance per daemon process. */
+    ownerOnboardingRunner?: OwnerOnboardingRunner;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     onIdentityProfileRegistered?: () => Promise<void> | void;
     onBrowserInfrastructureChanged?: () => Promise<void> | void;

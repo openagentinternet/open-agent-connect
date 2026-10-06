@@ -5,7 +5,27 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
-## Unreleased
+## 0.9.2 - 2026-10-07
+
+### Added
+
+- MetaTask tracking, end to end: the DSH Tracking Tasks panel (board, detail,
+  chain view, drawer, deliverables, node sections, roster, settlement), the
+  OAC web UI Tracking Tasks page, a watch service with alerts plus a daemon
+  watch tick, the IDBots-style task structure map with an expandable branch
+  node table, participate drafts (`POST /api/metatask/draft` wired into both
+  UIs), and throttled identity enrichment.
+- LLM platform refresh: invocation contracts aligned with the current
+  claude/codebuddy CLIs plus minimum-version gates, model catalogs for
+  claude/codex/cursor, codex 0.159 error surfacing, and a live smoke script.
+- Private-chat IDBots parity: silence protocol, wake timers, delivery
+  lifecycle, bot-initiated interim updates via the ticket-gated chat interim
+  command, episode rollover with an LLM handoff summary, a free message
+  composer for open threads in both private-chat UIs, and media/file messages
+  over `/protocols/simplefilemsg`.
+- Zero-touch user onboarding: automatic user account creation, a free
+  traffic grant, and signed `/info/owner` binding.
+- Self-cognition and memory are now injected into every LLM scenario.
 
 ### Changed
 
@@ -23,6 +43,26 @@ tags for releases.
   close, and `TabInfo` carries new optional `pinned`/`label` fields — additive
   on a backward-compatible contract, and OAC's compile-only UI shim references
   no tab types.
+- Bot identity prompting is unified into one shared `metabot_identity` block
+  builder, and scenario prompt copy is deduplicated across core and the DSH
+  plugin.
+- Settings UI: the topbar gear opens the Settings page, with the base-URL
+  modal folded into the General tab; the six placeholder General-tab panels
+  were removed.
+- The local web UI hides the Conversations/Group Task view toggle.
+
+### Fixed
+
+- A newly created Bot is selectable in every Bot picker immediately via a
+  bots-changed SSE feed.
+- Traffic mode and balance cards top-align, the billing toggle is compacted,
+  and chain card titles keep the title and pin on one line with truncation.
+- Provider state homes are isolated so managed bot turns stay out of platform
+  session history.
+- The bot identity block is no longer double-injected across chat backends.
+- Regenerated the skillpacks embedded runtimes that earlier P6/P7 merges had
+  skipped building.
+- Addressed the 16 verified issues from the 2026-10-03 DSH smoke-test report.
 
 ## 0.9.1 - 2026-10-03
 

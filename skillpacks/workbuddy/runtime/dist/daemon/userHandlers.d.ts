@@ -6,9 +6,11 @@
  * through the guarded reveal verb, exactly like the CLI reveal.
  */
 import { type OwnerIdentityRecord } from '../core/owner/ownerIdentity';
+import { type OwnerOnboardingRunner } from '../core/owner/ownerOnboarding';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
 import type { Signer } from '../core/signing/signer';
+import type { TrafficAccountService } from '../core/traffic/trafficAccountService';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 export interface UserDaemonHandlersInput {
     /** The machine-wide system home that owns `~/.metabot/owner/identity.json`. */
@@ -21,5 +23,9 @@ export interface UserDaemonHandlersInput {
     createSigner?: (owner: OwnerIdentityRecord) => Signer;
     /** Test seam: inter-write delay override for the chain publish. */
     chainWriteDelayMs?: number;
+    /** Traffic account service backing the onboarding runner fallback. */
+    trafficAccountService?: Pick<TrafficAccountService, 'ensureTrafficAccount' | 'claimFreeGrant'>;
+    /** Shared owner-onboarding runner (run verb); constructed on demand when omitted. */
+    ownerOnboardingRunner?: OwnerOnboardingRunner;
 }
 export declare function createUserDaemonHandlers(input: UserDaemonHandlersInput): NonNullable<MetabotDaemonHttpHandlers['user']>;

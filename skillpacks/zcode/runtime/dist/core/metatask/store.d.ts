@@ -52,6 +52,16 @@ export interface MetaTaskStore {
     getProjection(rootPinId: string): Promise<MetaTaskTaskProjection | null>;
     /** Resolve + stamp display identities onto the projections, then persist rows. */
     enrichIdentities(projections: MetaTaskTaskProjection[]): Promise<void>;
+    /**
+     * Serve-time identity stamp (display sugar, never blocks a read): returns a
+     * COPY of the projection whose `identities` carry the freshest cache rows;
+     * actors missing from the cache are backfilled best-effort (same resolver
+     * tiering + TTL/batch caps as the sweep). The persisted projection file is
+     * left untouched — a skipped replay re-stamp would defeat the skip.
+     */
+    withFreshIdentities(projection: MetaTaskTaskProjection): Promise<MetaTaskTaskProjection>;
+    /** Cached identity rows for the given metaIds, backfilling the cache for the missing ones. */
+    ensureIdentities(metaIds: string[]): Promise<Record<string, MetaTaskIdentity>>;
     board(localRosterMetaIds: string[]): Promise<MetaTaskBoard>;
     getWatchStatuses(): Promise<{
         root: string;

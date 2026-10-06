@@ -15,6 +15,27 @@ function readPositiveIntFlag(args, flag) {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : 'invalid';
 }
 async function runChatCommand(args, context) {
+    if (args[0] === 'interim') {
+        // Bot-initiated interim update inside an active chat reply turn: gated by
+        // the host-issued turn ticket (see privateChatInterimTurn.ts).
+        const turnFile = (0, helpers_1.readFlagValue)(args, '--turn-file');
+        const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
+        if (!turnFile) {
+            return (0, helpers_1.commandMissingFlag)('--turn-file');
+        }
+        if (!requestFile) {
+            return (0, helpers_1.commandMissingFlag)('--request-file');
+        }
+        const handler = context.dependencies.chat?.interim;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Chat interim handler is not configured.');
+        }
+        const request = await (0, helpers_1.readJsonFile)(context, requestFile);
+        const text = typeof request.text === 'string'
+            ? request.text
+            : '';
+        return handler({ turnFile, text });
+    }
     if (args[0] === 'private') {
         const requestFile = (0, helpers_1.readFlagValue)(args, '--request-file');
         if (!requestFile) {

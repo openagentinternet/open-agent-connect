@@ -11,6 +11,7 @@ exports.createUserDaemonHandlers = createUserDaemonHandlers;
 const commandResult_1 = require("../core/contracts/commandResult");
 const ownerIdentity_1 = require("../core/owner/ownerIdentity");
 const ownerSigner_1 = require("../core/owner/ownerSigner");
+const ownerOnboarding_1 = require("../core/owner/ownerOnboarding");
 const ownerProfilePublish_1 = require("../core/owner/ownerProfilePublish");
 const avatarChainWrite_1 = require("../core/identity/avatarChainWrite");
 function ownerFailure(error) {
@@ -32,6 +33,9 @@ function createUserDaemonHandlers(input) {
         create: async (rawInput) => {
             try {
                 const record = await (0, ownerIdentity_1.createOwnerIdentity)(systemHomeDir, { name: normalizeText(rawInput?.name) });
+                // An explicit create re-arms onboarding (clears any opt-out tombstone)
+                // so the account/grant steps still converge on the next daemon start.
+                await (0, ownerOnboarding_1.resetOwnerOnboardingAfterManualIdentity)(systemHomeDir).catch(() => undefined);
                 // The mnemonic is shown exactly once, same as the CLI create/import.
                 return (0, commandResult_1.commandSuccess)({ identity: (0, ownerIdentity_1.toOwnerIdentityPublic)(record), mnemonic: record.mnemonic });
             }
@@ -51,6 +55,7 @@ function createUserDaemonHandlers(input) {
                     mnemonic,
                     ...(derivationPath ? { path: derivationPath } : {}),
                 });
+                await (0, ownerOnboarding_1.resetOwnerOnboardingAfterManualIdentity)(systemHomeDir).catch(() => undefined);
                 return (0, commandResult_1.commandSuccess)({ identity: (0, ownerIdentity_1.toOwnerIdentityPublic)(record), mnemonic: record.mnemonic });
             }
             catch (error) {
@@ -158,10 +163,37 @@ function createUserDaemonHandlers(input) {
         delete: async () => {
             try {
                 await (0, ownerIdentity_1.deleteOwnerIdentity)(systemHomeDir);
+                // Tombstone the onboarding state: auto-provisioning must never
+                // resurrect an identity the user deliberately removed.
+                await (0, ownerOnboarding_1.markOwnerOnboardingOptedOut)(systemHomeDir);
                 return (0, commandResult_1.commandSuccess)({ deleted: true });
             }
             catch (error) {
                 return ownerFailure(error);
+            }
+        },
+        getOnboarding: async () => {
+            try {
+                return (0, commandResult_1.commandSuccess)(await (0, ownerOnboarding_1.readOwnerOnboardingStatus)(systemHomeDir));
+            }
+            catch (error) {
+                return (0, commandResult_1.commandFailed)('owner_onboarding_read_failed', error instanceof Error ? error.message : String(error));
+            }
+        },
+        runOnboarding: async () => {
+            const runner = input.ownerOnboardingRunner
+                ?? (input.trafficAccountService
+                    ? (0, ownerOnboarding_1.createOwnerOnboardingRunner)({ systemHomeDir, trafficAccountService: input.trafficAccountService })
+                    : null);
+            if (!runner) {
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Owner onboarding runner is not configured.');
+            }
+            try {
+                const onboarding = await runner.run();
+                return (0, commandResult_1.commandSuccess)({ onboarding });
+            }
+            catch (error) {
+                return (0, commandResult_1.commandFailed)('owner_onboarding_failed', error instanceof Error ? error.message : String(error));
             }
         },
     };

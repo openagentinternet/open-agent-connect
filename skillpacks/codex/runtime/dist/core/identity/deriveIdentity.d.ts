@@ -21,4 +21,14 @@ export declare function normalizeGlobalMetaId(value: unknown): string | null;
 export declare function validateGlobalMetaId(value: string): boolean;
 export declare function derivePrivateKeyHex(options?: DeriveIdentityOptions): Promise<string>;
 export declare function convertToGlobalMetaId(address: string): string;
+/**
+ * Decode a GlobalMetaId back into its version and payload (pubkey hash /
+ * script hash / witness program). Inverse of encodeIdAddress; returns null
+ * for malformed input or checksum mismatch. Ported from the IDBots
+ * globalMetaid service for offline owner-binding verification.
+ */
+export declare function decodeGlobalMetaIdPayload(globalMetaId: string): {
+    version: number;
+    payload: Uint8Array;
+} | null;
 export declare function deriveIdentity(options?: DeriveIdentityOptions): Promise<DerivedIdentity>;

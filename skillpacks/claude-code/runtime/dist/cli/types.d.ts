@@ -122,6 +122,8 @@ export interface CliDependencies {
     user?: {
         /** Name/avatar profile save with on-chain publish (daemon-backed). */
         update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Advance the zero-touch onboarding pipeline in the daemon (idempotent). */
+        runOnboarding?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
     network?: {
         listServices?: (input: {
@@ -204,6 +206,11 @@ export interface CliDependencies {
     };
     chat?: {
         private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        interim?: (input: {
+            turnFile: string;
+            text: string;
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         conversations?: (input?: {
             from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -257,6 +264,7 @@ export interface CliDependencies {
         get?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         replay?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        draft?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         claim?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         submit?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         verify?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

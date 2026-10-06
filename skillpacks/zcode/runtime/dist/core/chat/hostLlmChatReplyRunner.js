@@ -10,6 +10,8 @@ exports.isPlanningPreambleLine = isPlanningPreambleLine;
 const node_fs_1 = require("node:fs");
 const defaultChatReplyRunner_1 = require("./defaultChatReplyRunner");
 const privateChatAutoReply_1 = require("./privateChatAutoReply");
+const privateChatLoopGuards_1 = require("./privateChatLoopGuards");
+const privateChatInterimTurn_1 = require("./privateChatInterimTurn");
 const privateChatAllowedSkills_1 = require("./privateChatAllowedSkills");
 const metaBotWorldview_1 = require("./metaBotWorldview");
 const uri_1 = require("../metaweb/uri");
@@ -148,7 +150,7 @@ function buildChatSystemPrompt(input) {
 }
 function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills_1.emptyPrivateChatAllowedSkillScope)(), options = {}) {
     const { conversation, recentMessages, persona, strategy } = input;
-    const maxTurns = strategy?.maxTurns ?? 30;
+    const maxTurns = strategy?.maxTurns ?? privateChatAutoReply_1.DEFAULT_MAX_TURNS;
     const metaBotSlug = normalizeText(options.metaBotSlug);
     const operatorGuidanceText = normalizeText(input.operatorGuidanceText);
     const conversationCloseAllowed = input.conversationCloseAllowed !== false;
@@ -181,10 +183,27 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     strategyLines.push('- Keep replies concise and natural, 2-4 sentences per message.');
     strategyLines.push('- Do not repeat what you have already said.');
     strategyLines.push('- Actively steer the conversation toward the objective.');
+    if (conversationCloseAllowed
+        && conversation.turnCount >= Math.ceil((maxTurns * 2) / 3)
+        && conversation.turnCount < maxTurns - 1) {
+        strategyLines.push('- The conversation is entering the closing phase. Guide the discussion toward a natural conclusion. If there is no valuable discussion or pending questions left, politely begin wrapping up.');
+    }
     if (conversationCloseAllowed && conversation.turnCount >= maxTurns - 1) {
         strategyLines.push(`- This chat will be force-closed after turn ${maxTurns}. Steer the topic toward a natural close in THIS reply; if the conversation is ready to end, write your farewell and add ${CLOSE_CONVERSATION_SIGNAL} on the final line.`);
     }
     sections.push(strategyLines.join('\n'));
+    // IDBots Silence Protocol parity: without these rules a polite bot answers
+    // every acknowledgement, and two polite bots trap each other in an endless
+    // exchange of hold notes. The sentinel is an exact-match protocol tag; any
+    // prose around it means a real reply and is delivered verbatim.
+    sections.push([
+        '## Silence Protocol ([NO_REPLY])',
+        `- You do not need to reply to every message; reply only to the latest meaningful message. When the latest message needs no answer — a work-in-progress signal, a hold marker, a mere acknowledgement, meaningless placeholder/closing content such as "Thinking...", "....", or "bye", or a silence/hold announcement in any wording or notation — reply with exactly \`${privateChatLoopGuards_1.PRIVATE_CHAT_NO_REPLY_SENTINEL}\` and nothing else: the host then delivers nothing to the peer.`,
+        `- Before choosing \`${privateChatLoopGuards_1.PRIVATE_CHAT_NO_REPLY_SENTINEL}\`, check what YOU still owe the peer. The host only runs you again when a NEW peer message arrives, so if your own earlier reply promised a later answer or update (for example you said you would verify something and come back with the result), a \`${privateChatLoopGuards_1.PRIVATE_CHAT_NO_REPLY_SENTINEL}\` now leaves both sides waiting forever. When you owe the peer an answer, deliver it (or a substantive interim result) as your reply; when the conversation has nothing left to produce, close it politely instead.`,
+        '- Never announce silence, waiting, or "no reply needed" in words. Such an announcement IS a delivered message: it forces the peer to process and answer it, trapping both bots in an endless exchange of "I am staying silent" notes.',
+        `- Never mirror or reuse the peer's silence notation. When the peer's message is itself a silence/hold announcement — in any language or notation — treat it as a no-op and reply with \`${privateChatLoopGuards_1.PRIVATE_CHAT_NO_REPLY_SENTINEL}\`.`,
+        `- Your final reply MUST be a regular text message outside any thinking/reasoning block. The host delivers ONLY your final text; reasoning content is never sent. Ending a turn wordless is a protocol violation that leaves the peer waiting forever; if you have decided to say nothing, reply with exactly \`${privateChatLoopGuards_1.PRIVATE_CHAT_NO_REPLY_SENTINEL}\` instead.`,
+    ].join('\n'));
     const exitLines = conversationCloseAllowed
         ? [
             '## Exit Mechanism',
@@ -229,6 +248,8 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
             '- Use ONLY the skills listed here, even if the host runtime offers other skills.',
             '- Skills may perform their documented actions (including on-chain writes, uploads, or sending messages) when the task calls for it — but never to send this chat reply itself (see Reply Delivery Boundary).',
             '- When skill execution actually starts, the host sends a brief wait notice to the peer automatically. Do not preface normal replies with wait notices, and do not repeat the notice as your final answer.',
+            '- Interim updates (bot-initiated messages): the chat workspace holds a host ticket file `.oac-private-chat-turn.json`. When a long-running task produces a partial result the peer should see now, deliver at most the ticketed number of short interim updates: write {"text": "..."} to a JSON file and run `metabot chat interim --turn-file "$PWD/.oac-private-chat-turn.json" --request-file <file>`. Each update is a few sentences at most, goes to this peer only, is never the final answer, and is never a "please wait" note (the host sends those).',
+            '- The final reply still comes from your final output only — interim updates never replace it.',
             '<available_skills>',
             ...skillLines,
             '</available_skills>',
@@ -247,6 +268,26 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
             'Use it as private steering for your next turn.',
             'Do not present it as peer-authored text or mention that you received hidden guidance.',
             operatorGuidanceText,
+        ].join('\n'));
+    }
+    // Host-injected notice for this specific turn (wake checks, empty-reply
+    // retries): the host re-ran the model on its own timer, which the model
+    // must know to decide correctly for the conversation tail.
+    const hostNoticeText = normalizeText(input.hostNoticeText);
+    if (hostNoticeText) {
+        sections.push([
+            '## Host Notice (critical for this turn)',
+            hostNoticeText,
+        ].join('\n'));
+    }
+    // Episode handoff (IDBots rollover parity): background from the episode
+    // that ended before this one, replacing its pruned raw history.
+    const episodeSummaryText = normalizeText(input.episodeSummaryText);
+    if (episodeSummaryText) {
+        sections.push([
+            '## Previous Episode Handoff',
+            'Your previous episode with this peer ended and its raw history was archived. Carry its outcomes and still-open commitments forward:',
+            episodeSummaryText,
         ].join('\n'));
     }
     sections.push([
@@ -317,7 +358,13 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
 function parseRunnerOutput(rawOutput) {
     const output = normalizeText(stripPlanningPreamble(rawOutput));
     if (!output) {
-        return { state: 'skip' };
+        // A completed-but-empty final text (reasoning-only completion): retryable
+        // by the orchestrator with a host notice, never delivered, and NOT a
+        // runtime failure (IDBots 2026-09-16 stall postmortem).
+        return { state: 'empty_reply' };
+    }
+    if ((0, privateChatLoopGuards_1.isPrivateChatNoReplySentinel)(output)) {
+        return { state: 'no_reply' };
     }
     const content = canonicalizeFinalByeLine(output);
     const hasEndMarker = hasFinalByeLine(content);
@@ -396,18 +443,15 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, systemProm
                 const result = session?.result;
                 if (result) {
                     if (result.status === 'completed') {
+                        // A completed attempt always produces a verdict: reply text, a
+                        // deliberate [NO_REPLY], or an empty final text (empty_reply).
+                        // Emptiness is model behavior, not a runtime failure — the
+                        // runtime stays healthy and sticky; the orchestrator retries
+                        // with a host notice (IDBots 2026-09-16 stall postmortem).
                         const parsed = parseRunnerOutput(result.output);
-                        if (parsed.state !== 'skip') {
-                            stickyRuntime.onSuccess(resolved.runtime.id);
-                            pollDeadlineTracker.reset(resolved.runtime.id);
-                            return { result: parsed, bindingId: resolved.bindingId };
-                        }
-                        excludeRuntimeIds.add(resolved.runtime.id);
-                        stickyRuntime.onFailure(resolved.runtime.id);
-                        if (shouldMarkRuntimeUnavailable) {
-                            await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime completed without returning output.').catch(() => { });
-                        }
-                        return null;
+                        stickyRuntime.onSuccess(resolved.runtime.id);
+                        pollDeadlineTracker.reset(resolved.runtime.id);
+                        return { result: parsed, bindingId: resolved.bindingId };
                     }
                     excludeRuntimeIds.add(resolved.runtime.id);
                     stickyRuntime.onFailure(resolved.runtime.id);
@@ -509,7 +553,10 @@ function createHostLlmChatReplyRunner(options) {
             });
             if (outcome && outcome.ok && typeof outcome.output === 'string') {
                 const parsed = parseRunnerOutput(outcome.output);
-                if (parsed.state !== 'skip')
+                // A host completion with no final text is NOT a usable result: fall
+                // through to the local-runtime chain (a different backend may not
+                // have the reasoning-only failure mode) instead of accepting silence.
+                if (parsed.state !== 'skip' && parsed.state !== 'empty_reply')
                     return parsed;
             }
             else if (outcome && !outcome.ok) {
@@ -554,6 +601,17 @@ function createHostLlmChatReplyRunner(options) {
             await node_fs_1.promises.mkdir(chatWorkspaceDir, { recursive: true }).catch((error) => {
                 const message = error instanceof Error ? error.message : String(error);
                 logWarning?.('[private chat workspace]', message);
+            });
+            // Bot-initiated interim messages (IDBots send_private_chat parity):
+            // issue the turn ticket the `metabot chat interim` command consumes.
+            // Ticket-gated on the daemon side, so best-effort here.
+            await (0, privateChatInterimTurn_1.writePrivateChatTurnContext)({
+                workspaceDir: chatWorkspaceDir,
+                conversationId: input.conversation.conversationId,
+                peerGlobalMetaId: input.conversation.peerGlobalMetaId,
+            }).catch((error) => {
+                const message = error instanceof Error ? error.message : String(error);
+                logWarning?.('[private chat interim ticket]', message);
             });
         }
         // The wait notice goes out at most once per turn, even when several

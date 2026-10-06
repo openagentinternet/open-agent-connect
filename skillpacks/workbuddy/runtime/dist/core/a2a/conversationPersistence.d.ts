@@ -23,6 +23,9 @@ export interface PersistA2AConversationMessageInput {
         orderPinId?: string | null;
         paymentTxid?: string | null;
         raw?: Record<string, unknown> | null;
+        deliveryStatus?: 'pending' | 'sent' | 'failed' | null;
+        deliveryError?: string | null;
+        hostStatus?: boolean;
     };
     orderSession?: Partial<A2AOrderConversationSession> | null;
     replaceExistingMessage?: boolean;
@@ -36,6 +39,24 @@ export interface A2AConversationPersistenceEvent {
     timestamp: number;
     kind: string;
     protocolTag: string | null;
+    /** 'incoming' | 'outgoing' when known; lets UIs count only peer messages
+     * as unread instead of their own sends. */
+    direction?: string | null;
+}
+/**
+ * Live reply-turn activity (IDBots StreamingActivityBar parity): the
+ * auto-reply orchestrator publishes `replying: true` when a turn starts
+ * composing for a peer and `replying: false` when it settles. The events ride
+ * the same per-Bot conversation SSE stream as persistence events, so UIs can
+ * show a "local bot is working" indicator without polling. In-memory only:
+ * a daemon restart simply means no state until the next turn.
+ */
+export interface A2AConversationReplyStateEvent {
+    type: 'conversation-reply-state';
+    localGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    replying: boolean;
+    timestamp: number;
 }
 export interface PersistA2AConversationMessageBestEffortResult {
     persisted: boolean;
@@ -44,6 +65,8 @@ export interface PersistA2AConversationMessageBestEffortResult {
 }
 export declare function publishA2AConversationPersistenceEvent(event: A2AConversationPersistenceEvent): void;
 export declare function subscribeA2AConversationPersistenceEvents(localGlobalMetaId: string, subscriber: (event: A2AConversationPersistenceEvent) => void): () => void;
+export declare function publishA2AConversationReplyState(event: A2AConversationReplyStateEvent): void;
+export declare function subscribeA2AConversationReplyState(localGlobalMetaId: string, subscriber: (event: A2AConversationReplyStateEvent) => void): () => void;
 export declare function sanitizeA2ARawMetadata(raw: Record<string, unknown> | null | undefined): Record<string, unknown> | null;
 export declare function buildA2APeerSessionId(localGlobalMetaId: string, peerGlobalMetaId: string): string;
 export declare function buildA2AOrderSessionId(orderTxid: string): string;

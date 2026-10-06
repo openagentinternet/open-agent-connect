@@ -20,9 +20,8 @@ const app_11 = require("../../ui/pages/surf/app");
 const app_12 = require("../../ui/pages/memory/app");
 const app_13 = require("../../ui/pages/schedule/app");
 const app_14 = require("../../ui/pages/tracking/app");
-const app_15 = require("../../ui/pages/traffic/app");
-const app_16 = require("../../ui/pages/services/app");
-const app_17 = require("../../ui/pages/settings/app");
+const app_15 = require("../../ui/pages/services/app");
+const app_16 = require("../../ui/pages/settings/app");
 const browser_1 = require("@openagentinternet/agent-browser-ui/browser");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
@@ -51,15 +50,14 @@ const PAGE_BUILDERS = {
     'refund': app_4.buildRefundPageDefinition,
     'bot': app_6.buildBotPageDefinition,
     'conversations': app_7.buildConversationsPageDefinition,
-    'services': app_16.buildServicesPageDefinition,
+    'services': app_15.buildServicesPageDefinition,
     'apps': app_8.buildAppsPageDefinition,
     'kb': app_10.buildKbPageDefinition,
     'surf': app_11.buildSurfPageDefinition,
     'memory': app_12.buildMemoryPageDefinition,
     'schedule': app_13.buildSchedulePageDefinition,
     'tracking': app_14.buildTrackingPageDefinition,
-    'traffic': app_15.buildTrafficPageDefinition,
-    'settings': app_17.buildSettingsPageDefinition,
+    'settings': app_16.buildSettingsPageDefinition,
     'metaapps': app_9.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
@@ -97,9 +95,7 @@ function renderNav(currentPage, i18n) {
 }
 function injectTopbarChrome(html, i18n) {
     const withLogo = html.replace(/<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/, '<a class="topbar-logo" href="/ui/bot">Open Agent Connect</a>');
-    return withLogo
-        .replace('</nav>', `</nav>${(0, topbarChrome_1.renderTopbarControls)(i18n)}`)
-        .replace('</main>', `</main>${(0, topbarChrome_1.renderTopbarSettingsModal)(i18n)}`);
+    return withLogo.replace('</nav>', `</nav>${(0, topbarChrome_1.renderTopbarControls)(i18n)}`);
 }
 function applyStaticI18n(html, i18n) {
     return html.replace(/(<[^>]*\sdata-i18n-key="([^"]+)"[^>]*>)([^<]*)(<\/[^>]+>)/g, (match, open, key, _text, close) => {
@@ -150,7 +146,7 @@ async function renderBuiltInPage(page, languagePreference) {
     // inject only the page-specific content HTML. Otherwise fall back to the
     // legacy hero wrapper for templates that don't have __PAGE_CONTENT__.
     const content = definition.contentHtml ?? '';
-    const script = `${(0, i18n_1.renderClientI18nScript)(i18n)}\n${definition.script}\n;\n${(0, topbarChrome_1.renderTopbarSettingsScript)()}`;
+    const script = `${(0, i18n_1.renderClientI18nScript)(i18n)}\n${definition.script}`;
     const html = template
         .replace(/<html lang="en">/g, `<html lang="${escapeHtml(i18n.language)}">`)
         .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))
@@ -361,6 +357,26 @@ const handleUiRoutes = async (context) => {
         const from = url.searchParams.get('from');
         if (from)
             location.searchParams.set('from', from);
+        const language = url.searchParams.get('lang');
+        if (language)
+            location.searchParams.set('lang', language);
+        context.res.writeHead(302, {
+            'Location': `${location.pathname}${location.search}`,
+            'Cache-Control': 'no-store',
+        });
+        context.res.end();
+        return true;
+    }
+    // Traffic is a tab inside the Settings page (DSH PluginSettingsPanel
+    // parity). Keep `/ui/traffic` alive as a permanent redirect so existing
+    // links, bookmarks, and `metabot ui open --page traffic` keep working; the
+    // language param passes through.
+    if (url.pathname === '/ui/traffic') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const location = new URL('/ui/settings?tab=traffic', 'http://placeholder.local');
         const language = url.searchParams.get('lang');
         if (language)
             location.searchParams.set('lang', language);

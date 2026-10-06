@@ -1,4 +1,6 @@
 import type { ChatSkillWaitNoticeGenerator } from './chatSkillWaitNotice';
+import type { ChatEpisodeSummaryGenerator } from './chatEpisodeSummary';
+import { type PrivateChatWakeStore } from './privateChatWake';
 import { type A2AConversationMessagePersister } from '../a2a/conversationPersistence';
 import { type PrivateChatSendFailureEvent } from './privateChatSendFailureLog';
 import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
@@ -6,6 +8,7 @@ import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
 import type { Signer } from '../signing/signer';
 import type { PrivateChatInboundMessage, PrivateChatMessage, ChatReplyRunner, PrivateChatAutoReplyConfig } from './privateChatTypes';
+export declare const DEFAULT_MAX_TURNS = 50;
 export interface PrivateChatAutoReplyDependencies {
     stateStore: PrivateChatStateStore;
     strategyStore: ChatStrategyStore;
@@ -18,6 +21,8 @@ export interface PrivateChatAutoReplyDependencies {
     logSendFailure?: (event: PrivateChatSendFailureEvent) => void;
     hasActiveOrderWithPeer?: (peerGlobalMetaId: string) => Promise<boolean>;
     chatSkillWaitNotice?: ChatSkillWaitNoticeGenerator | null;
+    wakeStore?: PrivateChatWakeStore;
+    episodeSummaryGenerator?: ChatEpisodeSummaryGenerator | null;
     now?: () => number;
 }
 export interface PrivateChatAutoReplyOrchestrator {
@@ -27,6 +32,9 @@ export interface PrivateChatAutoReplyOrchestrator {
     handleLocalGuidedTurn(peerGlobalMetaId: string, options?: {
         guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;
     }): Promise<void>;
+    fireDueWakes(): Promise<number>;
+    startWakeLoop(): void;
+    stopWakeLoop(): void;
 }
 export declare function unwrapPrivateChatContent(raw: string): {
     content: string;

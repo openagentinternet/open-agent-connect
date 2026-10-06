@@ -281,6 +281,9 @@ function buildMessage(row) {
         txid,
         txidPreview: formatTxidPreview(txid),
         timestampLabel: formatTimestamp(timestamp || normalizeTimestampMs(sender.timestamp)),
+        hostStatus: record.hostStatus === true,
+        deliveryStatus: normalizeText(record.deliveryStatus),
+        isAttachment: /^metafile:\/\//iu.test(normalizeText(record.content)),
     };
 }
 function buildConversationsPageViewModel(input = {}) {

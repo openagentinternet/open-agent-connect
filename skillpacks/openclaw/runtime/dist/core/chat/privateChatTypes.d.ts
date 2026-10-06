@@ -13,6 +13,10 @@ export interface PrivateChatConversation {
     pendingGuidanceCreatedAt: number | null;
     pendingGuidanceLeaseId?: string | null;
     pendingGuidanceLeaseExpiresAt?: number | null;
+    /** Episode rollover (IDBots parity): 0-based index of the active episode. */
+    episodeIndex?: number;
+    /** LLM handoff summary of the episode that ended before the current one. */
+    episodeSummary?: string | null;
 }
 export interface PrivateChatMessage {
     conversationId: string;
@@ -72,9 +76,11 @@ export interface ChatReplyRunnerInput {
     memoryContext?: string | null;
     conversationCloseAllowed?: boolean;
     onSkillExecutionStart?: () => void;
+    hostNoticeText?: string | null;
+    episodeSummaryText?: string | null;
 }
 export interface ChatReplyRunnerResult {
-    state: 'reply' | 'end_conversation' | 'skip';
+    state: 'reply' | 'end_conversation' | 'no_reply' | 'empty_reply' | 'skip';
     content?: string;
     extensions?: Record<string, unknown>;
 }
@@ -85,4 +91,6 @@ export interface PrivateChatAutoReplyConfig {
     defaultStrategyId: string | null;
     maxTurns?: number;
     cooldownMs?: number;
+    wakeDelaysMs?: number[];
+    episodeRolloverMessages?: number;
 }

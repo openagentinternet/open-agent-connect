@@ -10,12 +10,18 @@ function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
         appNameLabel: tx('apps.form.appName'),
         appNameRequired: tx('apps.form.appNameRequired'),
         assets: tx('apps.form.assets'),
+        authorUnknown: tx('apps.authorUnknown'),
         basicInformation: tx('apps.form.basicInformation'),
         botFallback: tx('apps.botFallback'),
         cancel: tx('apps.form.cancel'),
         chainCopyTxid: tx('apps.chain.copyTxid'),
+        chainEmptyMessage: tx('apps.chain.emptyMessage'),
+        chainEmptyTitle: tx('apps.chain.emptyTitle'),
         chainErrorTitle: tx('apps.chain.errorTitle'),
+        chainGalleryDescription: tx('apps.chainGalleryDescription'),
+        chainGalleryTitle: tx('apps.chainGalleryTitle'),
         chainNoTxid: tx('apps.chain.noTxid'),
+        chainPageLabel: tx('apps.chain.pageLabel'),
         chainPendingTitle: tx('apps.chain.pendingTitle'),
         chainPublishPendingMessage: tx('apps.chain.publishPendingMessage'),
         chainPublishSuccessMessage: tx('apps.chain.publishSuccessMessage'),
@@ -91,6 +97,7 @@ function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
         multiPinPlaceholder: tx('apps.form.multiPinPlaceholder'),
         noLocalBotAvailable: tx('apps.noLocalBotAvailable'),
         noUploadResult: tx('apps.form.noUploadResult'),
+        openAuthorPage: tx('apps.openAuthorPage'),
         pageSizeLabel: tx('apps.pageSizeLabel'),
         optionalLabel: tx('apps.form.optional'),
         previousVersionLabel: tx('apps.form.previousVersion'),
@@ -122,6 +129,8 @@ function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
         singlePinPlaceholder: tx('apps.form.singlePinPlaceholder'),
         tagsHelp: tx('apps.form.tagsHelp'),
         tagsLabel: tx('apps.form.tags'),
+        tabChain: tx('apps.tabChain'),
+        tabLocal: tx('apps.tabLocal'),
         technicalInformation: tx('apps.form.technicalInformation'),
         titleLabel: tx('apps.form.title'),
         untitledMetaApp: tx('apps.untitledMetaApp'),
@@ -151,38 +160,69 @@ function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
             </div>
           </div>
 
-          <div class="apps-bot-filter">
-            <label id="apps-bot-picker-label" data-i18n-key="apps.localBot">${tx('apps.localBot')}</label>
-            <div class="apps-bot-picker" data-apps-bot-picker aria-labelledby="apps-bot-picker-label">
-              <button class="apps-bot-trigger" type="button" disabled>
-                <span data-i18n-key="apps.botPickerPlaceholder">${tx('apps.botPickerPlaceholder')}</span>
-                <span class="apps-bot-chevron" aria-hidden="true">v</span>
-              </button>
-            </div>
+          <div class="apps-tabs" role="tablist" aria-label="${tx('apps.toolbarTitle')}">
+            <button class="apps-tab" type="button" role="tab" data-apps-tab="chain" data-active="true" aria-selected="true" data-i18n-key="apps.tabChain">${tx('apps.tabChain')}</button>
+            <button class="apps-tab" type="button" role="tab" data-apps-tab="local" aria-selected="false" data-i18n-key="apps.tabLocal">${tx('apps.tabLocal')}</button>
           </div>
 
-          <div class="apps-notice" data-apps-notice hidden></div>
+          <div class="apps-tabpanel" data-apps-tabpanel="chain" role="tabpanel">
+            <div class="apps-notice" data-apps-chain-notice hidden></div>
+            <section class="apps-gallery" aria-label="${tx('apps.galleryAria')}">
+              <div class="apps-section-header">
+                <div>
+                  <h2 data-i18n-key="apps.chainGalleryTitle">${tx('apps.chainGalleryTitle')}</h2>
+                  <p data-i18n-key="apps.chainGalleryDescription">${tx('apps.chainGalleryDescription')}</p>
+                </div>
+                <span data-apps-chain-grid-count>0</span>
+              </div>
+              <div class="apps-grid" data-apps-chain-grid>
+                <div class="apps-empty">
+                  <strong data-i18n-key="apps.chain.emptyTitle">${tx('apps.chain.emptyTitle')}</strong>
+                  <p data-i18n-key="apps.chain.emptyMessage">${tx('apps.chain.emptyMessage')}</p>
+                </div>
+              </div>
+              <div class="apps-pagination">
+                <button class="btn btn-sm" type="button" data-apps-chain-page-prev data-i18n-key="apps.previous">${tx('apps.previous')}</button>
+                <span data-apps-chain-page-label data-i18n-key="apps.chain.pageLabel">${tx('apps.chain.pageLabel')}</span>
+                <button class="btn btn-sm" type="button" data-apps-chain-page-next data-i18n-key="apps.next">${tx('apps.next')}</button>
+              </div>
+            </section>
+          </div>
 
-          <section class="apps-gallery" aria-label="${tx('apps.galleryAria')}">
-            <div class="apps-section-header">
-              <div>
-                <h2 data-i18n-key="apps.publishedMetaApps">${tx('apps.publishedMetaApps')}</h2>
-                <p data-i18n-key="apps.galleryDescription">${tx('apps.galleryDescription')}</p>
-              </div>
-              <span data-apps-grid-count>0</span>
-            </div>
-            <div class="apps-grid" data-apps-grid>
-              <div class="apps-empty">
-                <strong data-i18n-key="apps.emptyTitle">${tx('apps.emptyTitle')}</strong>
-                <p data-i18n-key="apps.emptyMessage">${tx('apps.emptyMessage')}</p>
+          <div class="apps-tabpanel" data-apps-tabpanel="local" role="tabpanel" hidden>
+            <div class="apps-bot-filter">
+              <label id="apps-bot-picker-label" data-i18n-key="apps.localBot">${tx('apps.localBot')}</label>
+              <div class="apps-bot-picker" data-apps-bot-picker aria-labelledby="apps-bot-picker-label">
+                <button class="apps-bot-trigger" type="button" disabled>
+                  <span data-i18n-key="apps.botPickerPlaceholder">${tx('apps.botPickerPlaceholder')}</span>
+                  <span class="apps-bot-chevron" aria-hidden="true">v</span>
+                </button>
               </div>
             </div>
-            <div class="apps-pagination">
-              <button class="btn btn-sm" type="button" data-apps-page-prev data-i18n-key="apps.previous">${tx('apps.previous')}</button>
-              <span data-apps-page-label data-i18n-key="apps.pageLabel">${tx('apps.pageLabel')}</span>
-              <button class="btn btn-sm" type="button" data-apps-page-next data-i18n-key="apps.next">${tx('apps.next')}</button>
-            </div>
-          </section>
+
+            <div class="apps-notice" data-apps-notice hidden></div>
+
+            <section class="apps-gallery" aria-label="${tx('apps.galleryAria')}">
+              <div class="apps-section-header">
+                <div>
+                  <h2 data-i18n-key="apps.publishedMetaApps">${tx('apps.publishedMetaApps')}</h2>
+                  <p data-i18n-key="apps.galleryDescription">${tx('apps.galleryDescription')}</p>
+                </div>
+                <span data-apps-grid-count>0</span>
+              </div>
+              <div class="apps-grid" data-apps-grid>
+                <div class="apps-empty">
+                  <strong data-i18n-key="apps.emptyTitle">${tx('apps.emptyTitle')}</strong>
+                  <p data-i18n-key="apps.emptyMessage">${tx('apps.emptyMessage')}</p>
+                </div>
+              </div>
+              <div class="apps-pagination">
+                <button class="btn btn-sm" type="button" data-apps-page-prev data-i18n-key="apps.previous">${tx('apps.previous')}</button>
+                <span data-apps-page-label data-i18n-key="apps.pageLabel">${tx('apps.pageLabel')}</span>
+                <button class="btn btn-sm" type="button" data-apps-page-next data-i18n-key="apps.next">${tx('apps.next')}</button>
+              </div>
+            </section>
+          </div>
         </div>
         <div class="apps-modal-root" data-apps-modal-root hidden></div>
       </section>
@@ -197,6 +237,7 @@ function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
 function buildAppsPageRuntimeSource(text, options) {
     return `(() => {
   const APPS_API_BASE = '/api/metaapp/list';
+  const CHAIN_API_BASE = '/api/metaapp/search';
   const METAAPP_PUBLIC_BASE_URL = ${JSON.stringify(share_1.METAAPP_PUBLIC_BASE_URL)};
   const PAGE_SIZE = 12;
   const UI_TEXT = ${JSON.stringify(text)};
@@ -205,6 +246,7 @@ function buildAppsPageRuntimeSource(text, options) {
   const METAAPP_METAFILE_REFERENCE_PATTERN = new RegExp(${JSON.stringify(options.metafileReferencePatternSource)}, 'i');
   const COPY_ICON_HTML = '<span aria-hidden="true">&#x29C9;</span>';
   const state = {
+    tab: 'chain',
     profiles: [],
     selectedSlug: '',
     records: [],
@@ -213,6 +255,12 @@ function buildAppsPageRuntimeSource(text, options) {
     nextCursor: '',
     loadingToken: 0,
     loading: false,
+    chainRows: [],
+    chainCursorStack: [''],
+    chainNextCursor: '',
+    chainLoadingToken: 0,
+    chainLoading: false,
+    chainLoaded: false,
     botMenuOpen: false,
     modal: null,
     fork: null,
@@ -222,11 +270,21 @@ function buildAppsPageRuntimeSource(text, options) {
     grid: document.querySelector('[data-apps-grid]'),
     gridCount: document.querySelector('[data-apps-grid-count]'),
     notice: document.querySelector('[data-apps-notice]'),
+    chainPanel: document.querySelector('[data-apps-tabpanel="chain"]'),
+    localPanel: document.querySelector('[data-apps-tabpanel="local"]'),
+    chainGrid: document.querySelector('[data-apps-chain-grid]'),
+    chainGridCount: document.querySelector('[data-apps-chain-grid-count]'),
+    chainNotice: document.querySelector('[data-apps-chain-notice]'),
+    tabChain: document.querySelector('[data-apps-tab="chain"]'),
+    tabLocal: document.querySelector('[data-apps-tab="local"]'),
     refresh: document.querySelector('[data-apps-refresh]'),
     publish: document.querySelector('[data-apps-publish-open]'),
     prev: document.querySelector('[data-apps-page-prev]'),
     next: document.querySelector('[data-apps-page-next]'),
     pageLabel: document.querySelector('[data-apps-page-label]'),
+    chainPrev: document.querySelector('[data-apps-chain-page-prev]'),
+    chainNext: document.querySelector('[data-apps-chain-page-next]'),
+    chainPageLabel: document.querySelector('[data-apps-chain-page-label]'),
     botPicker: document.querySelector('[data-apps-bot-picker]'),
     modalRoot: document.querySelector('[data-apps-modal-root]'),
   };
@@ -1019,6 +1077,37 @@ function buildAppsPageRuntimeSource(text, options) {
 
   const findRecordByPinId = (pinId) => state.records.find((record) => recordPinId(record) === normalizeText(pinId)) || null;
 
+  // On-chain feed rows (the 链上元应用 tab): a tolerant projection of one
+  // /api/metaapp/search item — same shape as the DSH AppsPanel chain card.
+  const normalizeChainRow = (value) => {
+    const row = value && typeof value === 'object' ? value : {};
+    return {
+      pinId: normalizeText(row.pinId),
+      title: normalizeText(row.title),
+      appName: normalizeText(row.appName),
+      intro: normalizeText(row.intro),
+      icon: normalizeText(row.icon),
+      coverImg: normalizeText(row.coverImg),
+      tags: Array.isArray(row.tags) ? row.tags.map(normalizeText).filter(Boolean) : [],
+      runtime: normalizeText(row.runtime),
+      version: normalizeText(row.version),
+      publisherGlobalMetaId: normalizeText(row.publisherGlobalMetaId),
+      publisherName: normalizeText(row.publisherName),
+      publisherAvatarId: normalizeText(row.publisherAvatarId),
+    };
+  };
+  const findChainRowByPinId = (pinId) => state.chainRows.find((row) => normalizeText(row && row.pinId) === normalizeText(pinId)) || null;
+  const chainRecordFromRow = (row) => ({
+    pinId: normalizeText(row && row.pinId),
+    title: normalizeText(row && row.title) || undefined,
+    appName: normalizeText(row && row.appName) || undefined,
+    intro: normalizeText(row && row.intro) || undefined,
+  });
+
+  const navigateToPath = (path) => {
+    window.location.href = (window.location && window.location.origin ? window.location.origin : '') + path;
+  };
+
   const closeAppsModal = () => {
     state.modal = null;
     state.fork = null;
@@ -1374,10 +1463,51 @@ function buildAppsPageRuntimeSource(text, options) {
     '</article>';
   };
 
+  // DSH AppsPanel chain card, ported: cover + centered-state pill, icon +
+  // title row, pin line, intro, tags, and a foot with the developer
+  // (avatar + name → their Bot page) at the left and run/fork/share right.
+  const renderChainCard = (row) => {
+    const pinId = normalizeText(row && row.pinId);
+    const title = normalizeText(row && (row.title || row.appName)) || pinId || uiText('apps.untitledMetaApp', UI_TEXT.untitledMetaApp);
+    const subtitle = [normalizeText(row && row.version), normalizeText(row && row.runtime)].filter(Boolean).join(' / ');
+    const intro = normalizeText(row && row.intro);
+    const tags = Array.isArray(row && row.tags) ? row.tags.slice(0, 4) : [];
+    const coverSrc = imageUrlForReference(row && row.coverImg);
+    const authorName = normalizeText(row && (row.publisherName || row.publisherGlobalMetaId)) || uiText('apps.authorUnknown', UI_TEXT.authorUnknown);
+    const openAuthorLabel = uiText('apps.openAuthorPage', UI_TEXT.openAuthorPage, { name: authorName });
+    const authorInner = imageMarkup('apps-author-avatar', row && row.publisherAvatarId, authorName, '') +
+      '<span class="apps-chain-author-name">' + escapeHtml(authorName) + '</span>';
+    const authorHtml = normalizeText(row && row.publisherGlobalMetaId)
+      ? '<button class="apps-chain-author" type="button" data-apps-chain-author="' + escapeHtml(normalizeText(row && row.publisherGlobalMetaId)) + '" title="' + escapeHtml(openAuthorLabel) + '" aria-label="' + escapeHtml(openAuthorLabel) + '">' + authorInner + '</button>'
+      : '<span class="apps-chain-author apps-chain-author-static">' + authorInner + '</span>';
+    const copyLabel = uiText('apps.copyPinId', UI_TEXT.copyPinId);
+    return '<article class="apps-card apps-chain-card" data-apps-chain-card="' + escapeHtml(pinId) + '" tabindex="0">' +
+      '<div class="apps-chain-cover">' +
+        (coverSrc ? '<img class="apps-chain-cover-img" src="' + escapeHtml(coverSrc) + '" alt="" loading="lazy" data-apps-image-fallback="">' : '') +
+        '<span class="apps-state-pill">' + escapeHtml(uiText('apps.runnable', UI_TEXT.runnable)) + '</span>' +
+      '</div>' +
+      '<div class="apps-chain-card-body">' +
+        '<div class="apps-chain-title">' +
+          imageMarkup('apps-chain-icon', row && row.icon, title, '') +
+          '<div class="apps-chain-title-copy"><h3>' + escapeHtml(title) + '</h3><p>' + escapeHtml(subtitle) + '</p></div>' +
+        '</div>' +
+        '<div class="apps-pin-line"><code>' + escapeHtml(pinId) + '</code><button class="apps-copy-btn" type="button" data-apps-copy-pin="' + escapeHtml(pinId) + '" aria-label="' + escapeHtml(copyLabel) + '" title="' + escapeHtml(copyLabel) + '">' + COPY_ICON_HTML + '</button></div>' +
+        '<p class="apps-card-intro">' + escapeHtml(intro) + '</p>' +
+        '<div class="apps-tags">' + tags.map((tag) => '<span>' + escapeHtml(tag) + '</span>').join('') + '</div>' +
+      '</div>' +
+      '<div class="apps-chain-foot">' +
+        authorHtml +
+        '<button class="btn btn-primary" type="button" data-apps-chain-run="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.run', UI_TEXT.run)) + '</button>' +
+        '<button class="btn" type="button" data-apps-chain-fork="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.fork', UI_TEXT.fork)) + '</button>' +
+        '<button class="btn" type="button" data-apps-chain-share="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.share', UI_TEXT.share)) + '</button>' +
+      '</div>' +
+    '</article>';
+  };
+
   const renderPaginationControls = () => {
     const hasPrevious = state.cursorStack.length > 1;
     const hasNext = Boolean(state.nextCursor);
-    if (elements.refresh) elements.refresh.disabled = state.loading;
+    if (elements.refresh) elements.refresh.disabled = state.tab === 'chain' ? state.chainLoading : state.loading;
     if (elements.prev) {
       elements.prev.hidden = !hasPrevious;
       elements.prev.disabled = state.loading || !hasPrevious;
@@ -1387,6 +1517,33 @@ function buildAppsPageRuntimeSource(text, options) {
       elements.next.disabled = state.loading || !hasNext;
     }
     if (elements.pageLabel) elements.pageLabel.textContent = uiText('apps.pageSizeLabel', UI_TEXT.pageSizeLabel);
+  };
+
+  const renderChainGrid = () => {
+    if (!elements.chainGrid) return;
+    if (!state.chainRows.length) {
+      elements.chainGrid.innerHTML = '<div class="apps-empty"><strong>' + escapeHtml(uiText('apps.chain.emptyTitle', UI_TEXT.chainEmptyTitle)) + '</strong><p>' + escapeHtml(uiText('apps.chain.emptyMessage', UI_TEXT.chainEmptyMessage)) + '</p></div>';
+    } else {
+      elements.chainGrid.innerHTML = state.chainRows.map(renderChainCard).join('');
+    }
+    if (elements.chainGridCount) elements.chainGridCount.textContent = String(state.chainRows.length);
+    renderChainPaginationControls();
+    hydrateImageFallbacks(elements.chainGrid);
+  };
+
+  const renderChainPaginationControls = () => {
+    const hasPrevious = state.chainCursorStack.length > 1;
+    const hasNext = Boolean(state.chainNextCursor);
+    if (elements.refresh) elements.refresh.disabled = state.tab === 'chain' ? state.chainLoading : state.loading;
+    if (elements.chainPrev) {
+      elements.chainPrev.hidden = !hasPrevious;
+      elements.chainPrev.disabled = state.chainLoading || !hasPrevious;
+    }
+    if (elements.chainNext) {
+      elements.chainNext.hidden = !hasNext;
+      elements.chainNext.disabled = state.chainLoading || !hasNext;
+    }
+    if (elements.chainPageLabel) elements.chainPageLabel.textContent = uiText('apps.chain.pageLabel', UI_TEXT.chainPageLabel, { page: state.chainCursorStack.length });
   };
 
   const renderGrid = () => {
@@ -1404,6 +1561,82 @@ function buildAppsPageRuntimeSource(text, options) {
   const setLoading = (loading) => {
     state.loading = loading;
     renderPaginationControls();
+  };
+
+  const setChainLoading = (loading) => {
+    state.chainLoading = loading;
+    renderChainPaginationControls();
+  };
+
+  const showChainNotice = (kind, title, body) => {
+    if (!elements.chainNotice) return;
+    elements.chainNotice.hidden = false;
+    elements.chainNotice.dataset.tone = kind;
+    elements.chainNotice.innerHTML = '<strong>' + escapeHtml(title) + '</strong>' + (body ? '<p>' + escapeHtml(body) + '</p>' : '');
+  };
+
+  const hideChainNotice = () => {
+    if (elements.chainNotice) elements.chainNotice.hidden = true;
+  };
+
+  const chainErrorNotice = (error) => {
+    showChainNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
+  };
+
+  const loadChainPage = async (cursor) => {
+    const token = ++state.chainLoadingToken;
+    const params = new URLSearchParams();
+    params.set('size', String(PAGE_SIZE));
+    if (cursor) params.set('cursor', cursor);
+    setChainLoading(true);
+    try {
+      const data = await fetchJson(CHAIN_API_BASE + '?' + params.toString());
+      if (token !== state.chainLoadingToken) return false;
+      const rows = Array.isArray(data && data.items) ? data.items.map(normalizeChainRow) : [];
+      if (!rows.length && cursor) {
+        // Spurious trailing cursor: the page after the last returns nothing.
+        state.chainNextCursor = '';
+        hideChainNotice();
+        renderChainPaginationControls();
+        return false;
+      }
+      state.chainRows = rows;
+      state.chainNextCursor = data && data.hasMore === true ? normalizeText(data && data.nextCursor) : '';
+      hideChainNotice();
+      renderChainGrid();
+      return true;
+    } finally {
+      if (token === state.chainLoadingToken) {
+        setChainLoading(false);
+      }
+    }
+  };
+
+  const loadChainFirstPage = async () => {
+    state.chainCursorStack = [''];
+    return await loadChainPage('');
+  };
+
+  const selectTab = (tab) => {
+    const nextTab = tab === 'local' ? 'local' : 'chain';
+    state.tab = nextTab;
+    if (elements.tabChain) {
+      elements.tabChain.dataset.active = nextTab === 'chain' ? 'true' : 'false';
+      elements.tabChain.setAttribute('aria-selected', nextTab === 'chain' ? 'true' : 'false');
+    }
+    if (elements.tabLocal) {
+      elements.tabLocal.dataset.active = nextTab === 'local' ? 'true' : 'false';
+      elements.tabLocal.setAttribute('aria-selected', nextTab === 'local' ? 'true' : 'false');
+    }
+    if (elements.chainPanel) elements.chainPanel.hidden = nextTab !== 'chain';
+    if (elements.localPanel) elements.localPanel.hidden = nextTab !== 'local';
+    if (elements.publish) elements.publish.hidden = nextTab !== 'local';
+    renderPaginationControls();
+    renderChainPaginationControls();
+    if (nextTab === 'chain' && !state.chainLoaded) {
+      state.chainLoaded = true;
+      loadChainFirstPage().catch(chainErrorNotice);
+    }
   };
 
   const loadProfiles = async () => {
@@ -1445,6 +1678,15 @@ function buildAppsPageRuntimeSource(text, options) {
   };
 
   const refreshApps = async () => {
+    if (state.tab === 'chain') {
+      if (state.chainLoading) return;
+      try {
+        await loadChainFirstPage();
+      } catch (error) {
+        chainErrorNotice(error);
+      }
+      return;
+    }
     if (state.loading) return;
     try {
       await loadApps(state.cursor);
@@ -1473,8 +1715,14 @@ function buildAppsPageRuntimeSource(text, options) {
   };
 
   const initialize = async () => {
+    renderGrid();
+    renderChainPaginationControls();
+    if (elements.publish) elements.publish.hidden = true;
+    // The chain tab is the default view: its first page loads up front; the
+    // local Bot list still loads eagerly so Fork/Publish stay ready.
+    state.chainLoaded = true;
+    loadChainFirstPage().catch(chainErrorNotice);
     try {
-      renderGrid();
       await loadProfiles();
       await loadApps('');
     } catch (error) {
@@ -1485,12 +1733,16 @@ function buildAppsPageRuntimeSource(text, options) {
   document.addEventListener('click', async (event) => {
     const eventTarget = event.target instanceof Element ? event.target : null;
     if (!eventTarget) return;
-    const target = eventTarget.closest('[data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-copy-value], [data-apps-run], [data-apps-share], [data-apps-detail], [data-apps-edit], [data-apps-fork], [data-apps-delete-open], [data-apps-card]');
+    const target = eventTarget.closest('[data-apps-tab], [data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-copy-value], [data-apps-run], [data-apps-share], [data-apps-detail], [data-apps-edit], [data-apps-fork], [data-apps-delete-open], [data-apps-chain-author], [data-apps-chain-run], [data-apps-chain-share], [data-apps-chain-fork], [data-apps-card], [data-apps-chain-card]');
     if (!target) {
       if (state.botMenuOpen && !eventTarget.closest('[data-apps-bot-picker]')) {
         state.botMenuOpen = false;
         renderBotPicker();
       }
+      return;
+    }
+    if (target.matches('[data-apps-tab]')) {
+      selectTab(target.getAttribute('data-apps-tab') || 'chain');
       return;
     }
     if (target.matches('[data-apps-bot-trigger]')) {
@@ -1558,20 +1810,51 @@ function buildAppsPageRuntimeSource(text, options) {
       if (record) openAppsModal('delete', record);
       return;
     }
+    if (target.matches('[data-apps-chain-author]')) {
+      const globalMetaId = target.getAttribute('data-apps-chain-author') || '';
+      if (globalMetaId) navigateToPath('/browser/metaid/' + encodeURIComponent(globalMetaId));
+      return;
+    }
+    if (target.matches('[data-apps-chain-run]')) {
+      const pinId = target.getAttribute('data-apps-chain-run') || '';
+      if (pinId && !target.disabled) navigateToPath('/browser/metaapp/' + encodeURIComponent(pinId));
+      return;
+    }
+    if (target.matches('[data-apps-chain-share]')) {
+      const row = findChainRowByPinId(target.getAttribute('data-apps-chain-share') || '');
+      if (row) openAppsModal('share', chainRecordFromRow(row));
+      return;
+    }
+    if (target.matches('[data-apps-chain-fork]')) {
+      const row = findChainRowByPinId(target.getAttribute('data-apps-chain-fork') || '');
+      if (row) await startFork(chainRecordFromRow(row));
+      return;
+    }
     if (target.matches('[data-apps-card]')) {
       const record = findRecordByPinId(target.getAttribute('data-apps-card') || '');
       if (record) openAppsModal('detail', record);
+      return;
+    }
+    if (target.matches('[data-apps-chain-card]')) {
+      const pinId = target.getAttribute('data-apps-chain-card') || '';
+      if (pinId) navigateToPath('/browser/metaapp/' + encodeURIComponent(pinId));
     }
   });
 
   document.addEventListener('keydown', (event) => {
     const eventTarget = event.target instanceof Element ? event.target : null;
     if (!eventTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
-    const card = eventTarget.matches('[data-apps-card]') ? eventTarget : null;
-    if (!card) return;
-    event.preventDefault();
-    const record = findRecordByPinId(card.getAttribute('data-apps-card') || '');
-    if (record) openAppsModal('detail', record);
+    if (eventTarget.matches('[data-apps-card]')) {
+      event.preventDefault();
+      const record = findRecordByPinId(eventTarget.getAttribute('data-apps-card') || '');
+      if (record) openAppsModal('detail', record);
+      return;
+    }
+    if (eventTarget.matches('[data-apps-chain-card]')) {
+      event.preventDefault();
+      const pinId = eventTarget.getAttribute('data-apps-chain-card') || '';
+      if (pinId) navigateToPath('/browser/metaapp/' + encodeURIComponent(pinId));
+    }
   });
 
   if (elements.refresh) elements.refresh.addEventListener('click', refreshApps);
@@ -1625,11 +1908,38 @@ function buildAppsPageRuntimeSource(text, options) {
       showNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
     }
   });
+  if (elements.chainNext) elements.chainNext.addEventListener('click', async () => {
+    if (state.chainLoading || !state.chainNextCursor) return;
+    const nextCursor = state.chainNextCursor;
+    try {
+      const loaded = await loadChainPage(nextCursor);
+      if (loaded) {
+        state.chainCursorStack.push(nextCursor);
+        renderChainPaginationControls();
+      }
+    } catch (error) {
+      chainErrorNotice(error);
+    }
+  });
+  if (elements.chainPrev) elements.chainPrev.addEventListener('click', async () => {
+    if (state.chainLoading || state.chainCursorStack.length <= 1) return;
+    const previousCursor = state.chainCursorStack[state.chainCursorStack.length - 2] || '';
+    try {
+      const loaded = await loadChainPage(previousCursor);
+      if (loaded) {
+        state.chainCursorStack.pop();
+        renderChainPaginationControls();
+      }
+    } catch (error) {
+      chainErrorNotice(error);
+    }
+  });
 
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('oac:i18n-changed', () => {
       renderBotPicker();
       renderGrid();
+      renderChainGrid();
       if (state.modal && elements.modalRoot && !elements.modalRoot.hidden) {
         openAppsModal(state.modal.mode, state.modal.targetPinId ? findRecordByPinId(state.modal.targetPinId) : null);
       }

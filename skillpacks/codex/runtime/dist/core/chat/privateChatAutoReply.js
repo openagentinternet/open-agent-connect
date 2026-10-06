@@ -1,25 +1,57 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_MAX_TURNS = void 0;
 exports.unwrapPrivateChatContent = unwrapPrivateChatContent;
 exports.createPrivateChatAutoReplyOrchestrator = createPrivateChatAutoReplyOrchestrator;
 const privateChat_1 = require("./privateChat");
+const privateChat_2 = require("./privateChat");
 const chatPersonaLoader_1 = require("./chatPersonaLoader");
 const privateChatMemory_1 = require("./privateChatMemory");
+const chatEpisodeSummary_1 = require("./chatEpisodeSummary");
+const privateChatLoopGuards_1 = require("./privateChatLoopGuards");
+const privateChatWake_1 = require("./privateChatWake");
+const privateChatInterimTurn_1 = require("./privateChatInterimTurn");
 const conversationPersistence_1 = require("../a2a/conversationPersistence");
 const simplemsgClassifier_1 = require("../a2a/simplemsgClassifier");
 const privateChatSendFailureLog_1 = require("./privateChatSendFailureLog");
-const DEFAULT_MAX_TURNS = 30;
+// IDBots parity: 50 turns per active session by default.
+exports.DEFAULT_MAX_TURNS = 50;
 const DEFAULT_MAX_IDLE_MS = 300_000;
-const DEFAULT_RECENT_MESSAGES_LIMIT = 60;
+// IDBots parity: 80 messages from the active session + 20 from the previous
+// session as background (see selectPrivateChatPromptContextMessages).
+const ACTIVE_SEGMENT_MESSAGES_LIMIT = 80;
+const PREVIOUS_SEGMENT_MESSAGES_LIMIT = 20;
+const DEFAULT_RECENT_MESSAGES_LIMIT = ACTIVE_SEGMENT_MESSAGES_LIMIT + PREVIOUS_SEGMENT_MESSAGES_LIMIT;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 const CLOSE_CONVERSATION_FINAL_LINE_PATTERN = /^(?:bye|goodbye)[.!。！]?$/iu;
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
+// Inbound verbatim retransmissions: the 2nd consecutive copy is absorbed
+// (loop protection); the 3rd runs again as an insistent re-ask (IDBots parity).
+const INBOUND_REPEAT_ESCALATION_AFTER = 3;
+const WAKE_LOOP_INTERVAL_MS = 10_000;
+const WAKE_TURN_BUSY_DEFER_MS = 60_000;
 // Outbound-message extension markers for the chat-skill wait notice: they let
 // retries dedupe against conversation history and let the staleness guard
 // skip notices when checking whether a newer peer message has arrived.
 const CHAT_SKILL_WAIT_NOTICE_EXTENSION = 'chatSkillWaitNotice';
 const CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION = 'chatSkillWaitNoticeForMessageId';
+// Host-side silence markers (chatNoReply / chatSilentTail, defined in
+// privateChatLoopGuards) record a turn that deliberately delivered nothing.
+// They are local-only: never pinned, never shown to the peer, and they must
+// not read as an answer for staleness checks or prompt history.
+function isHostSilenceMarker(message) {
+    return Boolean(message.direction === 'outbound'
+        && (message.extensions?.[privateChatLoopGuards_1.CHAT_NO_REPLY_EXTENSION] === true
+            || message.extensions?.[privateChatLoopGuards_1.CHAT_SILENT_TAIL_EXTENSION] === true));
+}
+// Bot-initiated interim updates (ticket-gated, IDBots send_private_chat
+// parity): real delivered text for the peer, but never the turn's answer.
+// Staleness checks must not read them as "the final reply already went out".
+function isChatInterimMessage(message) {
+    return Boolean(message.direction === 'outbound'
+        && message.extensions?.[privateChatInterimTurn_1.CHAT_INTERIM_EXTENSION] === true);
+}
 function hasSentChatSkillWaitNotice(messages, forMessageId) {
     return messages.some((message) => (message.direction === 'outbound'
         && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true
@@ -29,8 +61,12 @@ function hasSentChatSkillWaitNotice(messages, forMessageId) {
 // and OpenTeam recruitment envelopes are service traffic, not conversation.
 // Keep them out of the LLM chat context so a completed service exchange does
 // not read as a finished conversation and nudge the model into closing early.
+// Host-side silence markers are dropped too: the sentinel carries no
+// conversational value — the Silence Protocol prompt section governs when to
+// use it, and past uses must not echo through the history.
 function filterChatPromptMessages(messages) {
-    return messages.filter((message) => (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind === 'private_chat');
+    return messages.filter((message) => ((0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind === 'private_chat'
+        && !isHostSilenceMarker(message)));
 }
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -147,11 +183,14 @@ async function conversationHasOutboundSince(input) {
 }
 async function latestConversationMessageMatches(input) {
     // Scan a small tail instead of only the very last record: our own interim
-    // chat-skill wait notices are appended to the store while the turn is still
-    // being composed, and must not count as "a newer message arrived".
+    // chat-skill wait notices and host-side silence markers are appended to the
+    // store while the turn is still being composed, and must not count as "a
+    // newer message arrived".
     const latestMessages = await input.stateStore.getRecentMessages(input.conversationId, 5);
     const latestSignificantMessage = [...latestMessages].reverse().find((message) => !(message.direction === 'outbound'
-        && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true));
+        && (message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true
+            || isHostSilenceMarker(message)
+            || isChatInterimMessage(message))));
     return Boolean(latestSignificantMessage && latestSignificantMessage.messageId === input.expectedMessageId);
 }
 function checkRateLimit(rateLimiter, now) {
@@ -166,7 +205,10 @@ function checkRateLimit(rateLimiter, now) {
 // newer inbound arrived (only the latest message of a burst should be
 // answered, IDBots-style) or a non-notice outbound already answered it. Used
 // both to skip queued reply turns BEFORE paying for an LLM call and as the
-// commit-time staleness guard before sending.
+// commit-time staleness guard before sending. Host-side silence markers
+// (chatNoReply / chatSilentTail) and ticket-gated interim updates never
+// answer a message — a wake turn must still be able to re-drive the tail
+// they sit behind.
 async function conversationMovedPastMessage(input) {
     const recentMessages = await input.stateStore.getRecentMessages(input.conversationId, 20);
     const triggerIndex = recentMessages.findIndex((message) => message.messageId === input.messageId);
@@ -175,14 +217,16 @@ async function conversationMovedPastMessage(input) {
     }
     return recentMessages.slice(triggerIndex + 1).some((message) => (message.direction === 'inbound'
         || (message.direction === 'outbound'
-            && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] !== true)));
+            && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] !== true
+            && !isHostSilenceMarker(message)
+            && !isChatInterimMessage(message))));
 }
 // Per-bot config values win over strategy values; the defaults are the last
 // resort for runtime configs constructed without the new fields.
 function resolveEffectiveStrategy(strategy, config) {
     return {
         id: strategy?.id ?? 'default',
-        maxTurns: config.maxTurns ?? strategy?.maxTurns ?? DEFAULT_MAX_TURNS,
+        maxTurns: config.maxTurns ?? strategy?.maxTurns ?? exports.DEFAULT_MAX_TURNS,
         maxIdleMs: config.cooldownMs ?? strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS,
         exitCriteria: strategy?.exitCriteria ?? '',
     };
@@ -191,6 +235,15 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
     const rateLimiter = { replyTimestamps: [] };
     const activeInboundReplies = new Set();
     const getNow = deps.now ?? (() => Date.now());
+    const wakeStore = deps.wakeStore ?? (0, privateChatWake_1.createPrivateChatWakeStore)(deps.paths);
+    const wakeDelaysMs = Array.isArray(config.wakeDelaysMs) && config.wakeDelaysMs.length > 0
+        ? config.wakeDelaysMs
+        : null;
+    // Consecutive verbatim-identical inbound copies per conversation: the 2nd
+    // copy is absorbed (loop protection), the 3rd runs as an insistent re-ask
+    // (IDBots inbound retransmission escalation). Entries reset when a different
+    // plaintext arrives or the session gap lapses.
+    const inboundRepeatTracker = new Map();
     // Reply turns are serialized per conversation: back-to-back inbound messages
     // must not spawn concurrent LLM turns (lost turnCount increments, replies
     // discarded only after the LLM call was paid for). Different conversations
@@ -208,6 +261,99 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (conversationTurnChains.get(conversationId) === current) {
                 conversationTurnChains.delete(conversationId);
             }
+        }
+    }
+    // ---- Host-side silence bookkeeping (IDBots [NO_REPLY] / silent-tail parity) ----
+    // Records that a turn deliberately delivered nothing: a local-only marker
+    // message plus a conversation update that flips lastDirection back to
+    // 'outbound' so the backfill's unanswered-tail recovery and every
+    // moved-past guard treat the tail as handled — only wake timers may
+    // re-drive it. Never pinned, never shown to the peer.
+    async function recordSilentTail(input) {
+        try {
+            const timestamp = getNow();
+            const extensions = input.marker === 'no_reply'
+                ? { [privateChatLoopGuards_1.CHAT_NO_REPLY_EXTENSION]: true }
+                : { [privateChatLoopGuards_1.CHAT_SILENT_TAIL_EXTENSION]: true };
+            extensions.chatSilentTailForMessageId = input.triggerMessageId;
+            const markerRecord = {
+                conversationId: input.conversation.conversationId,
+                messageId: buildMessageId(timestamp),
+                direction: 'outbound',
+                senderGlobalMetaId: input.selfGlobalMetaId,
+                content: input.marker === 'no_reply' ? '[NO_REPLY]' : '',
+                messagePinId: null,
+                extensions,
+                timestamp,
+            };
+            await deps.stateStore.appendMessages([markerRecord]).catch(() => undefined);
+            const latestConversation = await deps.stateStore.getConversationByPeer(input.conversation.peerGlobalMetaId);
+            if (latestConversation) {
+                await deps.stateStore.upsertConversation({
+                    ...latestConversation,
+                    lastDirection: 'outbound',
+                    updatedAt: timestamp,
+                });
+            }
+        }
+        catch {
+            // Silence bookkeeping must never break the reply loop.
+        }
+    }
+    // Local-only host status line (IDBots "[Host] …" bubbles parity): recorded
+    // in the UI-facing A2A store only — never pinned on-chain, never part of
+    // the LLM context, rendered as an internal status line by the UIs.
+    async function recordHostStatusMessage(input) {
+        const timestamp = getNow();
+        await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+            paths: deps.paths,
+            local: {
+                globalMetaId: input.selfGlobalMetaId,
+            },
+            peer: {
+                globalMetaId: input.peerGlobalMetaId,
+            },
+            message: {
+                messageId: `host-${buildMessageId(timestamp)}`,
+                direction: 'outgoing',
+                content: input.text,
+                timestamp,
+                hostStatus: true,
+            },
+        }, deps.a2aConversationPersister).catch(() => undefined);
+    }
+    // Arms (or advances) the bounded wake for a silent tail. Returns false when
+    // the wake budget for that kind is exhausted.
+    async function scheduleSilentTailWake(input) {
+        try {
+            if (!config.enabled)
+                return false;
+            const existing = (await wakeStore.readWakes())
+                .find((record) => record.conversationId === input.conversation.conversationId) ?? null;
+            const continues = existing !== null
+                && existing.kind === input.kind
+                && existing.triggerMessageId === input.triggerMessageId;
+            const fires = continues ? existing.fires + 1 : 0;
+            const scheduled = await wakeStore.schedule({
+                conversationId: input.conversation.conversationId,
+                peerGlobalMetaId: input.peerGlobalMetaId,
+                triggerMessageId: input.triggerMessageId,
+                kind: input.kind,
+                fires,
+                delays: input.kind === 'empty_reply'
+                    ? privateChatWake_1.DEFAULT_EMPTY_REPLY_RETRY_DELAYS_MS
+                    : (wakeDelaysMs ?? undefined),
+                now: getNow(),
+            });
+            if (!scheduled) {
+                // Budget exhausted: drop the record so the sweep does not re-fire a
+                // wake whose schedule can no longer advance.
+                await wakeStore.remove(input.conversation.conversationId).catch(() => undefined);
+            }
+            return scheduled !== null;
+        }
+        catch {
+            return false;
         }
     }
     async function sendReplyMessage(selfGlobalMetaId, peerGlobalMetaId, content, extensions) {
@@ -354,6 +500,8 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 conversationCloseAllowed,
                 onSkillExecutionStart: input.onSkillExecutionStart,
                 memoryContext: input.memoryContext ?? null,
+                hostNoticeText: input.hostNoticeText ?? null,
+                episodeSummaryText: input.episodeSummaryText ?? null,
             });
         }
         catch (error) {
@@ -369,6 +517,12 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
         if (runnerResult.state === 'skip') {
             return null;
         }
+        if (runnerResult.state === 'no_reply') {
+            return { kind: 'no_reply', content: '', extensions: null, shouldClose: false };
+        }
+        if (runnerResult.state === 'empty_reply') {
+            return { kind: 'empty_reply', content: '', extensions: null, shouldClose: false };
+        }
         let content = normalizeText(runnerResult.content);
         let shouldClose = runnerResult.state === 'end_conversation' || hasFinalByeLine(content);
         if (shouldClose && !conversationCloseAllowed) {
@@ -379,9 +533,12 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             content = ensureFinalByeLine(content);
         }
         if (!content) {
-            return null;
+            // Defensive: a 'reply' state without usable text behaves like an empty
+            // completion — retryable, never delivered.
+            return { kind: 'empty_reply', content: '', extensions: null, shouldClose: false };
         }
         return {
+            kind: 'reply',
             content,
             extensions: shouldClose ? null : runnerResult.extensions ?? null,
             shouldClose,
@@ -415,8 +572,48 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 }
                 return null;
             }
+            // Delivery lifecycle (IDBots parity): the outgoing bubble appears in
+            // the UI-facing A2A store as pending the moment the turn commits to
+            // sending; the same record (same messageId) is then replaced with
+            // sent/failed once the chain write settles.
+            const pendingTimestamp = getNow();
+            const outgoingMessageId = buildMessageId(pendingTimestamp);
+            await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                paths: deps.paths,
+                local: {
+                    globalMetaId: input.selfGlobalMetaId,
+                },
+                peer: {
+                    globalMetaId: input.peerGlobalMetaId,
+                },
+                message: {
+                    messageId: outgoingMessageId,
+                    direction: 'outgoing',
+                    content: input.content,
+                    timestamp: pendingTimestamp,
+                    deliveryStatus: 'pending',
+                },
+            }, deps.a2aConversationPersister);
             outboundReply = await sendReplyMessage(input.selfGlobalMetaId, input.peerGlobalMetaId, input.content, input.extensions);
             if (!outboundReply) {
+                await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                    paths: deps.paths,
+                    local: {
+                        globalMetaId: input.selfGlobalMetaId,
+                    },
+                    peer: {
+                        globalMetaId: input.peerGlobalMetaId,
+                    },
+                    message: {
+                        messageId: outgoingMessageId,
+                        direction: 'outgoing',
+                        content: input.content,
+                        timestamp: pendingTimestamp,
+                        deliveryStatus: 'failed',
+                        deliveryError: 'chain write failed',
+                    },
+                    replaceExistingMessage: true,
+                }, deps.a2aConversationPersister);
                 if (input.guidanceToConsume) {
                     await deps.stateStore.releasePendingGuidanceClaimIfMatches(input.conversation.conversationId, input.guidanceToConsume);
                 }
@@ -425,7 +622,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             const timestamp = getNow();
             const outboundRecord = {
                 conversationId: input.conversation.conversationId,
-                messageId: outboundReply.pinId || buildMessageId(timestamp),
+                messageId: outgoingMessageId,
                 direction: 'outbound',
                 senderGlobalMetaId: input.selfGlobalMetaId,
                 content: input.content,
@@ -451,7 +648,9 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     txids: outboundReply.txids,
                     chain: outboundReply.network ?? 'mvc',
                     timestamp: outboundRecord.timestamp,
+                    deliveryStatus: 'sent',
                 },
+                replaceExistingMessage: true,
             }, deps.a2aConversationPersister);
             const latestConversation = await deps.stateStore.getConversationByPeer(input.peerGlobalMetaId);
             let updatedConversation = {
@@ -465,6 +664,9 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 pendingGuidanceLeaseExpiresAt: latestConversation?.pendingGuidanceLeaseExpiresAt ?? input.conversation.pendingGuidanceLeaseExpiresAt ?? null,
             };
             await deps.stateStore.upsertConversation(updatedConversation);
+            // A delivered reply answers the conversation tail: any pending wake for
+            // it is obsolete.
+            await wakeStore.remove(input.conversation.conversationId).catch(() => undefined);
             if (input.guidanceToConsume) {
                 updatedConversation = await deps.stateStore.clearPendingGuidanceIfMatches(input.conversation.conversationId, input.guidanceToConsume.guidanceText, input.guidanceToConsume.createdAt, input.guidanceToConsume.leaseId) ?? updatedConversation;
             }
@@ -513,6 +715,15 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             return false;
         }
         activeInboundReplies.add(replyKey);
+        // Live activity (IDBots StreamingActivityBar parity): the UI shows a
+        // "local bot is working" indicator while this turn composes.
+        (0, conversationPersistence_1.publishA2AConversationReplyState)({
+            type: 'conversation-reply-state',
+            localGlobalMetaId: input.selfGlobalMetaId,
+            peerGlobalMetaId: input.peerGlobalMetaId,
+            replying: true,
+            timestamp: getNow(),
+        });
         try {
             const guidanceWasPending = Boolean(normalizeText(input.conversation.pendingGuidanceText)
                 && typeof input.conversation.pendingGuidanceCreatedAt === 'number');
@@ -521,7 +732,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 : null;
             if (guidanceWasPending && !guidanceToConsume)
                 return false;
-            const maxTurns = input.strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
+            const maxTurns = input.strategy?.maxTurns ?? exports.DEFAULT_MAX_TURNS;
             if (input.conversation.turnCount >= maxTurns && !guidanceToConsume) {
                 const committedConversation = await commitOutboundTurn({
                     selfGlobalMetaId: input.selfGlobalMetaId,
@@ -538,7 +749,11 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 return true;
             }
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
-            const recentMessages = unwrapLegacyInboundContents(filterChatPromptMessages(await deps.stateStore.getRecentMessages(input.conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT)));
+            const recentMessages = unwrapLegacyInboundContents(filterChatPromptMessages((0, privateChatLoopGuards_1.selectPrivateChatPromptContextMessages)(await deps.stateStore.getRecentMessages(input.conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT), {
+                activeLimit: ACTIVE_SEGMENT_MESSAGES_LIMIT,
+                previousLimit: PREVIOUS_SEGMENT_MESSAGES_LIMIT,
+                gapMs: input.strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS,
+            })));
             // Interim "please wait" notice (IDBots-style): fired by the reply runner
             // when an allowed chat skill actually starts executing. Sent at most once
             // per inbound message, deduped against history so a later retry of the
@@ -571,6 +786,8 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 inboundMessage: input.inboundMessage,
                 operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
                 onSkillExecutionStart,
+                hostNoticeText: input.hostNoticeText ?? null,
+                episodeSummaryText: normalizeText(input.conversation.episodeSummary) || null,
                 memoryContext: await (0, privateChatMemory_1.buildPrivateReplyMemoryContext)(deps.paths, {
                     peerGlobalMetaId: input.peerGlobalMetaId,
                     userText: normalizeText(input.inboundMessage.content),
@@ -581,6 +798,96 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     await deps.stateStore.releasePendingGuidanceClaimIfMatches(input.conversation.conversationId, guidanceToConsume);
                 }
                 return false;
+            }
+            // The model deliberately chose silence ([NO_REPLY]): record a local
+            // marker so nothing re-drives the tail except a bounded wake, then arm
+            // that wake — the model may owe the peer a deferred answer.
+            if (preparedTurn.kind === 'no_reply') {
+                await recordSilentTail({
+                    conversation: input.conversation,
+                    selfGlobalMetaId: input.selfGlobalMetaId,
+                    marker: 'no_reply',
+                    triggerMessageId: input.inboundMessage.messageId,
+                });
+                if (guidanceToConsume) {
+                    await deps.stateStore.releasePendingGuidanceClaimIfMatches(input.conversation.conversationId, guidanceToConsume);
+                }
+                await scheduleSilentTailWake({
+                    conversation: input.conversation,
+                    peerGlobalMetaId: input.peerGlobalMetaId,
+                    triggerMessageId: input.inboundMessage.messageId,
+                    kind: 'silent_tail',
+                });
+                return true;
+            }
+            // The LLM completed without any final text (reasoning-only completion):
+            // nothing is deliverable. Record the silent tail and arm a bounded
+            // retry that re-runs the turn with a host retry notice.
+            if (preparedTurn.kind === 'empty_reply') {
+                await recordSilentTail({
+                    conversation: input.conversation,
+                    selfGlobalMetaId: input.selfGlobalMetaId,
+                    marker: 'silent_tail',
+                    triggerMessageId: input.inboundMessage.messageId,
+                });
+                if (guidanceToConsume) {
+                    await deps.stateStore.releasePendingGuidanceClaimIfMatches(input.conversation.conversationId, guidanceToConsume);
+                }
+                const scheduled = await scheduleSilentTailWake({
+                    conversation: input.conversation,
+                    peerGlobalMetaId: input.peerGlobalMetaId,
+                    triggerMessageId: input.inboundMessage.messageId,
+                    kind: 'empty_reply',
+                });
+                if (scheduled) {
+                    await recordHostStatusMessage({
+                        selfGlobalMetaId: input.selfGlobalMetaId,
+                        peerGlobalMetaId: input.peerGlobalMetaId,
+                        text: '[Host] Previous turn ended with no final reply text. A retry is scheduled.',
+                    });
+                }
+                else {
+                    deps.logSendFailure?.({
+                        kind: 'reply_empty_after_retries',
+                        peerGlobalMetaId: input.peerGlobalMetaId,
+                        error: 'reply turn produced no final reply text after all host retries',
+                    });
+                    await recordHostStatusMessage({
+                        selfGlobalMetaId: input.selfGlobalMetaId,
+                        peerGlobalMetaId: input.peerGlobalMetaId,
+                        text: '[Host] No final reply text was produced after all host retries.',
+                    });
+                }
+                return true;
+            }
+            // Echo guard (IDBots parity): a bot never needs to say the exact same
+            // thing three times in a row. Once the delivered tail already shows two
+            // verbatim-identical replies, a third identical one is an echo loop —
+            // block the delivery and leave the tail silent.
+            if ((0, privateChatLoopGuards_1.wouldCreatePrivateChatEchoLoop)({
+                messages: recentMessages,
+                replyText: preparedTurn.content,
+            })) {
+                deps.logSendFailure?.({
+                    kind: 'echo_guard_blocked',
+                    peerGlobalMetaId: input.peerGlobalMetaId,
+                    error: 'reply blocked: verbatim echo of the last delivered replies',
+                });
+                await recordHostStatusMessage({
+                    selfGlobalMetaId: input.selfGlobalMetaId,
+                    peerGlobalMetaId: input.peerGlobalMetaId,
+                    text: '[Host] Reply withheld: it would repeat the last delivered message verbatim.',
+                });
+                await recordSilentTail({
+                    conversation: input.conversation,
+                    selfGlobalMetaId: input.selfGlobalMetaId,
+                    marker: 'silent_tail',
+                    triggerMessageId: input.inboundMessage.messageId,
+                });
+                if (guidanceToConsume) {
+                    await deps.stateStore.releasePendingGuidanceClaimIfMatches(input.conversation.conversationId, guidanceToConsume);
+                }
+                return true;
             }
             // Keep wire order for the peer: the wait notice (if one went out during
             // the LLM turn) must settle before the final reply is sent.
@@ -614,8 +921,178 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             return true;
         }
         finally {
+            (0, conversationPersistence_1.publishA2AConversationReplyState)({
+                type: 'conversation-reply-state',
+                localGlobalMetaId: input.selfGlobalMetaId,
+                peerGlobalMetaId: input.peerGlobalMetaId,
+                replying: false,
+                timestamp: getNow(),
+            });
             activeInboundReplies.delete(replyKey);
         }
+    }
+    // ---- Episode rollover (IDBots a2aEpisodeRollover parity) ----
+    // Rolls the conversation into a new episode once its engine-side message
+    // log crosses the threshold: an LLM handoff summary replaces the raw
+    // history as prompt background, the engine log is pruned (A2A store and
+    // chain keep the full thread), and a divider line lands in the UI thread.
+    async function maybeRollConversationEpisode(input) {
+        try {
+            const threshold = Number.isFinite(config.episodeRolloverMessages)
+                ? Math.floor(config.episodeRolloverMessages)
+                : chatEpisodeSummary_1.DEFAULT_EPISODE_ROLLOVER_MESSAGES;
+            if (threshold < 2)
+                return input.conversation;
+            const state = await deps.stateStore.readState();
+            const conversationMessages = state.messages
+                .filter((message) => message.conversationId === input.conversation.conversationId)
+                .sort((left, right) => left.timestamp - right.timestamp);
+            if (conversationMessages.length < threshold)
+                return input.conversation;
+            const previousEpisodeIndex = input.conversation.episodeIndex ?? 0;
+            const recentForSummary = conversationMessages.slice(-100);
+            const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
+            const generated = deps.episodeSummaryGenerator
+                ? await deps.episodeSummaryGenerator({
+                    conversation: input.conversation,
+                    recentMessages: recentForSummary,
+                    persona,
+                })
+                : null;
+            const peerLabel = normalizeText(input.conversation.peerName) || 'the peer';
+            const summary = normalizeText(generated)
+                || `Episode ${previousEpisodeIndex + 1} with ${peerLabel} ran ${conversationMessages.length} messages; treat open threads from the recent history as still standing unless settled.`;
+            // Prune the engine-side log: keep only the newest record (the inbound
+            // driving this turn) so staleness checks stay well-defined.
+            const keepMessageIds = new Set(conversationMessages.slice(-1).map((message) => message.messageId));
+            await deps.stateStore.updateState((current) => ({
+                ...current,
+                messages: current.messages.filter((message) => (message.conversationId !== input.conversation.conversationId
+                    || keepMessageIds.has(message.messageId))),
+            }));
+            const rolled = {
+                ...input.conversation,
+                episodeIndex: previousEpisodeIndex + 1,
+                episodeSummary: summary,
+                updatedAt: getNow(),
+            };
+            await deps.stateStore.upsertConversation(rolled);
+            await recordHostStatusMessage({
+                selfGlobalMetaId: input.selfGlobalMetaId,
+                peerGlobalMetaId: input.conversation.peerGlobalMetaId,
+                text: `[Host] Episode ${previousEpisodeIndex + 1} ended · handoff summary: ${summary.slice(0, 200)}`,
+            });
+            return rolled;
+        }
+        catch {
+            return input.conversation;
+        }
+    }
+    // ---- Wake loop: bounded re-drive of silent-but-open conversation tails ----
+    let wakeLoopTimer = null;
+    let wakeSweepRunning = false;
+    // Runs one due wake record. Returns true when a wake turn actually ran
+    // (delivered a reply or re-marked the tail silent); false means the record
+    // was obsolete (removed) or the turn could not run (deferred/busy).
+    async function runWakeTurn(record) {
+        const conversation = await deps.stateStore.getConversationByPeer(record.peerGlobalMetaId);
+        if (!conversation || conversation.state !== 'active') {
+            await wakeStore.remove(record.conversationId).catch(() => undefined);
+            return false;
+        }
+        // Only re-drive a tail that is still the tail: a newer message or a real
+        // delivered answer cancels the wake instead.
+        if (!(await latestConversationMessageMatches({
+            stateStore: deps.stateStore,
+            conversationId: record.conversationId,
+            expectedMessageId: record.triggerMessageId,
+        }))) {
+            await wakeStore.remove(record.conversationId).catch(() => undefined);
+            return false;
+        }
+        if (conversationTurnChains.has(record.conversationId)) {
+            await wakeStore.deferFire(record.conversationId, WAKE_TURN_BUSY_DEFER_MS).catch(() => undefined);
+            return false;
+        }
+        const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
+        if (!selfGlobalMetaId) {
+            await wakeStore.deferFire(record.conversationId, WAKE_TURN_BUSY_DEFER_MS).catch(() => undefined);
+            return false;
+        }
+        const triggerMessages = await deps.stateStore.getRecentMessages(record.conversationId, 5);
+        const triggerMessage = triggerMessages.find((message) => message.messageId === record.triggerMessageId);
+        if (!triggerMessage) {
+            await wakeStore.remove(record.conversationId).catch(() => undefined);
+            return false;
+        }
+        const strategy = resolveEffectiveStrategy(conversation.strategyId
+            ? await deps.strategyStore.getStrategy(conversation.strategyId)
+            : null, config);
+        await recordHostStatusMessage({
+            selfGlobalMetaId,
+            peerGlobalMetaId: record.peerGlobalMetaId,
+            text: record.kind === 'empty_reply'
+                ? `[Host] Retry ${record.fires + 1}: re-running the turn after an empty completion.`
+                : `[Host] Wake check ${record.fires + 1}: re-evaluating the silent conversation tail.`,
+        });
+        const hostNoticeText = record.kind === 'empty_reply'
+            ? (0, privateChatLoopGuards_1.buildPrivateChatEmptyReplyRetryNotice)(record.fires + 1)
+            : (0, privateChatLoopGuards_1.buildPrivateChatWakeNotice)(record.fires + 1);
+        return runSerializedConversationTurn(record.conversationId, () => replyToInboundMessage({
+            selfGlobalMetaId,
+            peerGlobalMetaId: record.peerGlobalMetaId,
+            conversation,
+            inboundMessage: triggerMessage,
+            strategy,
+            hostNoticeText,
+        }));
+    }
+    async function fireDueWakes() {
+        if (!config.enabled)
+            return 0;
+        if (wakeSweepRunning)
+            return 0;
+        wakeSweepRunning = true;
+        try {
+            const due = (await wakeStore.readWakes()).filter((record) => record.fireAt <= getNow());
+            let ran = 0;
+            for (const record of due) {
+                let ranTurn = false;
+                try {
+                    ranTurn = await runWakeTurn(record);
+                }
+                catch {
+                    ranTurn = false;
+                }
+                if (ranTurn) {
+                    ran += 1;
+                }
+                else {
+                    // The turn could not run (busy, rate limited, transient runner
+                    // failure): push the fire time forward instead of hammering it on
+                    // every sweep. Records already removed as obsolete are untouched.
+                    await wakeStore.deferFire(record.conversationId, WAKE_TURN_BUSY_DEFER_MS).catch(() => undefined);
+                }
+            }
+            return ran;
+        }
+        finally {
+            wakeSweepRunning = false;
+        }
+    }
+    function startWakeLoop() {
+        if (wakeLoopTimer)
+            return;
+        wakeLoopTimer = setInterval(() => {
+            void fireDueWakes().catch(() => undefined);
+        }, WAKE_LOOP_INTERVAL_MS);
+        wakeLoopTimer.unref?.();
+    }
+    function stopWakeLoop() {
+        if (!wakeLoopTimer)
+            return;
+        clearInterval(wakeLoopTimer);
+        wakeLoopTimer = null;
     }
     return {
         async retryPendingInboundMessage(peerGlobalMetaId) {
@@ -780,12 +1257,17 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             // all see plain text instead of raw JSON.
             const inboundWireContent = unwrapPrivateChatContent(message.content);
             const simplemsgClassification = (0, simplemsgClassifier_1.classifySimplemsgContent)(inboundWireContent.content);
+            // File messages (simplefilemsg): the body is plaintext JSON carrying a
+            // metafile:// attachment pointer. Recorded, never replied to.
+            const fileAttachment = (0, privateChat_2.parsePrivateFileChatContent)(inboundWireContent.content);
             const inboundMessageRecord = {
                 conversationId: conversation.conversationId,
                 messageId: message.messagePinId || buildMessageId(now),
                 direction: 'inbound',
                 senderGlobalMetaId: peerGlobalMetaId,
-                content: inboundWireContent.content,
+                content: fileAttachment
+                    ? `[File message: ${fileAttachment.attachment}]`
+                    : inboundWireContent.content,
                 messagePinId: message.messagePinId,
                 extensions: inboundWireContent.extensions,
                 timestamp: inboundTimestamp,
@@ -811,14 +1293,26 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 message: {
                     messageId: inboundMessageRecord.messageId,
                     direction: 'incoming',
-                    content: inboundMessageRecord.content,
-                    contentType: message.contentType,
+                    content: fileAttachment ? fileAttachment.attachment : inboundMessageRecord.content,
+                    contentType: fileAttachment
+                        ? fileAttachment.fileType
+                        : message.contentType,
                     pinId: inboundMessageRecord.messagePinId,
                     timestamp: inboundMessageRecord.timestamp,
                     raw: message.rawMessage,
                 },
             }, deps.a2aConversationPersister);
+            // Any new peer message owns the conversation tail now: pending wakes for
+            // an older silent tail are obsolete (IDBots wake cancellation parity).
+            await wakeStore.remove(conversation.conversationId).catch(() => undefined);
             if (conversation.state === 'closed') {
+                await deps.stateStore.upsertConversation(conversation);
+                return;
+            }
+            // ---- File-message path (simplefilemsg, IDBots parity): the attachment
+            // is recorded above with its pointer and content type; file messages
+            // never drive an LLM turn or consume turns. ----
+            if (fileAttachment) {
                 await deps.stateStore.upsertConversation(conversation);
                 return;
             }
@@ -848,6 +1342,48 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 return;
             }
             // ---- Private-chat path: turn counting, cooldown, reply runner ----
+            // Skip-list inbound (placeholder chatter, a peer host's silence
+            // sentinel, a bare goodbye): record-only, no turn, no reply (IDBots
+            // shouldSkipPrivateChatAutoReplyText parity). A bare goodbye still
+            // closes the conversation — the peer meant to end it.
+            if ((0, privateChatLoopGuards_1.shouldSkipPrivateChatAutoReplyText)(inboundWireContent.content)) {
+                if (hasFinalByeLine(inboundWireContent.content)) {
+                    conversation = { ...conversation, state: 'closed', updatedAt: now };
+                }
+                await deps.stateStore.upsertConversation(conversation);
+                return;
+            }
+            // Verbatim inbound retransmission handling (IDBots parity): a
+            // consecutive identical copy inside the session gap is a retransmission
+            // echo — the first copy already drove (or is driving) a reply turn. The
+            // 2nd copy is absorbed; the 3rd consecutive copy runs again as an
+            // insistent re-ask. The current record is excluded by id so the scan
+            // finds the previous inbound even when our own reply sits between.
+            const recentForRepeat = (await deps.stateStore.getRecentMessages(conversation.conversationId, 10))
+                .filter((message) => message.messageId !== inboundMessageRecord.messageId);
+            if ((0, privateChatLoopGuards_1.isRepeatInboundPrivateChatMessage)({
+                messages: recentForRepeat,
+                content: inboundWireContent.content,
+                now,
+                gapMs: maxIdleMs,
+                defaultGapMs: DEFAULT_MAX_IDLE_MS,
+            })) {
+                const previousRepeat = inboundRepeatTracker.get(conversation.conversationId);
+                const consecutiveRepeatCount = previousRepeat
+                    && previousRepeat.content === inboundWireContent.content.trim()
+                    ? previousRepeat.count + 1
+                    : 2;
+                if (consecutiveRepeatCount < INBOUND_REPEAT_ESCALATION_AFTER) {
+                    inboundRepeatTracker.set(conversation.conversationId, {
+                        content: inboundWireContent.content.trim(),
+                        count: consecutiveRepeatCount,
+                        firstAt: now,
+                    });
+                    await deps.stateStore.upsertConversation(conversation);
+                    return;
+                }
+            }
+            inboundRepeatTracker.delete(conversation.conversationId);
             await runSerializedConversationTurn(conversation.conversationId, async () => {
                 // Re-read inside the per-conversation mutex so back-to-back inbound
                 // messages cannot lose turnCount increments to a read-modify-write
@@ -863,6 +1399,12 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     turnCount: (turnCountWasReset ? 0 : storedConversation.turnCount) + 1,
                 };
                 await deps.stateStore.upsertConversation(conversation);
+                // Episode rollover (inside the per-conversation mutex so concurrent
+                // turns cannot double-roll): may prune history and bump episodeIndex.
+                conversation = await maybeRollConversationEpisode({
+                    conversation,
+                    selfGlobalMetaId,
+                });
                 // Check for the natural-language closing signal from peer.
                 if (hasFinalByeLine(inboundWireContent.content)) {
                     conversation = { ...conversation, state: 'closed', updatedAt: now };
@@ -910,7 +1452,11 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     turnCount: conversation.turnCount + 1,
                 };
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
-            const recentMessages = unwrapLegacyInboundContents(filterChatPromptMessages(await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT)));
+            const recentMessages = unwrapLegacyInboundContents(filterChatPromptMessages((0, privateChatLoopGuards_1.selectPrivateChatPromptContextMessages)(await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT), {
+                activeLimit: ACTIVE_SEGMENT_MESSAGES_LIMIT,
+                previousLimit: PREVIOUS_SEGMENT_MESSAGES_LIMIT,
+                gapMs: strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS,
+            })));
             const preparedTurn = await prepareOutboundTurn({
                 conversation: runnerConversation,
                 recentMessages,
@@ -918,6 +1464,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 strategy,
                 inboundMessage: null,
                 operatorGuidanceText: guidanceToConsume.guidanceText,
+                episodeSummaryText: normalizeText(conversation.episodeSummary) || null,
                 // A guided turn that opens a new session (turnCount 1, fresh or
                 // reopened) is the operator reaching out — it must not carry a close
                 // marker, or the peer side would instantly re-close the conversation.
@@ -944,5 +1491,8 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 return;
             rateLimiter.replyTimestamps.push(getNow());
         },
+        fireDueWakes,
+        startWakeLoop,
+        stopWakeLoop,
     };
 }
