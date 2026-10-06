@@ -1866,6 +1866,11 @@ test('chain cards port the DSH card: icon, cover, author row, run/fork/share foo
   assert.ok(context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-fork]'), 'fork button');
   assert.ok(context.elements['[data-apps-chain-grid]'].querySelector('[data-apps-chain-share]'), 'share button');
   assert.ok(gridHtml.includes('data-apps-copy-pin="' + PIN + '"'), 'pin copy button');
+  // The card body must use its own class: the chain-status dialog already
+  // owns `.apps-chain-body`, and the collision used to break single-line
+  // title/pin truncation on the card.
+  assert.ok(gridHtml.includes('apps-chain-card-body'), 'card body uses the non-colliding class');
+  assert.ok(!gridHtml.includes('"apps-chain-body"'), 'card body must not reuse the dialog class');
 });
 
 test('chain card Run and author row open the local Browser pages', async () => {
