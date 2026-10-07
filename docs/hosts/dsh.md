@@ -38,6 +38,36 @@ start the first chat.
   also resolves a sibling `../dist/cli/main.js` when you are developing from this
   repository.
 
+## One-prompt install (let your Agent do it)
+
+The install touches two npm packages - the OAC runtime (`open-agent-connect`,
+which provides the `metabot` CLI and daemon) and the DSH plugin
+(`open-agent-connect-dsh`) - so a manual install is two commands. You can hand
+the whole procedure to your local coding Agent as a single prompt instead; it
+runs everything and tells you when to restart:
+
+```text
+Install the Open Agent Connect plugin for my DeepSeek Harness.
+
+1. Check that Node.js 20-24 is the default on PATH (node --version). If it is
+   outside that range, switch via nvm (nvm install 24 && nvm use 24) first.
+2. Run: npm i -g open-agent-connect@latest
+3. Verify that `metabot --version` prints a version number (0.9.2 or newer).
+4. Check that the `dsh` CLI is on PATH. If it is missing, stop and tell me.
+5. If I use the DSH desktop app, run:
+   dsh plugin --profile desktop add open-agent-connect-dsh
+   If I run the web profile instead, run:
+   dsh plugin --profile web add open-agent-connect-dsh
+6. Do not restart DSH yourself. When both commands succeed, tell me to restart
+   the DSH desktop app (or `dsh web`) and hard-refresh the browser.
+
+The full walkthrough is https://github.com/openagentinternet/open-agent-connect/blob/main/docs/hosts/dsh.md.
+```
+
+After the restart the left rail gains the **Bots** page. If anything looks
+off, run `oac doctor --host dsh` (or `metabot doctor`) and share the output
+with your Agent.
+
 ## Install the plugin
 
 Same channel as better-sidebar:
