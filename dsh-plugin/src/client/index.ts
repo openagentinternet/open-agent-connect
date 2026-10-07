@@ -448,6 +448,8 @@ export function apply(ctx: ClientContext): void {
       botHomepageUpload: (slug: string, fileName: string, contentType: string, base64: string) =>
         api.botHomepageUpload(slug, fileName, contentType, base64),
       metaappList: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
+      runtimeCheck: () => api.runtimeCheck(),
+      runtimeInstall: () => api.runtimeInstall(),
       bots: () => api.list(),
       memoryList: (from: string, options?: Record<string, unknown>) => api.memoryList(from, options),
       memoryAdd: (from: string, entry: Record<string, unknown>) => api.memoryAdd(from, entry),

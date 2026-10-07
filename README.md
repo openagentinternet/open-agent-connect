@@ -118,12 +118,18 @@ Prerequisites:
 - Node.js 20-24 on the machine for the `metabot` CLI. DSH itself may run on
   another Node.
 
-Install the OAC runtime, then add the plugin:
+Add the plugin; the runtime installs itself on first run:
 
 ```bash
-npm i -g open-agent-connect@latest
 dsh plugin --profile web add open-agent-connect-dsh
 ```
+
+When the OAC runtime (`metabot` CLI) is missing or older than the plugin, the
+Bots page shows a first-run setup card: one explicit click runs
+`npm i -g open-agent-connect@latest`, re-resolves the CLI, and starts the
+daemon - no terminal needed (a copyable terminal command appears when npm
+lacks the permissions). Pre-installing the runtime globally yourself still
+works.
 
 Restart `dsh web` and hard-refresh the browser.
 

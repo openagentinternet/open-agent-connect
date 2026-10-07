@@ -34,32 +34,54 @@ start the first chat.
 - Node.js `>=20 <25` for the `metabot` CLI. DSH itself may run on another Node.
   The plugin looks for `OAC_NODE_PATH`, then `process.execPath` when that Node is
   in range, then nvm 20–24. Override the CLI entry with `OAC_METABOT_CLI_PATH`.
-- Open Agent Connect on PATH (`npm i -g open-agent-connect@latest`). The plugin
-  also resolves a sibling `../dist/cli/main.js` when you are developing from this
-  repository.
+- The OAC runtime (`open-agent-connect`, which provides the `metabot` CLI and
+  daemon) is no longer a separate install step: when it is missing or older
+  than the plugin, the Bots page shows a first-run setup card that installs it
+  with one explicit click (`npm i -g open-agent-connect@latest` — never
+  silent; a copyable terminal command appears when npm lacks the permissions).
+  Pre-installing it yourself (`npm i -g open-agent-connect@latest`) also works,
+  and the plugin still resolves a sibling `../dist/cli/main.js` when you are
+  developing from this repository.
+
+## First-run runtime setup card
+
+On first open (and once per apply, cached) the plugin probes the runtime:
+CLI path, node binary, npm availability, and the runtime version against the
+plugin's own version (the two packages release in lockstep, so the runtime
+must be `>=` the plugin). The My Bots section then shows one card instead of
+scattered CLI errors:
+
+- **Missing** — no runnable `metabot` CLI: an "Install runtime" button runs
+  the global npm install, re-resolves the CLI, and starts the daemon + binds
+  skills without a terminal.
+- **Stale** — runtime older than the plugin: same one-click upgrade.
+- **Manual** — no supported Node or no npm next to it: the card shows the
+  exact command to copy into a terminal instead of a button.
+
+A successful install also retries the Bot-preset reconcile so the new-session
+chip lists Bots without a DSH restart; a restart is still the clean way to
+re-run the full apply.
 
 ## One-prompt install (let your Agent do it)
 
-The install touches two npm packages - the OAC runtime (`open-agent-connect`,
-which provides the `metabot` CLI and daemon) and the DSH plugin
-(`open-agent-connect-dsh`) - so a manual install is two commands. You can hand
-those two commands to your local coding Agent as a single prompt; it runs
-them, diagnoses anything that fails on your machine, and tells you when to
+The runtime installs itself from the Bots page on first run, so the manual
+install is now a single command. You can still hand it to your local coding
+Agent; it diagnoses anything that fails on your machine and tells you when to
 restart:
 
 ```text
 Install the Open Agent Connect plugin for my DeepSeek Harness:
 
-  npm i -g open-agent-connect@latest
   dsh plugin --profile desktop add open-agent-connect-dsh
 
-If either command fails, diagnose and fix the environment (Node must be
-20-24) and retry; ask me only if you cannot resolve it. Afterwards confirm
-`metabot --version` is 0.9.2 or newer, then tell me to restart the DSH
-desktop app and hard-refresh the browser - do not restart DSH yourself.
+If the command fails, diagnose and fix the environment (Node must be 20-24
+for the metabot CLI) and retry; ask me only if you cannot resolve it. Then
+tell me to restart the DSH desktop app and hard-refresh the browser - do not
+restart DSH yourself. After the restart, open the Bots page: if it shows a
+runtime setup card, click its install button and report the result.
 ```
 
-For the `dsh web` profile, swap the second command to
+For the `dsh web` profile, swap the command to
 `dsh plugin --profile web add open-agent-connect-dsh`.
 
 After the restart the left rail gains the **Bots** page. If anything looks

@@ -1088,6 +1088,89 @@ export const api = {
     const response = await fetch('/oac/api/health', { credentials: 'same-origin' })
     return await response.json() as { ok: boolean; error?: string }
   },
+  /** First-run runtime probe behind the Bots-page setup card. */
+  runtimeCheck: async (): Promise<RuntimeCheckPayload> =>
+    normalizeRuntimeCheck(await post('runtime/check')),
+  /**
+   * One-click guided runtime install (the setup card's explicit button —
+   * never silent). Resolves with `ok: false` on npm failures instead of
+   * throwing, so the card can render the manual fallback command.
+   */
+  runtimeInstall: async (): Promise<RuntimeInstallResult> => {
+    let envelope: CommandEnvelope<{ check?: unknown; health?: unknown }>
+    try {
+      envelope = await postEnvelope('runtime/install')
+    } catch (cause) {
+      // The failed install envelope (e.g. npm EPERM) surfaces as OacApiError
+      // with the fallback command + permission flag on `data`.
+      if (cause instanceof OacApiError) {
+        const data = recordOf(cause.data)
+        return {
+          ok: false,
+          permission: data.permission === true,
+          message: cause.message,
+          command: textOf(data.command) || RUNTIME_INSTALL_COMMAND_FALLBACK,
+          check: data.check === undefined ? null : normalizeRuntimeCheck(data.check),
+        }
+      }
+      return {
+        ok: false,
+        permission: false,
+        message: cause instanceof Error ? cause.message : String(cause),
+        command: RUNTIME_INSTALL_COMMAND_FALLBACK,
+        check: null,
+      }
+    }
+    return {
+      ok: true,
+      check: normalizeRuntimeCheck(recordOf(envelope.data).check),
+    }
+  },
+}
+
+const RUNTIME_INSTALL_COMMAND_FALLBACK = 'npm i -g open-agent-connect@latest'
+
+export type RuntimeCheckStatus = 'ok' | 'missing' | 'stale' | 'npm_unavailable'
+
+export type RuntimeCheckPayload = {
+  status: RuntimeCheckStatus
+  cliPath: string | null
+  nodePath: string | null
+  nodeVersion: string | null
+  npmPath: string | null
+  runtimeVersion: string | null
+  requiredVersion: string
+  installCommand: string
+  error: string | null
+}
+
+export type RuntimeInstallResult =
+  | { ok: true; check: RuntimeCheckPayload }
+  | {
+    ok: false
+    /** EPERM/EACCES-class failure: the manual terminal command is the path forward. */
+    permission: boolean
+    message: string
+    command: string
+    check: RuntimeCheckPayload | null
+  }
+
+function normalizeRuntimeCheck(value: unknown): RuntimeCheckPayload {
+  const record = recordOf(value)
+  const status = textOf(record.status)
+  return {
+    status: status === 'missing' || status === 'stale' || status === 'npm_unavailable'
+      ? status
+      : 'ok',
+    cliPath: textOf(record.cliPath) || null,
+    nodePath: textOf(record.nodePath) || null,
+    nodeVersion: textOf(record.nodeVersion) || null,
+    npmPath: textOf(record.npmPath) || null,
+    runtimeVersion: textOf(record.runtimeVersion) || null,
+    requiredVersion: textOf(record.requiredVersion) || '0.0.0',
+    installCommand: textOf(record.installCommand) || RUNTIME_INSTALL_COMMAND_FALLBACK,
+    error: textOf(record.error) || null,
+  }
 }
 
 function textOf(value: unknown): string {

@@ -26,6 +26,8 @@ import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
 import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
+import { RuntimeInstalledNote, RuntimeSetupCard } from './RuntimeSetupCard.tsx'
+import type { RuntimeCheckPayload, RuntimeInstallResult } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
 import type { MemoryLocaleKey } from './locale-memory.ts'
 import type { MemoryPanelInjected } from './MemoryPanel.tsx'
@@ -78,6 +80,10 @@ export interface BotPanelInjected extends MemoryPanelInjected {
     base64: string,
   ) => Promise<BotHomepageUploadPayload>
   metaappList: (from: string, size?: number, cursor?: string) => Promise<MetaAppListPayload>
+  /** First-run runtime probe behind the setup card (host `runtime/check`). */
+  runtimeCheck: () => Promise<RuntimeCheckPayload>
+  /** Guided runtime install (host `runtime/install`) — the setup card's button. */
+  runtimeInstall: () => Promise<RuntimeInstallResult>
 }
 
 function interpolate(template: string, vars: Record<string, string | number>): string {
@@ -107,6 +113,8 @@ export function BotPanel({
   botSetupRetry,
   botHomepageUpload,
   metaappList,
+  runtimeCheck,
+  runtimeInstall,
   t,
   memoryT,
   memoryList,
@@ -148,6 +156,20 @@ export function BotPanel({
   const [canCreate, setCanCreate] = useState(false)
   const [tick, setTick] = useState(0)
 
+  // First-run runtime probe: missing / stale / not-auto-installable renders
+  // the setup card instead of the scattered CLI errors below.
+  const [runtime, setRuntime] = useState<RuntimeCheckPayload | null>(null)
+  const [runtimeInstalled, setRuntimeInstalled] = useState(false)
+
+  useEffect(() => {
+    let current = true
+    void runtimeCheck().then(
+      (check) => { if (current) setRuntime(check) },
+      () => { if (current) setRuntime(null) },
+    )
+    return () => { current = false }
+  }, [runtimeCheck])
+
   // Bot set refresh: CLI/daemon-side Bot writes update the My Bots list
   // without a manual refresh (route-driven creates already reload via tick).
   const botsRevision = useBotsRevision()
@@ -166,6 +188,10 @@ export function BotPanel({
   }, [llmDirectory])
 
   const reload = (): void => setTick((value) => value + 1)
+
+  // The setup card owns the missing/stale-runtime story: while it is up, the
+  // raw CLI-bridge error line below would only duplicate it.
+  const runtimeSetupVisible = runtime !== null && runtime.status !== 'ok'
 
   /** setup.state !== 'ready' decides between the success and the amber setup-pending result panel. */
   const createResultPhase = (bot: BotRow): CreatePhase =>
@@ -470,7 +496,21 @@ export function BotPanel({
           </Button>
         </div>
       </div>
-      {error && !creating ? <div className="oac-error">{error}</div> : null}
+      {runtimeSetupVisible && runtime !== null ? (
+        <RuntimeSetupCard
+          runtime={runtime}
+          t={t}
+          install={runtimeInstall}
+          onInstalled={() => {
+            setRuntime(null)
+            setRuntimeInstalled(true)
+            setError(null)
+            reload()
+          }}
+        />
+      ) : null}
+      {runtimeInstalled && !runtimeSetupVisible ? <RuntimeInstalledNote t={t} /> : null}
+      {error && !creating && !runtimeSetupVisible ? <div className="oac-error">{error}</div> : null}
       {bots === null && !error ? <div className="oac-muted">{t('loading')}</div> : null}
       {bots && bots.length === 0 ? <div className="oac-bot-intro">{t('empty')}</div> : null}
       {bots && bots.length > 0 ? (

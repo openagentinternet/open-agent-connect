@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 export const OAC_NODE_MAJOR_MIN = 20
 export const OAC_NODE_MAJOR_MAX_EXCLUSIVE = 25
@@ -91,4 +91,31 @@ export function resolveNodeBinary(
     ok: false,
     error: `No Node.js >=${OAC_NODE_MAJOR_MIN} <${OAC_NODE_MAJOR_MAX_EXCLUSIVE} found. Set OAC_NODE_PATH to a supported binary.`,
   }
+}
+
+/** npm-global `node_modules` root for one node binary's prefix (npm root -g, without spawning npm). */
+export function npmGlobalModulesRoot(nodePath: string): string {
+  const prefix = join(dirname(nodePath), '..')
+  // Windows installs global packages straight into <prefix>\node_modules;
+  // POSIX layouts (nvm, Homebrew, system) use <prefix>/lib/node_modules.
+  return process.platform === 'win32' ? join(prefix, 'node_modules') : join(prefix, 'lib', 'node_modules')
+}
+
+/**
+ * Locate the `npm` binary that pairs with a resolved Node (same bin dir).
+ * Override: `OAC_NPM_PATH`. Windows `npm.cmd` shims need a shell spawn.
+ */
+export function resolveNpmBinary(
+  env: NodeJS.ProcessEnv,
+  node: NodeResolution,
+): string | undefined {
+  if (env.OAC_NPM_PATH && existsSync(env.OAC_NPM_PATH)) return env.OAC_NPM_PATH
+  if (!node.ok) return undefined
+  const binDir = dirname(node.path)
+  const names = process.platform === 'win32' ? ['npm.cmd', 'npm.exe', 'npm'] : ['npm']
+  for (const name of names) {
+    const candidate = join(binDir, name)
+    if (existsSync(candidate)) return candidate
+  }
+  return undefined
 }

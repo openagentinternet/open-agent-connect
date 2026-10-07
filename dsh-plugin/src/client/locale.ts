@@ -240,6 +240,21 @@ export const en = {
   confirmDeleteBackedUp: 'Backed up & Confirm Delete',
   healthError: 'OAC host is not ready: {message}',
 
+  // ── First-run runtime setup card (My Bots) ─────────────────────────────
+  setupTitleMissing: 'Open Agent Connect runtime is missing',
+  setupTitleStale: 'Open Agent Connect runtime needs an upgrade',
+  setupTitleManual: 'Open Agent Connect runtime needs a manual install',
+  setupMissingBody: 'The metabot CLI was not found on this machine. One click installs the runtime globally (npm i -g open-agent-connect@latest) — no terminal needed.',
+  setupStaleBody: 'The installed runtime ({found}) is older than this plugin ({required}). One click upgrades the runtime to the latest version — no terminal needed.',
+  setupManualBody: 'Automatic install is not available in this environment. Run this command in a terminal, then reopen the Bots page:',
+  setupDetail: 'Detail: {message}',
+  setupInstall: 'Install runtime',
+  setupUpgrade: 'Upgrade runtime',
+  setupInstalling: 'Installing…',
+  setupInstallFailed: 'Runtime install failed',
+  setupPermissionHint: 'npm does not have permission to write the global install location. Run this in a terminal instead:',
+  setupSuccess: 'Open Agent Connect runtime installed — OAC daemon started.',
+
   tabScheduled: 'Scheduled',
   schHint: 'Tasks this Bot runs on a schedule — created here, via `metabot schedule create`, or handed off by the Bot itself during a MetaWeb surf run (create_scheduled_task, cap 2 per surf). While DSH is open they run as real DSH conversations; headlessly through the Bot\'s LLM runtime otherwise.',
   schEmpty: 'No scheduled tasks for this Bot yet.',
@@ -788,6 +803,21 @@ export const zh = {
   confirmDeleteCountdown: '确认删除 ({count}s)',
   confirmDeleteBackedUp: '已备份助记词，并确认删除',
   healthError: 'OAC 宿主未就绪：{message}',
+
+  // ── First-run runtime setup card (My Bots) ─────────────────────────────
+  setupTitleMissing: '缺少 Open Agent Connect 运行时',
+  setupTitleStale: 'Open Agent Connect 运行时需要升级',
+  setupTitleManual: '需要手动安装 Open Agent Connect 运行时',
+  setupMissingBody: '本机未找到 metabot CLI。一键即可全局安装运行时（npm i -g open-agent-connect@latest），全程无需打开终端。',
+  setupStaleBody: '已安装的运行时（{found}）低于本插件（{required}）。一键升级到最新版运行时，全程无需打开终端。',
+  setupManualBody: '当前环境无法自动安装。请在终端运行以下命令，然后重新打开 Bots 页：',
+  setupDetail: '详情：{message}',
+  setupInstall: '安装运行时',
+  setupUpgrade: '升级运行时',
+  setupInstalling: '安装中…',
+  setupInstallFailed: '运行时安装失败',
+  setupPermissionHint: 'npm 没有全局安装目录的写入权限。请改为在终端运行：',
+  setupSuccess: 'Open Agent Connect 运行时已安装——OAC daemon 已启动。',
 
   tabScheduled: '定时任务',
   schHint: '这个 Bot 按排程运行的任务——在这里创建、通过 `metabot schedule create` 创建，或 Bot 在 MetaWeb 冲浪中自行移交（create_scheduled_task，每次冲浪最多 2 个）。DSH 在线时以真实 DSH 会话运行；离线时由 daemon 通过 Bot 的 LLM 运行时无头执行。',
