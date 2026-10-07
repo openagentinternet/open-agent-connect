@@ -537,6 +537,11 @@ export function apply(ctx: ClientContext): void {
       trafficT: tTraffic,
       who: () => api.userWho(),
       onboarding: () => api.userOnboarding(),
+      runtimeSetup: {
+        check: () => api.runtimeCheck(),
+        install: () => api.runtimeInstall(),
+        t,
+      },
       create: (name: string) => api.userCreate(name),
       importIdentity: (input: { name: string; mnemonic: string; path?: string }) => api.userImport(input),
       update: (input: { name?: string; avatarDataUrl?: string }) => api.userUpdate(input),

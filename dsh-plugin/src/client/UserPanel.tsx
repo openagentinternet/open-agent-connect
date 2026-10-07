@@ -1,18 +1,31 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
-import type { OwnerIdentityRow, OwnerOnboardingPayload, OwnerUpdateInput, OwnerUpdatePayload, OwnerWhoPayload, OwnerWritePayload } from './api.ts'
+import type { OwnerIdentityRow, OwnerOnboardingPayload, OwnerUpdateInput, OwnerUpdatePayload, OwnerWhoPayload, OwnerWritePayload, RuntimeCheckPayload, RuntimeInstallResult } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { CopyIconButton } from './CopyIconButton.tsx'
+import { RuntimeSetupCard } from './RuntimeSetupCard.tsx'
+import type { BotsLocaleKey } from './locale.ts'
 import type { UserLocaleKey } from './locale-user.ts'
 
 type Translate = (key: UserLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 type View = 'loading' | 'empty' | 'create' | 'import' | 'backup' | 'profile'
 
+/** The guided-install surface shown when the identity read fails because the
+ *  OAC runtime itself is unusable — the same card My Bots shows, so a broken
+ *  runtime never leaks a raw CLI error into the User tab. */
+export interface UserRuntimeSetupInjected {
+  check: () => Promise<RuntimeCheckPayload>
+  install: () => Promise<RuntimeInstallResult>
+  t: (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
+}
+
 export interface UserPanelInjected {
   who: () => Promise<OwnerWhoPayload>
   /** Zero-touch onboarding progress (optional: older hosts may omit it). */
   onboarding?: () => Promise<OwnerOnboardingPayload>
+  /** Runtime setup fallback (optional: older hosts may omit it). */
+  runtimeSetup?: UserRuntimeSetupInjected
   create: (name: string) => Promise<OwnerWritePayload>
   importIdentity: (input: { name: string; mnemonic: string; path?: string }) => Promise<OwnerWritePayload>
   /** Name/avatar profile save; publishes the changed fields on-chain. */
@@ -106,10 +119,12 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
   const [revealMnemonic, setRevealMnemonic] = useState('')
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [onboardingLine, setOnboardingLine] = useState<string | null>(null)
+  const [setupCheck, setSetupCheck] = useState<RuntimeCheckPayload | null>(null)
 
   const load = useCallback(() => {
     setView('loading')
     setError(null)
+    setSetupCheck(null)
     // Best-effort onboarding progress (older CLI builds have no verb yet).
     if (injected.onboarding) {
       void injected.onboarding().then(
@@ -129,7 +144,24 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
           setView('empty')
         }
       },
-      (cause: unknown) => {
+      async (cause: unknown) => {
+        // The identity read can fail because the OAC runtime itself is
+        // missing/unusable (node / CLI resolution). Probe the structured
+        // runtime check: a non-ok status renders the same guided setup card
+        // My Bots shows instead of a raw CLI error string.
+        const setup = injected.runtimeSetup
+        if (setup) {
+          try {
+            const check = await setup.check()
+            if (check.status !== 'ok') {
+              setSetupCheck(check)
+              setView('empty')
+              return
+            }
+          } catch {
+            // Fall through: the raw error is the honest fallback.
+          }
+        }
         setError(cause instanceof Error ? cause.message : String(cause))
         setView('empty')
       },
@@ -263,7 +295,16 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
 
       {view === 'loading' ? <div className="oac-muted">{t('loading')}</div> : null}
 
-      {view === 'empty' ? (
+      {setupCheck && injected.runtimeSetup ? (
+        <RuntimeSetupCard
+          runtime={setupCheck}
+          t={injected.runtimeSetup.t}
+          install={injected.runtimeSetup.install}
+          onInstalled={() => { load() }}
+        />
+      ) : null}
+
+      {view === 'empty' && !setupCheck ? (
         <section className="oac-section-card oac-user-empty">
           <span className="oac-section-title">{t('emptyTitle')}</span>
           <p className="oac-hint">{t('emptyHint')}</p>

@@ -51,6 +51,8 @@ import {
   localBotShow,
   localConversationsList,
   localConversationsMessages,
+  localUserWho,
+  resetLocalReadCache,
 } from './local-read.js'
 import type { HostAgentLike, HostContext, HostSessionEventLike, HostSessionLike, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { uploadFileBytes } from './file-upload.js'
@@ -133,6 +135,27 @@ async function dispatchPost(
     }
     const health = await bootstrapHealth()
     onRuntimeInstalled?.(health)
+    // The guided install may have landed the FIRST OAC dist on this machine:
+    // drop the local-read caches so in-process reads re-resolve immediately.
+    resetLocalReadCache()
+    // Zero-touch account, IDBots-style: a brand-new runtime on a machine with
+    // no owner identity gets one right here (`user ensure` is idempotent, so
+    // an existing identity — e.g. created seconds ago by the daemon's own
+    // onboarding kick — is returned untouched). The daemon's fire-and-forget
+    // onboarding owns the traffic account + free-grant claim afterwards.
+    if (health.cliPath !== null) {
+      try {
+        const existing = await localUserWho()
+        const hasIdentity = existing?.ok
+          ? Boolean((existing.data as { identity?: unknown } | undefined)?.identity)
+          : false
+        if (!hasIdentity) {
+          await runMetabot(['user', 'ensure'], { timeoutMs: 45_000 })
+        }
+      } catch (error) {
+        warn(ctx, `post-install owner ensure failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     // The apply-time preset reconcile was skipped when the CLI was missing;
     // retry it once here so Bot presets (the new-session chip) appear
     // without a DSH restart. Best-effort — the registry watch and the rest

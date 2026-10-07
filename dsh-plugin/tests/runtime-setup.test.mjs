@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, chmod } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
 
 const {
@@ -10,6 +10,9 @@ const {
   installRuntime,
   npmGlobalPackageCli,
   pluginVersion,
+  resolveCli,
+  resolveLocalCliPath,
+  runMetabot,
   RUNTIME_INSTALL_COMMAND,
 } = await import('../lib/cli-bridge.js')
 const { resolveNpmBinary, npmGlobalModulesRoot } = await import('../lib/node-runtime.js')
@@ -234,4 +237,63 @@ test('the plugin surface exports the runtime setup entry points', async () => {
   assert.equal(typeof plugin.installRuntime, 'function')
   assert.equal(typeof plugin.compareVersions, 'function')
   assert.equal(plugin.RUNTIME_INSTALL_COMMAND, 'npm i -g open-agent-connect@latest')
+})
+
+// ── Electron run-as-node + node-independent local discovery ─────────────────
+
+test('resolveCli: an Electron run-as-node resolution carries nodeSpawnEnv into every spawn', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-runtime-electron-'))
+  try {
+    // Fake "electron" node binary: a node script is spawnable like a binary
+    // with the right shebang, and it reports whether it ran as plain Node.
+    const fakeNode = join(root, 'electron-app')
+    await writeFile(fakeNode, '#!/usr/bin/env node\nconsole.log(JSON.stringify({ ok: true, state: "success", data: { runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null } }))\n', 'utf8')
+    await chmod(fakeNode, 0o755)
+    const fakeCli = join(root, 'dist', 'cli', 'main.js')
+    await mkdir(dirname(fakeCli), { recursive: true })
+    await writeFile(fakeCli, '// never read: the fake node ignores it\n', 'utf8')
+
+    const electronNode = { ok: true, path: fakeNode, version: 'v24.18.1', spawnEnv: { ELECTRON_RUN_AS_NODE: '1' } }
+    const resolution = resolveCli({ OAC_METABOT_CLI_PATH: fakeCli }, electronNode)
+    assert.equal(resolution.nodeSpawnEnv.ELECTRON_RUN_AS_NODE, '1')
+
+    // The spawned CLI child actually receives the merged env.
+    const result = await runMetabot([], { resolution })
+    assert.equal(result.ok, true)
+    assert.equal(result.data.runAsNode, '1')
+
+    // And a plain-node resolution spawns without the flag.
+    const plain = await runMetabot([], {
+      resolution: { cliPath: fakeCli, oacPath: null, nodePath: fakeNode, nodeVersion: 'v24.13.1' },
+    })
+    assert.equal(plain.data.runAsNode, null)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveLocalCliPath: env override wins; discovery never requires a supported node', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-runtime-local-'))
+  try {
+    // npm's own layout for one node binary: <prefix>/lib/node_modules (POSIX).
+    const cli = join(root, 'lib', 'node_modules', 'open-agent-connect', 'dist', 'cli', 'main.js')
+    await mkdir(dirname(cli), { recursive: true })
+    await writeFile(cli, '// fake\n', 'utf8')
+
+    assert.equal(resolveLocalCliPath({ OAC_METABOT_CLI_PATH: cli }), cli)
+    // No supported node anywhere (empty discovery paths) still resolves —
+    // the adjacent package / sibling dist answers, and the call never throws.
+    const found = resolveLocalCliPath({ OAC_METABOT_CLI_PATH: undefined }, [])
+    assert.equal(typeof found, 'string')
+    assert.match(found, /dist[/\\]cli[/\\]main\.js$/)
+
+    // A discovery node path (any version — e.g. an out-of-range system node)
+    // contributes its npm-global root, but the adjacent package still
+    // outranks it when one exists (this repo links the OAC root).
+    const fakeNode = join(root, 'bin', 'node')
+    assert.equal(npmGlobalPackageCli('metabot', fakeNode), cli)
+    assert.equal(resolveLocalCliPath({ OAC_METABOT_CLI_PATH: undefined }, [fakeNode]), found)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
