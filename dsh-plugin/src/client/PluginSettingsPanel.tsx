@@ -53,6 +53,7 @@ export function PluginSettingsPanel(
     trafficT,
     who,
     onboarding,
+    runtimeSetup,
     create,
     importIdentity,
     update,
@@ -110,6 +111,7 @@ export function PluginSettingsPanel(
         <UserPanel
           who={who}
           onboarding={onboarding}
+          runtimeSetup={runtimeSetup}
           create={create}
           importIdentity={importIdentity}
           update={update}

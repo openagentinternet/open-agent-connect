@@ -7,7 +7,14 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { npmGlobalModulesRoot, resolveNpmBinary, resolveNodeBinary, type NodeResolution } from './node-runtime.js'
+import {
+  discoveryNodePaths,
+  npmGlobalModulesRoot,
+  resolveNpmBinary,
+  resolveNodeBinary,
+  wellKnownNpmGlobalRoots,
+  type NodeResolution,
+} from './node-runtime.js'
 
 const require = createRequire(import.meta.url)
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -40,6 +47,12 @@ export type CliResolution = {
   oacPath: string | null
   nodePath: string
   nodeVersion: string
+  /**
+   * Extra env the resolved node binary needs to behave as plain Node — set
+   * when nodePath is an Electron app binary run with ELECTRON_RUN_AS_NODE.
+   * Every spawn of the CLI must merge this into the child env.
+   */
+  nodeSpawnEnv?: Record<string, string>
 }
 
 export class CliBridgeError extends Error {
@@ -143,7 +156,29 @@ export function resolveCli(
     oacPath: resolveOacCliPath(env, node.path, cliPath) ?? null,
     nodePath: node.path,
     nodeVersion: node.version,
+    ...(node.spawnEnv ? { nodeSpawnEnv: node.spawnEnv } : {}),
   }
+}
+
+/**
+ * Loose CLI path discovery for in-process local reads: unlike `resolveCli`
+ * this NEVER requires a supported Node binary — locating the dist directory
+ * only needs paths, so out-of-range node installs and well-known global
+ * roots are probed too. Returns undefined when no OAC package exists
+ * anywhere; callers then fall back to the CLI (and its honest errors).
+ */
+export function resolveLocalCliPath(
+  env: NodeJS.ProcessEnv = process.env,
+  discoveryPaths?: string[],
+): string | undefined {
+  const nodePaths = discoveryPaths ?? discoveryNodePaths(env)
+  return firstExisting([
+    env.OAC_METABOT_CLI_PATH,
+    fromNpmPackage('metabot'),
+    ...nodePaths.map((nodePath) => npmGlobalPackageCli('metabot', nodePath)),
+    ...wellKnownNpmGlobalRoots().map((root) => join(root, 'open-agent-connect', 'dist', 'cli', 'main.js')),
+    siblingRepoCli('metabot'),
+  ])
 }
 
 // ── First-run runtime check + guided install ────────────────────────────────
@@ -195,10 +230,15 @@ function readPackageJsonVersion(pkgJsonPath: string): string | null {
   }
 }
 
-function probeCliVersion(cliPath: string, nodePath: string): string | null {
+function probeCliVersion(
+  cliPath: string,
+  nodePath: string,
+  spawnEnv?: Record<string, string>,
+): string | null {
   const result = spawnSync(nodePath, [cliPath, '--version', '--json'], {
     encoding: 'utf8',
     timeout: RUNTIME_VERSION_PROBE_TIMEOUT_MS,
+    env: { ...process.env, ...spawnEnv },
   })
   if (result.status !== 0 || !result.stdout) return null
   try {
@@ -216,10 +256,14 @@ function probeCliVersion(cliPath: string, nodePath: string): string | null {
  * layouts): one `--version --json` probe. Memoized per CLI path so the
  * version never probes on ordinary CLI calls.
  */
-function defaultReadRuntimeVersion(cliPath: string, nodePath: string | null): string | null {
+function defaultReadRuntimeVersion(
+  cliPath: string,
+  nodePath: string | null,
+  spawnEnv?: Record<string, string>,
+): string | null {
   if (runtimeVersionCache.has(cliPath)) return runtimeVersionCache.get(cliPath) ?? null
   let version = readPackageJsonVersion(join(dirname(cliPath), '..', '..', 'package.json'))
-  if (version === null && nodePath !== null) version = probeCliVersion(cliPath, nodePath)
+  if (version === null && nodePath !== null) version = probeCliVersion(cliPath, nodePath, spawnEnv)
   runtimeVersionCache.set(cliPath, version)
   return version
 }
@@ -253,7 +297,7 @@ export type CheckRuntimeDeps = {
   /** `undefined` (the key absent) means "resolve normally"; inject `undefined` value to force missing. */
   cliPath?: string | undefined
   npmPath?: string | undefined
-  readVersion?: (cliPath: string, nodePath: string | null) => string | null
+  readVersion?: (cliPath: string, nodePath: string | null, spawnEnv?: Record<string, string>) => string | null
 }
 
 const CLI_NOT_FOUND_ERROR = 'metabot CLI not found. Install open-agent-connect or set OAC_METABOT_CLI_PATH.'
@@ -295,7 +339,7 @@ export function checkRuntime(deps: CheckRuntimeDeps = {}): RuntimeCheck {
       : { ...base, status: 'npm_unavailable', error: NPM_NOT_FOUND_ERROR }
   }
   const readVersion = deps.readVersion ?? defaultReadRuntimeVersion
-  const runtimeVersion = readVersion(cliPath, nodePath)
+  const runtimeVersion = readVersion(cliPath, nodePath, node.ok ? node.spawnEnv : undefined)
   if (runtimeVersion !== null && compareVersions(runtimeVersion, requiredVersion) < 0) {
     const versionError = `open-agent-connect ${runtimeVersion} is older than this plugin (${requiredVersion}); upgrade the runtime.`
     return npmPath
@@ -458,10 +502,11 @@ function spawnCli(
   args: string[],
   timeoutMs: number,
   env: NodeJS.ProcessEnv,
+  spawnEnv?: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
     const child = spawn(nodePath, [scriptPath, ...args], {
-      env,
+      env: spawnEnv ? { ...env, ...spawnEnv } : env,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stdout = ''
@@ -507,6 +552,7 @@ export async function runMetabot(
     args,
     timeoutMs,
     env,
+    resolution.nodeSpawnEnv,
   )
   try {
     return parseMetabotStdout(stdout)

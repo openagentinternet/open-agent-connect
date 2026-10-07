@@ -15,7 +15,7 @@
 import { createRequire } from 'node:module'
 import { basename } from 'node:path'
 import { dirname, join } from 'node:path'
-import { resolveCli } from './cli-bridge.js'
+import { resolveLocalCliPath } from './cli-bridge.js'
 import type { MetabotCommandResult } from './cli-bridge.js'
 
 const requireModule = createRequire(import.meta.url)
@@ -25,14 +25,23 @@ let cachedDistRoot: string | null | undefined
 
 function resolveDistRoot(): string | null {
   if (cachedDistRoot !== undefined) return cachedDistRoot
-  try {
-    const { cliPath } = resolveCli()
-    // cliPath is <dist>/cli/main.js; the dist root two levels up holds core/.
-    cachedDistRoot = dirname(dirname(cliPath))
-  } catch {
-    cachedDistRoot = null
-  }
+  // Path discovery only — never gated on a supported Node binary the way
+  // `resolveCli` (which must spawn the CLI) is. A machine whose only node is
+  // out of range still gets in-process reads when the OAC package exists.
+  const cliPath = resolveLocalCliPath()
+  // cliPath is <dist>/cli/main.js; the dist root two levels up holds core/.
+  cachedDistRoot = cliPath ? dirname(dirname(cliPath)) : null
   return cachedDistRoot
+}
+
+/**
+ * Drop the dist-root cache and every loaded core module. A guided runtime
+ * install may have landed a new dist (or the first one); stale caches would
+ * keep serving "dist not found" until a DSH restart.
+ */
+export function resetLocalReadCache(): void {
+  cachedDistRoot = undefined
+  moduleCache.clear()
 }
 
 const moduleCache = new Map<string, Record<string, unknown>>()

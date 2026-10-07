@@ -169,7 +169,7 @@ function spawnDetached(args: string[], env: NodeJS.ProcessEnv): void {
     throw new Error('metabot CLI not found')
   }
   const child = spawn(resolution.nodePath, [resolution.cliPath, ...args], {
-    env,
+    env: resolution.nodeSpawnEnv ? { ...env, ...resolution.nodeSpawnEnv } : env,
     stdio: 'ignore',
     detached: true,
   })

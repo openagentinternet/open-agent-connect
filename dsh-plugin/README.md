@@ -761,7 +761,10 @@ adding it again.
 
 Requires Node `>=20 <25` for the `metabot` CLI. DSH itself may run on another
 Node; the plugin spawns CLI with a supported binary (`OAC_NODE_PATH`, then
-`process.execPath` if in range, then nvm 20–24). Override the CLI with
+`process.execPath` if in range, then nvm 20–24, then — on the Electron desktop
+host only — `process.execPath` again with `ELECTRON_RUN_AS_NODE=1` when the
+app's embedded Node is in range: a machine with NO system Node still runs the
+CLI, and every CLI spawn merges that env flag through). Override the CLI with
 `OAC_METABOT_CLI_PATH`.
 
 **First-run runtime setup.** When the OAC runtime is missing or older than
@@ -775,6 +778,23 @@ and is cached — ordinary CLI calls never spawn `--version`. The resolution
 order for the CLI is `OAC_METABOT_CLI_PATH`, the adjacent
 `open-agent-connect` package, the npm global root of the resolved node
 (`<node bin>/../lib/node_modules`), then a sibling repo `dist/`.
+
+**Zero-touch user account (IDBots parity).** A fresh machine never leaves the
+user without an identity to anchor traffic: every daemon start runs the OAC
+core's idempotent owner-onboarding pipeline (create the machine-wide owner
+identity with the default name "User" → get-or-create the traffic account →
+claim the one-time free traffic grant → MVC gas subsidy → publish the owner
+`/info/name` pin; journaled in `~/.metabot/owner/onboarding.json`, retried on
+later daemon starts, tombstoned `opted_out` after a deliberate
+`metabot user delete`). The guided runtime install additionally runs
+`metabot user ensure` synchronously, so the identity exists the moment the
+setup card finishes. In-process local reads (`user/who` first of all) locate
+the OAC dist WITHOUT a supported Node binary — discovery probes out-of-range
+node installs and the well-known npm global roots too, so a machine whose
+only Node is v26+ still shows the User tab's identity instead of the bare
+"No Node.js >=20 <25 found" CLI error. When the runtime is genuinely
+unusable, the User tab falls back to the same guided setup card My Bots
+shows — a raw CLI error never reaches the panel.
 
 ## Host routes
 
