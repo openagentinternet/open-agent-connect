@@ -23,35 +23,31 @@ async function startServer() {
   };
 }
 
-test('GET /ui/schedule serves the Schedule page with console chrome and the schedule API surface', async (t) => {
+test('GET /ui/schedule is hidden but the schedule API surface stays wired', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
+  // The Schedule console page is temporarily hidden: /ui/schedule returns the
+  // same 404 envelope as an unknown page while its builder stays registered
+  // (the schedule API routes and the page-script tests keep covering it).
   const response = await fetch(`${server.baseUrl}/ui/schedule`);
-  const html = await response.text();
+  const body = await response.json();
 
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /data-schedule-shell/);
-  // Every management verb the page script talks to is wired in.
-  assert.match(html, /\/api\/schedule\/list/);
-  assert.match(html, /\/api\/schedule\/runs/);
-  assert.match(html, /\/api\/schedule\/create/);
-  assert.match(html, /\/api\/schedule\/update/);
-  assert.match(html, /\/api\/schedule\/delete/);
-  assert.match(html, /\/api\/schedule\/enable/);
-  assert.match(html, /\/api\/schedule\/disable/);
-  // Bot scoping for the per-Bot store.
-  assert.match(html, /\/api\/bot\/profiles/);
-  assert.match(html, /data-schedule-bot-select/);
-  assert.match(html, /data-schedule-editor/);
-  assert.match(html, /data-schedule-runs-card/);
-  // Topbar chrome: logo, injected controls, and the console nav.
-  assert.match(html, /topbar-logo/);
-  assert.match(html, /data-language-toggle/);
-  assert.match(html, /data-settings-link/);
-  assert.match(html, /href="\/ui\/schedule"[^>]*class="active"|class="active"[^>]*href="\/ui\/schedule"/);
-  assert.match(html, /<title data-i18n-title="schedule\.title">Schedule — Open Agent Connect<\/title>/);
+  assert.equal(response.status, 404);
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'not_found');
+});
+
+test('GET /ui/tracking is hidden and returns the unknown-page 404 envelope', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/tracking`);
+  const body = await response.json();
+
+  assert.equal(response.status, 404);
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'not_found');
 });
 
 test('GET /ui/traffic redirects to the Settings traffic tab which serves the traffic API surface', async (t) => {
@@ -94,18 +90,6 @@ test('GET /ui/traffic redirects to the Settings traffic tab which serves the tra
   assert.match(html, /data-language-toggle/);
 });
 
-test('GET /ui/schedule localizes to Simplified Chinese with lang=zh-CN', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/ui/schedule?lang=zh-CN`);
-  const html = await response.text();
-  assert.equal(response.status, 200);
-  assert.match(html, /定时任务 — Open Agent Connect/);
-  assert.match(html, /新建任务/);
-  assert.match(html, /没有本地 Bot。|选择要管理的 Bot。/);
-});
-
 test('GET /ui/settings localizes the Traffic tab to Simplified Chinese with lang=zh-CN', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -119,11 +103,11 @@ test('GET /ui/settings localizes the Traffic tab to Simplified Chinese with lang
   assert.match(html, /兑换码/);
 });
 
-test('console navigation includes Schedule after Memory and leaves Traffic to the settings link', async (t) => {
+test('console navigation omits the hidden Schedule and Tracking pages', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/schedule`);
+  const response = await fetch(`${server.baseUrl}/ui/bot`);
   const html = await response.text();
   const navMatch = html.match(/<nav class="topbar-nav">([\s\S]*?)<\/nav>/);
   assert.ok(navMatch, 'topbar nav rendered');
@@ -132,7 +116,6 @@ test('console navigation includes Schedule after Memory and leaves Traffic to th
     '/ui/bot',
     '/ui/conversations',
     '/ui/apps',
-    '/ui/schedule',
   ];
   let lastIndex = -1;
   for (const href of order) {
@@ -141,7 +124,10 @@ test('console navigation includes Schedule after Memory and leaves Traffic to th
     assert.ok(index > lastIndex, `${href} should follow the previous nav item`);
     lastIndex = index;
   }
-  assert.match(nav, /data-i18n-key="nav.schedule"/);
+  assert.doesNotMatch(nav, /href="\/ui\/schedule"/);
+  assert.doesNotMatch(nav, /href="\/ui\/tracking"/);
+  assert.doesNotMatch(nav, /data-i18n-key="nav\.schedule"/);
+  assert.doesNotMatch(nav, /data-i18n-key="nav\.tracking"/);
   assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/surf"/);
   assert.doesNotMatch(nav, /href="\/ui\/memory"/);
@@ -172,11 +158,11 @@ test('GET /ui/settings exposes Traffic as an in-page tab without adding it to to
   assert.doesNotMatch(navMatch[1], /href="\/ui\/traffic"/);
 });
 
-test('schedule and traffic pages reject non-GET methods', async (t) => {
+test('schedule, tracking, and traffic pages reject non-GET methods', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
-  for (const path of ['/ui/schedule', '/ui/traffic']) {
+  for (const path of ['/ui/schedule', '/ui/tracking', '/ui/traffic']) {
     const response = await fetch(`${server.baseUrl}${path}`, { method: 'POST' });
     assert.equal(response.status, 405, `${path} should reject POST`);
     assert.match(response.headers.get('allow') ?? '', /GET/);

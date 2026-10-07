@@ -66,11 +66,12 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'bot', labelKey: 'nav.botPage' },
   { page: 'conversations', labelKey: 'nav.conversations' },
   { page: 'apps', labelKey: 'nav.apps' },
-  { page: 'schedule', labelKey: 'nav.schedule' },
-  { page: 'tracking', labelKey: 'nav.tracking' },
 ];
 
-const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();
+// Temporarily hidden console pages: they stay registered in PAGE_BUILDERS
+// (and their tests keep covering the page scripts) but return 404 at their
+// /ui/<page> URL and never appear in the topbar navigation.
+const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>(['schedule', 'tracking']);
 
 function escapeHtml(value: string): string {
   return value

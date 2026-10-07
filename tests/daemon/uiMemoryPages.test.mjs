@@ -103,7 +103,7 @@ test('GET /ui/memory localizes to Simplified Chinese with lang=zh-CN', async (t)
   assert.match(html, /记忆整理/);
 });
 
-test('console navigation omits Memory and Surf', async (t) => {
+test('console navigation omits Memory, Surf, Schedule, and Tracking', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -116,7 +116,6 @@ test('console navigation omits Memory and Surf', async (t) => {
     '/ui/bot',
     '/ui/conversations',
     '/ui/apps',
-    '/ui/schedule',
   ];
   let lastIndex = -1;
   for (const href of order) {
@@ -125,6 +124,8 @@ test('console navigation omits Memory and Surf', async (t) => {
     assert.ok(index > lastIndex, `${href} should follow the previous nav item`);
     lastIndex = index;
   }
+  assert.doesNotMatch(nav, /href="\/ui\/schedule"/);
+  assert.doesNotMatch(nav, /href="\/ui\/tracking"/);
   assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/surf"/);
   assert.doesNotMatch(nav, /href="\/ui\/memory"/);

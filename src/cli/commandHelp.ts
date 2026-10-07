@@ -3469,7 +3469,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--disabled', value: '', description: 'Create the task disabled.' },
       HELP_JSON_FLAG,
     ],
-    successFields: ['task', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
+    successFields: ['task'],
     examples: [
       'metabot schedule create --from alice --name "morning digest" --prompt "Summarize yesterday\'s dream diary." --at 2026-09-06T08:00:00',
       'metabot schedule create --name "kb sweep" --prompt "Scan MetaWeb for new guides and save them to the knowledge base." --every 3600000',
@@ -3481,7 +3481,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'List scheduled tasks for one Bot (or the Twin default); --all groups every local Bot\'s tasks.',
     usage: 'metabot schedule list [--from <bot-slug> | --all]',
     optionalFlags: [FROM_BOT_FLAG, { flag: '--all', description: 'List every local Bot\'s tasks, grouped by Bot slug.' }, HELP_JSON_FLAG],
-    successFields: ['tasks', 'groups (with --all)', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
+    successFields: ['tasks', 'groups (with --all)'],
     examples: ['metabot schedule list --from alice', 'metabot schedule list --all'],
   },
   {
@@ -3541,7 +3541,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot schedule run --id <task-id> [--from <bot-slug>]',
     requiredFlags: [{ flag: '--id', value: '<task-id>', description: 'Scheduled task id.' }],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    successFields: ['taskId', 'output', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
+    successFields: ['taskId', 'output'],
     examples: ['metabot schedule run --from alice --id <task-id>'],
   },
   {
@@ -4154,7 +4154,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Open one local MetaBot runtime HTML page such as bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, schedule, or traffic.',
     usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>] [--mode <mode>] [--host <provider>]',
     requiredFlags: [
-      { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, schedule, or traffic.' },
+      { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, or traffic.' },
     ],
     optionalFlags: [
       FROM_BOT_FLAG,

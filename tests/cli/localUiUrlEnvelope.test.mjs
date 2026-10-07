@@ -125,7 +125,6 @@ for (const [label, page, run] of [
   ['surf status', '/ui/surf', (deps) => deps.surf.status({ from: SLUG })],
   ['memory list', '/ui/memory', (deps) => deps.memory.list({ from: SLUG })],
   ['dream status', '/ui/dream', (deps) => deps.dream.status({ from: SLUG })],
-  ['schedule list', '/ui/schedule', (deps) => deps.schedule.list({ from: SLUG })],
   ['knowledge-base list', '/ui/kb', (deps) => deps.knowledgeBase.list({ from: SLUG })],
   ['knowledge-base query', '/ui/kb', (deps) => deps.knowledgeBase.query({ from: SLUG, text: 'hello' })],
   ['knowledge-base study status', '/ui/kb', (deps) => deps.knowledgeBase.studyList({ from: SLUG })],
@@ -199,7 +198,7 @@ test('dream run: success envelope carries localUiUrl (empty-day path, no LLM)', 
   assert.equal(result.data.localUiUrl, `http://127.0.0.1:10001/ui/dream?from=${SLUG}`);
 });
 
-test('schedule create + run: envelopes carry localUiUrl', async (t) => {
+test('schedule create + run: envelopes omit localUiUrl while the /ui/schedule page is hidden', async (t) => {
   const { profileRoot, base, paths } = await createTempProfileHome();
   await writeFakeLocalRuntime(paths);
   t.after(patchRegistryBackends('scheduled task output'));
@@ -213,12 +212,12 @@ test('schedule create + run: envelopes carry localUiUrl', async (t) => {
   });
   assert.equal(created.ok, true);
   assert.equal(created.data.task.name, 'morning digest');
-  assert.equal(created.data.localUiUrl, `http://127.0.0.1:10001/ui/schedule?from=${SLUG}`);
+  assert.equal('localUiUrl' in created.data, false);
 
   const run = await deps.schedule.run({ from: SLUG, id: created.data.task.id });
   assert.equal(run.ok, true);
   assert.equal(run.data.output, 'scheduled task output');
-  assert.equal(run.data.localUiUrl, `http://127.0.0.1:10001/ui/schedule?from=${SLUG}`);
+  assert.equal('localUiUrl' in run.data, false);
 });
 
 for (const verb of ['status', 'balance']) {

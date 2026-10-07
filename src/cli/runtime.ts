@@ -972,7 +972,7 @@ function resolveLocalUiPath(page: string): string {
   // Standalone console pages served by the daemon at /ui/<page>. Listed
   // explicitly so new pages are recognized by the localUiUrl plumbing the
   // moment they are added to SUPPORTED_UI_PAGES.
-  if (page === 'kb' || page === 'surf' || page === 'memory' || page === 'schedule' || page === 'traffic' || page === 'dream') {
+  if (page === 'kb' || page === 'surf' || page === 'memory' || page === 'traffic' || page === 'dream') {
     return `/ui/${page}`;
   }
   return `/ui/${page}`;
@@ -5368,11 +5368,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
             ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
           });
-          return withStandalonePageLocalUiUrl(
-            commandSuccess({ task } as unknown as Record<string, unknown>),
-            'schedule',
-            path.basename(paths.profileRoot),
-          );
+          return commandSuccess({ task } as unknown as Record<string, unknown>);
         } catch (error) {
           return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
         }
@@ -5394,11 +5390,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const paths = resolveMetabotPaths(actor.homeDir);
         const store = createScheduleStore(paths);
         const tasks = await store.listTasks();
-        return withStandalonePageLocalUiUrl(
-          commandSuccess({ tasks } as unknown as Record<string, unknown>),
-          'schedule',
-          path.basename(paths.profileRoot),
-        );
+        return commandSuccess({ tasks } as unknown as Record<string, unknown>);
       },
       show: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -5502,11 +5494,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (result.kind === 'failed') {
           return commandFailed('schedule_run_failed', result.error);
         }
-        return withStandalonePageLocalUiUrl(
-          commandSuccess({ taskId: input.id, output: result.output } as unknown as Record<string, unknown>),
-          'schedule',
-          slug,
-        );
+        return commandSuccess({ taskId: input.id, output: result.output } as unknown as Record<string, unknown>);
       },
       runs: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);

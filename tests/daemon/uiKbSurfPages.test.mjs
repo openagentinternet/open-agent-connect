@@ -86,7 +86,7 @@ test('GET /ui/kb and /ui/surf localize to Simplified Chinese with lang=zh-CN', a
   assert.match(surfHtml, /立即冲浪/);
 });
 
-test('console navigation omits Knowledge, Surf, and Memory from the topbar', async (t) => {
+test('console navigation omits Knowledge, Surf, Memory, Schedule, and Tracking from the topbar', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -99,7 +99,6 @@ test('console navigation omits Knowledge, Surf, and Memory from the topbar', asy
     '/ui/bot',
     '/ui/conversations',
     '/ui/apps',
-    '/ui/schedule',
   ];
   let lastIndex = -1;
   for (const href of order) {
@@ -109,6 +108,8 @@ test('console navigation omits Knowledge, Surf, and Memory from the topbar', asy
     lastIndex = index;
   }
   assert.doesNotMatch(nav, /data-i18n-key="nav.knowledge"/);
+  assert.doesNotMatch(nav, /href="\/ui\/schedule"/);
+  assert.doesNotMatch(nav, /href="\/ui\/tracking"/);
   assert.doesNotMatch(nav, /href="\/ui\/services"/);
   assert.doesNotMatch(nav, /href="\/ui\/surf"/);
   assert.doesNotMatch(nav, /href="\/ui\/memory"/);
