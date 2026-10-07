@@ -158,9 +158,9 @@ export function bindMediaDescriptionTools(ctx: HostContext, controlFactory: () =
     }
   }
   control ??= {
-    async describeImage() { throw new Error('media description is unavailable: the OAC CLI installation could not be resolved (reinstall open-agent-connect or set OAC_METABOT_CLI_PATH)') },
-    async describeVideo() { throw new Error('media description is unavailable: the OAC CLI installation could not be resolved (reinstall open-agent-connect or set OAC_METABOT_CLI_PATH)') },
-    async describeAudio() { throw new Error('media description is unavailable: the OAC CLI installation could not be resolved (reinstall open-agent-connect or set OAC_METABOT_CLI_PATH)') },
+    async describeImage() { throw new Error('media description is unavailable: the OAC runtime could not be resolved (install it from the Bots page setup card, or set OAC_METABOT_CLI_PATH)') },
+    async describeVideo() { throw new Error('media description is unavailable: the OAC runtime could not be resolved (install it from the Bots page setup card, or set OAC_METABOT_CLI_PATH)') },
+    async describeAudio() { throw new Error('media description is unavailable: the OAC runtime could not be resolved (install it from the Bots page setup card, or set OAC_METABOT_CLI_PATH)') },
   }
   for (const definition of buildMediaDescriptionToolDefinitions(control)) {
     try { ctx.tools?.register(withRemoteContentGuard(definition)) } catch (error) {

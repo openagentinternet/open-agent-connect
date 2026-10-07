@@ -44,7 +44,7 @@ import {
 } from './conversation-bridge.js'
 import { streamAllChatEvents } from './chat-watcher.js'
 import { streamDaemonMetaAppEvents } from './metaapp-bridge.js'
-import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { CliBridgeError, checkRuntime, installRuntime, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import {
   localBotList,
@@ -110,7 +110,43 @@ async function dispatchPost(
   payload: unknown,
   browserHub: BrowserEventHub,
   botHub: BotChangeEventHub,
+  onRuntimeInstalled?: (health: HealthPayload) => void,
 ): Promise<MetabotCommandResult> {
+  if (method === 'runtime/check') {
+    // The setup card's probe: always a success envelope — the check's own
+    // `status` field carries missing / stale / npm_unavailable.
+    return { ok: true, state: 'success', data: checkRuntime() }
+  }
+  if (method === 'runtime/install') {
+    // One-click guided install from the setup card's explicit button. npm
+    // then daemon start + skill bind; failures (e.g. EPERM) return the
+    // manual command for the card to show.
+    const result = await installRuntime()
+    if (!result.ok) {
+      return {
+        ok: false,
+        state: 'failed',
+        code: 'runtime_install_failed',
+        message: result.message,
+        data: { permission: result.permission, command: result.command, check: result.check },
+      }
+    }
+    const health = await bootstrapHealth()
+    onRuntimeInstalled?.(health)
+    // The apply-time preset reconcile was skipped when the CLI was missing;
+    // retry it once here so Bot presets (the new-session chip) appear
+    // without a DSH restart. Best-effort — the registry watch and the rest
+    // of a full re-apply still want a restart.
+    if (ctx.agentPresets !== undefined && health.cliPath !== null) {
+      try {
+        await reconcilePresets(ctx)
+        botHub.notify()
+      } catch (error) {
+        warn(ctx, `post-install preset reconcile failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    return { ok: true, state: 'success', data: { check: result.check, health } }
+  }
   if (method === 'browser/open') {
     const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
       ? (payload as { uri: string }).uri.trim()
@@ -384,6 +420,7 @@ function registerApi(
   getHealth: () => HealthPayload,
   browserHub: BrowserEventHub,
   botHub: BotChangeEventHub,
+  onRuntimeInstalled?: (health: HealthPayload) => void,
 ): () => void {
   const fence = (req: PluginHttpRequest): boolean =>
     isTrustedApiRequest(req, ctx.webRuntime.trustedHosts)
@@ -500,7 +537,7 @@ function registerApi(
           req,
           method === 'bots/homepage-upload' ? HOMEPAGE_UPLOAD_REQUEST_MAX_BYTES : undefined,
         )
-        const result = await dispatchPost(ctx, method, payload, browserHub, botHub)
+        const result = await dispatchPost(ctx, method, payload, browserHub, botHub, onRuntimeInstalled)
         const status = result.code === 'not-found' ? 404 : 200
         writeJson(res, status, result)
       } catch (error) {
@@ -664,7 +701,16 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   if (!config.skipBootstrap && ctx.get?.('schedule')) {
     void migrateLegacyScheduleTasks(ctx)
   }
-  ctx.effect(() => registerApi(ctx, () => health, browserHub, botHub), 'oac-dsh: /oac/api routes')
+  // After a guided runtime install (Bots-page setup card), the fresh
+  // bootstrap result replaces the apply-time health so /oac/api/health and
+  // the panels tell the new truth without a DSH restart.
+  ctx.effect(() => registerApi(
+    ctx,
+    () => health,
+    browserHub,
+    botHub,
+    (installed) => { health = installed },
+  ), 'oac-dsh: /oac/api routes')
 
   // Memory system: per-turn injection, post-turn extraction, and per-agent
   // memory tools for oac-* preset sessions. Each piece is config-gated and
@@ -835,9 +881,26 @@ export {
   type BotRegistryWatchOptions,
 } from './bot-events.js'
 export { localIdentityManagerPaths } from './local-read.js'
-export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } from './cli-bridge.js'
+export {
+  checkRuntime,
+  compareVersions,
+  installRuntime,
+  npmGlobalPackageCli,
+  parseMetabotStdout,
+  pluginVersion,
+  resolveCli,
+  resolveMetabotCliPath,
+  resetRuntimeVersionCache,
+  runMetabot,
+  RUNTIME_INSTALL_COMMAND,
+  type CheckRuntimeDeps,
+  type InstallRuntimeDeps,
+  type RuntimeCheck,
+  type RuntimeCheckStatus,
+  type RuntimeInstallResult,
+} from './cli-bridge.js'
 export { DAEMON_PINNED_SKIP, runMetabotPinned } from './daemon-pinned-run.js'
-export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
+export { isSupportedNodeVersion, npmGlobalModulesRoot, resolveNpmBinary, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
 export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'

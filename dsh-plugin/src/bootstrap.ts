@@ -1,4 +1,5 @@
 import {
+  checkRuntime,
   runMetabot,
   resolveCli,
   type CliResolution,
@@ -32,7 +33,12 @@ export async function bootstrapHealth(
   try {
     resolution = resolve(env)
   } catch (error) {
-    health.error = error instanceof Error ? error.message : String(error)
+    // Consume the structured runtime check (what the Bots-page setup card
+    // shows) instead of the bare throw, so health carries the same story.
+    const check = checkRuntime({ env })
+    health.error = check.error ?? (error instanceof Error ? error.message : String(error))
+    health.nodePath = check.nodePath
+    health.nodeVersion = check.nodeVersion
     return summarizeHealth(health)
   }
   health.cliPath = resolution.cliPath

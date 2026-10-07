@@ -6,6 +6,16 @@ export const BOTS_CSS = `
 .oac-bot-intro { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-tertiary); }
 .oac-bot-listing-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .oac-error { color: var(--dsh-color-danger, #c44); }
+
+/* First-run runtime setup card (missing / stale / manual-install states). */
+.oac-setup-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--dsw-alias-state-warn-border, rgba(230, 162, 60, .5)); border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-state-warn-label, #e6a23c) 6%, transparent); }
+.oac-setup-card-head { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-primary); }
+.oac-setup-card-body { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
+.oac-setup-card-command { display: flex; flex-direction: column; gap: 6px; }
+.oac-setup-card-command-row { display: flex; align-items: center; gap: 6px; }
+.oac-setup-card-command-row code { flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; background: var(--dsw-alias-fill-l2, rgba(127,127,127,.12)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; color: var(--dsw-alias-label-secondary); }
+.oac-setup-card-actions { display: flex; gap: 8px; }
+.oac-setup-installed { display: flex; align-items: center; gap: 6px; }
 .oac-card { border: 1px solid var(--dsh-border, rgba(127,127,127,.3)); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
 .oac-card-list { display: flex; flex-direction: column; gap: 8px; }
 .oac-tabs { display: flex; gap: 4px; flex-wrap: wrap; }

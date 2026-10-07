@@ -764,6 +764,18 @@ Node; the plugin spawns CLI with a supported binary (`OAC_NODE_PATH`, then
 `process.execPath` if in range, then nvm 20–24). Override the CLI with
 `OAC_METABOT_CLI_PATH`.
 
+**First-run runtime setup.** When the OAC runtime is missing or older than
+this plugin, the My Bots section shows a setup card instead of scattered CLI
+errors. One explicit button click runs `npm i -g open-agent-connect@latest`
+(never silent — a global npm install needs the user's consent), re-resolves
+the CLI, starts the daemon, binds skills, and retries the Bot-preset
+reconcile; when npm is unavailable or fails on EPERM/EACCES the card degrades
+to a copyable terminal command. The runtime version probe runs once per apply
+and is cached — ordinary CLI calls never spawn `--version`. The resolution
+order for the CLI is `OAC_METABOT_CLI_PATH`, the adjacent
+`open-agent-connect` package, the npm global root of the resolved node
+(`<node bin>/../lib/node_modules`), then a sibling repo `dist/`.
+
 ## Host routes
 
 All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Host or `trustedHosts`; refuse `sec-fetch-site: cross-site`).
@@ -771,6 +783,8 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | Method | Path | Purpose |
 |---|---|---|
 | GET or POST | `/oac/api/health` | `{ cliPath, daemon, skillBind }` |
+| POST | `/oac/api/runtime/check` | first-run probe: node/npm/CLI availability + runtime-vs-plugin version (drives the setup card) |
+| POST | `/oac/api/runtime/install` | one-click guided runtime install (`npm i -g open-agent-connect@latest`), then daemon start + skill bind + preset reconcile retry; failures return the manual command |
 | POST | `/oac/api/who` | `metabot identity who` JSON envelope |
 | POST | `/oac/api/chat/*` | `metabot chat conversations`, `messages`, `private` |
 | POST | `/oac/api/llm/host-status` | daemon `/api/llm/host-executor/status` (connected-executor count) for the Bot editor's reply-model lines |
