@@ -54,9 +54,13 @@ test('metatask logic: candidateState maps engine flags per §4.1', async () => {
   assert.equal(logic.candidateState(node, optimistic2, byPin, null), 'optimistic');
 });
 
-test('metatask panel: registration id/order/icon/width per the UI contract', () => {
+test('metatask panel: registration id/order/icon/width per the UI contract (section gated off while hidden)', () => {
   const index = read('src/client/index.ts');
-  assert.match(index, /id: 'oac-tracking',\n\s+order: 21,/, 'section id oac-tracking at order 21');
+  // The section is temporarily hidden behind a feature flag: the registration
+  // below stays in place, but TRACKING_SECTION_ENABLED = false keeps it out
+  // of the Bots nav until the feature matures.
+  assert.match(index, /const TRACKING_SECTION_ENABLED = false/, 'tracking section gate is off');
+  assert.match(index, /if \(TRACKING_SECTION_ENABLED\) \{\s*\n\s*ctx\.slots\.inject\('oac\.bots\.section', \(\) => ctx\.slots\.register\(\{\s*\n\s*name: 'oac\.bots\.section',\s*\n\s*id: 'oac-tracking',\n\s+order: 21,/, 'section id oac-tracking at order 21 inside the gate');
   assert.match(index, /label: \(\) => t\('navTracking'\)/, 'nav label uses the navTracking key');
   assert.match(index, /import \{ TrackingTasksPanel \} from '\.\/TrackingTasksPanel\.tsx'/, 'panel import');
   assert.match(index, /TRACKING_CSS/, 'tracking styles join the injection');

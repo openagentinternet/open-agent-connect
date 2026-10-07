@@ -503,22 +503,28 @@ export function apply(ctx: ClientContext): void {
   // (a Long-term tab is reserved inside). Order 21 = after 我的Bot (20),
   // before 元应用. The panel fetches its data through the plugin's own
   // metatask/* host routes (the daemon route behind the same dispatch).
-  ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
-    name: 'oac.bots.section',
-    id: 'oac-tracking',
-    order: 21,
-    label: () => t('navTracking'),
-    locale: NS,
-    inject: () => ({
-      mt: (key: string, vars?: Record<string, string | number>) => t(key as BotsLocaleKey, vars),
-      metataskBoard: (refresh?: boolean) => api.metataskBoard(refresh),
-      metataskTask: (root: string, refresh?: boolean) => api.metataskTask(root, refresh),
-      metataskDraft: (root: string, lang?: 'en' | 'zh') => api.metataskDraft(root, lang),
-      mtApi: {
+  // Temporarily hidden — the feature is not mature enough to ship in the Bots
+  // nav yet; flip to true to re-register the section (panel, locale keys,
+  // styles, icon, and host routes all stay in place).
+  const TRACKING_SECTION_ENABLED = false
+  if (TRACKING_SECTION_ENABLED) {
+    ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
+      name: 'oac.bots.section',
+      id: 'oac-tracking',
+      order: 21,
+      label: () => t('navTracking'),
+      locale: NS,
+      inject: () => ({
+        mt: (key: string, vars?: Record<string, string | number>) => t(key as BotsLocaleKey, vars),
+        metataskBoard: (refresh?: boolean) => api.metataskBoard(refresh),
         metataskTask: (root: string, refresh?: boolean) => api.metataskTask(root, refresh),
-      },
-    }),
-  }, TrackingTasksPanel))
+        metataskDraft: (root: string, lang?: 'en' | 'zh') => api.metataskDraft(root, lang),
+        mtApi: {
+          metataskTask: (root: string, refresh?: boolean) => api.metataskTask(root, refresh),
+        },
+      }),
+    }, TrackingTasksPanel))
+  }
 
   ctx.slots.inject('oac.bots.section', () => ctx.slots.register({
     name: 'oac.bots.section',
