@@ -83,7 +83,7 @@ test('runOac help shows primary bare install flow and registry platform host lis
   assert.match(result.stdout, /oac install/);
   assert.match(result.stdout, /oac doctor/);
   assert.match(result.stdout, /uninstall\s+Remove OAC shim/);
-  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy\|dsh>/);
+  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy\|dsh\|grok-bot>/);
 });
 
 test('runOac installs shared skills, metabot shim, and codex host bindings for an explicit host', async (t) => {
@@ -365,6 +365,33 @@ test('runOac install --host dsh force-creates DSH skill-bind roots without an OA
   const catalog = await fs.readdir(path.join(systemHome, '.dsh', 'skills'));
   assert.ok(catalog.includes('metabot-help'));
   assert.ok(catalog.some((name) => name.startsWith('metabot-')));
+});
+
+test('runOac install --host grok-bot binds the manual staging root without a runtime and leaves cursor roots untouched', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-force-grok-bot-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const auto = await runOacCli(systemHome, ['install']);
+  assert.equal(auto.exitCode, 0);
+  // The grok-bot root is autoBind 'manual': a bare install must not create it.
+  await assert.rejects(fs.stat(path.join(systemHome, '.grok-bot', 'skills')), { code: 'ENOENT' });
+
+  const result = await runOacCli(systemHome, ['install', '--host', 'grok-bot']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'grok-bot');
+  const grokBotRoot = result.payload.data.boundRoots.find((root) => root.platformId === 'grok-bot' && root.rootId === 'grok-bot-home');
+  assert.ok(grokBotRoot);
+  assert.equal(grokBotRoot.status, 'bound');
+  assert.ok(grokBotRoot.boundSkills.includes('metabot-help'));
+  assert.ok(grokBotRoot.boundSkills.every((name) => name.startsWith('metabot-')));
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.grok-bot', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'host-skills', 'grok-bot', 'metabot-help'),
+  );
+  // Grok Bot is not Cursor: the cursor host root must stay untouched.
+  await assert.rejects(fs.stat(path.join(systemHome, '.cursor', 'skills')), { code: 'ENOENT' });
 });
 
 test('runOac install rejects removed Trae host support', async (t) => {
