@@ -30,6 +30,14 @@ import {
   HostPersonaProjectionError,
   unbindHostPersonaProjection,
 } from '../core/host/hostPersonaProjection';
+import {
+  bindGrokBotAssistant,
+  configureGrokBotWebhook,
+  doctorGrokBotBindings,
+  getGrokBotBindingStatus,
+  GrokBotBindingError,
+  unbindGrokBotAssistant,
+} from '../core/host/grokBotBinding';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { resolveTwinHomeDir } from '../core/bot/twinRole';
 import {
@@ -2724,6 +2732,28 @@ async function runHostPersonaProjection(
     }
     return commandFailed(
       'host_persona_projection_failed',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+async function runGrokBotBinding(
+  operation: () => Promise<unknown>,
+): Promise<MetabotCommandResult<unknown>> {
+  try {
+    return commandSuccess(await operation());
+  } catch (error) {
+    if (error instanceof GrokBotBindingError) {
+      return {
+        ok: false,
+        state: 'failed',
+        code: error.code,
+        message: error.message,
+        data: error.data,
+      } as MetabotCommandResult<unknown>;
+    }
+    return commandFailed(
+      'grok_bot_binding_failed',
       error instanceof Error ? error.message : String(error),
     );
   }
@@ -5694,6 +5724,31 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         host: input.host,
         from: input.from,
         env: context.env,
+      })),
+      grokBotBindingStatus: async (input) => runGrokBotBinding(() => getGrokBotBindingStatus({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        from: input.from,
+      })),
+      grokBotBindingBind: async (input) => runGrokBotBinding(() => bindGrokBotAssistant({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        from: input.from,
+        assistantId: input.assistantId,
+        assistantName: input.assistantName,
+        force: input.force,
+      })),
+      grokBotBindingWebhook: async (input) => runGrokBotBinding(() => configureGrokBotWebhook({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        from: input.from,
+        url: input.url,
+        secret: input.secret,
+        clear: input.clear,
+      })),
+      grokBotBindingUnbind: async (input) => runGrokBotBinding(() => unbindGrokBotAssistant({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        from: input.from,
+      })),
+      grokBotBindingDoctor: async () => runGrokBotBinding(() => doctorGrokBotBindings({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
       })),
     },
     system: {

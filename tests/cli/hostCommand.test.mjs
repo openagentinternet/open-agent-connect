@@ -583,3 +583,88 @@ test('runCli preserves unrelated host-native skills while binding shared MetaBot
   const nativeSkillBody = await fs.readFile(path.join(nativeSkillRoot, 'SKILL.md'), 'utf8');
   assert.equal(nativeSkillBody, '# native helper\n');
 });
+
+test('runCli manages the Grok Bot binding lifecycle for one profile', async (t) => {
+  const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-binding-', 'nori');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const unbound = await runHostCli(homeDir, ['host', 'binding', 'status', '--from', 'nori']);
+  assert.equal(unbound.exitCode, 0);
+  assert.equal(unbound.payload.data.host, 'grok-bot');
+  assert.equal(unbound.payload.data.bound, false);
+  assert.equal(unbound.payload.data.profile.slug, 'nori');
+
+  const missingId = await runHostCli(homeDir, ['host', 'binding', 'bind', '--from', 'nori']);
+  assert.equal(missingId.exitCode, 1);
+  assert.match(missingId.payload.message, /--assistant-id/);
+
+  const bound = await runHostCli(homeDir, [
+    'host', 'binding', 'bind', '--from', 'nori', '--assistant-id', 'asst-1', '--assistant-name', 'Nori',
+  ]);
+  assert.equal(bound.exitCode, 0);
+  assert.equal(bound.payload.data.action, 'created');
+  assert.equal(bound.payload.data.binding.assistantId, 'asst-1');
+
+  const hooked = await runHostCli(homeDir, [
+    'host', 'binding', 'webhook', '--from', 'nori', '--url', 'https://grok.example.com/routine/abc', '--secret', 'tok',
+  ]);
+  assert.equal(hooked.exitCode, 0);
+  assert.equal(hooked.payload.data.binding.webhook.url, 'https://grok.example.com/routine/abc');
+
+  const insecure = await runHostCli(homeDir, [
+    'host', 'binding', 'webhook', '--from', 'nori', '--url', 'http://grok.example.com/routine/abc',
+  ]);
+  assert.equal(insecure.exitCode, 1);
+  assert.equal(insecure.payload.code, 'invalid_argument');
+
+  const status = await runHostCli(homeDir, ['host', 'binding', 'status', '--from', 'nori']);
+  assert.equal(status.payload.data.bound, true);
+  // Command results never echo the bearer token back.
+  assert.equal(status.payload.data.binding.webhook.secretConfigured, true);
+  assert.equal(status.payload.data.binding.webhook.secret, undefined);
+
+  const unboundAgain = await runHostCli(homeDir, ['host', 'binding', 'unbind', '--from', 'nori']);
+  assert.equal(unboundAgain.exitCode, 0);
+  assert.equal(unboundAgain.payload.data.removed, true);
+  const afterUnbind = await runHostCli(homeDir, ['host', 'binding', 'status', '--from', 'nori']);
+  assert.equal(afterUnbind.payload.data.bound, false);
+});
+
+test('runCli host binding doctor audits every profile read-only', async (t) => {
+  const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-binding-doctor-', 'nori');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  await runHostCli(homeDir, ['host', 'binding', 'bind', '--from', 'nori', '--assistant-id', 'asst-1']);
+
+  const doctor = await runHostCli(homeDir, ['host', 'binding', 'doctor']);
+  assert.equal(doctor.exitCode, 0);
+  assert.equal(doctor.payload.data.host, 'grok-bot');
+  const entry = doctor.payload.data.entries.find((candidate) => candidate.slug === 'nori');
+  assert.ok(entry);
+  assert.equal(entry.bound, true);
+  assert.equal(entry.webhookState, 'not_configured');
+  assert.ok(entry.issues.some((issue) => issue.includes('webhook is not configured')));
+
+  // Doctor is read-only: it must not create or rewrite binding files.
+  const status = await runHostCli(homeDir, ['host', 'binding', 'status', '--from', 'nori']);
+  assert.equal(status.payload.data.binding.assistantName, null);
+});
+
+test('runCli prints host binding help for `metabot host binding --help`', async (t) => {
+  const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-binding-help-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const stdout = [];
+  const exitCode = await runCli(['host', 'binding', '--help'], {
+    env: createRuntimeEnv(homeDir),
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot host binding <status\|bind\|webhook\|unbind\|doctor>/m);
+  assert.match(output, /^\s+bind\s+/m);
+  assert.match(output, /^\s+doctor\s+/m);
+});
