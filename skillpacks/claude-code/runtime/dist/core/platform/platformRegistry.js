@@ -481,6 +481,22 @@ exports.PLATFORM_DEFINITIONS = [
             ],
         },
     },
+    {
+        // Grok Bot is a cloud-hosted assistant platform: there is no local CLI
+        // runtime to probe or spawn, so this entry is skills-only. Its skill root
+        // is a manual staging area — Grok Bot loads skills from its own in-app
+        // library, so auto install never binds here; an explicit
+        // `host bind-skills --host grok-bot` links the shared skills into this
+        // directory for the in-session assistant to import.
+        id: 'grok-bot',
+        displayName: 'Grok Bot',
+        logoPath: '/ui/assets/platforms/grok-bot.svg',
+        skills: {
+            roots: [
+                { id: 'grok-bot-home', kind: 'global', path: '~/.grok-bot/skills', autoBind: 'manual' },
+            ],
+        },
+    },
 ];
 exports.SUPPORTED_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS.map((platform) => platform.id);
 exports.RUNTIME_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS

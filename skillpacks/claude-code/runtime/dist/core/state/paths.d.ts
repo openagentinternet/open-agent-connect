@@ -34,6 +34,10 @@ export interface MetabotPaths {
     homepageStatePath: string;
     dshLlmPath: string;
     botRoleStatePath: string;
+    /** Per-profile Grok Bot assistant binding (`.runtime/state/grok-bot-binding.json`). */
+    grokBotBindingPath: string;
+    /** Grok Bot webhook LLM task handoff dir (`.runtime/state/grok-bot-llm-tasks/`). */
+    grokBotLlmTasksRoot: string;
     bioMdPath: string;
     soulMdPath: string;
     goalMdPath: string;

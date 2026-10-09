@@ -39,6 +39,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-twin',
   'metabot-upload-file',
   'metabot-wallet-manage',
+  'metabot-grok-bot',
 ];
 const REMOVED_SKILLS = [
   'metabot-ask-master',

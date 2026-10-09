@@ -734,6 +734,25 @@ export interface CliDependencies {
             host: 'codex';
             from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        grokBotBindingStatus?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        grokBotBindingBind?: (input: {
+            from?: string;
+            assistantId: string;
+            assistantName?: string;
+            force: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        grokBotBindingWebhook?: (input: {
+            from?: string;
+            url?: string;
+            secret?: string;
+            clear: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        grokBotBindingUnbind?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        grokBotBindingDoctor?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
     system?: {
         update?: (input: {

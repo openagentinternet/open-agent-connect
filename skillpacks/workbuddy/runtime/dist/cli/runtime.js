@@ -66,6 +66,10 @@ const infrastructureConfigStore_1 = require("../core/config/infrastructureConfig
 const configTypes_1 = require("../core/config/configTypes");
 const hostSkillBinding_1 = require("../core/host/hostSkillBinding");
 const hostPersonaProjection_1 = require("../core/host/hostPersonaProjection");
+const grokBotBinding_1 = require("../core/host/grokBotBinding");
+const grokBotWebhook_1 = require("../core/host/grokBotWebhook");
+const grokBotLlmChannel_1 = require("../core/host/grokBotLlmChannel");
+const noLlmIngest_1 = require("../core/surf/noLlmIngest");
 const twinRole_1 = require("../core/bot/twinRole");
 const identityProfiles_1 = require("../core/identity/identityProfiles");
 const profileWorkspace_1 = require("../core/identity/profileWorkspace");
@@ -690,7 +694,7 @@ function resolveLocalUiPath(page) {
     // Standalone console pages served by the daemon at /ui/<page>. Listed
     // explicitly so new pages are recognized by the localUiUrl plumbing the
     // moment they are added to SUPPORTED_UI_PAGES.
-    if (page === 'kb' || page === 'surf' || page === 'memory' || page === 'schedule' || page === 'traffic' || page === 'dream') {
+    if (page === 'kb' || page === 'surf' || page === 'memory' || page === 'traffic' || page === 'dream') {
         return `/ui/${page}`;
     }
     return `/ui/${page}`;
@@ -1869,12 +1873,19 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
             if (!orchestrator)
                 return;
             if (!input.handleOrderProtocolMessageForProfile) {
+                if ((0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind !== 'order_protocol'
+                    && await routeInboundViaGrokBotWebhook(profile.homeDir, normalizeDispatcherPrivateChatMessage(message))) {
+                    return;
+                }
                 await orchestrator.handleInboundMessage(message);
                 return;
             }
             const dispatcher = buildA2ASimplemsgInboundDispatcher({
                 handleOrderProtocolMessage: async (orderMessage) => input.handleOrderProtocolMessageForProfile(profile, orderMessage),
                 handleGenericPrivateChatMessage: async (genericMessage) => {
+                    if (await routeInboundViaGrokBotWebhook(profile.homeDir, genericMessage)) {
+                        return;
+                    }
                     await orchestrator.handleInboundMessage(genericMessage);
                 },
             });
@@ -2083,6 +2094,38 @@ async function runHostPersonaProjection(operation) {
             };
         }
         return (0, commandResult_1.commandFailed)('host_persona_projection_failed', error instanceof Error ? error.message : String(error));
+    }
+}
+async function runGrokBotBinding(operation) {
+    try {
+        return (0, commandResult_1.commandSuccess)(await operation());
+    }
+    catch (error) {
+        if (error instanceof grokBotBinding_1.GrokBotBindingError) {
+            return {
+                ok: false,
+                state: 'failed',
+                code: error.code,
+                message: error.message,
+                data: error.data,
+            };
+        }
+        return (0, commandResult_1.commandFailed)('grok_bot_binding_failed', error instanceof Error ? error.message : String(error));
+    }
+}
+/**
+ * Returns true when the profile's Grok Bot binding took over the message
+ * (delivered to the assistant's dialog webhook, or delivery attempted and
+ * failed — recorded, never retried). false means "no webhook configured":
+ * the caller falls back to the normal local reply path.
+ */
+async function routeInboundViaGrokBotWebhook(homeDir, message) {
+    try {
+        return (await (0, grokBotWebhook_1.deliverGrokBotPrivateChat)({ homeDir, message })) !== 'not_configured';
+    }
+    catch (error) {
+        console.warn('[grok-bot webhook]', error instanceof Error ? error.message : String(error));
+        return false;
     }
 }
 async function runDaemonStartCommand(context) {
@@ -4475,7 +4518,7 @@ function createDefaultCliDependencies(context) {
                         ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
                         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
                     });
-                    return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ task }), 'schedule', node_path_1.default.basename(paths.profileRoot));
+                    return (0, commandResult_1.commandSuccess)({ task });
                 }
                 catch (error) {
                     return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
@@ -4501,7 +4544,7 @@ function createDefaultCliDependencies(context) {
                 const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
                 const store = (0, store_2.createScheduleStore)(paths);
                 const tasks = await store.listTasks();
-                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ tasks }), 'schedule', node_path_1.default.basename(paths.profileRoot));
+                return (0, commandResult_1.commandSuccess)({ tasks });
             },
             show: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4614,7 +4657,7 @@ function createDefaultCliDependencies(context) {
                 if (result.kind === 'failed') {
                     return (0, commandResult_1.commandFailed)('schedule_run_failed', result.error);
                 }
-                return withStandalonePageLocalUiUrl((0, commandResult_1.commandSuccess)({ taskId: input.id, output: result.output }), 'schedule', slug);
+                return (0, commandResult_1.commandSuccess)({ taskId: input.id, output: result.output });
             },
             runs: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -4807,6 +4850,31 @@ function createDefaultCliDependencies(context) {
                 host: input.host,
                 from: input.from,
                 env: context.env,
+            })),
+            grokBotBindingStatus: async (input) => runGrokBotBinding(() => (0, grokBotBinding_1.getGrokBotBindingStatus)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                from: input.from,
+            })),
+            grokBotBindingBind: async (input) => runGrokBotBinding(() => (0, grokBotBinding_1.bindGrokBotAssistant)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                from: input.from,
+                assistantId: input.assistantId,
+                assistantName: input.assistantName,
+                force: input.force,
+            })),
+            grokBotBindingWebhook: async (input) => runGrokBotBinding(() => (0, grokBotBinding_1.configureGrokBotWebhook)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                from: input.from,
+                url: input.url,
+                secret: input.secret,
+                clear: input.clear,
+            })),
+            grokBotBindingUnbind: async (input) => runGrokBotBinding(() => (0, grokBotBinding_1.unbindGrokBotAssistant)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                from: input.from,
+            })),
+            grokBotBindingDoctor: async () => runGrokBotBinding(() => (0, grokBotBinding_1.doctorGrokBotBindings)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
             })),
         },
         system: {
@@ -5677,6 +5745,16 @@ async function serveCliDaemonProcess(context) {
                     hostLlmNotes.push(String(message).slice(0, 300));
             },
         });
+        // Grok Bot tier: profiles bound to a Grok Bot assistant delegate the same
+        // passive completions through the assistant's routine webhook.
+        const grokBotBinding = await (0, grokBotBinding_1.readGrokBotBinding)(profilePaths.grokBotBindingPath).catch(() => null);
+        const grokBotCompletion = (0, grokBotLlmChannel_1.createGrokBotWebhookCompletion)({
+            homeDir,
+            logWarning: (_scope, message) => {
+                if (hostLlmNotes.length < 8)
+                    hostLlmNotes.push(String(message).slice(0, 300));
+            },
+        });
         const collectSurfLlmDiagnostics = async () => {
             const diagnostics = {};
             try {
@@ -5685,6 +5763,8 @@ async function serveCliDaemonProcess(context) {
                 diagnostics.hostPath = {
                     connectedExecutors: bridge ? bridge.connectedExecutors() : 0,
                     dshPairConfigured: Boolean(binding?.dshLlmProvider?.trim() && binding?.dshLlmModel?.trim()),
+                    grokBotBound: Boolean(grokBotBinding && (0, grokBotBinding_1.isGrokBotBound)(grokBotBinding)),
+                    grokBotWebhookConfigured: Boolean(grokBotBinding?.webhook),
                     notes: hostLlmNotes,
                 };
             }
@@ -5721,6 +5801,9 @@ async function serveCliDaemonProcess(context) {
             const hostText = await hostCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
             if (hostText !== null)
                 return hostText;
+            const grokBotText = await grokBotCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
+            if (grokBotText !== null)
+                return grokBotText;
             const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
                 runtimeResolver,
                 llmExecutor,
@@ -5971,6 +6054,41 @@ async function serveCliDaemonProcess(context) {
             const tagged = err;
             if (!tagged.surfFailure)
                 tagged.surfFailure = (0, failure_1.toSurfRunFailure)(err, 'session');
+            // Grok Bot machines have no local LLM at all: when every LLM channel is
+            // unavailable, still land the deterministic half of the pipeline — file
+            // the briefed pins into the KB raw — and close the run as partial
+            // instead of failing it outright (requirement: partial, savedToKb > 0,
+            // report says "not deep-read").
+            if (tagged.surfFailure.code === 'LLM_RUNTIME_UNAVAILABLE' && grokBotBinding && (0, grokBotBinding_1.isGrokBotBound)(grokBotBinding)) {
+                const ingest = await (0, noLlmIngest_1.runSurfNoLlmKbIngest)({
+                    items: surfContext.briefing.items,
+                    maxSaves: writeState.kbBudget ?? SURF_KB_ADD_BUDGET,
+                    readPin: (pinId) => (0, pinRead_1.readMetawebPin)(pinId, readsOptions),
+                    addDocument: (doc) => kbService.addDocument(surfContext.botSlug, doc),
+                    logWarning: (message) => console.warn('[surf grok-bot no-llm ingest]', message),
+                });
+                if (ingest.savedToKb > 0) {
+                    return {
+                        stats: { savedToKb: ingest.savedToKb, deepRead: 0 },
+                        reportMarkdown: [
+                            '# Surf report (partial — no LLM available)',
+                            '',
+                            'No LLM channel was usable (no host executor, no Grok Bot webhook completion, no healthy local runtime), so this run stopped at deterministic ingestion.',
+                            `Saved ${ingest.savedToKb} fetched pin(s) to the knowledge base raw. They were NOT deep-read: no knowledge points, no comments, no chain interactions.`,
+                            '',
+                            'For full surf runs, connect the Grok Bot routine webhook (`metabot host binding webhook --from <slug> --url <https-url>`) or a local LLM runtime, then run surf again.',
+                        ].join('\n'),
+                        reportJson: JSON.stringify({
+                            partial: true,
+                            reason: 'llm_runtime_unavailable',
+                            deepRead: false,
+                            savedToKb: ingest.savedToKb,
+                            savedPinIds: ingest.savedPinIds,
+                        }),
+                        seenActions: [],
+                    };
+                }
+            }
             throw err;
         }
     };
@@ -6434,6 +6552,9 @@ async function serveCliDaemonProcess(context) {
     const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
         handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
         handleGenericPrivateChatMessage: async (message) => {
+            if (await routeInboundViaGrokBotWebhook(homeDir, message)) {
+                return;
+            }
             await chatAutoReplyOrchestrator.handleInboundMessage(message);
         },
         logWarning: (scope, error) => {
