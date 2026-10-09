@@ -38,6 +38,7 @@ import {
   GrokBotBindingError,
   unbindGrokBotAssistant,
 } from '../core/host/grokBotBinding';
+import { deliverGrokBotPrivateChat } from '../core/host/grokBotWebhook';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { resolveTwinHomeDir } from '../core/bot/twinRole';
 import {
@@ -2450,6 +2451,10 @@ export function createPrivateChatAutoReplyProfileDispatcher(
       const orchestrator = await getOrCreateOrchestrator(profile);
       if (!orchestrator) return;
       if (!input.handleOrderProtocolMessageForProfile) {
+        if (classifySimplemsgContent(message.content).kind !== 'order_protocol'
+          && await routeInboundViaGrokBotWebhook(profile.homeDir, normalizeDispatcherPrivateChatMessage(message))) {
+          return;
+        }
         await orchestrator.handleInboundMessage(message);
         return;
       }
@@ -2460,6 +2465,9 @@ export function createPrivateChatAutoReplyProfileDispatcher(
           orderMessage,
         ),
         handleGenericPrivateChatMessage: async (genericMessage) => {
+          if (await routeInboundViaGrokBotWebhook(profile.homeDir, genericMessage)) {
+            return;
+          }
           await orchestrator.handleInboundMessage(genericMessage);
         },
       });
@@ -2756,6 +2764,24 @@ async function runGrokBotBinding(
       'grok_bot_binding_failed',
       error instanceof Error ? error.message : String(error),
     );
+  }
+}
+
+/**
+ * Returns true when the profile's Grok Bot binding took over the message
+ * (delivered to the assistant's dialog webhook, or delivery attempted and
+ * failed — recorded, never retried). false means "no webhook configured":
+ * the caller falls back to the normal local reply path.
+ */
+async function routeInboundViaGrokBotWebhook(
+  homeDir: string,
+  message: PrivateChatInboundMessage,
+): Promise<boolean> {
+  try {
+    return (await deliverGrokBotPrivateChat({ homeDir, message })) !== 'not_configured';
+  } catch (error) {
+    console.warn('[grok-bot webhook]', error instanceof Error ? error.message : String(error));
+    return false;
   }
 }
 
@@ -7490,6 +7516,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
     handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
     handleGenericPrivateChatMessage: async (message) => {
+      if (await routeInboundViaGrokBotWebhook(homeDir, message)) {
+        return;
+      }
       await chatAutoReplyOrchestrator.handleInboundMessage(message);
     },
     logWarning: (scope, error) => {
