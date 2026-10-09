@@ -34,6 +34,7 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-twin',
   'metabot-upload-file',
   'metabot-wallet-manage',
+  'metabot-grok-bot',
 ];
 const RETIRED_NPM_SKILLS = [
   'metabot-loom-wish2task',

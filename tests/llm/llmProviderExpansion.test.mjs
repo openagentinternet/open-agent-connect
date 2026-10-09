@@ -92,7 +92,7 @@ test('supported provider metadata includes all managed host providers and custom
   assert.equal(PROVIDER_DISPLAY_NAMES.codebuddy, 'CodeBuddy');
   assert.equal(PROVIDER_DISPLAY_NAMES.zcode, 'ZCode');
   assert.equal(PROVIDER_DISPLAY_NAMES.workbuddy, 'WorkBuddy');
-  assert.deepEqual(SUPPORTED_PLATFORM_IDS, [...SUPPORTED_LLM_PROVIDERS, 'dsh']);
+  assert.deepEqual(SUPPORTED_PLATFORM_IDS, [...SUPPORTED_LLM_PROVIDERS, 'dsh', 'grok-bot']);
   assert.deepEqual(getPlatformSearchOrder(), HOST_SEARCH_ORDER);
   assert.deepEqual(getPlatformBinaryMap(), HOST_BINARY_MAP);
   assert.deepEqual(getPlatformDisplayNames(), PROVIDER_DISPLAY_NAMES);
@@ -106,13 +106,14 @@ test('supported provider metadata includes all managed host providers and custom
   assert.equal(isLlmProvider('zcode'), true);
   assert.equal(isLlmProvider('workbuddy'), true);
   assert.equal(isLlmProvider('dsh'), false);
+  assert.equal(isLlmProvider('grok-bot'), false);
 });
 
 test('platform registry defines managed runtime metadata and install skill roots', () => {
-  assert.equal(PLATFORM_DEFINITIONS.length, 15);
+  assert.equal(PLATFORM_DEFINITIONS.length, 16);
   assert.deepEqual(
     PLATFORM_DEFINITIONS.map((platform) => platform.id),
-    [...SUPPORTED_LLM_PROVIDERS, 'dsh'],
+    [...SUPPORTED_LLM_PROVIDERS, 'dsh', 'grok-bot'],
   );
   assert.equal(PLATFORM_DEFINITIONS[0].id, 'claude-code');
 
@@ -162,6 +163,14 @@ test('platform registry defines managed runtime metadata and install skill roots
   assert.equal(dsh.runtime, undefined);
   assert.equal(dsh.executor, undefined);
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'dsh' && root.path === '~/.dsh/skills' && root.homeEnv === 'DSH_HOME'));
+  const grokBot = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'grok-bot');
+  assert.ok(grokBot);
+  assert.equal(grokBot.runtime, undefined);
+  assert.equal(grokBot.executor, undefined);
+  const grokBotHome = getPlatformSkillRoots('grok-bot').find((root) => root.id === 'grok-bot-home');
+  assert.ok(grokBotHome);
+  assert.equal(grokBotHome.path, '~/.grok-bot/skills');
+  assert.equal(grokBotHome.autoBind, 'manual');
 });
 
 test('kimi platform exposes a Kimi Work Desktop skill root with cross-platform paths', () => {
@@ -247,6 +256,7 @@ test('platform registry assigns provider-specific LLM icons for every managed ru
       zcode: '/ui/assets/platforms/zcode.svg',
       workbuddy: '/ui/assets/platforms/codebuddy.svg',
       dsh: '/ui/assets/platforms/dsh.svg',
+      'grok-bot': '/ui/assets/platforms/grok-bot.svg',
     },
   );
 

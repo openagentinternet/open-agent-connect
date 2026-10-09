@@ -64,10 +64,11 @@ const NAV_ITEMS = [
     { page: 'bot', labelKey: 'nav.botPage' },
     { page: 'conversations', labelKey: 'nav.conversations' },
     { page: 'apps', labelKey: 'nav.apps' },
-    { page: 'schedule', labelKey: 'nav.schedule' },
-    { page: 'tracking', labelKey: 'nav.tracking' },
 ];
-const HIDDEN_UI_PAGES = new Set();
+// Temporarily hidden console pages: they stay registered in PAGE_BUILDERS
+// (and their tests keep covering the page scripts) but return 404 at their
+// /ui/<page> URL and never appear in the topbar navigation.
+const HIDDEN_UI_PAGES = new Set(['schedule', 'tracking']);
 function escapeHtml(value) {
     return value
         .replace(/&/g, '&amp;')

@@ -38,6 +38,62 @@ async function runHostCommand(args, context) {
         }
         return handler({ host, from: (0, helpers_1.readFlagValue)(args, '--from') ?? undefined });
     }
+    if (args[0] === 'binding') {
+        const action = args[1];
+        const hostDeps = context.dependencies.host;
+        const from = (0, helpers_1.readFlagValue)(args, '--from') ?? undefined;
+        switch (action) {
+            case 'status': {
+                const handler = hostDeps?.grokBotBindingStatus;
+                if (!handler)
+                    return (0, commandResult_1.commandFailed)('not_implemented', 'Host binding status handler is not configured.');
+                return handler({ from });
+            }
+            case 'bind': {
+                const handler = hostDeps?.grokBotBindingBind;
+                if (!handler)
+                    return (0, commandResult_1.commandFailed)('not_implemented', 'Host binding bind handler is not configured.');
+                const assistantId = (0, helpers_1.readFlagValue)(args, '--assistant-id');
+                if (!assistantId)
+                    return (0, helpers_1.commandMissingFlag)('--assistant-id');
+                return handler({
+                    from,
+                    assistantId,
+                    assistantName: (0, helpers_1.readFlagValue)(args, '--assistant-name') ?? undefined,
+                    force: args.includes('--force'),
+                });
+            }
+            case 'webhook': {
+                const handler = hostDeps?.grokBotBindingWebhook;
+                if (!handler)
+                    return (0, commandResult_1.commandFailed)('not_implemented', 'Host binding webhook handler is not configured.');
+                const clear = args.includes('--clear');
+                const url = (0, helpers_1.readFlagValue)(args, '--url') ?? undefined;
+                if (!clear && !url)
+                    return (0, helpers_1.commandMissingFlag)('--url');
+                return handler({
+                    from,
+                    url,
+                    secret: (0, helpers_1.readFlagValue)(args, '--secret') ?? undefined,
+                    clear,
+                });
+            }
+            case 'unbind': {
+                const handler = hostDeps?.grokBotBindingUnbind;
+                if (!handler)
+                    return (0, commandResult_1.commandFailed)('not_implemented', 'Host binding unbind handler is not configured.');
+                return handler({ from });
+            }
+            case 'doctor': {
+                const handler = hostDeps?.grokBotBindingDoctor;
+                if (!handler)
+                    return (0, commandResult_1.commandFailed)('not_implemented', 'Host binding doctor handler is not configured.');
+                return handler();
+            }
+            default:
+                return (0, helpers_1.commandUnknownSubcommand)(`host ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
+        }
+    }
     if (args[0] !== 'bind-skills') {
         return (0, helpers_1.commandUnknownSubcommand)(`host ${(0, helpers_1.redactSensitiveArgs)(args).join(' ')}`.trim());
     }

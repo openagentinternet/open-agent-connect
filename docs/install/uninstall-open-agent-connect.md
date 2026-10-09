@@ -37,7 +37,16 @@ Current supported host roots are registry-driven and match `oac install`:
 - `CodeBuddy`: `$HOME/.codebuddy/skills`
 - `ZCode`: `$HOME/.zcode/skills`
 - `WorkBuddy`: `$HOME/.workbuddy/skills` and `$HOME/.codebuddy/skills`
+- `Grok Bot`: `$HOME/.grok-bot/skills` (manual staging root; only present when `--host grok-bot` was force-bound)
 - Shared standard root: `$HOME/.agents/skills`
+
+Grok Bot note: uninstall never deletes MetaIDs created for Grok Bot assistants
+and never touches the Grok Bot sidebar assistants themselves. Their identity
+keys remain under `~/.metabot/profiles/<slug>/` like every other Bot identity;
+the binding records (`grok-bot-binding.json`) are part of that preserved
+profile state. The `metabot-grok-bot` skill entry the assistants wrote into the
+Grok Bot in-app skill library is removed from inside the app, not by this
+uninstall.
 
 For other Claude Code-compatible hosts, also remove any `metabot-*` links you
 manually created in that host's documented skill root.

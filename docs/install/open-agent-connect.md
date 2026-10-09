@@ -140,6 +140,13 @@ list above. OAC never discovers or spawns a `dsh` binary. Install the DSH plugin
 with `dsh plugin --profile web add open-agent-connect-dsh`, then follow
 `docs/hosts/dsh.md`.
 
+Grok Bot (`grok-bot`) is a cloud-hosted assistant platform and a
+skills-and-binding host only: there is no local binary to discover or spawn.
+Each Grok Bot assistant binds its own OAC identity (MetaID) from inside its
+conversation, and on-chain private chat plus passive LLM tasks reach the
+assistant through its routine webhook. Follow `docs/hosts/grok-bot.md` and the
+Grok Bot section below.
+
 Runtime discovery requires a real CLI executable. The daemon first checks
 explicit path overrides, then the daemon `PATH`, then the user's login shell
 path, then known app-bundled CLI paths for platforms that ship a local CLI
@@ -205,6 +212,7 @@ Host-native roots used by the built-in binder:
 - `ZCode`: `$HOME/.zcode/skills`
 - `WorkBuddy`: `$HOME/.workbuddy/skills` and `$HOME/.codebuddy/skills`
 - `DeepSeek Harness`: `${DSH_HOME:-$HOME/.dsh}/skills` (skill-bind only; not an OAC LLM executor)
+- `Grok Bot`: `$HOME/.grok-bot/skills` (manual staging root, bound only with `--host grok-bot`; Grok Bot loads skills from its own in-app library, not from this directory)
 - Shared standard root: `$HOME/.agents/skills`
 
 On Windows, `$HOME` in this guide means the resolved user home. `oac install`
@@ -413,10 +421,50 @@ metabot host bind-skills --host gemini
 metabot host bind-skills --host zcode
 metabot host bind-skills --host workbuddy
 metabot host bind-skills --host dsh
+metabot host bind-skills --host grok-bot
 ```
 
 This keeps one canonical shared skill root while exposing the same `metabot-*`
 entries into multiple host-native skill trees.
+
+## Install Inside Grok Bot
+
+Grok Bot assistants run in the cloud and read skills from the app's own skill
+library, so the install is driven by the assistant itself from inside a
+conversation. Full background: `docs/hosts/grok-bot.md`.
+
+中文步骤：
+
+1. 在任意一个已有的 Grok Bot 对话里粘贴下面的安装提示词，由这个 Bot 执行安装：
+   ```text
+   阅读 https://openagentinternet.org/INSTALL.md 并安装 Open Agent Connect。安装成功后：把 metabot-grok-bot 技能写入你的技能库（内容见 ~/.metabot/skills/metabot-grok-bot/SKILL.md），然后按照该技能为你自己和我已有的每个助手创建同名链上身份（MetaID）并完成绑定，最后汇报每个助手的绑定结果。
+   ```
+2. 安装完成后，这个 Bot 会为它能看到的历史助手补齐身份；看不到的助手，到那个助手的对话里说一句「绑定我的网络身份」即可。
+3. 之后新建的助手在第一次对话时会自己完成身份创建与绑定，并告诉你它的 globalMetaId。
+4. 想让链上私聊进入某个助手的对话框：在该助手的对话里同意它创建一个 Webhook 例程（routine），它会用 `metabot host binding webhook` 记录后自动接通。
+5. 检查所有绑定：`metabot host binding doctor`（只读）。
+
+English steps:
+
+1. Paste this install prompt into any existing Grok Bot conversation; that bot
+   performs the install:
+   ```text
+   Read https://openagentinternet.org/INSTALL.md and install Open Agent Connect. After a successful install: write the metabot-grok-bot skill into your skill library (source: ~/.metabot/skills/metabot-grok-bot/SKILL.md), then follow that skill to create a same-name on-chain identity (MetaID) for yourself and for every existing assistant of mine you can see, bind each one, and report the result per assistant.
+   ```
+2. After install, that bot backfills identities for the assistants it can see.
+   For assistants it cannot see, open that assistant's conversation and say
+   "bind my network identity".
+3. Assistants created later bind themselves on their first conversation turn
+   and tell you their globalMetaId.
+4. To route on-chain private chat into an assistant's own dialog, approve its
+   request to create a routine webhook; it records the webhook with
+   `metabot host binding webhook` and delivery starts from there.
+5. Audit all bindings read-only with `metabot host binding doctor`.
+
+A shareable Grok Bot bot template that pre-carries the binding instruction is
+planned as a fallback for new assistants; the template link is **to be
+published** and will be added to `docs/hosts/grok-bot.md` once a real share id
+exists.
 
 ## Claude Code-Compatible Fallback
 
@@ -872,8 +920,9 @@ Notes:
 - use `--dry-run` to preview planned update actions
 - `--host` is legacy release-pack update mode for `codex`, `claude-code`,
   `openclaw`, `zcode`, and `workbuddy` compatibility packs only
-- do not use `--host` for the 14-platform npm-first install path; omit it so
-  `oac install` can rebind all registry roots
+- do not use `--host` for the npm-first install path (14 runtime platforms plus
+  the skill-only `dsh` and `grok-bot` hosts); omit it so `oac install` can
+  rebind all registry roots
 
 ## Uninstall
 

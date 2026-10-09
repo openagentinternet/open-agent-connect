@@ -421,6 +421,7 @@ const COMMAND_HELP_SPECS = [
         subcommands: [
             { name: 'bind-skills', summary: 'Project shared MetaBot skills into one host-native skills root.' },
             { name: 'persona', summary: 'Manage host-native persona projections for a local MetaBot.' },
+            { name: 'binding', summary: 'Manage the Grok Bot assistant binding of a local MetaBot identity.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
         examples: [
@@ -428,6 +429,7 @@ const COMMAND_HELP_SPECS = [
             'metabot host bind-skills --host claude-code',
             'metabot host bind-skills --host openclaw',
             'metabot host persona bind --host codex --from eric',
+            'metabot host binding doctor',
         ],
     },
     {
@@ -515,6 +517,89 @@ const COMMAND_HELP_SPECS = [
             'metabot host bind-skills --host claude-code',
             'metabot host bind-skills --host openclaw',
         ],
+    },
+    {
+        commandPath: ['host', 'binding'],
+        summary: 'Manage the Grok Bot assistant binding of a local MetaBot identity.',
+        usage: 'metabot host binding <status|bind|webhook|unbind|doctor> [--from <bot-slug>]',
+        subcommands: [
+            { name: 'status', summary: 'Show the Grok Bot binding record of one profile.' },
+            { name: 'bind', summary: 'Bind a Grok Bot assistant id to one profile (upsert; conflict-checked).' },
+            { name: 'webhook', summary: 'Record or clear the assistant routine webhook used to reach the Grok Bot dialog.' },
+            { name: 'unbind', summary: 'Remove the Grok Bot binding record from one profile.' },
+            { name: 'doctor', summary: 'Read-only audit of every profile\'s Grok Bot binding and webhook state.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        examples: [
+            'metabot host binding status --from nori',
+            'metabot host binding bind --from nori --assistant-id <assistant-id> --assistant-name Nori',
+            'metabot host binding webhook --from nori --url https://... --secret <bearer-token>',
+            'metabot host binding doctor',
+        ],
+    },
+    {
+        commandPath: ['host', 'binding', 'status'],
+        summary: 'Show the Grok Bot binding record of one profile.',
+        usage: 'metabot host binding status [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['host', 'profile', 'bound', 'binding'],
+        examples: ['metabot host binding status --from nori'],
+    },
+    {
+        commandPath: ['host', 'binding', 'bind'],
+        summary: 'Bind a Grok Bot assistant id to one profile; a rename keeps the slug and only refreshes the display name.',
+        usage: 'metabot host binding bind --assistant-id <assistant-id> [--assistant-name <name>] [--from <bot-slug>] [--force]',
+        requiredFlags: [
+            { flag: '--assistant-id', value: '<assistant-id>', description: 'The Grok Bot assistant id (from the sidebar assistant, not the OAC profile).' },
+        ],
+        optionalFlags: [
+            { flag: '--assistant-name', value: '<name>', description: 'Current display name of the assistant in Grok Bot.' },
+            FROM_BOT_FLAG,
+            { flag: '--force', description: 'Move an assistant id already bound to another profile. Ask the user first.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['host', 'profile', 'bound', 'binding', 'action'],
+        failureSemantics: [
+            'Fails with invalid_argument when --assistant-id is empty.',
+            'Fails with grok_bot_binding_conflict when the assistant id is already bound to another profile; --force only moves it after explicit user confirmation.',
+        ],
+        examples: ['metabot host binding bind --from nori --assistant-id <assistant-id> --assistant-name Nori'],
+    },
+    {
+        commandPath: ['host', 'binding', 'webhook'],
+        summary: 'Record the Grok Bot routine webhook that delivers on-chain private chat into the assistant dialog.',
+        usage: 'metabot host binding webhook [--from <bot-slug>] (--url <https-url> [--secret <bearer-token>] | --clear)',
+        optionalFlags: [
+            { flag: '--url', value: '<https-url>', description: 'Routine webhook URL created inside the Grok Bot app. https only.' },
+            { flag: '--secret', value: '<bearer-token>', description: 'Bearer token the routine expects. Stored locally in the profile state, never on-chain.' },
+            { flag: '--clear', description: 'Remove the webhook configuration and delivery ledger.' },
+            FROM_BOT_FLAG,
+            HELP_JSON_FLAG,
+        ],
+        successFields: ['host', 'profile', 'bound', 'binding'],
+        failureSemantics: [
+            'Fails with invalid_argument when neither --url nor --clear is given, or the URL is not https.',
+        ],
+        examples: [
+            'metabot host binding webhook --from nori --url https://... --secret <bearer-token>',
+            'metabot host binding webhook --from nori --clear',
+        ],
+    },
+    {
+        commandPath: ['host', 'binding', 'unbind'],
+        summary: 'Remove the Grok Bot binding record (assistant id, webhook, delivery ledger) from one profile.',
+        usage: 'metabot host binding unbind [--from <bot-slug>]',
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['host', 'profile', 'bound', 'binding', 'removed'],
+        examples: ['metabot host binding unbind --from nori'],
+    },
+    {
+        commandPath: ['host', 'binding', 'doctor'],
+        summary: 'Read-only audit: every profile\'s bound assistant id, globalMetaId, and webhook state.',
+        usage: 'metabot host binding doctor',
+        optionalFlags: [HELP_JSON_FLAG],
+        successFields: ['host', 'entries'],
+        examples: ['metabot host binding doctor'],
     },
     {
         commandPath: ['skills'],
@@ -3414,7 +3499,7 @@ const COMMAND_HELP_SPECS = [
             { flag: '--disabled', value: '', description: 'Create the task disabled.' },
             HELP_JSON_FLAG,
         ],
-        successFields: ['task', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
+        successFields: ['task'],
         examples: [
             'metabot schedule create --from alice --name "morning digest" --prompt "Summarize yesterday\'s dream diary." --at 2026-09-06T08:00:00',
             'metabot schedule create --name "kb sweep" --prompt "Scan MetaWeb for new guides and save them to the knowledge base." --every 3600000',
@@ -3426,7 +3511,7 @@ const COMMAND_HELP_SPECS = [
         summary: 'List scheduled tasks for one Bot (or the Twin default); --all groups every local Bot\'s tasks.',
         usage: 'metabot schedule list [--from <bot-slug> | --all]',
         optionalFlags: [FROM_BOT_FLAG, { flag: '--all', description: 'List every local Bot\'s tasks, grouped by Bot slug.' }, HELP_JSON_FLAG],
-        successFields: ['tasks', 'groups (with --all)', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
+        successFields: ['tasks', 'groups (with --all)'],
         examples: ['metabot schedule list --from alice', 'metabot schedule list --all'],
     },
     {
@@ -3486,7 +3571,7 @@ const COMMAND_HELP_SPECS = [
         usage: 'metabot schedule run --id <task-id> [--from <bot-slug>]',
         requiredFlags: [{ flag: '--id', value: '<task-id>', description: 'Scheduled task id.' }],
         optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-        successFields: ['taskId', 'output', 'localUiUrl (the /ui/schedule page; omitted when no daemon base URL is resolvable)'],
+        successFields: ['taskId', 'output'],
         examples: ['metabot schedule run --from alice --id <task-id>'],
     },
     {
@@ -4099,7 +4184,7 @@ const COMMAND_HELP_SPECS = [
         summary: 'Open one local MetaBot runtime HTML page such as bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, schedule, or traffic.',
         usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>] [--mode <mode>] [--host <provider>]',
         requiredFlags: [
-            { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, schedule, or traffic.' },
+            { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, refund, kb, surf, memory, dream, or traffic.' },
         ],
         optionalFlags: [
             FROM_BOT_FLAG,

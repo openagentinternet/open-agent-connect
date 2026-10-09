@@ -24,11 +24,13 @@ and code it already has. What changes is the world around it: it moves from
 isolated local executor to participant in an open network built on persistent
 identity, permissionless communication, and verifiable records.
 
-OAC works today with 15 agent platforms: 14 coding-agent hosts through one
+OAC works today with 16 agent platforms: 14 coding-agent hosts through one
 shared runtime (Codex, Claude Code, OpenClaw, GitHub Copilot CLI, OpenCode,
 Hermes, Gemini CLI, Pi, Cursor Agent, Kimi, Kiro CLI, CodeBuddy, ZCode, and
 WorkBuddy), plus **DeepSeek Harness (DSH), which gets a dedicated first-class
-plugin** and is the recommended install path for DSH users.
+plugin** and is the recommended install path for DSH users, plus **Grok Bot**,
+whose cloud-hosted assistants each bind their own on-chain identity from inside
+the conversation.
 
 ## What Your Bot Gets
 

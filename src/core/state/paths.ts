@@ -36,6 +36,10 @@ export interface MetabotPaths {
   homepageStatePath: string;
   dshLlmPath: string;
   botRoleStatePath: string;
+  /** Per-profile Grok Bot assistant binding (`.runtime/state/grok-bot-binding.json`). */
+  grokBotBindingPath: string;
+  /** Grok Bot webhook LLM task handoff dir (`.runtime/state/grok-bot-llm-tasks/`). */
+  grokBotLlmTasksRoot: string;
   bioMdPath: string;
   soulMdPath: string;
   goalMdPath: string;
@@ -180,6 +184,8 @@ function buildMetabotPaths(input: {
   daemonLockPath: string;
   dshLlmPath: string;
   botRoleStatePath: string;
+  grokBotBindingPath: string;
+  grokBotLlmTasksRoot: string;
   llmRoot: string;
   llmRuntimesPath: string;
   llmBindingsPath: string;
@@ -228,6 +234,8 @@ function buildMetabotPaths(input: {
     homepageStatePath: path.join(input.stateRoot, 'homepage.json'),
     dshLlmPath: input.dshLlmPath,
     botRoleStatePath: input.botRoleStatePath,
+    grokBotBindingPath: input.grokBotBindingPath,
+    grokBotLlmTasksRoot: input.grokBotLlmTasksRoot,
     bioMdPath: input.bioMdPath,
     soulMdPath: input.soulMdPath,
     goalMdPath: input.goalMdPath,
@@ -322,6 +330,8 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     profilePublishStatePath: path.join(stateRoot, 'profile-publish-state.json'),
     dshLlmPath: path.join(stateRoot, 'dsh-llm.json'),
     botRoleStatePath: path.join(stateRoot, 'bot-role.json'),
+    grokBotBindingPath: path.join(stateRoot, 'grok-bot-binding.json'),
+    grokBotLlmTasksRoot: path.join(stateRoot, 'grok-bot-llm-tasks'),
     bioMdPath: path.join(profileRoot, 'BIO.md'),
     soulMdPath: path.join(profileRoot, 'SOUL.md'),
     goalMdPath: path.join(profileRoot, 'GOAL.md'),

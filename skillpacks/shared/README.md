@@ -32,6 +32,7 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 - `metabot-twin`
 - `metabot-metatask`
 - `metabot-metatask-wizard`
+- `metabot-grok-bot`
 
 ## Install
 

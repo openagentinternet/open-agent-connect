@@ -43,6 +43,7 @@ const METABOT_SKILLS = [
   'metabot-twin',
   'metabot-metatask',
   'metabot-metatask-wizard',
+  'metabot-grok-bot',
 ];
 
 const HOSTS = {

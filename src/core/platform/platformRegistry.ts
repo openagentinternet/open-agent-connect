@@ -15,7 +15,8 @@ export type PlatformId =
   | 'codebuddy'
   | 'zcode'
   | 'workbuddy'
-  | 'dsh';
+  | 'dsh'
+  | 'grok-bot';
 
 export type RuntimePlatformId = PlatformId;
 
@@ -596,6 +597,22 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       roots: [
         { id: 'dsh-home', kind: 'global', homeEnv: 'DSH_HOME', path: '~/.dsh/skills', autoBind: 'when-parent-exists' },
         { id: 'dsh-project', kind: 'project', path: '.dsh/skills', autoBind: 'manual' },
+      ],
+    },
+  },
+  {
+    // Grok Bot is a cloud-hosted assistant platform: there is no local CLI
+    // runtime to probe or spawn, so this entry is skills-only. Its skill root
+    // is a manual staging area — Grok Bot loads skills from its own in-app
+    // library, so auto install never binds here; an explicit
+    // `host bind-skills --host grok-bot` links the shared skills into this
+    // directory for the in-session assistant to import.
+    id: 'grok-bot',
+    displayName: 'Grok Bot',
+    logoPath: '/ui/assets/platforms/grok-bot.svg',
+    skills: {
+      roots: [
+        { id: 'grok-bot-home', kind: 'global', path: '~/.grok-bot/skills', autoBind: 'manual' },
       ],
     },
   },
