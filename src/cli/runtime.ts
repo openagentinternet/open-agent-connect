@@ -36,9 +36,13 @@ import {
   doctorGrokBotBindings,
   getGrokBotBindingStatus,
   GrokBotBindingError,
+  isGrokBotBound,
+  readGrokBotBinding,
   unbindGrokBotAssistant,
 } from '../core/host/grokBotBinding';
 import { deliverGrokBotPrivateChat } from '../core/host/grokBotWebhook';
+import { createGrokBotWebhookCompletion } from '../core/host/grokBotLlmChannel';
+import { runSurfNoLlmKbIngest } from '../core/surf/noLlmIngest';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { resolveTwinHomeDir } from '../core/bot/twinRole';
 import {
@@ -6720,6 +6724,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         if (hostLlmNotes.length < 8) hostLlmNotes.push(String(message).slice(0, 300));
       },
     });
+    // Grok Bot tier: profiles bound to a Grok Bot assistant delegate the same
+    // passive completions through the assistant's routine webhook.
+    const grokBotBinding = await readGrokBotBinding(profilePaths.grokBotBindingPath).catch(() => null);
+    const grokBotCompletion = createGrokBotWebhookCompletion({
+      homeDir,
+      logWarning: (_scope, message) => {
+        if (hostLlmNotes.length < 8) hostLlmNotes.push(String(message).slice(0, 300));
+      },
+    });
     const collectSurfLlmDiagnostics = async (): Promise<Record<string, unknown>> => {
       const diagnostics: Record<string, unknown> = {};
       try {
@@ -6728,6 +6741,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         diagnostics.hostPath = {
           connectedExecutors: bridge ? bridge.connectedExecutors() : 0,
           dshPairConfigured: Boolean(binding?.dshLlmProvider?.trim() && binding?.dshLlmModel?.trim()),
+          grokBotBound: Boolean(grokBotBinding && isGrokBotBound(grokBotBinding)),
+          grokBotWebhookConfigured: Boolean(grokBotBinding?.webhook),
           notes: hostLlmNotes,
         };
       } catch {
@@ -6761,6 +6776,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         .join('\n\n---\n\n');
       const hostText = await hostCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
       if (hostText !== null) return hostText;
+      const grokBotText = await grokBotCompletion({ botSlug: surfContext.botSlug, system: surfSystemPrompt, user: historyText });
+      if (grokBotText !== null) return grokBotText;
       const result = await runLlmPromptWithRuntimeFallback({
         runtimeResolver,
         llmExecutor,
@@ -7016,6 +7033,41 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       // receipt folding) still records a classified session-stage failure.
       const tagged = err as Error & { surfFailure?: SurfRunFailure };
       if (!tagged.surfFailure) tagged.surfFailure = toSurfRunFailure(err, 'session');
+      // Grok Bot machines have no local LLM at all: when every LLM channel is
+      // unavailable, still land the deterministic half of the pipeline — file
+      // the briefed pins into the KB raw — and close the run as partial
+      // instead of failing it outright (requirement: partial, savedToKb > 0,
+      // report says "not deep-read").
+      if (tagged.surfFailure.code === 'LLM_RUNTIME_UNAVAILABLE' && grokBotBinding && isGrokBotBound(grokBotBinding)) {
+        const ingest = await runSurfNoLlmKbIngest({
+          items: surfContext.briefing.items,
+          maxSaves: writeState.kbBudget ?? SURF_KB_ADD_BUDGET,
+          readPin: (pinId) => readMetawebPin(pinId, readsOptions),
+          addDocument: (doc) => kbService.addDocument(surfContext.botSlug, doc),
+          logWarning: (message) => console.warn('[surf grok-bot no-llm ingest]', message),
+        });
+        if (ingest.savedToKb > 0) {
+          return {
+            stats: { savedToKb: ingest.savedToKb, deepRead: 0 },
+            reportMarkdown: [
+              '# Surf report (partial — no LLM available)',
+              '',
+              'No LLM channel was usable (no host executor, no Grok Bot webhook completion, no healthy local runtime), so this run stopped at deterministic ingestion.',
+              `Saved ${ingest.savedToKb} fetched pin(s) to the knowledge base raw. They were NOT deep-read: no knowledge points, no comments, no chain interactions.`,
+              '',
+              'For full surf runs, connect the Grok Bot routine webhook (`metabot host binding webhook --from <slug> --url <https-url>`) or a local LLM runtime, then run surf again.',
+            ].join('\n'),
+            reportJson: JSON.stringify({
+              partial: true,
+              reason: 'llm_runtime_unavailable',
+              deepRead: false,
+              savedToKb: ingest.savedToKb,
+              savedPinIds: ingest.savedPinIds,
+            }),
+            seenActions: [],
+          };
+        }
+      }
       throw err;
     }
   };

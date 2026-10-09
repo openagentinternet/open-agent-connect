@@ -35,7 +35,7 @@ function buildPrivateChatPayload(input: {
   };
 }
 
-async function postWebhook(input: {
+export async function postGrokBotWebhook(input: {
   binding: GrokBotBinding;
   payload: Record<string, unknown>;
   fetchImpl: typeof fetch;
@@ -90,7 +90,7 @@ export async function deliverGrokBotPrivateChat(input: {
     return 'not_configured';
   }
   const now = input.now ?? (() => new Date());
-  const result = await postWebhook({
+  const result = await postGrokBotWebhook({
     binding,
     payload: buildPrivateChatPayload(input),
     fetchImpl: input.fetchImpl ?? fetch,
