@@ -227,6 +227,21 @@ export interface GrokBotBindingStatus {
   profile: { name: string; slug: string; homeDir: string; globalMetaId: string };
   bound: boolean;
   binding: RedactedGrokBotBinding;
+  /** Machine-readable next step for the calling assistant; null when nothing is pending. */
+  hint: string | null;
+}
+
+function grokBotBindingHint(binding: RedactedGrokBotBinding, slug: string): string | null {
+  if (!binding.assistantId) {
+    return null;
+  }
+  if (!binding.webhook) {
+    return `Webhook not configured: on-chain private chat cannot reach this assistant's dialog and surf runs partial. After the user approves, record the routine webhook with: metabot host binding webhook --from ${slug} --url <https-url> [--secret <bearer-token>].`;
+  }
+  if (binding.lastWebhookDelivery?.status === 'failed') {
+    return `Last webhook delivery failed (${binding.lastWebhookDelivery.error ?? 'unknown error'}). Check the routine webhook URL/token and re-record it with metabot host binding webhook --from ${slug} --url <https-url>.`;
+  }
+  return null;
 }
 
 export async function getGrokBotBindingStatus(input: {
@@ -235,6 +250,7 @@ export async function getGrokBotBindingStatus(input: {
 }): Promise<GrokBotBindingStatus> {
   const profile = await resolveBindingProfile(input);
   const binding = await readGrokBotBinding(grokBotBindingPathForProfile(profile.homeDir));
+  const redacted = redactGrokBotBinding(binding);
   return {
     host: GROK_BOT_HOST_ID,
     profile: {
@@ -244,7 +260,8 @@ export async function getGrokBotBindingStatus(input: {
       globalMetaId: profile.globalMetaId,
     },
     bound: isGrokBotBound(binding),
-    binding: redactGrokBotBinding(binding),
+    binding: redacted,
+    hint: grokBotBindingHint(redacted, profile.slug),
   };
 }
 

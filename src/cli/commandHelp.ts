@@ -597,7 +597,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Show the Grok Bot binding record of one profile.',
     usage: 'metabot host binding status [--from <bot-slug>]',
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    successFields: ['host', 'profile', 'bound', 'binding'],
+    successFields: ['host', 'profile', 'bound', 'binding', 'hint'],
     examples: ['metabot host binding status --from nori'],
   },
   {
@@ -613,7 +613,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--force', description: 'Move an assistant id already bound to another profile. Ask the user first.' },
       HELP_JSON_FLAG,
     ],
-    successFields: ['host', 'profile', 'bound', 'binding', 'action'],
+    successFields: ['host', 'profile', 'bound', 'binding', 'hint', 'action'],
     failureSemantics: [
       'Fails with invalid_argument when --assistant-id is empty.',
       'Fails with grok_bot_binding_conflict when the assistant id is already bound to another profile; --force only moves it after explicit user confirmation.',
@@ -631,7 +631,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       FROM_BOT_FLAG,
       HELP_JSON_FLAG,
     ],
-    successFields: ['host', 'profile', 'bound', 'binding'],
+    successFields: ['host', 'profile', 'bound', 'binding', 'hint'],
     failureSemantics: [
       'Fails with invalid_argument when neither --url nor --clear is given, or the URL is not https.',
     ],
@@ -645,7 +645,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Remove the Grok Bot binding record (assistant id, webhook, delivery ledger) from one profile.',
     usage: 'metabot host binding unbind [--from <bot-slug>]',
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    successFields: ['host', 'profile', 'bound', 'binding', 'removed'],
+    successFields: ['host', 'profile', 'bound', 'binding', 'hint', 'removed'],
     examples: ['metabot host binding unbind --from nori'],
   },
   {

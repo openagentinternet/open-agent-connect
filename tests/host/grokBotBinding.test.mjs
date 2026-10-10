@@ -102,6 +102,8 @@ test('bind creates, stays unchanged on repeat, and keeps identity across rename'
   assert.equal(created.action, 'created');
   assert.equal(created.bound, true);
   assert.equal(created.binding.assistantId, 'asst-1');
+  assert.match(created.hint, /Webhook not configured/);
+  assert.match(created.hint, /host binding webhook --from nori/);
   const boundAt = created.binding.boundAt;
   assert.ok(boundAt);
 
@@ -159,6 +161,7 @@ test('webhook requires https, roundtrips, and clears with its delivery ledger', 
   assert.equal(configured.binding.webhook.url, 'https://grok.example.com/routine/abc');
   assert.equal(configured.binding.webhook.secretConfigured, true);
   assert.equal(configured.binding.webhook.secret, undefined);
+  assert.equal(configured.hint, null);
 
   const filePath = grokBotBindingPathForProfile(profiles[0].homeDir);
   await recordGrokBotWebhookDelivery(filePath, {
@@ -170,6 +173,8 @@ test('webhook requires https, roundtrips, and clears with its delivery ledger', 
   const withLedger = await readGrokBotBinding(filePath);
   assert.equal(withLedger.lastWebhookDelivery.status, 'failed');
   assert.equal(withLedger.lastWebhookDelivery.error, 'HTTP 502');
+  const failedStatus = await getGrokBotBindingStatus({ systemHomeDir: systemHome, from: 'nori' });
+  assert.match(failedStatus.hint, /Last webhook delivery failed \(HTTP 502\)/);
 
   const cleared = await configureGrokBotWebhook({ systemHomeDir: systemHome, from: 'nori', clear: true });
   assert.equal(cleared.binding.webhook, null);

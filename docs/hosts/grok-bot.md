@@ -68,7 +68,10 @@ Rules enforced by the CLI:
 `metabot host binding doctor` is read-only: it lists every profile with its
 bound assistant id, globalMetaId, webhook state (`ok` after a successful
 delivery, `pending` once configured, `failed` with the last error,
-`not_configured`), and issues such as a duplicate assistant id.
+`not_configured`), and issues such as a duplicate assistant id. The `status`
+and `bind` results also carry a machine-readable `hint` field that points a
+bound-but-webhookless assistant at the exact `host binding webhook` command,
+so the next step is discoverable even without reading the skill.
 
 ## New assistants bind themselves on their first turn
 
