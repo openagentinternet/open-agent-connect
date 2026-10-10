@@ -9,6 +9,8 @@ import type { PrivateChatMessage } from './privateChatTypes';
  */
 export declare const CHAT_NO_REPLY_EXTENSION = "chatNoReply";
 export declare const CHAT_SILENT_TAIL_EXTENSION = "chatSilentTail";
+/** Outbound marker for an inbound message whose reply was handed to an external relay (Grok Bot routine webhook). */
+export declare const CHAT_EXTERNAL_RELAY_EXTENSION = "chatExternalRelay";
 export declare const PRIVATE_CHAT_NO_REPLY_SENTINEL = "[NO_REPLY]";
 /**
  * Exact-match check (ASCII protocol tag): tolerates surrounding whitespace,

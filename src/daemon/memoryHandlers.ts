@@ -16,6 +16,7 @@ import path from 'node:path';
 import { commandFailed, commandSuccess } from '../core/contracts/commandResult';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createHostFirstCompletion } from '../core/llm/hostLlmExecutorBridge';
+import { createGrokBotWebhookCompletion } from '../core/host/grokBotLlmChannel';
 import type { LlmExecutor } from '../core/llm/executor';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
@@ -438,6 +439,12 @@ export function createMemoryDaemonHandlers(
           timeoutMs: HYGIENE_LLM_TIMEOUT_MS,
         })({ botSlug: slug, system: request.system, user: request.user });
         if (hostText !== null) return hostText;
+        // Grok Bot-bound profiles delegate through the assistant's routine webhook.
+        const grokBotText = await createGrokBotWebhookCompletion({
+          homeDir: paths.profileRoot,
+          timeoutMs: HYGIENE_LLM_TIMEOUT_MS,
+        })({ botSlug: slug, system: request.system, user: request.user });
+        if (grokBotText !== null) return grokBotText;
         if (!llmExecutor) return null;
         const outcome = await runLlmPromptWithRuntimeFallback({
           runtimeResolver,

@@ -30,6 +30,7 @@ import {
 } from '../core/schedule/store';
 import { runScheduledTask } from '../core/schedule/service';
 import { createHostFirstCompletion } from '../core/llm/hostLlmExecutorBridge';
+import { createGrokBotWebhookCompletion } from '../core/host/grokBotLlmChannel';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
@@ -111,6 +112,12 @@ export function createScheduleDaemonHandlers(input: ScheduleDaemonHandlersInput)
         timeoutMs: SCHEDULE_RUN_LLM_TIMEOUT_MS,
       })({ botSlug: slug, system: turn.systemPrompt, user: turn.prompt });
       if (hostText !== null) return { ok: true as const, output: hostText };
+      // Grok Bot-bound profiles delegate through the assistant's routine webhook.
+      const grokBotText = await createGrokBotWebhookCompletion({
+        homeDir: paths.profileRoot,
+        timeoutMs: SCHEDULE_RUN_LLM_TIMEOUT_MS,
+      })({ botSlug: slug, system: turn.systemPrompt, user: turn.prompt });
+      if (grokBotText !== null) return { ok: true as const, output: grokBotText };
       const outcome = await runLlmPromptWithRuntimeFallback({
         runtimeResolver,
         llmExecutor,

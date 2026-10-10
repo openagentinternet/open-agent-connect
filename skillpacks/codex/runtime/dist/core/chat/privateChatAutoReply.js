@@ -274,14 +274,20 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             const timestamp = getNow();
             const extensions = input.marker === 'no_reply'
                 ? { [privateChatLoopGuards_1.CHAT_NO_REPLY_EXTENSION]: true }
-                : { [privateChatLoopGuards_1.CHAT_SILENT_TAIL_EXTENSION]: true };
+                : input.marker === 'external_relay'
+                    ? { [privateChatLoopGuards_1.CHAT_EXTERNAL_RELAY_EXTENSION]: input.relay ?? 'external' }
+                    : { [privateChatLoopGuards_1.CHAT_SILENT_TAIL_EXTENSION]: true };
             extensions.chatSilentTailForMessageId = input.triggerMessageId;
             const markerRecord = {
                 conversationId: input.conversation.conversationId,
                 messageId: buildMessageId(timestamp),
                 direction: 'outbound',
                 senderGlobalMetaId: input.selfGlobalMetaId,
-                content: input.marker === 'no_reply' ? '[NO_REPLY]' : '',
+                content: input.marker === 'no_reply'
+                    ? '[NO_REPLY]'
+                    : input.marker === 'external_relay'
+                        ? `[Relayed via ${input.relay ?? 'external relay'}]`
+                        : '',
                 messagePinId: null,
                 extensions,
                 timestamp,
@@ -1095,6 +1101,81 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
         wakeLoopTimer = null;
     }
     return {
+        async recordExternallyRelayedInbound(message, relay) {
+            const selfGlobalMetaId = await deps.selfGlobalMetaId();
+            if (!selfGlobalMetaId)
+                return false;
+            const now = getNow();
+            const peerGlobalMetaId = normalizeText(message.fromGlobalMetaId);
+            if (!peerGlobalMetaId)
+                return false;
+            const conversationId = buildConversationId(selfGlobalMetaId, peerGlobalMetaId);
+            const inboundTimestamp = normalizeTimestampMs(message.timestamp) || now;
+            let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId) ?? {
+                conversationId,
+                peerGlobalMetaId,
+                peerName: null,
+                topic: null,
+                strategyId: config.defaultStrategyId,
+                state: 'active',
+                turnCount: 0,
+                lastDirection: 'inbound',
+                createdAt: now,
+                updatedAt: now,
+                pendingGuidanceText: null,
+                pendingGuidanceCreatedAt: null,
+                pendingGuidanceLeaseId: null,
+                pendingGuidanceLeaseExpiresAt: null,
+            };
+            const inboundWireContent = unwrapPrivateChatContent(message.content);
+            const fileAttachment = (0, privateChat_2.parsePrivateFileChatContent)(inboundWireContent.content);
+            const inboundMessageRecord = {
+                conversationId,
+                messageId: message.messagePinId || buildMessageId(now),
+                direction: 'inbound',
+                senderGlobalMetaId: peerGlobalMetaId,
+                content: fileAttachment
+                    ? `[File message: ${fileAttachment.attachment}]`
+                    : inboundWireContent.content,
+                messagePinId: message.messagePinId,
+                extensions: inboundWireContent.extensions,
+                timestamp: inboundTimestamp,
+            };
+            const appendedInboundMessages = await deps.stateStore.appendMessages([inboundMessageRecord]);
+            if (appendedInboundMessages.length === 0) {
+                return false;
+            }
+            conversation = { ...conversation, lastDirection: 'inbound', updatedAt: now };
+            await deps.stateStore.upsertConversation(conversation);
+            await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+                paths: deps.paths,
+                local: { globalMetaId: selfGlobalMetaId },
+                peer: {
+                    globalMetaId: peerGlobalMetaId,
+                    chatPublicKey: message.fromChatPublicKey,
+                },
+                message: {
+                    messageId: inboundMessageRecord.messageId,
+                    direction: 'incoming',
+                    content: fileAttachment ? fileAttachment.attachment : inboundMessageRecord.content,
+                    contentType: fileAttachment ? fileAttachment.fileType : message.contentType,
+                    pinId: inboundMessageRecord.messagePinId,
+                    timestamp: inboundMessageRecord.timestamp,
+                    raw: message.rawMessage,
+                },
+            }, deps.a2aConversationPersister);
+            // The reply is owned by the external relay (the Grok Bot dialog), so the
+            // conversation tail is handled locally: no backfill re-drive, no
+            // unanswered-tail recovery.
+            await recordSilentTail({
+                conversation,
+                selfGlobalMetaId,
+                marker: 'external_relay',
+                relay,
+                triggerMessageId: inboundMessageRecord.messageId,
+            });
+            return true;
+        },
         async retryPendingInboundMessage(peerGlobalMetaId) {
             if (!config.enabled)
                 return false;

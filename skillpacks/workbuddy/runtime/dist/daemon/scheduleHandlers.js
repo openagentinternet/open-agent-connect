@@ -21,6 +21,7 @@ const paths_1 = require("../core/state/paths");
 const store_1 = require("../core/schedule/store");
 const service_1 = require("../core/schedule/service");
 const hostLlmExecutorBridge_1 = require("../core/llm/hostLlmExecutorBridge");
+const grokBotLlmChannel_1 = require("../core/host/grokBotLlmChannel");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
@@ -80,6 +81,13 @@ function createScheduleDaemonHandlers(input) {
             })({ botSlug: slug, system: turn.systemPrompt, user: turn.prompt });
             if (hostText !== null)
                 return { ok: true, output: hostText };
+            // Grok Bot-bound profiles delegate through the assistant's routine webhook.
+            const grokBotText = await (0, grokBotLlmChannel_1.createGrokBotWebhookCompletion)({
+                homeDir: paths.profileRoot,
+                timeoutMs: SCHEDULE_RUN_LLM_TIMEOUT_MS,
+            })({ botSlug: slug, system: turn.systemPrompt, user: turn.prompt });
+            if (grokBotText !== null)
+                return { ok: true, output: grokBotText };
             const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
                 runtimeResolver,
                 llmExecutor,

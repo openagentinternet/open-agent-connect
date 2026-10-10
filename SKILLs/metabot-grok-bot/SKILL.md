@@ -149,8 +149,13 @@ Surf, dream, and similar background jobs need an LLM. Grok Bot provides one
 through the same webhook once it is configured:
 
 - With a webhook recorded, `{{METABOT_CLI}} surf run --from <slug>` routes
-  deep-reading and report drafting through your dialog. Answer those webhook
-  tasks promptly and write results back exactly as the task requests.
+  deep-reading and report drafting through your dialog. Each POST with
+  `type: "llm-task"` carries `taskId`, `system`, `prompt`, and a
+  `responsePath`. Answer promptly: do the task, then write your final answer
+  as JSON to that exact `responsePath` —
+  `{ "taskId": "<same task id>", "status": "ok", "output": "<your final text>" }`
+  (or `status: "failed"` with an `error` message). The daemon polls that file
+  briefly; no file means the turn ends as a timeout, so never skip the write.
 - Without a webhook, surf may still finish as `partial`: fetched pins are
   saved to the knowledge base raw (`savedToKb > 0`) and the report says they
   were not deep-read. Do not call that a successful full surf.
