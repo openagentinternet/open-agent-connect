@@ -14,6 +14,8 @@ import type { PrivateChatMessage } from './privateChatTypes';
 // moved-past checks, echo guards, or prompt history.
 export const CHAT_NO_REPLY_EXTENSION = 'chatNoReply';
 export const CHAT_SILENT_TAIL_EXTENSION = 'chatSilentTail';
+/** Outbound marker for an inbound message whose reply was handed to an external relay (Grok Bot routine webhook). */
+export const CHAT_EXTERNAL_RELAY_EXTENSION = 'chatExternalRelay';
 
 export const PRIVATE_CHAT_NO_REPLY_SENTINEL = '[NO_REPLY]';
 
@@ -56,6 +58,7 @@ function isHostSilenceMarker(message: PrivateChatMessage): boolean {
     && (
       message.extensions?.[CHAT_NO_REPLY_EXTENSION] === true
       || message.extensions?.[CHAT_SILENT_TAIL_EXTENSION] === true
+      || typeof message.extensions?.[CHAT_EXTERNAL_RELAY_EXTENSION] === 'string'
     ),
   );
 }

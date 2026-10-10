@@ -1873,8 +1873,10 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
             if (!orchestrator)
                 return;
             if (!input.handleOrderProtocolMessageForProfile) {
+                const genericMessage = normalizeDispatcherPrivateChatMessage(message);
                 if ((0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind !== 'order_protocol'
-                    && await routeInboundViaGrokBotWebhook(profile.homeDir, normalizeDispatcherPrivateChatMessage(message))) {
+                    && await routeInboundViaGrokBotWebhook(profile.homeDir, genericMessage)) {
+                    await orchestrator.recordExternallyRelayedInbound?.(genericMessage, 'grok-bot-webhook')?.catch(() => undefined);
                     return;
                 }
                 await orchestrator.handleInboundMessage(message);
@@ -1884,6 +1886,7 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
                 handleOrderProtocolMessage: async (orderMessage) => input.handleOrderProtocolMessageForProfile(profile, orderMessage),
                 handleGenericPrivateChatMessage: async (genericMessage) => {
                     if (await routeInboundViaGrokBotWebhook(profile.homeDir, genericMessage)) {
+                        await orchestrator.recordExternallyRelayedInbound?.(genericMessage, 'grok-bot-webhook')?.catch(() => undefined);
                         return;
                     }
                     await orchestrator.handleInboundMessage(genericMessage);
@@ -5765,6 +5768,7 @@ async function serveCliDaemonProcess(context) {
                     dshPairConfigured: Boolean(binding?.dshLlmProvider?.trim() && binding?.dshLlmModel?.trim()),
                     grokBotBound: Boolean(grokBotBinding && (0, grokBotBinding_1.isGrokBotBound)(grokBotBinding)),
                     grokBotWebhookConfigured: Boolean(grokBotBinding?.webhook),
+                    grokBotLastWebhookDelivery: grokBotBinding?.lastWebhookDelivery ?? null,
                     notes: hostLlmNotes,
                 };
             }
@@ -6553,6 +6557,7 @@ async function serveCliDaemonProcess(context) {
         handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
         handleGenericPrivateChatMessage: async (message) => {
             if (await routeInboundViaGrokBotWebhook(homeDir, message)) {
+                await chatAutoReplyOrchestrator.recordExternallyRelayedInbound?.(message, 'grok-bot-webhook')?.catch(() => undefined);
                 return;
             }
             await chatAutoReplyOrchestrator.handleInboundMessage(message);

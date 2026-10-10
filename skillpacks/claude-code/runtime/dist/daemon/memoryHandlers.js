@@ -20,6 +20,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../core/contracts/commandResult");
 const chatPersonaLoader_1 = require("../core/chat/chatPersonaLoader");
 const hostLlmExecutorBridge_1 = require("../core/llm/hostLlmExecutorBridge");
+const grokBotLlmChannel_1 = require("../core/host/grokBotLlmChannel");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
@@ -422,6 +423,13 @@ function createMemoryDaemonHandlers(input) {
                 })({ botSlug: slug, system: request.system, user: request.user });
                 if (hostText !== null)
                     return hostText;
+                // Grok Bot-bound profiles delegate through the assistant's routine webhook.
+                const grokBotText = await (0, grokBotLlmChannel_1.createGrokBotWebhookCompletion)({
+                    homeDir: paths.profileRoot,
+                    timeoutMs: HYGIENE_LLM_TIMEOUT_MS,
+                })({ botSlug: slug, system: request.system, user: request.user });
+                if (grokBotText !== null)
+                    return grokBotText;
                 if (!llmExecutor)
                     return null;
                 const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({

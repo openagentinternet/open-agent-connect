@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PRIVATE_CHAT_ECHO_GUARD_MIN_REPEATS = exports.PRIVATE_CHAT_NO_REPLY_SENTINEL = exports.CHAT_SILENT_TAIL_EXTENSION = exports.CHAT_NO_REPLY_EXTENSION = void 0;
+exports.PRIVATE_CHAT_ECHO_GUARD_MIN_REPEATS = exports.PRIVATE_CHAT_NO_REPLY_SENTINEL = exports.CHAT_EXTERNAL_RELAY_EXTENSION = exports.CHAT_SILENT_TAIL_EXTENSION = exports.CHAT_NO_REPLY_EXTENSION = void 0;
 exports.isPrivateChatNoReplySentinel = isPrivateChatNoReplySentinel;
 exports.shouldSkipPrivateChatAutoReplyText = shouldSkipPrivateChatAutoReplyText;
 exports.wouldCreatePrivateChatEchoLoop = wouldCreatePrivateChatEchoLoop;
@@ -21,6 +21,8 @@ exports.selectPrivateChatPromptContextMessages = selectPrivateChatPromptContextM
 // moved-past checks, echo guards, or prompt history.
 exports.CHAT_NO_REPLY_EXTENSION = 'chatNoReply';
 exports.CHAT_SILENT_TAIL_EXTENSION = 'chatSilentTail';
+/** Outbound marker for an inbound message whose reply was handed to an external relay (Grok Bot routine webhook). */
+exports.CHAT_EXTERNAL_RELAY_EXTENSION = 'chatExternalRelay';
 exports.PRIVATE_CHAT_NO_REPLY_SENTINEL = '[NO_REPLY]';
 /**
  * Exact-match check (ASCII protocol tag): tolerates surrounding whitespace,
@@ -63,7 +65,8 @@ function shouldSkipPrivateChatAutoReplyText(value) {
 function isHostSilenceMarker(message) {
     return Boolean(message.direction === 'outbound'
         && (message.extensions?.[exports.CHAT_NO_REPLY_EXTENSION] === true
-            || message.extensions?.[exports.CHAT_SILENT_TAIL_EXTENSION] === true));
+            || message.extensions?.[exports.CHAT_SILENT_TAIL_EXTENSION] === true
+            || typeof message.extensions?.[exports.CHAT_EXTERNAL_RELAY_EXTENSION] === 'string'));
 }
 /**
  * Outbound records that count as delivered conversational text: host-side

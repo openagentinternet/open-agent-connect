@@ -26,6 +26,7 @@ const dreamService_1 = require("../core/memory/dreamService");
 const experiencePromptBlocks_1 = require("../core/memory/experiencePromptBlocks");
 const memoryStore_1 = require("../core/memory/memoryStore");
 const hostLlmExecutorBridge_1 = require("../core/llm/hostLlmExecutorBridge");
+const grokBotLlmChannel_1 = require("../core/host/grokBotLlmChannel");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
@@ -97,6 +98,22 @@ function createDreamDaemonHandlers(input) {
             });
             if (hostText !== null)
                 return hostText;
+            // Grok Bot-bound profiles delegate the same completion through the
+            // assistant's routine webhook (llm-task channel).
+            const grokBotText = await (0, grokBotLlmChannel_1.createGrokBotWebhookCompletion)({
+                homeDir: paths.profileRoot,
+                timeoutMs: DREAM_LLM_TIMEOUT_MS,
+                logWarning: (scope, message) => log(`${scope} ${message}`),
+            })({
+                botSlug: slug,
+                system: request.system,
+                user: request.user,
+                ...(Number.isFinite(request.maxOutputTokens) && request.maxOutputTokens > 0
+                    ? { maxTokens: request.maxOutputTokens }
+                    : {}),
+            });
+            if (grokBotText !== null)
+                return grokBotText;
             const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
                 runtimeResolver,
                 llmExecutor,

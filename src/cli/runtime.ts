@@ -2455,8 +2455,10 @@ export function createPrivateChatAutoReplyProfileDispatcher(
       const orchestrator = await getOrCreateOrchestrator(profile);
       if (!orchestrator) return;
       if (!input.handleOrderProtocolMessageForProfile) {
+        const genericMessage = normalizeDispatcherPrivateChatMessage(message);
         if (classifySimplemsgContent(message.content).kind !== 'order_protocol'
-          && await routeInboundViaGrokBotWebhook(profile.homeDir, normalizeDispatcherPrivateChatMessage(message))) {
+          && await routeInboundViaGrokBotWebhook(profile.homeDir, genericMessage)) {
+          await orchestrator.recordExternallyRelayedInbound?.(genericMessage, 'grok-bot-webhook')?.catch(() => undefined);
           return;
         }
         await orchestrator.handleInboundMessage(message);
@@ -2470,6 +2472,7 @@ export function createPrivateChatAutoReplyProfileDispatcher(
         ),
         handleGenericPrivateChatMessage: async (genericMessage) => {
           if (await routeInboundViaGrokBotWebhook(profile.homeDir, genericMessage)) {
+            await orchestrator.recordExternallyRelayedInbound?.(genericMessage, 'grok-bot-webhook')?.catch(() => undefined);
             return;
           }
           await orchestrator.handleInboundMessage(genericMessage);
@@ -6743,6 +6746,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
           dshPairConfigured: Boolean(binding?.dshLlmProvider?.trim() && binding?.dshLlmModel?.trim()),
           grokBotBound: Boolean(grokBotBinding && isGrokBotBound(grokBotBinding)),
           grokBotWebhookConfigured: Boolean(grokBotBinding?.webhook),
+          grokBotLastWebhookDelivery: grokBotBinding?.lastWebhookDelivery ?? null,
           notes: hostLlmNotes,
         };
       } catch {
@@ -7569,6 +7573,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     handleOrderProtocolMessage: handlers.services?.handleInboundOrderProtocolMessage,
     handleGenericPrivateChatMessage: async (message) => {
       if (await routeInboundViaGrokBotWebhook(homeDir, message)) {
+        await chatAutoReplyOrchestrator.recordExternallyRelayedInbound?.(message, 'grok-bot-webhook')?.catch(() => undefined);
         return;
       }
       await chatAutoReplyOrchestrator.handleInboundMessage(message);

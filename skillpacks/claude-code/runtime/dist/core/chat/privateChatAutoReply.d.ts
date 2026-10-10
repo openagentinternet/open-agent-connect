@@ -27,6 +27,15 @@ export interface PrivateChatAutoReplyDependencies {
 }
 export interface PrivateChatAutoReplyOrchestrator {
     handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
+    /**
+     * Records an inbound message whose reply was handed to an external relay
+     * (e.g. the Grok Bot routine webhook): the message joins the store (so
+     * backfill dedupe covers it) and a local-only relay marker flips the
+     * conversation tail to handled, so neither the sweep nor the
+     * unanswered-tail recovery re-drives it. Returns false when the message was
+     * already recorded (duplicate delivery).
+     */
+    recordExternallyRelayedInbound(message: PrivateChatInboundMessage, relay: string): Promise<boolean>;
     retryPendingInboundMessage(peerGlobalMetaId: string): Promise<boolean>;
     retryOutboundMessage(peerGlobalMetaId: string, message: PrivateChatMessage): Promise<boolean>;
     handleLocalGuidedTurn(peerGlobalMetaId: string, options?: {

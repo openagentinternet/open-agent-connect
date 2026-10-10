@@ -27,6 +27,7 @@ import {
 import { formatLocalDate } from '../core/memory/experiencePromptBlocks';
 import { createMemoryStore } from '../core/memory/memoryStore';
 import { createHostFirstCompletion } from '../core/llm/hostLlmExecutorBridge';
+import { createGrokBotWebhookCompletion } from '../core/host/grokBotLlmChannel';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
@@ -123,6 +124,21 @@ export function createDreamDaemonHandlers(
           : {}),
       });
       if (hostText !== null) return hostText;
+      // Grok Bot-bound profiles delegate the same completion through the
+      // assistant's routine webhook (llm-task channel).
+      const grokBotText = await createGrokBotWebhookCompletion({
+        homeDir: paths.profileRoot,
+        timeoutMs: DREAM_LLM_TIMEOUT_MS,
+        logWarning: (scope, message) => log(`${scope} ${message}`),
+      })({
+        botSlug: slug,
+        system: request.system,
+        user: request.user,
+        ...(Number.isFinite(request.maxOutputTokens) && request.maxOutputTokens > 0
+          ? { maxTokens: request.maxOutputTokens }
+          : {}),
+      });
+      if (grokBotText !== null) return grokBotText;
       const outcome = await runLlmPromptWithRuntimeFallback({
         runtimeResolver,
         llmExecutor,
