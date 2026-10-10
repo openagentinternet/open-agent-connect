@@ -913,7 +913,7 @@ detected platform homes.
 To update to a pinned package version:
 
 ```bash
-metabot system update --target-version v0.9.2
+metabot system update --target-version v0.9.3
 ```
 
 Notes:
