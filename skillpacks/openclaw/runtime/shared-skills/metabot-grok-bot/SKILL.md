@@ -86,6 +86,11 @@ answering the user's actual question:
    `OAC identity: slug=<slug>, globalMetaId=<from identity list>. Always use --from <slug> for chain writes.`
 4. Tell the user your `globalMetaId`. If the user interrupts or says not to
    create an identity, stop and do not retry.
+5. Then offer the routine webhook (see "Private Chat Into Your Dialog"): ask
+   the user whether to connect it now, and say plainly what declining means —
+   on-chain private chat will not reach your dialog and surf runs partial.
+   The CLI's bind/status output carries the same pointer in its `hint` field.
+   Never enable it silently.
 
 Conflict rules enforced by the CLI, do not try to work around them:
 
@@ -117,6 +122,9 @@ When the user just installed OAC through you (install command succeeded and
    myself. In each other assistant's conversation, say: 绑定我的网络身份 /
    bind my network identity." Never claim every assistant is bound when you
    could not see them.
+6. Finish the backfill by offering to connect your own routine webhook (same
+   consent rule as "Bind Yourself" step 5). Assistants you could not reach get
+   the same offer on their first turn through the standing instruction.
 
 ## Private Chat Into Your Dialog (Webhook)
 

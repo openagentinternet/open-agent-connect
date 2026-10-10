@@ -604,6 +604,7 @@ test('runCli manages the Grok Bot binding lifecycle for one profile', async (t) 
   assert.equal(bound.exitCode, 0);
   assert.equal(bound.payload.data.action, 'created');
   assert.equal(bound.payload.data.binding.assistantId, 'asst-1');
+  assert.match(bound.payload.data.hint, /Webhook not configured/);
 
   const hooked = await runHostCli(homeDir, [
     'host', 'binding', 'webhook', '--from', 'nori', '--url', 'https://grok.example.com/routine/abc', '--secret', 'tok',

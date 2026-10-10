@@ -48,6 +48,8 @@ export interface GrokBotBindingStatus {
     };
     bound: boolean;
     binding: RedactedGrokBotBinding;
+    /** Machine-readable next step for the calling assistant; null when nothing is pending. */
+    hint: string | null;
 }
 export declare function getGrokBotBindingStatus(input: {
     systemHomeDir: string;

@@ -179,9 +179,22 @@ async function resolveBindingProfile(input) {
     }
     return twinProfile;
 }
+function grokBotBindingHint(binding, slug) {
+    if (!binding.assistantId) {
+        return null;
+    }
+    if (!binding.webhook) {
+        return `Webhook not configured: on-chain private chat cannot reach this assistant's dialog and surf runs partial. After the user approves, record the routine webhook with: metabot host binding webhook --from ${slug} --url <https-url> [--secret <bearer-token>].`;
+    }
+    if (binding.lastWebhookDelivery?.status === 'failed') {
+        return `Last webhook delivery failed (${binding.lastWebhookDelivery.error ?? 'unknown error'}). Check the routine webhook URL/token and re-record it with metabot host binding webhook --from ${slug} --url <https-url>.`;
+    }
+    return null;
+}
 async function getGrokBotBindingStatus(input) {
     const profile = await resolveBindingProfile(input);
     const binding = await readGrokBotBinding(grokBotBindingPathForProfile(profile.homeDir));
+    const redacted = redactGrokBotBinding(binding);
     return {
         host: exports.GROK_BOT_HOST_ID,
         profile: {
@@ -191,7 +204,8 @@ async function getGrokBotBindingStatus(input) {
             globalMetaId: profile.globalMetaId,
         },
         bound: isGrokBotBound(binding),
-        binding: redactGrokBotBinding(binding),
+        binding: redacted,
+        hint: grokBotBindingHint(redacted, profile.slug),
     };
 }
 async function bindGrokBotAssistant(input) {
