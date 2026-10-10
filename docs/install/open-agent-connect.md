@@ -431,7 +431,10 @@ entries into multiple host-native skill trees.
 
 Grok Bot assistants run in the cloud and read skills from the app's own skill
 library, so the install is driven by the assistant itself from inside a
-conversation. Full background: `docs/hosts/grok-bot.md`.
+conversation. Everything lands on the assistant's own cloud machine — the OAC
+install, profiles, binding records, daemon, and webhook deliveries — not on
+the computer where you happen to be chatting from. Full background:
+`docs/hosts/grok-bot.md`.
 
 中文步骤：
 
