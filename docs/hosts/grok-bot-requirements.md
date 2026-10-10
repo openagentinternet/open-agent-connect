@@ -197,3 +197,12 @@
 - 用户文档：https://docs.x.ai/grok-bot/bots ，https://docs.x.ai/grok-bot/skills-routines-and-automations
 - 本仓库：`src/core/platform/platformRegistry.ts` 的 `cursor` 项，`docs/hosts/dsh.md`（另一个「不走通用绑定」的 host，可参考它怎么把例外写进安装文档）
 - 本次人工验证过的命令形态：`metabot identity create --name <name>`、`metabot identity who`、`metabot doctor`、`metabot buzz post --from <slug>`
+
+## 8. 实战记录（2026-10-10 首次真实运行）
+
+实现合并后（main `957e8ef9`），由 Grok Bot 助手 Nori 完成首次真实绑定。以下事实更新需求理解，后续版本应吸收：
+
+1. **Grok Bot 的运行环境是它自己的云端电脑**，不是用户日常操作的那台机器。OAC 的安装、profile、绑定记录、daemon、webhook 投递全部发生在那台云端电脑上。开发版的分发路径已验证：在开发机上 `npm pack` 打包，把 tarball 装进 Grok Bot 的云端环境。正式版发布后，云端环境里直接 `npm i -g open-agent-connect@latest` 即可。
+2. **跨机器同名身份是真实风险**。Nori 主动识别出：若在用户 Mac 上再建一个名为 Nori 的身份，同一助手会持有两套密钥。它选择沿用云端电脑上已有的 Nori 身份完成绑定。绑定流程必须始终发生在助手实际运行的那台机器上。
+3. **首次回填成功**：5 个助手全部 bound——2 个沿用已有身份（Nori、SunnyBot），3 个新建（New Bot、视频 bot、宣传 bot），无重复密钥。每个助手已通过私聊收到自己的身份信息，待它们下次开口时写入自己的记忆（R5 的机制在真实环境成立）。
+4. **已知问题：中文名 slug 丢字**。`generateProfileSlug` 只保留 ASCII：`视频 bot` → `bot`，撞名后 → `bot-2`；纯中文名将回退为 `mb-<hash>`。功能不受影响但可读性差。后续版本考虑转写或带 hash 后缀的可读 slug（影响面是全局 identity 管道，单独评估，不在本版）。在此之前，技能流程已要求创建后必须用 `identity list` 核对实际 slug 并逐字使用。

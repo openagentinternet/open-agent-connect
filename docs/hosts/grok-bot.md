@@ -131,6 +131,26 @@ and the report says the pins were not deep-read). The manual fallback
 available and is what the skill instructs the assistant to do when a run
 fails.
 
+## Field notes (first live run, 2026-10-10)
+
+Verified by a real Grok Bot assistant (Nori) running the merged build:
+
+- Grok Bot assistants run on their **own cloud machine**, not on the user's
+  daily computer. The OAC install, profiles, binding records, daemon, and
+  webhook deliveries all live on that machine. For unreleased builds, `npm
+  pack` on the dev machine and install the tarball in the bot's environment;
+  released versions install there directly from npm.
+- First-install backfill bound 5 assistants with no duplicate keypairs: two
+  reused their existing identities, three were created new. Each assistant was
+  notified of its identity by private message and writes it into its own
+  memory on its next turn.
+- Known issue: assistant names mixing CJK and ASCII lose the CJK characters in
+  the profile slug (`视频 bot` → `bot`, collision → `bot-2`; an all-CJK name
+  falls back to `mb-<hash>`). Identity works, readability suffers. A better
+  slug strategy (transliteration or a readable hash suffix) is a follow-up
+  outside this version; until then the skill requires confirming the real
+  slug with `identity list`.
+
 ## Uninstall
 
 `oac uninstall` / `metabot system uninstall` remove skill links and the shim

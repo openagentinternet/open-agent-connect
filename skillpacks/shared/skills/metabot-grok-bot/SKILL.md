@@ -78,6 +78,9 @@ answering the user's actual question:
    ```bash
    $HOME/.metabot/bin/metabot host binding bind --from <slug> --assistant-id <your assistant id> --assistant-name "<your assistant name>"
    ```
+   CJK names lose their non-ASCII characters in the slug (`视频 bot` becomes
+   `bot`, and a collision becomes `bot-2`): never guess the slug, always copy
+   it verbatim from `identity list` and use that slug in every `--from`.
 3. Persist the binding on your own side too — your assistant description is
    user-editable, so also write it into your durable memory:
    `OAC identity: slug=<slug>, globalMetaId=<from identity list>. Always use --from <slug> for chain writes.`
