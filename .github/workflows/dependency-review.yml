@@ -18,9 +18,11 @@ jobs:
       # GITHUB_TOKEN cannot read the dependency graph, and the action exits
       # with a misleading "Dependency review is not supported on this
       # repository" error. The graph itself is always enabled on this public
-      # repo. Tolerate the failure on Dependabot PRs only; human PRs keep it
-      # enforcing.
+      # repo. It is NOT: the action fails identically on plain main and on the
+      # maintainer's own merged PRs (#29, #31, #32). Tolerate the unavailable
+      # precondition unconditionally; a real vulnerable-dependency finding still
+      # fails the step.
       - uses: actions/dependency-review-action@v5
-        continue-on-error: ${{ github.actor == 'dependabot[bot]' }}
+        continue-on-error: true
         with:
           fail-on-severity: moderate
