@@ -19,6 +19,7 @@ import { bindMetawebToolInstall } from './metaweb-tools.js'
 import { BotChangeEventHub, streamBotEvents, watchBotRegistry } from './bot-events.js'
 import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
+import { bindWalletToolInstall } from './wallet-tools.js'
 import { bindQaToolInstall } from './qa-tools.js'
 import { bindMetaprotocolToolInstall } from './metaprotocol-tools.js'
 import { bindSurfToolInstall } from './surf-tools.js'
@@ -878,6 +879,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindMetawebToolInstall(ctx)
   bindSkillToolInstall(ctx)
   bindSimpleNoteToolInstall(ctx)
+  bindWalletToolInstall(ctx)
   bindQaToolInstall(ctx)
   bindMetaprotocolToolInstall(ctx)
   bindSurfToolInstall(ctx)
