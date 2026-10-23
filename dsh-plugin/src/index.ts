@@ -20,6 +20,7 @@ import { BotChangeEventHub, streamBotEvents, watchBotRegistry } from './bot-even
 import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { bindQaToolInstall } from './qa-tools.js'
+import { bindPrivateChatToolInstall } from './private-chat-tools.js'
 import { bindMetaprotocolToolInstall } from './metaprotocol-tools.js'
 import { bindSurfToolInstall } from './surf-tools.js'
 import { dispatchSurfRoutes } from './surf-routes.js'
@@ -879,6 +880,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindSkillToolInstall(ctx)
   bindSimpleNoteToolInstall(ctx)
   bindQaToolInstall(ctx)
+  bindPrivateChatToolInstall(ctx)
   bindMetaprotocolToolInstall(ctx)
   bindSurfToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
