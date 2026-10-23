@@ -25,6 +25,7 @@ import { bindSurfToolInstall } from './surf-tools.js'
 import { dispatchSurfRoutes } from './surf-routes.js'
 import { dispatchScheduleRoutes, migrateLegacyScheduleTasks } from './schedule-routes.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
+import { bindLongtaskToolInstall } from './longtask-tools.js'
 import { bindMediaDescriptionTools } from './vision-tools.js'
 import { getAutoReplyStatus, getLlmHostStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import {
@@ -884,6 +885,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindKnowledgeBaseToolInstall(ctx)
   bindGlobalKnowledgeToolInstall(ctx)
   bindMediaDescriptionTools(ctx)
+  bindLongtaskToolInstall(ctx)
 
   // Source-session relay: drain group-task milestones back into the chat that
   // originated each task ("哪里发起哪里结束"), on a host-lifetime timer.

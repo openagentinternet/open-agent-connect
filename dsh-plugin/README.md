@@ -598,6 +598,34 @@ down, the tick falls back to the `metabot schedule due|claim|complete` CLI
 verbs — a dead daemon cannot race a claim. Per-run bookkeeping lives in
 `<profile>/.runtime/schedule/schedule.json`.
 
+## Long-term task board: `longtask_*` tools, and how they differ from the IDBots board
+
+Six native tools bridge the OAC CLI `metabot longtask …` surface (flag-only,
+daemon-free — the handlers run in-process against the profile's file-backed
+store): **`longtask_board`** (derived cards: column / progress / current
+subtask), **`longtask_show`** (one task with subtasks and the trimmed
+journal), **`longtask_create`** (tool-generated `lt-…` id; title + goal),
+**`longtask_add_subtask`** (tool-generated `st-…` id, auto ordinal max+1,
+`dependsOn`), **`longtask_set_status`** (the 7-status enum with a soft
+transition warning), and **`longtask_advance`** (one planner pass).
+
+This is an HONEST BRIDGE, not parity — differences vs the IDBots long-term
+task board, condensed:
+
+| IDBots (17-verb governed lifecycle) | this surface (6 verbs) |
+| --- | --- |
+| `task_create` drafts, owner confirms in prose, `task_activate` flips live | `longtask_create` goes live as `active` immediately — no draft stage |
+| accept/propose/reject/skip are gated (owner-only rule, acceptance-delegate switch, evidence requirement) | collapsed into `longtask_set_status`, **ungated** — acceptance discipline lives in the tool description and the agent; unusual transitions warn but are not refused |
+| sub-projects carry acceptanceCriteria / evidence / waitNote / waitUntil / channel / notes | subtasks carry only `{ordinal, title, status, dependsOn}` (the store's `expectedMinutes` is not settable through this surface yet) — criteria live in the task goal text |
+| waiting on the owner parks the card behind a host heartbeat that re-presents the brief | the owner is in the chat session; present decisions in-band (no heartbeat exists here) |
+| journal notes and stage moves (activate/pause/cancel) are first-class verbs | not available as tools yet (store verbs exist; the CLI verbs land separately) |
+| `advance` escalates into a cowork session | `longtask_advance` only records push decisions in the journal + nudge bookkeeping — it delivers nothing anywhere |
+| `delegation_anchor` renders the worker brief | not available yet |
+
+`twin_task_*` (round 1) remains the orchestration face — delegate/reassign/
+cancel of worker sessions — while `longtask_*` is the persistent task BOARD:
+different nouns, different stores, no overlap.
+
 ## MetaWeb learning: search, install, demo
 
 `oac-*` agents can learn from the AI internet end-to-end. `search_metaweb` /
