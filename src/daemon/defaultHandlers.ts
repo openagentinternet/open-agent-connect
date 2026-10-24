@@ -269,6 +269,11 @@ import {
   type SimpleNoteNetwork,
 } from '../core/simplenote/publish';
 import {
+  GroupChatPublishError,
+  joinGroupChat,
+  sendGroupChatMessage,
+} from '../core/group/groupChatPins';
+import {
   formatLikePinResult,
   formatSimpleAnswerResult,
   formatSimpleQuestionResult,
@@ -17769,6 +17774,90 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed(
             'history_fetch_failed',
             error instanceof Error ? error.message : 'Failed to fetch private chat history.'
+          );
+        }
+      },
+      // Group chat primitives (SimpleGroupJoin / SimpleGroupChat) — the two
+      // on-chain actions of the IDBots group_chat tool. The join body carries
+      // {groupId, state: 1} with referrer/k only when non-empty (IDBots
+      // main.ts tool-path omission form); the send body carries the
+      // AES-encrypted message (the CALLER encrypts with the group crypto —
+      // the core builder refuses plaintext-looking content).
+      groupJoin: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before joining a group.');
+        }
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await joinGroupChat(actor.signer, {
+            groupId: normalizeText(rawInput.groupId ?? rawInput.group_id),
+            referrer: normalizeText(rawInput.referrer),
+            k: normalizeText(rawInput.k),
+            network,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          const fallbackCode = error instanceof GroupChatPublishError ? error.code : 'group_join_failed';
+          return await commandFailedOrBroadcastUnknown(
+            error,
+            'group-join',
+            stableChainWriteHash('group-join', [
+              normalizeText(rawInput.groupId ?? rawInput.group_id),
+              normalizeText(rawInput.referrer),
+              normalizeText(rawInput.k),
+              await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+            ]),
+            fallbackCode,
+          );
+        }
+      },
+      groupSend: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before sending a group message.');
+        }
+        // The on-chain nickName is ALWAYS the acting bot's registered identity
+        // name, resolved here from the runtime state — a request-supplied
+        // nickName is deliberately never read (IDBots incident: sender_name
+        // "claude bot" on an otherwise-correct pin). Unresolvable name falls
+        // back to the empty string (IDBots `?? ''` semantics).
+        const nickName = normalizeText(state.identity.name);
+        const requestMention = Array.isArray(rawInput.mention)
+          ? rawInput.mention.map((entry: unknown) => normalizeText(entry)).filter(Boolean)
+          : [];
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await sendGroupChatMessage(actor.signer, {
+            groupId: normalizeText(rawInput.groupId ?? rawInput.group_id),
+            content: normalizeText(rawInput.content),
+            nickName,
+            replyPin: normalizeText(rawInput.replyPin ?? rawInput.reply_pin) || undefined,
+            channelId: normalizeText(rawInput.channelId ?? rawInput.channel_id) || undefined,
+            mention: requestMention.length ? requestMention : undefined,
+            network,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          const fallbackCode = error instanceof GroupChatPublishError ? error.code : 'group_send_failed';
+          return await commandFailedOrBroadcastUnknown(
+            error,
+            'group-send',
+            stableChainWriteHash('group-send', [
+              normalizeText(rawInput.groupId ?? rawInput.group_id),
+              normalizeText(rawInput.content),
+              nickName,
+              await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+            ]),
+            fallbackCode,
           );
         }
       },

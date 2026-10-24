@@ -270,6 +270,8 @@ export interface MetabotDaemonHttpHandlers {
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    groupJoin?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    groupSend?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     privateFile?: (input: {
       from?: string;
       to: string;

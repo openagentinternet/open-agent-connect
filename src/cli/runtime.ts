@@ -4567,6 +4567,18 @@ return {
           input,
         );
       },
+      groupJoin: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/chat/group/join',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      groupSend: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/chat/group/send',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       interim: async (input) => {
         // Bot-initiated interim updates ride the ticket-gated daemon route;
         // inside a reply turn this is the ONLY sanctioned send surface (the

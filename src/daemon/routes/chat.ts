@@ -120,6 +120,32 @@ export const handleChatRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/chat/group/join') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+    const input = await context.readJsonBody();
+    const result = handlers.chat?.groupJoin
+      ? await handlers.chat.groupJoin(input)
+      : commandFailed('not_implemented', 'Chat group join handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
+  if (url.pathname === '/api/chat/group/send') {
+    if (req.method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+    const input = await context.readJsonBody();
+    const result = handlers.chat?.groupSend
+      ? await handlers.chat.groupSend(input)
+      : commandFailed('not_implemented', 'Chat group send handler is not configured.');
+    context.sendJson(200, result);
+    return true;
+  }
+
   if (url.pathname === '/api/chat/auto-reply/status') {
     if (req.method !== 'GET') {
       context.sendMethodNotAllowed(['GET']);

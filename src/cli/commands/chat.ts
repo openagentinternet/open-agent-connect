@@ -64,6 +64,34 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
     });
   }
 
+  if (args[0] === 'group') {
+    const subAction = args[1];
+    if (subAction !== 'join' && subAction !== 'send') {
+      return commandUnknownSubcommand(`chat group ${redactSensitiveArgs(args.slice(1)).join(' ')}`.trim());
+    }
+    const requestFile = readFlagValue(args, '--request-file');
+    if (!requestFile) {
+      return commandMissingFlag('--request-file');
+    }
+    const handler = subAction === 'join'
+      ? context.dependencies.chat?.groupJoin
+      : context.dependencies.chat?.groupSend;
+    if (!handler) {
+      return commandFailed('not_implemented', `Chat group ${subAction} handler is not configured.`);
+    }
+    const from = readFromFlag(args);
+    const chainFlag = readChainWriteFlag(args);
+    if (chainFlag.error) {
+      return chainFlag.error;
+    }
+    const request = await readJsonFile(context, requestFile);
+    return handler({
+      ...request,
+      ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+      ...(from ? { from } : {}),
+    });
+  }
+
   if (args[0] === 'conversations') {
     const handler = context.dependencies.chat?.conversations;
     if (!handler) {

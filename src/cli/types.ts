@@ -187,6 +187,8 @@ export interface CliDependencies {
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    groupJoin?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    groupSend?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     interim?: (input: { turnFile: string; text: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     conversations?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     messages?: (input: { conversationId: string; limit?: number; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
