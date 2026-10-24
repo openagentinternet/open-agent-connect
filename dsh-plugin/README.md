@@ -598,6 +598,41 @@ down, the tick falls back to the `metabot schedule due|claim|complete` CLI
 verbs — a dead daemon cannot race a claim. Per-run bookkeeping lives in
 `<profile>/.runtime/schedule/schedule.json`.
 
+## Long-term task board: `longtask_*` tools, and how they differ from the IDBots board
+
+Eleven native tools bridge the OAC CLI `metabot longtask …` surface (flag-only,
+daemon-free — the handlers run in-process against the profile's file-backed
+store): **`longtask_board`** (derived cards: column / progress / current
+subtask), **`longtask_show`** (one task with subtasks and the trimmed
+journal), **`longtask_create`** (tool-generated `lt-…` id; title + goal),
+**`longtask_add_subtask`** (tool-generated `st-…` id, auto ordinal max+1,
+`dependsOn`), **`longtask_set_status`** (the 7-status enum with a soft
+transition warning), **`longtask_advance`** (one planner pass), plus the five
+lifecycle tools: **`longtask_note`** (journal verb — the carrier for verdicts,
+wait briefs and skip/reject reasons), **`longtask_set_stage`**
+(active/paused/cancelled/done; the stage move is journalled), **`longtask_wait`**
+(park a subtask on the owner's decision or an external condition and journal
+the brief — two CLI calls in one tool), **`longtask_unblock`** (resume a parked
+subtask, optional journal note), and **`longtask_delegation_anchor`** (render
+the `<longterm_anchor>` context block for delegating one sub-project).
+
+This is an HONEST BRIDGE, not parity — differences vs the IDBots long-term
+task board, condensed:
+
+| IDBots (17-verb governed lifecycle) | this surface (11 verbs) |
+| --- | --- |
+| `task_create` drafts, owner confirms in prose, `task_activate` flips live | `longtask_create` goes live as `active` immediately — no draft stage; `longtask_set_stage` moves active/paused/cancelled/done afterwards (journalled, but ungated) |
+| accept/propose/reject/skip are gated (owner-only rule, acceptance-delegate switch, evidence requirement) | collapsed into `longtask_set_status`, **ungated** — acceptance discipline lives in the tool description and the agent; unusual transitions warn but are not refused |
+| `task_complete` closes at goal level (skip-remaining + evidence + two-level summary) | no equivalent — `longtask_set_stage done` only flips the stage flag; nothing verifies sub-projects or records goal-level evidence |
+| sub-projects carry acceptanceCriteria / evidence / waitNote / waitUntil / channel / notes | subtasks carry only `{ordinal, title, status, dependsOn}` (`expectedMinutes` is settable via the CLI `--expected-minutes` flag but not through this tool surface yet) — criteria live in the task goal text; `longtask_update`-style title/goal rewrite is CLI-only (`metabot longtask update`) |
+| waiting on the owner parks the card behind a host heartbeat that re-presents the brief | **degraded form**: `longtask_wait` sets waiting_owner/waiting_external + journals the brief (six-section discipline in its description) and RETURNS the brief so the agent presents it in the same turn — no heartbeat re-presents it later; `waitUntil` has no store column, it rides the journaled note text and nothing re-checks it automatically |
+| `advance` escalates into a cowork session | `longtask_advance` only records push decisions in the journal + nudge bookkeeping — it delivers nothing anywhere |
+| `delegation_anchor` renders the worker brief from board fields | `longtask_delegation_anchor` renders the same template from `longtask_show` output; columns this board lacks degrade to explicit placeholders |
+
+`twin_task_*` (round 1) remains the orchestration face — delegate/reassign/
+cancel of worker sessions — while `longtask_*` is the persistent task BOARD:
+different nouns, different stores, no overlap.
+
 ## MetaWeb learning: search, install, demo
 
 `oac-*` agents can learn from the AI internet end-to-end. `search_metaweb` /
