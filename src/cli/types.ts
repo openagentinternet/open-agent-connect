@@ -22,6 +22,9 @@ export interface CliDependencies {
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  comment?: {
+    pin?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   simplenote?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };

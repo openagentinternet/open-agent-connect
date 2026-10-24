@@ -4085,6 +4085,14 @@ return {
         input,
       ),
     },
+    comment: {
+      pin: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/comment/pin',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+    },
     simplenote: {
       post: async (input) => requestJsonForSelectedActor(
         'POST',
@@ -6726,6 +6734,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
   return {
     config: { ...defaults.config, ...provided.config },
     buzz: { ...defaults.buzz, ...provided.buzz },
+    comment: { ...defaults.comment, ...provided.comment },
     browser: { ...defaults.browser, ...provided.browser },
     metaapp: { ...defaults.metaapp, ...provided.metaapp },
     metaid: { ...defaults.metaid, ...provided.metaid },

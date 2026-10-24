@@ -269,6 +269,10 @@ import {
   type SimpleNoteNetwork,
 } from '../core/simplenote/publish';
 import {
+  CommentPublishError,
+  publishCommentPin,
+} from '../core/comment/publishCommentPin';
+import {
   formatLikePinResult,
   formatSimpleAnswerResult,
   formatSimpleQuestionResult,
@@ -14385,6 +14389,41 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ...readStringArray(rawInput.attachments),
             ]),
             'buzz_post_failed',
+          );
+        }
+      },
+    },
+    // comment_pin: one paycomment pin — a public thread reply on ANY pin
+    // (payload-only write, no upload), same posture as the qanda like route.
+    comment: {
+      pin: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before commenting.');
+        }
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await publishCommentPin(actor.signer, {
+            pinId: normalizeText(rawInput.pinId ?? rawInput.pin_id),
+            content: normalizeText(rawInput.content),
+            network,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          const fallbackCode = error instanceof CommentPublishError ? error.code : 'comment_pin_failed';
+          return await commandFailedOrBroadcastUnknown(
+            error,
+            'comment',
+            stableChainWriteHash('comment', [
+              normalizeText(rawInput.pinId ?? rawInput.pin_id),
+              normalizeText(rawInput.content),
+              await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+            ]),
+            fallbackCode,
           );
         }
       },

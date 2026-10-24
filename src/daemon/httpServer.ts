@@ -7,6 +7,7 @@ import { commandFailed } from '../core/contracts/commandResult';
 import { handleConfigRoutes } from './routes/config';
 import { handleTrafficRoutes } from './routes/traffic';
 import { handleBuzzRoutes } from './routes/buzz';
+import { handleCommentRoutes } from './routes/comment';
 import { handleSimpleNoteRoutes } from './routes/simplenote';
 import { handleQandaRoutes } from './routes/qanda';
 import { handleProtocolRoutes } from './routes/protocol';
@@ -48,6 +49,7 @@ const ROUTES: RouteHandler[] = [
   handleConfigRoutes,
   handleTrafficRoutes,
   handleBuzzRoutes,
+  handleCommentRoutes,
   handleSimpleNoteRoutes,
   handleQandaRoutes,
   handleProtocolRoutes,

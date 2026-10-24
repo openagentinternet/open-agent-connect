@@ -1,0 +1,32 @@
+import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
+import { commandMissingFlag, commandUnknownSubcommand, readChainWriteFlag, readFlagValue, readFromFlag, readJsonFile, redactSensitiveArgs } from './helpers';
+import type { CliRuntimeContext } from '../types';
+
+export async function runCommentCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
+  if (args[0] !== 'pin') {
+    return commandUnknownSubcommand(`comment ${redactSensitiveArgs(args).join(' ')}`.trim());
+  }
+
+  const requestFile = readFlagValue(args, '--request-file');
+  if (!requestFile) {
+    return commandMissingFlag('--request-file');
+  }
+  const from = readFromFlag(args);
+
+  const chainFlag = readChainWriteFlag(args);
+  if (chainFlag.error) {
+    return chainFlag.error;
+  }
+
+  const handler = context.dependencies.comment?.pin;
+  if (!handler) {
+    return commandFailed('not_implemented', 'Comment pin handler is not configured.');
+  }
+
+  const request = await readJsonFile(context, requestFile);
+  return handler({
+    ...request,
+    ...(chainFlag.chain ? { network: chainFlag.chain } : {}),
+    ...(from ? { from } : {}),
+  });
+}

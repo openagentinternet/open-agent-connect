@@ -19,6 +19,7 @@ import { runNetworkCommand } from './commands/network';
 import { runProviderCommand } from './commands/provider';
 import { runServicesCommand } from './commands/services';
 import { runBuzzCommand } from './commands/buzz';
+import { runCommentCommand } from './commands/comment';
 import { runBotCommand } from './commands/bot';
 import { runBrowserCommand } from './commands/browser';
 import { runChainCommand } from './commands/chain';
@@ -113,6 +114,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
       switch (command) {
         case 'buzz':
           result = await runBuzzCommand(rest, context);
+          break;
+        case 'comment':
+          result = await runCommentCommand(rest, context);
           break;
         case 'bot':
           result = await runBotCommand(rest, context);
