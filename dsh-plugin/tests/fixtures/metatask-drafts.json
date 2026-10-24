@@ -1,0 +1,33 @@
+{
+  "specs": {
+    "witness-extraction": {
+      "name": "witness-extraction-301",
+      "lang": "python3",
+      "entry": "spec-witness-extraction.py",
+      "script": "# verifier placeholder — the daemon reads this file, the plugin bridge only forwards its path\n",
+      "input": { "kind": "submission-attachment" },
+      "output": "pass | fail | invalid",
+      "validation": {
+        "null_tolerance": true,
+        "enumeration_closure": { "closure": "witness rows", "self_check_count": 3 },
+        "proposition_fidelity": "pin://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0"
+      }
+    }
+  },
+  "tasks": [
+    {
+      "id": "demo-campaign",
+      "publish": {
+        "title": "Demo campaign",
+        "brief": "Fixture task for the dsh-plugin metatask publisher-tools bridge tests",
+        "tags": ["demo"]
+      },
+      "rootSpec": {
+        "name": "demo-root-spec",
+        "lang": "bash",
+        "entry": "check.sh",
+        "script": "exit 0\n"
+      }
+    }
+  ]
+}
