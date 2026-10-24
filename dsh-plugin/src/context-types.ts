@@ -323,4 +323,20 @@ export interface OacDshConfig {
   llmExecutor?: {
     enabled?: boolean
   }
+  /**
+   * Cerebellum (小脑) fast-decision core (JEV). DEFAULT OFF — the section
+   * absent or `enabled !== true` means the plugin makes zero JEV calls and
+   * zero behavior changes. Enabling sends question state (never the API
+   * key) to the configured provider endpoint; see src/cerebellum/README.md
+   * for the consent note and the ported defect constraints.
+   */
+  cerebellum?: {
+    /** Master switch; only `true` activates anything. */
+    enabled?: boolean
+    /** 'typesafe-jev' (direct, apiKey required) | 'idbots-jev-free' (relay). */
+    provider?: 'typesafe-jev' | 'idbots-jev-free'
+    apiKey?: string
+    baseUrl?: string
+    model?: string
+  }
 }

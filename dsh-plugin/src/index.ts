@@ -16,6 +16,7 @@ import {
   resolveMetaAppSource,
 } from './browser-tools.js'
 import { bindMetawebToolInstall } from './metaweb-tools.js'
+import { bindCerebellumCore } from './cerebellum/client.js'
 import { BotChangeEventHub, streamBotEvents, watchBotRegistry } from './bot-events.js'
 import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
@@ -884,6 +885,21 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindKnowledgeBaseToolInstall(ctx)
   bindGlobalKnowledgeToolInstall(ctx)
   bindMediaDescriptionTools(ctx)
+  // Cerebellum (JEV fast-decision core), Round 3 PR-1: config-only wiring,
+  // DEFAULT OFF. The bind reads the plugin config's cerebellum section and
+  // constructs the call-context runtime (lazy config re-resolution +
+  // signal-bounded free-relay fetch stack). Nothing on any turn path
+  // consults it yet — the memory write gate, conversation re-rank,
+  // shortlists, and spawned-agent effort hooks land in later PRs — so with
+  // the flag off (or absent) behavior is byte-identical to before.
+  const cerebellumRuntime = bindCerebellumCore(config.cerebellum, {
+    sink: (level, tag, message, extra) => {
+      if (level === 'ERROR' || level === 'WARN') {
+        warn(ctx, `${tag}: ${message}${extra ? ` ${JSON.stringify(extra)}` : ''}`)
+      }
+    },
+  })
+  void cerebellumRuntime
 
   // Source-session relay: drain group-task milestones back into the chat that
   // originated each task ("哪里发起哪里结束"), on a host-lifetime timer.
