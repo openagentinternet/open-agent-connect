@@ -1,7 +1,7 @@
 /**
  * MetaWeb (Agent Internet) native tools for DSH — OAC port of the IDBots M1
- * pair (search_metaweb / read_metaweb_pin) plus the static worldview prompt
- * section. Tools execute the OAC core modules in-process (same dist-root
+ * tools (search_metaweb / read_metaweb_pin / read_metaweb_pins_batch) plus
+ * the static worldview prompt section. Tools execute the OAC core modules in-process (same dist-root
  * resolution as local-read; no CLI subprocess on the hot path); the base URL
  * honors METABOT_METAWEB_API_BASE_URL. read_metaweb_pin additionally mirrors
  * each successful read into the bot's chain history via a fire-and-forget
@@ -100,11 +100,22 @@ export function buildMetawebToolDefinitions(input: {
   host: HostContext
   hostAgent: HostAgentLike
   run?: RunFn
+  /**
+   * Test seam for read_metaweb_pins_batch: production calls the OAC core
+   * batch client in-process (same dist-root resolution as the single read).
+   */
+  readPinsBatch?: (pinIds: string[], options?: Record<string, unknown>) => Promise<Record<string, unknown>>
 }): HostToolDefinition[] {
   const { host, hostAgent } = input
   const run = input.run ?? (async (args, options) => {
     const { runMetabot } = await import('./cli-bridge.js')
     return runMetabot(args, options)
+  })
+  const readPinsBatch = input.readPinsBatch ?? (async (pinIds, options) => {
+    const batchModule = core('core/metaweb/pinBatchRead.js') as {
+      metawebPinsBatch: (pinIds: string[], options?: Record<string, unknown>) => Promise<Record<string, unknown>>
+    }
+    return batchModule.metawebPinsBatch(pinIds, options)
   })
 
   const actorSlug = (exec: HostToolExec): string => {
@@ -248,6 +259,93 @@ export function buildMetawebToolDefinitions(input: {
           return `${formatModule.formatMetawebPinDetail(pin)}\n${uriModule.METAWEB_CITATION_RULE}`
         } catch (error) {
           return toolError('read_metaweb_pin', error instanceof Error ? error.message : String(error))
+        }
+      },
+    },
+    {
+      name: 'read_metaweb_pins_batch',
+      description:
+        'Read up to 50 MetaWeb pins in ONE call — prefer over looping read_metaweb_pin for a shortlist to deep-read. '
+        + 'Returns each pinId mapped to its sheet (protocol, title/meta, author, body) or an isolated per-pin error — single failures never fail the batch. '
+        + 'Output is budget-capped: long bodies are trimmed or omitted (labeled per-pin) while every meta block stays complete — a missing body does NOT mean unreadable; '
+        + 'follow up with read_metaweb_pin on trimmed/omitted pins you need in full. '
+        + 'The receipt carries a one-line machine-readable summary (`- RECEIPT read_metaweb_pins_batch: {…}`) '
+        + 'with requested/readable_upstream/returned/omitted/truncation_points/bytes_written/caliber, so "read out" and "delivered" are separately checkable. '
+        + '~10-15 pins per call keeps bodies mostly whole; null content means encrypted/empty — skip.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pinIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '1-50 pinIds to deep-read (from search_metaweb results).',
+          },
+        },
+        required: ['pinIds'],
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 60_000,
+      execute: async (args: Record<string, unknown>, exec: HostToolExec) => {
+        const pinIds = (Array.isArray(args.pinIds) ? args.pinIds : [])
+          .map((id) => (typeof id === 'string' ? id.trim() : ''))
+          .filter(Boolean)
+        if (pinIds.length === 0) {
+          return toolError('read_metaweb_pins_batch', 'at least one pinId is required.')
+        }
+        if (pinIds.length > 50) {
+          return toolError('read_metaweb_pins_batch', `at most 50 pinIds per call (got ${pinIds.length}) — split the list into smaller batches.`)
+        }
+        try {
+          const batchModule = core('core/metaweb/pinBatchRead.js') as {
+            renderMetawebPinsBatch: (
+              pinIds: string[],
+              entries: Record<string, unknown>,
+            ) => {
+              text: string
+              receipt: Record<string, unknown>
+              deliveredPins: Array<Record<string, unknown>>
+            }
+            MetawebBatchTooLargeError: new (message: string) => Error
+          }
+          const entries = await readPinsBatch(pinIds, metawebOptions())
+          let rendered: ReturnType<typeof batchModule.renderMetawebPinsBatch>
+          try {
+            rendered = batchModule.renderMetawebPinsBatch(pinIds, entries)
+          } catch (error) {
+            if (error instanceof batchModule.MetawebBatchTooLargeError) {
+              return toolError('read_metaweb_pins_batch', error.message)
+            }
+            throw error
+          }
+          // Fire-and-forget chain-history read record for DELIVERED bodies
+          // only (a pin whose body was omitted for budget was fetched, not
+          // read) — same posture as read_metaweb_pin: never awaited, never
+          // fatal.
+          const slug = actorSlug(exec)
+          if (slug) {
+            for (const pin of rendered.deliveredPins) {
+              const meta = (pin.meta ?? {}) as Record<string, unknown>
+              const creator = (pin.creator ?? {}) as Record<string, unknown>
+              void runMetabotWithPayloadFile(
+                ['chainhistory', 'read', 'record', '--from', slug],
+                {
+                  pinId: textOf(pin.pinId) || '',
+                  path: textOf(pin.path) || null,
+                  protocol: textOf(pin.protocol) || null,
+                  title: textOf(meta.title) || null,
+                  authorGlobalMetaId: textOf(creator.globalMetaId) || null,
+                  contentText: typeof pin.text === 'string' ? pin.text : null,
+                  source: 'read_metaweb_pins_batch',
+                },
+                '--payload-file',
+                [],
+                run,
+              ).catch(() => undefined)
+            }
+          }
+          return rendered.text
+        } catch (error) {
+          return toolError('read_metaweb_pins_batch', error instanceof Error ? error.message : String(error))
         }
       },
     },

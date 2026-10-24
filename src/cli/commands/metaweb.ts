@@ -4,7 +4,7 @@
  * the metaso-p2p node (same pattern as `metaid search`).
  */
 
-import { commandMissingFlag, redactSensitiveArgs } from './helpers';
+import { commandMissingFlag, readJsonFile, redactSensitiveArgs } from './helpers';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { CliRuntimeContext } from '../types';
 
@@ -103,6 +103,18 @@ export function runMetawebCommand(
     const handler = context.dependencies.metaweb?.read;
     if (!handler) return Promise.resolve(commandNotImplemented('read'));
     return Promise.resolve(handler({ pinId }));
+  }
+
+  if (subcommand === 'batch-read') {
+    const pinsFile = readFlagValue(args, '--pins-file');
+    if (!pinsFile) return Promise.resolve(commandMissingFlag('--pins-file'));
+
+    const handler = context.dependencies.metaweb?.batchRead;
+    if (!handler) return Promise.resolve(commandNotImplemented('batch-read'));
+    return readJsonFile(context, pinsFile).then((request) => {
+      const raw = (request && typeof request === 'object' && !Array.isArray(request) ? request : {}) as Record<string, unknown>;
+      return handler({ pinIds: Array.isArray(raw.pinIds) ? raw.pinIds : [] });
+    });
   }
 
   return Promise.resolve(commandUnknownSubcommand(`metaweb ${redactSensitiveArgs(args).join(' ')}`.trim()));

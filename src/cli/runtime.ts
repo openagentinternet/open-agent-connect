@@ -177,6 +177,12 @@ import {
   type MetawebSearchProtocol,
 } from '../core/metaweb/search';
 import { readMetawebPin, MetawebPinNotFoundError } from '../core/metaweb/pinRead';
+import {
+  metawebPinsBatch,
+  renderMetawebPinsBatch,
+  MetawebBatchTooLargeError,
+  METAWEB_PINS_BATCH_MAX,
+} from '../core/metaweb/pinBatchRead';
 import { formatMetawebPinDetail, formatMetawebSearchBullets } from '../core/metaweb/format';
 import { METAWEB_CITATION_RULE } from '../core/metaweb/uri';
 import {
@@ -3351,6 +3357,40 @@ return {
     }
   }
 
+  // `metabot metaweb batch-read --pins-file` — up to 50 pins in one round
+  // trip (POST /api/metaweb/pins:batch), rendered under the batch result
+  // budget with the machine-readable RECEIPT line. In-process like
+  // `metaweb search/read`.
+  async function runMetawebBatchRead(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const pinIds = (Array.isArray(input.pinIds) ? input.pinIds : [])
+        .map((id) => String(id ?? '').trim())
+        .filter(Boolean);
+      if (pinIds.length === 0) {
+        return commandFailed('missing_pin_ids', '--pins-file must carry a non-empty pinIds array.');
+      }
+      if (pinIds.length > METAWEB_PINS_BATCH_MAX) {
+        return commandFailed(
+          'too_many_pins',
+          `metaweb batch-read accepts at most ${METAWEB_PINS_BATCH_MAX} pinIds per call (got ${pinIds.length}) — split the list into smaller batches.`,
+        );
+      }
+      const entries = await metawebPinsBatch(pinIds, metawebServiceOptions());
+      try {
+        const { text, receipt } = renderMetawebPinsBatch(pinIds, entries);
+        return commandSuccess({ ...receipt, formatted: text });
+      } catch (error) {
+        if (error instanceof MetawebBatchTooLargeError) {
+          return commandFailed('batch_too_large', error.message);
+        }
+        throw error;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('metaweb_batch_read_failed', message);
+    }
+  }
+
   // `metabot qanda search|latest|detail|answers` — read-only Q&A recall over
   // the metaso-p2p Q&A APIs, in-process like `metaweb search/read`. The data
   // envelope carries the raw rows plus a model-ready `formatted` block (the
@@ -4076,6 +4116,7 @@ return {
     metaweb: {
       search: async (input) => runMetawebSearch(input),
       read: async (input) => runMetawebRead(input),
+      batchRead: async (input) => runMetawebBatchRead(input),
     },
     buzz: {
       post: async (input) => requestJsonForSelectedActor(

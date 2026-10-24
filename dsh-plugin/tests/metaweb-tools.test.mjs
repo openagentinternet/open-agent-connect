@@ -34,7 +34,7 @@ test('bindMetawebToolInstall registers the worldview section and both tools', ()
   assert.match(host.sections[1].text, /ALWAYS write them in FULL/)
   assert.match(host.sections[1].text, /never abbreviated|NEVER abbreviate/i)
   assert.match(host.sections[1].text, /64 lowercase hex chars/)
-  assert.deepEqual(host.tools.map((tool) => tool.name).sort(), ['read_metaweb_pin', 'search_metaweb'])
+  assert.deepEqual(host.tools.map((tool) => tool.name).sort(), ['read_metaweb_pin', 'read_metaweb_pins_batch', 'search_metaweb'])
 })
 
 test('search tool executes the OAC core in-process and renders guidance', async () => {
