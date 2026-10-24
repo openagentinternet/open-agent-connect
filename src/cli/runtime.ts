@@ -6428,6 +6428,7 @@ return {
           return commandSuccess(await store.addSubtask({
             taskId: input.id, id: input.subtaskId, ordinal: input.ordinal,
             title: input.title, dependsOn: input.dependsOn,
+            expectedMinutes: input.expectedMinutes ?? null,
           }));
         } catch (error) {
           return commandFailed('longtask_subtask_failed', error instanceof Error ? error.message : String(error));
@@ -6445,6 +6446,58 @@ return {
         );
         if (!subtask) return commandFailed('longtask_subtask_not_found', `No sub-task ${input.subtaskId} in ${input.id}.`);
         return commandSuccess(subtask);
+      },
+      note: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const { createLongTermStore, longTermStorePaths } = await import('../core/longtask/store.js');
+        const store = createLongTermStore(longTermStorePaths(resolveMetabotPaths(actor.homeDir)));
+        // addEvent itself does not know tasks, so guard here: a note must never
+        // land on a task (or sub-task) that does not exist.
+        const task = await store.getTask(input.id);
+        if (!task) return commandFailed('longtask_not_found', `No long-term task ${input.id}.`);
+        if (input.subtaskId) {
+          const subtask = (await store.listSubtasks(input.id)).find((row) => row.id === input.subtaskId);
+          if (!subtask) return commandFailed('longtask_subtask_not_found', `No sub-task ${input.subtaskId} in ${input.id}.`);
+        }
+        const event = await store.addEvent({
+          taskId: input.id,
+          subtaskId: input.subtaskId ?? null,
+          kind: 'note',
+          actor: 'local',
+          detail: input.text,
+          at: new Date().toISOString(),
+        });
+        return commandSuccess(event);
+      },
+      setStage: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const { createLongTermStore, longTermStorePaths } = await import('../core/longtask/store.js');
+        const store = createLongTermStore(longTermStorePaths(resolveMetabotPaths(actor.homeDir)));
+        const task = await store.setTaskStage(
+          input.id,
+          input.stage as Parameters<typeof store.setTaskStage>[1],
+          new Date().toISOString(),
+        );
+        if (!task) return commandFailed('longtask_not_found', `No long-term task ${input.id}.`);
+        return commandSuccess(task);
+      },
+      updateTask: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const { createLongTermStore, longTermStorePaths } = await import('../core/longtask/store.js');
+        const store = createLongTermStore(longTermStorePaths(resolveMetabotPaths(actor.homeDir)));
+        try {
+          const task = await store.updateTask({
+            taskId: input.id, title: input.title, goal: input.goal,
+            nowIso: new Date().toISOString(),
+          });
+          if (!task) return commandFailed('longtask_not_found', `No long-term task ${input.id}.`);
+          return commandSuccess(task);
+        } catch (error) {
+          return commandFailed('longtask_update_failed', error instanceof Error ? error.message : String(error));
+        }
       },
     },
     surf: {

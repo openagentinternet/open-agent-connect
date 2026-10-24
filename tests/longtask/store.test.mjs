@@ -132,3 +132,72 @@ test('store: the board derives column, progress and current from stored sub-task
   assert.equal(gone.column, null);
   assert.equal(gone.progress.total, 1);
 });
+
+test('store: a stage move appends an audit event; re-setting the same stage is silent', async () => {
+  const paths = pathsFor('stage-events');
+  const store = createLongTermStore(paths);
+  await store.createTask({ id: 't1', title: 'T', nowIso: T0 });
+
+  const paused = await store.setTaskStage('t1', 'paused', T1);
+  assert.equal(paused.stage, 'paused');
+  const events = await store.listEvents('t1');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'task_stage');
+  assert.equal(events[0].subtaskId, null);
+  assert.equal(events[0].actor, 'local');
+  assert.equal(events[0].detail, 'defining -> paused');
+  assert.equal((await store.getTask('t1')).updatedAt, T1);
+
+  // Re-setting the same stage is not a move, so it adds no event — the same
+  // rule as the status move above.
+  await store.setTaskStage('t1', 'paused', T1);
+  assert.equal((await store.listEvents('t1')).length, 1);
+
+  // An unknown task is null, and nothing lands in any journal.
+  assert.equal(await store.setTaskStage('nope', 'paused', T1), null);
+  assert.equal((await store.listEvents('t1')).length, 1);
+});
+
+test('store: updateTask patches title/goal, journals the change, refuses blank titles', async () => {
+  const paths = pathsFor('update');
+  const store = createLongTermStore(paths);
+  await store.createTask({ id: 't1', title: 'Old', goal: 'g1', nowIso: T0 });
+
+  const updated = await store.updateTask({ taskId: 't1', title: 'New', goal: 'g2', nowIso: T1 });
+  assert.equal(updated.title, 'New');
+  assert.equal(updated.goal, 'g2');
+  assert.equal(updated.updatedAt, T1);
+  const events = await store.listEvents('t1');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'task_update');
+  assert.equal(events[0].detail, 'title: "Old" -> "New"; goal updated');
+
+  // Re-writing the same values is not a change: no second event.
+  await store.updateTask({ taskId: 't1', title: 'New', nowIso: T1 });
+  assert.equal((await store.listEvents('t1')).length, 1);
+
+  // A blank title is refused at write time, the same posture as the CHECKs.
+  await assert.rejects(
+    () => store.updateTask({ taskId: 't1', title: '   ', nowIso: T1 }),
+    /title must be a non-empty string/,
+  );
+  // Unknown task: null, nothing written.
+  assert.equal(await store.updateTask({ taskId: 'nope', title: 'x', nowIso: T1 }), null);
+});
+
+test('store: expectedMinutes round-trips through addSubtask (set → number, absent or invalid → null)', async () => {
+  const paths = pathsFor('expected-minutes');
+  const store = createLongTermStore(paths);
+  await store.createTask({ id: 't1', title: 'T', nowIso: T0 });
+
+  const estimated = await store.addSubtask({ taskId: 't1', id: 's1', ordinal: 1, title: 'a', expectedMinutes: 90 });
+  assert.equal(estimated.expectedMinutes, 90);
+  const plain = await store.addSubtask({ taskId: 't1', id: 's2', ordinal: 2, title: 'b' });
+  assert.equal(plain.expectedMinutes, null);
+  const zeroed = await store.addSubtask({ taskId: 't1', id: 's3', ordinal: 3, title: 'c', expectedMinutes: 0 });
+  assert.equal(zeroed.expectedMinutes, null, 'non-positive minutes fall back to unestimated');
+
+  // And it survives a reopen — the file is the truth.
+  const rows = await createLongTermStore(paths).listSubtasks('t1');
+  assert.deepEqual(rows.map((row) => row.expectedMinutes), [90, null, null]);
+});

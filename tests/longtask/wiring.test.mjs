@@ -67,3 +67,36 @@ test('longtask: the board reaches the registry-backed store too', async () => {
   assert.deepEqual(board.find((c) => c.task.id === 'live').progress, { accepted: 1, total: 2, percent: 50 });
   assert.equal(board.find((c) => c.task.id === 'gone').column, null);
 });
+
+test('longtask: stage moves, notes and title/goal updates land through the resolved home', async () => {
+  const base = mkdtempTempRootSync('metabot-longtask-lifecycle-');
+  const profileRoot = path.join(base, '.metabot', 'profiles', 'test-slug');
+  mkdirSync(profileRoot, { recursive: true });
+  const store = createLongTermStore(longTermStorePaths(resolveMetabotPaths(profileRoot)));
+  await store.createTask({
+    id: 'lt1', title: 'Rework', goal: 'old goal', stage: 'active', nowIso: new Date(T0).toISOString(),
+  });
+  await store.addSubtask({ taskId: 'lt1', id: 's1', ordinal: 1, title: 'first' });
+
+  // What the runtime's `note` handler does, through the same registry keys: a
+  // local-actor note pinned to the sub-project (the wait-brief carrier).
+  await store.addEvent({
+    taskId: 'lt1', subtaskId: 's1', kind: 'note', actor: 'local',
+    detail: 'waiting on owner: brief', at: new Date(T0 + 1000).toISOString(),
+  });
+  // What `set-stage` does: the stage move lands AND is journalled — the
+  // planner reads the journal, so silence would read as staleness.
+  await store.setTaskStage('lt1', 'paused', new Date(T0 + 2000).toISOString());
+  // What `update` does: a title/goal patch plus its journal entry.
+  await store.updateTask({ taskId: 'lt1', goal: 'new goal', nowIso: new Date(T0 + 3000).toISOString() });
+
+  const reopened = createLongTermStore(longTermStorePaths(resolveMetabotPaths(profileRoot)));
+  const task = await reopened.getTask('lt1');
+  assert.equal(task.stage, 'paused');
+  assert.equal(task.goal, 'new goal');
+  const events = await reopened.listEvents('lt1');
+  assert.deepEqual(events.map((event) => event.kind), ['note', 'task_stage', 'task_update']);
+  assert.equal(events[0].subtaskId, 's1');
+  assert.equal(events[0].actor, 'local');
+  assert.equal(events[1].detail, 'active -> paused');
+});

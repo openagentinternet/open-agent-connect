@@ -374,8 +374,11 @@ export interface CliDependencies {
     show?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
     board?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     advance?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    addSubtask?: (input: { from?: string; id: string; subtaskId: string; ordinal: number; title: string; dependsOn?: string[] }) => Awaitable<MetabotCommandResult<unknown>>;
+    addSubtask?: (input: { from?: string; id: string; subtaskId: string; ordinal: number; title: string; dependsOn?: string[]; expectedMinutes?: number | null }) => Awaitable<MetabotCommandResult<unknown>>;
     setSubtaskStatus?: (input: { from?: string; id: string; subtaskId: string; status: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    note?: (input: { from?: string; id: string; subtaskId?: string; text: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    setStage?: (input: { from?: string; id: string; stage: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    updateTask?: (input: { from?: string; id: string; title?: string; goal?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   knowledgeBase?: {
     list?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;

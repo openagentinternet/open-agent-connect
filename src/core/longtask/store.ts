@@ -93,6 +93,8 @@ const isStage = (value: unknown): value is LongTermTaskStage =>
 const isSubtaskStatus = (value: unknown): value is LongTermSubtaskStatus =>
   typeof value === 'string' && (SUBTASK_STATUSES as readonly string[]).includes(value);
 const asText = (value: unknown): string => (typeof value === 'string' ? value : '');
+/** Journal-friendly clip for echoed field values (titles). */
+const clip = (text: string): string => (text.length > 60 ? `${text.slice(0, 60)}…` : text);
 
 export interface CreateTaskInput {
   id: string;
@@ -117,6 +119,7 @@ export interface LongTermStore {
   getTask(taskId: string): Promise<LongTermTask | null>;
   listTasks(): Promise<LongTermTask[]>;
   setTaskStage(taskId: string, stage: LongTermTaskStage, nowIso: string): Promise<LongTermTask | null>;
+  updateTask(input: { taskId: string; title?: string; goal?: string; nowIso: string }): Promise<LongTermTask | null>;
   addSubtask(input: AddSubtaskInput): Promise<LongTermStoredSubtask>;
   listSubtasks(taskId: string): Promise<LongTermStoredSubtask[]>;
   updateSubtaskStatus(
@@ -273,9 +276,62 @@ export function createLongTermStore(paths: LongTermStorePaths): LongTermStore {
         const file = await readTasks();
         const task = file.tasks.find((entry) => entry.id === taskId);
         if (!task) return null;
+        const previous = task.stage;
         task.stage = stage;
         task.updatedAt = nowIso;
         await writeJsonAtomic(paths.tasksPath, file);
+        // A stage move is journal-worthy in the same shape as a status move:
+        // the advance planner reads the journal, so a silent stage change would
+        // read as silence to every later pass.
+        if (previous !== stage) {
+          await appendEvent({
+            id: `${taskId}:task_stage:${nowIso}`,
+            taskId,
+            subtaskId: null,
+            kind: 'task_stage',
+            actor: 'local',
+            detail: `${previous} -> ${stage}`,
+            at: nowIso,
+          });
+        }
+        return task;
+      });
+    },
+
+    async updateTask(input) {
+      return enqueue(async () => {
+        if (input.title !== undefined && input.title.trim() === '') {
+          throw new Error('long-term task: title must be a non-empty string when provided.');
+        }
+        const file = await readTasks();
+        const task = file.tasks.find((entry) => entry.id === input.taskId);
+        if (!task) return null;
+        // The goal text is this store's interim carrier for acceptance
+        // criteria, so rewriting either field is a replan-class change: journal
+        // it. Titles are echoed old->new (clipped); the goal is only marked,
+        // because its full text lives in the task row.
+        const changes: string[] = [];
+        if (input.title !== undefined && input.title !== task.title) {
+          changes.push(`title: "${clip(task.title)}" -> "${clip(input.title)}"`);
+          task.title = input.title;
+        }
+        if (input.goal !== undefined && input.goal !== task.goal) {
+          changes.push('goal updated');
+          task.goal = input.goal;
+        }
+        task.updatedAt = input.nowIso;
+        await writeJsonAtomic(paths.tasksPath, file);
+        if (changes.length > 0) {
+          await appendEvent({
+            id: `${input.taskId}:task_update:${input.nowIso}`,
+            taskId: input.taskId,
+            subtaskId: null,
+            kind: 'task_update',
+            actor: 'local',
+            detail: changes.join('; '),
+            at: input.nowIso,
+          });
+        }
         return task;
       });
     },

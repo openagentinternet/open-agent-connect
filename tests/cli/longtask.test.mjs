@@ -66,3 +66,90 @@ test('longtask: an unknown verb, an unwired verb and a missing surface are all r
 
   assert.ok(LONG_TASK_SUBCOMMANDS.includes('advance'));
 });
+
+test('longtask: the new lifecycle verbs are registered subcommands', () => {
+  for (const sub of ['note', 'set-stage', 'update']) {
+    assert.ok(LONG_TASK_SUBCOMMANDS.includes(sub), `missing subcommand: ${sub}`);
+  }
+});
+
+test('longtask: note passes flags through, --subtask optional, missing --text refused pre-handler', async () => {
+  const calls = [];
+  const context = contextWith({ note: async (input) => { calls.push(input); return ok(input); } });
+  const withSub = await runLongTaskCommand(
+    ['note', '--id', 't1', '--subtask', 's1', '--text', 'wait brief: options a/b', '--from', 'bot'], context);
+  assert.equal(withSub.state, 'success');
+  assert.deepEqual(calls, [{ from: 'bot', id: 't1', subtaskId: 's1', text: 'wait brief: options a/b' }]);
+
+  const noSub = await runLongTaskCommand(['note', '--id', 't1', '--text', 'x'], context);
+  assert.equal(noSub.state, 'success');
+  assert.equal(calls[1].id, 't1');
+  assert.equal(calls[1].subtaskId, undefined);
+  assert.equal(calls[1].text, 'x');
+  assert.equal(calls[1].from, undefined);
+
+  const missing = await runLongTaskCommand(['note', '--id', 't1'], context);
+  assert.equal(missing.code, 'missing_flag');
+  assert.match(missing.message, /--text/);
+  assert.equal(calls.length, 2, 'a refused command never reaches the handler');
+});
+
+test('longtask: set-stage validates the four lifecycle stages before dispatch', async () => {
+  const calls = [];
+  const context = contextWith({ setStage: async (input) => { calls.push(input); return ok(input); } });
+  const good = await runLongTaskCommand(['set-stage', '--id', 't1', '--stage', 'paused', '--from', 'bot'], context);
+  assert.equal(good.state, 'success');
+  assert.deepEqual(calls, [{ from: 'bot', id: 't1', stage: 'paused' }]);
+
+  // `defining` is store-internal: this surface starts tasks active, so it is
+  // not a stage a caller can move anything into.
+  const bad = await runLongTaskCommand(['set-stage', '--id', 't1', '--stage', 'defining'], context);
+  assert.equal(bad.code, 'invalid_flag_value');
+  assert.match(bad.message, /active\|paused\|cancelled\|done/);
+
+  const missing = await runLongTaskCommand(['set-stage', '--id', 't1'], context);
+  assert.equal(missing.code, 'missing_flag');
+  assert.equal(calls.length, 1);
+});
+
+test('longtask: update requires at least one of --title/--goal and passes both through', async () => {
+  const calls = [];
+  const context = contextWith({ updateTask: async (input) => { calls.push(input); return ok(input); } });
+  const both = await runLongTaskCommand(
+    ['update', '--id', 't1', '--title', 'New title', '--goal', 'New goal', '--from', 'bot'], context);
+  assert.equal(both.state, 'success');
+  assert.deepEqual(calls, [{ from: 'bot', id: 't1', title: 'New title', goal: 'New goal' }]);
+
+  const goalOnly = await runLongTaskCommand(['update', '--id', 't1', '--goal', 'g2'], context);
+  assert.equal(goalOnly.state, 'success');
+  assert.equal(calls[1].goal, 'g2');
+  assert.equal(calls[1].title, undefined);
+
+  const neither = await runLongTaskCommand(['update', '--id', 't1'], context);
+  assert.equal(neither.code, 'missing_flag');
+  assert.match(neither.message, /--title or --goal/);
+  assert.equal(calls.length, 2);
+});
+
+test('longtask: add-subtask passes --expected-minutes through and refuses non-positive values', async () => {
+  const calls = [];
+  const context = contextWith({ addSubtask: async (input) => { calls.push(input); return ok(input); } });
+  const good = await runLongTaskCommand(
+    ['add-subtask', '--id', 't1', '--subtask', 's1', '--title', 'x', '--ordinal', '1', '--expected-minutes', '90'],
+    context);
+  assert.equal(good.state, 'success');
+  assert.equal(calls[0].expectedMinutes, 90);
+
+  const absent = await runLongTaskCommand(
+    ['add-subtask', '--id', 't1', '--subtask', 's2', '--title', 'x', '--ordinal', '2'], context);
+  assert.equal(absent.state, 'success');
+  assert.equal(calls[1].expectedMinutes, undefined);
+
+  for (const bad of ['0', '-5', '1.5', 'abc']) {
+    const refused = await runLongTaskCommand(
+      ['add-subtask', '--id', 't1', '--subtask', 's3', '--title', 'x', '--ordinal', '3', '--expected-minutes', bad],
+      context);
+    assert.equal(refused.code, 'invalid_flag_value', `--expected-minutes ${bad} must be refused`);
+  }
+  assert.equal(calls.length, 2);
+});
