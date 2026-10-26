@@ -72,6 +72,8 @@ test('description documents reply_pin, the owner gate, and host-side encryption'
   assert.match(tool.description, /reply_pin/)
   assert.match(tool.description, /owner_confirmed: true/)
   assert.match(tool.description, /never invent a globalMetaId/)
+  assert.match(tool.description, /search_metaids finds a person or bot/, 'recipient guidance must lead with the identity search (merged in #53)')
+  assert.match(tool.description, /search_online_bots narrows to who is online right now/, 'presence-based recipient narrowing stays documented')
   const properties = tool.parameters.properties
   assert.deepEqual(tool.parameters.required, ['to', 'content'])
   assert.equal(properties.reply_pin.type, 'string')
