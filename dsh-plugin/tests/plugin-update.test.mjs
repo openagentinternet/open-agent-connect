@@ -83,7 +83,7 @@ test('applyPluginUpdate removes the bundle and installs the exact target through
   const calls = []
   const manager = {
     async listBundles() {
-      return [{ name: 'open-agent-connect-dsh', version: '0.9.6', source: 'open-agent-connect-dsh@^0.9.6', removable: true }]
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.7', source: 'open-agent-connect-dsh@^0.9.7', removable: true }]
     },
     async removeBundle(name) {
       calls.push(['remove', name])
@@ -91,19 +91,19 @@ test('applyPluginUpdate removes the bundle and installs the exact target through
     },
     async installBundle(spec, options) {
       calls.push(['install', spec, options])
-      return { application: 'applied', version: '0.9.7' }
+      return { application: 'applied', version: '0.9.8' }
     },
   }
   const { applyPluginUpdate } = await import('../lib/plugin-update.js')
   const result = await applyPluginUpdate(
     { get: key => key === 'pluginManager' ? manager : undefined },
-    { check: async () => ({ ok: true, current: '0.9.6', latest: '0.9.7', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+    { check: async () => ({ ok: true, current: '0.9.7', latest: '0.9.8', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
   )
   assert.equal(result.ok, true)
   assert.equal(result.application, 'applied')
   assert.deepEqual(calls, [
     ['remove', 'open-agent-connect-dsh'],
-    ['install', 'open-agent-connect-dsh@0.9.7', { enabled: true, saveExact: true }],
+    ['install', 'open-agent-connect-dsh@0.9.8', { enabled: true, saveExact: true }],
   ])
 })
 
@@ -111,7 +111,7 @@ test('applyPluginUpdate rolls back the prior installed spec after a failed insta
   const calls = []
   const manager = {
     async listBundles() {
-      return [{ name: 'open-agent-connect-dsh', version: '0.9.6', source: 'open-agent-connect-dsh@^0.9.6', removable: true }]
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.7', source: 'open-agent-connect-dsh@^0.9.7', removable: true }]
     },
     async removeBundle(name) {
       calls.push(['remove', name])
@@ -119,21 +119,21 @@ test('applyPluginUpdate rolls back the prior installed spec after a failed insta
     },
     async installBundle(spec) {
       calls.push(['install', spec])
-      if (spec.endsWith('@0.9.7')) return { application: 'failed', error: { code: 'network', message: 'registry offline' } }
+      if (spec.endsWith('@0.9.8')) return { application: 'failed', error: { code: 'network', message: 'registry offline' } }
       return { application: 'applied' }
     },
   }
   const { applyPluginUpdate } = await import('../lib/plugin-update.js')
   const result = await applyPluginUpdate(
     { get: key => key === 'pluginManager' ? manager : undefined },
-    { check: async () => ({ ok: true, current: '0.9.6', latest: '0.9.7', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+    { check: async () => ({ ok: true, current: '0.9.7', latest: '0.9.8', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
   )
   assert.equal(result.ok, false)
   assert.equal(result.code, 'network')
   assert.deepEqual(calls, [
     ['remove', 'open-agent-connect-dsh'],
-    ['install', 'open-agent-connect-dsh@0.9.7'],
-    ['install', 'open-agent-connect-dsh@^0.9.6'],
+    ['install', 'open-agent-connect-dsh@0.9.8'],
+    ['install', 'open-agent-connect-dsh@^0.9.7'],
   ])
 })
 
@@ -141,7 +141,7 @@ test('applyPluginUpdate rolls back when pnpm installs a different version than r
   const calls = []
   const manager = {
     async listBundles() {
-      return [{ name: 'open-agent-connect-dsh', version: '0.9.6', source: 'open-agent-connect-dsh@^0.9.6', removable: true }]
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.7', source: 'open-agent-connect-dsh@^0.9.7', removable: true }]
     },
     async removeBundle(name) {
       calls.push(['remove', name])
@@ -149,21 +149,21 @@ test('applyPluginUpdate rolls back when pnpm installs a different version than r
     },
     async installBundle(spec) {
       calls.push(['install', spec])
-      if (spec.endsWith('@0.9.7')) return { application: 'applied', version: '0.9.5' }
+      if (spec.endsWith('@0.9.8')) return { application: 'applied', version: '0.9.6' }
       return { application: 'applied' }
     },
   }
   const { applyPluginUpdate } = await import('../lib/plugin-update.js')
   const result = await applyPluginUpdate(
     { get: key => key === 'pluginManager' ? manager : undefined },
-    { check: async () => ({ ok: true, current: '0.9.6', latest: '0.9.7', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+    { check: async () => ({ ok: true, current: '0.9.7', latest: '0.9.8', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
   )
   assert.equal(result.ok, false)
   assert.equal(result.code, 'version_mismatch')
   assert.deepEqual(calls, [
     ['remove', 'open-agent-connect-dsh'],
-    ['install', 'open-agent-connect-dsh@0.9.7'],
-    ['install', 'open-agent-connect-dsh@^0.9.6'],
+    ['install', 'open-agent-connect-dsh@0.9.8'],
+    ['install', 'open-agent-connect-dsh@^0.9.7'],
   ])
 })
 
@@ -177,7 +177,7 @@ test('applyPluginUpdate refuses a non-newer target before touching the profile',
   const { applyPluginUpdate } = await import('../lib/plugin-update.js')
   const result = await applyPluginUpdate(
     { get: key => key === 'pluginManager' ? manager : undefined },
-    { check: async () => ({ ok: true, current: '0.9.6', latest: '0.9.5', updateAvailable: false, registry: 'test', checkedAt: 1 }) },
+    { check: async () => ({ ok: true, current: '0.9.7', latest: '0.9.6', updateAvailable: false, registry: 'test', checkedAt: 1 }) },
   )
   assert.equal(result.ok, false)
   assert.equal(result.code, 'not_available')

@@ -1,6 +1,6 @@
 {
   "name": "open-agent-connect-dsh",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "DSH profile-bundle plugin for Open Agent Connect: a Bots page, one MetaBot = one agent preset, and CLI-backed UI.",
   "license": "MIT",
   "icon": "./icon.svg",
