@@ -9,7 +9,7 @@ dsh plugin --profile web add open-agent-connect-dsh
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
 Host kernel requirement: this plugin is built and verified against the DSH
-**0.2.1-rc.2** client surface and runs on the
+**0.2.1-rc.3** client surface and runs on the
 **0.1.5**, **0.1.6**, **0.1.7**, **0.2.0**, and **0.2.1** kernel lines — most peer ranges are
 `^0.1.5-alpha.1 || ^0.1.6-alpha.1 || ^0.1.7-alpha.1 || ^0.2.0-rc.1`, with the
 wider `^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
@@ -66,6 +66,18 @@ The 0.2.1 adaptations worth knowing about:
   temporary 1017 label) are additive. The client boot graph still loads the
   `platform: "web"` bundle and the declared slot injections; the desktop
   surface was exercised with the Bots page and `/oac/api/health`.
+- **No host/client API break in 0.2.1-rc.3.** The rc.3 additions (the
+  sidebar/conversation/guide More-menu customization slots with in-memory
+  panel/view pinning, `MenuItemButton.current`, `Menu.minWidthFromAnchor`,
+  `whenDraftExists` draft handling, the official `/models` listing on the
+  DeepSeek API-key route) are additive. Every package the plugin injects or
+  externals only gained members; `AgentPresetSeatController.select` gained a
+  structured outcome, but the slot-facing wrapper this plugin's own seat
+  shadows keeps the old contract, and the plugin's seat talks to the
+  session-controller remotes, which changed doc comments only. The DOM
+  anchors behind the DOM-mounted surfaces (`[data-slot="sidebar.workspaces"]`
+  for the conversation tabs, the hero `data-phase`/composer-seat marks) are
+  unchanged, so those mounts carry over as shipped.
 
 The 0.2.0 adaptations worth knowing about:
 
