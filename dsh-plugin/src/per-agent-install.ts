@@ -18,11 +18,14 @@ import { runMetabotPinned } from './daemon-pinned-run.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { agentsRegistryOf, installTwinOnAgent } from './twin-tools.js'
+import type { SpawnedEffortResolver } from './cerebellum-tools.js'
 
 export interface PerAgentInstallOptions {
   /** Twin/group family gate (config.twin.enabled, default on). */
   twinEnabled?: boolean
   twinStepTimeoutMs?: number
+  /** Cerebellum reasoning-effort resolver for delegated worker spawns (Round 3 PR-3). */
+  twinEffort?: SpawnedEffortResolver
   liveOacAgents: Map<string, HostAgentLike>
   /** Slugs whose legacy notification backlog was already flushed this host run. */
   notifiedBacklogs: Set<string>
@@ -99,6 +102,7 @@ export function createPerAgentInstaller(ctx: HostContext, options: PerAgentInsta
     if (botType !== 'twin') return
     const orchestrator = installTwinOnAgent(ctx, agent, slug, {
       stepTimeoutMs: options.twinStepTimeoutMs,
+      effort: options.twinEffort,
     })
     installGroupTaskOnAgent(agent, slug)
     if (!options.notifiedBacklogs.has(slug)) {

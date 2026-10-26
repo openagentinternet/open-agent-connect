@@ -27,6 +27,7 @@ import { type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
+import type { SpawnedEffortResolver } from './cerebellum-tools.js'
 import { oacMessageSource } from './message-source.js'
 import { tappedOrSnapshot, tapSessionEvents } from './session-event-tap.js'
 import { markRemoteContentAgent, unmarkRemoteContentAgent } from './remote-content-guard.js'
@@ -92,6 +93,13 @@ export interface GroupTaskWorkerOptions {
   daemonAlive?: () => Promise<boolean>
   /** work-submit retry delays in ms (tests pass [0] to disable retries). */
   submitRetryDelaysMs?: number[]
+  /**
+   * Cerebellum reasoning-effort resolver consulted BEFORE agents.create when
+   * the worker's model pair carries no explicit effort pick (Round 3 PR-3).
+   * Null (the default path with the cerebellum off) keeps agentOptions
+   * byte-identical to before.
+   */
+  effort?: SpawnedEffortResolver
 }
 
 export interface GroupTaskWorkerRunner {
@@ -167,6 +175,7 @@ export function applyGroupTaskWorkerSessions(
   const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS
   const daemonAlive = options.daemonAlive ?? daemonAliveByHttp
   const submitRetryDelaysMs = options.submitRetryDelaysMs ?? SUBMIT_RETRY_DELAYS_MS
+  const effortResolver = options.effort
 
   /** Live sub-sessions keyed by `${taskId}:${workerSlug}` (reused across turns). */
   const activeSessions = new Map<string, ActiveWorkerSession>()
@@ -305,13 +314,27 @@ export function applyGroupTaskWorkerSessions(
     if (!session) {
       const sessionId = randomUUID()
       try {
+        // Reasoning effort (Round 3 PR-3): an explicit worker-bot pick wins
+        // untouched; otherwise the cerebellum selector (when enabled)
+        // resolves the rung from the first work brief, with the ported
+        // 10-min sticky escalation keyed by the stable (task, worker) pair
+        // so a re-spawned session within the window keeps its escalation.
+        // Null (off/unconfigured/failed) leaves agentOptions as before.
+        const effortRung = effortResolver
+          ? await effortResolver({
+            sessionKey,
+            promptText: buildWorkMessage(claim),
+            explicitEffort: modelPair.reasoningEffort,
+          })
+          : null
+        const reasoningEffort = effortRung ?? modelPair.reasoningEffort
         const handle = await registry.create({
           sessionId,
           meta: { agentPreset: preset, oacOrigin: 'group-task-worker', cwd: process.cwd() },
           agentOptions: {
             provider: modelPair.provider,
             model: modelPair.model,
-            ...(modelPair.reasoningEffort ? { reasoningEffort: modelPair.reasoningEffort } : {}),
+            ...(reasoningEffort ? { reasoningEffort } : {}),
           },
           setup: async (agentCtx: unknown) => {
             await ctx.agentPresets?.mount?.(agentCtx, preset)

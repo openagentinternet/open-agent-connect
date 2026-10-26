@@ -19,6 +19,11 @@ import { bindMetawebToolInstall } from './metaweb-tools.js'
 import { bindDiscoveryToolInstall } from './discovery-tools.js'
 import { bindMetataskToolInstall } from './metatask-tools.js'
 import { bindCerebellumCore } from './cerebellum/client.js'
+import {
+  applyCerebellumShortlists,
+  bindCerebellumToolInstall,
+  createSpawnedEffortResolver,
+} from './cerebellum-tools.js'
 import { BotChangeEventHub, streamBotEvents, watchBotRegistry } from './bot-events.js'
 import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
@@ -857,6 +862,25 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   // into whichever session appeared. Fresh settles mark themselves notified,
   // so this is only an upgrade-time cleanup.
   const notifiedBacklogs = new Set<string>()
+  // Cerebellum (JEV fast-decision core), Round 3 PR-1 + PR-3: config-only
+  // runtime, DEFAULT OFF. The bind reads the plugin config's cerebellum
+  // section and constructs the call-context runtime (lazy config
+  // re-resolution + signal-bounded free-relay fetch stack). With the flag
+  // off (or absent) every PR-3 surface is a no-op: the intuition tool is
+  // never registered (sync mount probe), the pre-step shortlist observer
+  // appends nothing, and the spawned-effort resolver returns null so every
+  // agents.create call site keeps its previous agentOptions.
+  const cerebellumRuntime = bindCerebellumCore(config.cerebellum, {
+    sink: (level, tag, message, extra) => {
+      if (level === 'ERROR' || level === 'WARN') {
+        warn(ctx, `${tag}: ${message}${extra ? ` ${JSON.stringify(extra)}` : ''}`)
+      }
+    },
+  })
+  // Round 3 PR-3 surfaces (all probe-gated, all fail-open):
+  const spawnedEffort = createSpawnedEffortResolver({ runtime: cerebellumRuntime })
+  bindCerebellumToolInstall(ctx, { runtime: cerebellumRuntime })
+  applyCerebellumShortlists(ctx, { runtime: cerebellumRuntime })
   if (memoryEnabled && config.memory?.tools !== false && ctx.on) {
     // Create-then-select sessions fire agent/created with the global default
     // preset (e.g. `oac`), which resolves no Bot slug — the installer retries
@@ -864,6 +888,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     const installer = createPerAgentInstaller(ctx, {
       twinEnabled: config.twin?.enabled !== false,
       twinStepTimeoutMs: config.twin?.stepTimeoutMs,
+      twinEffort: spawnedEffort,
       liveOacAgents,
       notifiedBacklogs,
       log: (message) => warn(ctx, message),
@@ -905,21 +930,10 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindGlobalKnowledgeToolInstall(ctx)
   bindMediaDescriptionTools(ctx)
   bindLongtaskToolInstall(ctx)
-  // Cerebellum (JEV fast-decision core), Round 3 PR-1: config-only wiring,
-  // DEFAULT OFF. The bind reads the plugin config's cerebellum section and
-  // constructs the call-context runtime (lazy config re-resolution +
-  // signal-bounded free-relay fetch stack). Nothing on any turn path
-  // consults it yet — the memory write gate, conversation re-rank,
-  // shortlists, and spawned-agent effort hooks land in later PRs — so with
-  // the flag off (or absent) behavior is byte-identical to before.
-  const cerebellumRuntime = bindCerebellumCore(config.cerebellum, {
-    sink: (level, tag, message, extra) => {
-      if (level === 'ERROR' || level === 'WARN') {
-        warn(ctx, `${tag}: ${message}${extra ? ` ${JSON.stringify(extra)}` : ''}`)
-      }
-    },
-  })
-  void cerebellumRuntime
+  // Cerebellum runtime + PR-3 surfaces (intuition tool, pre-step shortlists,
+  // spawned-effort resolver) are bound earlier in this apply — they must
+  // exist before the per-agent installer and the spawned-session schedulers
+  // below capture them.
 
   // Source-session relay: drain group-task milestones back into the chat that
   // originated each task ("哪里发起哪里结束"), on a host-lifetime timer.
@@ -940,6 +954,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       const runner = applyGroupTaskWorkerSessions(ctx, {
         pollMs: config.groupTask?.workerSessions?.pollMs,
         turnTimeoutMs: config.groupTask?.workerSessions?.turnTimeoutMs,
+        effort: spawnedEffort,
       })
       return () => runner.stop()
     }, 'oac-dsh: group-task worker sessions')
@@ -968,6 +983,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     applyScheduleScheduler(ctx, {
       tickSeconds: config.schedule?.tickSeconds,
       runTimeoutMs: config.schedule?.runTimeoutMs,
+      effort: spawnedEffort,
     })
   }
 

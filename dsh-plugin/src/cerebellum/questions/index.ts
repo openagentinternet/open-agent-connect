@@ -13,10 +13,12 @@
  * - remoteServiceShortlist.ts (#16)
  * - workerRank.ts        (#13)
  * - turnDecisionBundle.ts (2026-10-16 merge)
+ * - intuitionTool.ts     (#12 — Round 3 PR-3; the agent-tool wiring lives in
+ *   ../../cerebellum-tools.ts)
  *
  * NOT ported here: groupReplyGate (#5 — OAC has no on-chain group-chat
- * substrate, design doc §4 do-not-port), intuitionTool (#12 — brain-invoked
- * tool, lands in its own PR), effortSelector (#11 — lives in ../effort.ts).
+ * substrate, design doc §4 do-not-port), effortSelector (#11 — lives in
+ * ../effort.ts).
  */
 
 export type { CerebellumFetchLike } from './memoryRank.js';
@@ -51,3 +53,4 @@ export * from './volatileBlockGate.js';
 export * from './conversationSearchRank.js';
 export * from './workerRank.js';
 export * from './turnDecisionBundle.js';
+export * from './intuitionTool.js';

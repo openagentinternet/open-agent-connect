@@ -21,11 +21,48 @@ one of them is listed in the PR's diff table.
 | `questions/conversationSearchRank.ts` | `src/main/cerebellum/conversationSearchRank.ts` |
 | `questions/workerRank.ts` | `src/main/cerebellum/workerRank.ts` |
 | `questions/turnDecisionBundle.ts` | `src/main/cerebellum/turnDecisionBundle.ts` |
+| `questions/intuitionTool.ts` (PR-3) | `src/main/cerebellum/intuitionTool.ts` |
+| `../cerebellum-tools.ts` (PR-3 wiring) | `coworkRunner.ts` intuition registration (:12622-12720) + effort chain (:10010-10110), spawn-path form |
 
 Not ported: `groupReplyGate` (OAC has no on-chain group-chat substrate),
-`intuitionTool` (brain-invoked tool — later PR), the turn-ack bubble
-machinery (IDBots-renderer-bound; only the pure tier-mapping helper ports
-with `effort.ts`), the connection-test IPC + settings renderer.
+the turn-ack bubble machinery (IDBots-renderer-bound; only the pure
+tier-mapping helper ports with `effort.ts`), the connection-test IPC +
+settings renderer.
+
+## PR-3 turn-path surfaces (default OFF, zero behavior delta when disabled)
+
+1. **`intuition` agent tool** (`bindCerebellumToolInstall`): mount probe =
+   the runtime's sync config resolve — unconfigured/disabled registers
+   NOTHING (the tool is absent from the model's surface). Per-session
+   rolling window 3 calls / 60 s; every failure reports an honest
+   "no verdict"; hard input caps 6000/6/600/24/240 + 2-10 levels
+   (`questions/intuitionTool.ts`).
+2. **Pre-step shortlists** (`applyCerebellumShortlists`): ONE extra small
+   user-tail message beside the memory message, carrying the IDBots-shaped
+   `<skill_shortlist>` and (pool ≥ 12) `<remote_service_shortlist>` blocks.
+   Both rankings ride ONE `/v1/systemone` request (the turn-decision bundle
+   with empty memory/knowledge pools). Absent entirely when the cerebellum
+   is off — zero message delta.
+3. **Spawned-agent effort** (`createSpawnedEffortResolver`): consulted
+   BEFORE `agents.create` in `group-task-worker.ts`, `schedule-scheduler.ts`,
+   and `twin-tools.ts`. Explicit bot pick wins verbatim (a literal `auto`
+   maps to `max` — the IDBots unattended auto-means-max rule); any null
+   keeps the previous `agentOptions` byte-identical; escalations are
+   session-sticky for 10 min (bounded at 128 keys).
+
+### Diff vs IDBots (PR-3) — every deviation is a mechanical necessity of
+### this host or an explicit OAC privacy decision, listed for the diff table
+
+| Dimension | IDBots (@ d75bea8a) | OAC PR-3 |
+| --- | --- | --- |
+| intuition mount scope | owner `cowork_ui` sessions only (channel check) | registered on the host global layer; REFUSED at execute time in remote-content sessions (the OAC privacy line — DSH has no cowork_ui channel concept) |
+| intuition rate window | state on the active cowork session | map keyed by the DSH session id (lazily pruned) |
+| effort consult sites | interactive turn assembly only; unattended never consults | plugin-spawned `agents.create` (group-task worker / schedule / twin delegation) — design doc §2.2 B10; the A2A reply spawn is deliberately NOT consulted (remote untrusted text) |
+| effort policy | assistant two-level vs professional argmax, per mode flag | assistant-mode two-level policy (the IDBots default posture and the only live-validated mapping); no mode flag exists OAC-side (§5.3: never introduce one) |
+| sticky key | cowork session id | stable logical spawn key (`taskId:worker` / `schedule:slug:taskId` / `twin:taskId:stepId`) so a re-spawned session within 10 min keeps its escalation |
+| shortlist gathering | in-process skill manager + discovery snapshot per turn | OAC CLI (`skills list`, `network services --online`) behind a 60 s TTL cache (subprocess cost) |
+| shortlist privacy | all cowork turns | non-remote-content `oac-*` preset sessions only |
+| block text references | `<available_skills>` / `<available_remote_services>` blocks exist in the IDBots tail | block text ported verbatim; OAC has no per-turn remote-services block today (the reference is aspirational until PR-4 seams land) |
 
 ## Standing rules (do not break — ported defect lessons)
 
