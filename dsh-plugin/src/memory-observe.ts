@@ -6,6 +6,8 @@
  * best-effort: they never break a turn on failure.
  */
 import { randomUUID } from 'node:crypto'
+import type { CerebellumRuntime } from './cerebellum/client.js'
+import { gateTurnMemoryExtract } from './cerebellum-write-gate.js'
 import { runMetabot } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { slugFromPresetId } from './chip-logic.js'
@@ -64,6 +66,16 @@ export interface MemoryObserveOptions {
   run?: RunFn
   injection?: boolean
   extraction?: boolean
+  /**
+   * Cerebellum core runtime (Round 3 PR-2 write gate, design doc §2.2 B4).
+   * Absent (default) → the turn-end extract call is UNGATED and behavior is
+   * byte-identical to the pre-PR main. Present but disabled (the shipped
+   * cerebellum default) → the gate resolves no config per call, makes ZERO
+   * calls, and the extract call proceeds.
+   */
+  cerebellumRuntime?: CerebellumRuntime | null
+  /** Verdict/latency log sink for the gate (ids/counts only, never text). */
+  log?: (message: string) => void
 }
 
 /** Mount the per-turn memory injection (agent/pre-step, prepend so it composes). */
@@ -213,18 +225,55 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
           ).catch(() => undefined)
         }
         if (completed && userText) {
-          await runMetabotWithPayloadFile(
-            ['memory', 'extract', '--from', slug],
-            {
-              userText,
-              assistantText,
-              sessionId: capturedSessionId,
-              channel: 'dsh',
-            },
-            '--payload-file',
-            [],
-            run,
-          ).catch(() => undefined)
+          // Cerebellum write gate (design doc §2.2 B4): one cheap JEV Noul
+          // in front of the brain memory-extraction call. `false` skips the
+          // extract for this turn (the transcript mirrors above still run);
+          // `null`/`true`/disabled/any failure proceed. The gate never
+          // throws; the catch below is the belt-and-braces fail-open.
+          const proceedWithExtract = options.cerebellumRuntime
+            ? await gateTurnMemoryExtract({
+                runtime: options.cerebellumRuntime,
+                userText,
+                assistantText,
+                readImplicitEnabled: async () => {
+                  // explicitOnly source: the Bot's effective memory policy.
+                  // IDBots reads `implicitEnabled` in-process at the
+                  // extraction site; here the CLI bridges it. Any shape or
+                  // transport failure → null → implicit definition (the
+                  // more permissive one: it also counts explicit
+                  // remember/forget instructions), so a wrong guess can
+                  // only cost an extraction call, never a memory.
+                  const result = await runMetabotWithPayloadFile(
+                    ['memory', 'policy', 'get', '--from', slug],
+                    {},
+                    '--payload-file',
+                    [],
+                    run,
+                  )
+                  const effective = (
+                    result.data as { effective?: { memoryImplicitUpdateEnabled?: unknown } } | undefined
+                  )?.effective
+                  return typeof effective?.memoryImplicitUpdateEnabled === 'boolean'
+                    ? effective.memoryImplicitUpdateEnabled
+                    : null
+                },
+                log: options.log,
+              }).catch(() => true)
+            : true
+          if (proceedWithExtract) {
+            await runMetabotWithPayloadFile(
+              ['memory', 'extract', '--from', slug],
+              {
+                userText,
+                assistantText,
+                sessionId: capturedSessionId,
+                channel: 'dsh',
+              },
+              '--payload-file',
+              [],
+              run,
+            ).catch(() => undefined)
+          }
         }
       })
     } catch {

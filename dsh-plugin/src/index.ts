@@ -828,6 +828,22 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   // memory tools for oac-* preset sessions. Each piece is config-gated and
   // best-effort — failures never break a DSH turn.
   const memoryEnabled = config.memory?.enabled !== false
+  // Cerebellum (JEV fast-decision core), Round 3 PR-1: config-only bind,
+  // DEFAULT OFF. The bind reads the plugin config's cerebellum section and
+  // constructs the call-context runtime (lazy config re-resolution +
+  // signal-bounded free-relay fetch stack). PR-2 gives it its first two
+  // consumers — the turn-end memory write gate and the conversation_search
+  // re-rank — but both resolve the config per call: with the flag off (or
+  // absent) every call resolves null, NOTHING on any turn path is consulted
+  // (zero JEV fetches, zero extra CLI reads), and behavior is byte-identical
+  // to a build without this module.
+  const cerebellumRuntime = bindCerebellumCore(config.cerebellum, {
+    sink: (level, tag, message, extra) => {
+      if (level === 'ERROR' || level === 'WARN') {
+        warn(ctx, `${tag}: ${message}${extra ? ` ${JSON.stringify(extra)}` : ''}`)
+      }
+    },
+  })
   if (memoryEnabled && config.memory?.injection !== false) {
     ctx.effect(() => {
       applyMemoryInjection(ctx)
@@ -848,7 +864,10 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   }, 'oac-dsh: browser context injection')
   if (memoryEnabled && config.memory?.extraction !== false) {
     ctx.effect(() => {
-      applyMemoryExtraction(ctx)
+      applyMemoryExtraction(ctx, {
+        cerebellumRuntime,
+        log: (message) => warn(ctx, message),
+      })
       return () => undefined
     }, 'oac-dsh: memory extraction')
   }
@@ -867,6 +886,10 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       liveOacAgents,
       notifiedBacklogs,
       log: (message) => warn(ctx, message),
+      memoryTools: {
+        cerebellumRuntime,
+        log: (message) => warn(ctx, message),
+      },
     })
     ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
       installer.handleAgentCreated(payload?.agent)
@@ -905,21 +928,6 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindGlobalKnowledgeToolInstall(ctx)
   bindMediaDescriptionTools(ctx)
   bindLongtaskToolInstall(ctx)
-  // Cerebellum (JEV fast-decision core), Round 3 PR-1: config-only wiring,
-  // DEFAULT OFF. The bind reads the plugin config's cerebellum section and
-  // constructs the call-context runtime (lazy config re-resolution +
-  // signal-bounded free-relay fetch stack). Nothing on any turn path
-  // consults it yet — the memory write gate, conversation re-rank,
-  // shortlists, and spawned-agent effort hooks land in later PRs — so with
-  // the flag off (or absent) behavior is byte-identical to before.
-  const cerebellumRuntime = bindCerebellumCore(config.cerebellum, {
-    sink: (level, tag, message, extra) => {
-      if (level === 'ERROR' || level === 'WARN') {
-        warn(ctx, `${tag}: ${message}${extra ? ` ${JSON.stringify(extra)}` : ''}`)
-      }
-    },
-  })
-  void cerebellumRuntime
 
   // Source-session relay: drain group-task milestones back into the chat that
   // originated each task ("哪里发起哪里结束"), on a host-lifetime timer.
