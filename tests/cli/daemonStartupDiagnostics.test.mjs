@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -16,6 +17,17 @@ const {
 const { resolveMetabotDaemonPaths } = require('../../dist/core/state/paths.js');
 const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 
+// A pid harvested from a process that has already exited is guaranteed not to
+// be running right now. Fixed pids (e.g. 1111) go stale as machines accumulate
+// uptime and low pids get taken by long-lived system services.
+async function exitedPid() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+    child.on('exit', () => resolve(child.pid));
+    child.on('error', reject);
+  });
+}
+
 test('collectDaemonStartupDiagnostics reads global daemon.json and daemon.lock for the installation', async (t) => {
   const systemHome = await mkdtempTempRoot('metabot-daemon-diagnostics-');
   const paths = resolveMetabotDaemonPaths(systemHome);
@@ -23,11 +35,13 @@ test('collectDaemonStartupDiagnostics reads global daemon.json and daemon.lock f
     await rm(systemHome, { recursive: true, force: true });
   });
 
+  const stalePid = await exitedPid();
+  const lockPid = await exitedPid();
   await createDaemonStateStore(systemHome).writeDaemon({
     schemaVersion: 1,
     instanceId: 'default',
     ownerId: 'daemon-alice',
-    pid: 1111,
+    pid: stalePid,
     host: '127.0.0.1',
     port: 32390,
     baseUrl: 'http://127.0.0.1:32390',
@@ -40,7 +54,7 @@ test('collectDaemonStartupDiagnostics reads global daemon.json and daemon.lock f
   await mkdir(path.dirname(paths.daemonLockPath), { recursive: true });
   await writeFile(paths.daemonLockPath, `${JSON.stringify({
     ownerId: 'lock-alice',
-    pid: 999999,
+    pid: lockPid,
     acquiredAt: 654321,
   }, null, 2)}\n`, 'utf8');
 
@@ -54,13 +68,13 @@ test('collectDaemonStartupDiagnostics reads global daemon.json and daemon.lock f
   assert.equal(snapshot.daemonStatePath, paths.daemonStatePath);
   assert.equal(snapshot.lockPath, paths.daemonLockPath);
   assert.equal(snapshot.startupLogPath, paths.daemonLogPath);
-  // pid 1111 is not a running process in the test environment — a present
+  // stalePid comes from a process that has already exited — a present
   // record with a dead pid classifies as stale.
   assert.equal(snapshot.daemonRecordState, 'stale');
   assert.equal(snapshot.daemonRecord?.baseUrl, 'http://127.0.0.1:32390');
-  assert.equal(snapshot.daemonRecord?.pid, 1111);
+  assert.equal(snapshot.daemonRecord?.pid, stalePid);
   assert.equal(snapshot.lockInfo?.ownerId, 'lock-alice');
-  assert.equal(snapshot.lockInfo?.pid, 999999);
+  assert.equal(snapshot.lockInfo?.pid, lockPid);
   assert.equal(snapshot.lockOwnerAlive, false);
 });
 
