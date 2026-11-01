@@ -8,6 +8,8 @@
  * `metabot memory transcript read --any-bot`). The Memory Strategy prompt
  * section (ported from coworkRunner.ts:4401-4426) is installed alongside.
  */
+import type { CerebellumRuntime } from './cerebellum/client.js'
+import { rerankConversationSearch } from './cerebellum-write-gate.js'
 import { runMetabot } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { twinFallbackSlug } from './local-read.js'
@@ -124,8 +126,26 @@ function formatSessionRead(payload: { session?: Record<string, unknown>; turns?:
   return `${header}\n${body}`
 }
 
+/** Extra bindings for the memory tools family (Round 3 PR-2 re-rank). */
+export interface MemoryToolsOptions {
+  /**
+   * Cerebellum core runtime (design doc §2.2 B5). Absent (default) →
+   * `conversation_search` renders hits in the search (keyword/recency)
+   * order untouched, byte-identical to the pre-PR main. Present but
+   * disabled → the re-rank resolves no config per call, makes ZERO calls,
+   * and returns the original order.
+   */
+  cerebellumRuntime?: CerebellumRuntime | null
+  /** Counts/latency log sink for the re-rank (no query/snippets). */
+  log?: (message: string) => void
+}
+
 /** The memory tools, bound to one Bot slug. */
-export function buildMemoryToolDefinitions(slug: string, run: RunFn = runMetabot): HostToolDefinition[] {
+export function buildMemoryToolDefinitions(
+  slug: string,
+  run: RunFn = runMetabot,
+  options: MemoryToolsOptions = {},
+): HostToolDefinition[] {
   const viaPayload = (verb: string[], payload: Record<string, unknown>) =>
     runMetabotWithPayloadFile([...verb, '--from', slug], payload, '--payload-file', [], run)
 
@@ -313,7 +333,19 @@ export function buildMemoryToolDefinitions(slug: string, run: RunFn = runMetabot
           ...(numberArg(args, 'after') !== undefined ? { after: numberArg(args, 'after') } : {}),
         })
         const records = (dataOf(result) as { records?: Array<Record<string, unknown>> }).records ?? []
-        return formatSearchRecords(records)
+        // Cerebellum re-rank (design doc §2.2 B5): one Noul per hit, the
+        // noul replaces recency as the rank key; a score map below the 0.8
+        // coverage floor is discarded → keyword order verbatim. Absent
+        // runtime / disabled config / any failure → original order.
+        const ordered = options.cerebellumRuntime
+          ? await rerankConversationSearch({
+              runtime: options.cerebellumRuntime,
+              query: textArg(args, 'query'),
+              records,
+              log: options.log,
+            }).catch(() => records)
+          : records
+        return formatSearchRecords(ordered)
       },
     },
     {
@@ -354,13 +386,14 @@ export function installMemoryToolsOnAgent(
   agent: HostAgentLike,
   slug: string,
   run: RunFn = runMetabot,
+  options: MemoryToolsOptions = {},
 ): void {
   agent.ctx.systemPrompt?.section({
     name: 'oac:memory-strategy',
     order: 150,
     text: MEMORY_STRATEGY_TEXT,
   })
-  for (const definition of buildMemoryToolDefinitions(slug, run)) {
+  for (const definition of buildMemoryToolDefinitions(slug, run, options)) {
     agent.ctx.tools?.register(withRemoteContentGuard(definition))
   }
 }

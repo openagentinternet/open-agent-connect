@@ -13,10 +13,11 @@
  */
 import { slugFromPresetId } from './chip-logic.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
+import type { CerebellumRuntime } from './cerebellum/client.js'
 import type { HostAgentLike, HostContext, HostSessionEventLike, HostSessionLike } from './context-types.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
-import { installMemoryToolsOnAgent } from './memory-tools.js'
+import { installMemoryToolsOnAgent, type MemoryToolsOptions } from './memory-tools.js'
 import { agentsRegistryOf, installTwinOnAgent } from './twin-tools.js'
 
 export interface PerAgentInstallOptions {
@@ -29,6 +30,11 @@ export interface PerAgentInstallOptions {
   log?: (message: string) => void
   /** botType probe; tests inject a fake, production uses the daemon-pinned CLI. */
   botTypeOf?: (slug: string) => Promise<string | undefined>
+  /** Extra memory-tools bindings (cerebellum conversation re-rank, PR-2). */
+  memoryTools?: {
+    cerebellumRuntime?: CerebellumRuntime | null
+    log?: (message: string) => void
+  }
 }
 
 export interface PerAgentInstaller {
@@ -80,7 +86,7 @@ export function createPerAgentInstaller(ctx: HostContext, options: PerAgentInsta
       return
     }
     if (!memoryInstalled.has(agent)) {
-      installMemoryToolsOnAgent(agent, slug)
+      installMemoryToolsOnAgent(agent, slug, undefined, options.memoryTools)
       installChainHistoryRecallOnAgent(ctx, agent)
       memoryInstalled.add(agent)
     }
