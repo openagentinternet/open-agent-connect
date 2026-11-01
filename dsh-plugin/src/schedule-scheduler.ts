@@ -15,6 +15,7 @@ import { type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotPinned } from './daemon-pinned-run.js'
 import type { RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
+import type { SpawnedEffortResolver } from './cerebellum-tools.js'
 import { oacMessageSource } from './message-source.js'
 import { tappedOrSnapshot, tapSessionEvents, type SessionEventTap } from './session-event-tap.js'
 import type { AgentPresetsLike, HostAgentsRegistryLike, HostContext } from './context-types.js'
@@ -250,6 +251,18 @@ async function runScheduledSession(
   // synchronous log read — subscribe before the turn starts.
   const tap = deps.tapEvents?.(sessionId) ?? null
   try {
+    // Reasoning effort (Round 3 PR-3): an explicit Bot pick wins untouched;
+    // otherwise the cerebellum selector (when enabled) resolves the rung
+    // from the task prompt, sticky-keyed by the stable scheduled-task id.
+    // Null (off/unconfigured/failed) leaves agentOptions as before.
+    const effortRung = deps.effort
+      ? await deps.effort({
+        sessionKey: `schedule:${slug}:${task.id}`,
+        promptText: task.prompt,
+        explicitEffort: modelPair.reasoningEffort,
+      })
+      : null
+    const reasoningEffort = effortRung ?? modelPair.reasoningEffort
     const handle = await deps.agents.create({
       sessionId,
       // cwd keeps the session in the host workspace bucket: the DSH
@@ -258,7 +271,7 @@ async function runScheduledSession(
       agentOptions: {
         provider: modelPair.provider,
         model: modelPair.model,
-        ...(modelPair.reasoningEffort ? { reasoningEffort: modelPair.reasoningEffort } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
       setup: async (agentCtx: unknown) => {
         await deps.agentPresets.mount?.(agentCtx, presetIdForSlug(slug))
@@ -343,6 +356,8 @@ export interface ScheduleTickDeps {
   runTimeoutMs?: number
   /** Session cwd fallback when a task carries no workingDirectory (default process.cwd()). */
   cwd?: string
+  /** Cerebellum reasoning-effort resolver (Round 3 PR-3); absent keeps agentOptions as before. */
+  effort?: SpawnedEffortResolver
 }
 
 /**
@@ -455,6 +470,13 @@ export interface ScheduleSchedulerOptions {
   cwd?: string
   /** Test hook: called after each tick with per-bot outcomes. */
   onTick?: (outcomes: ScheduleBotOutcome[]) => void
+  /**
+   * Cerebellum reasoning-effort resolver consulted BEFORE agents.create when
+   * the Bot's model pair carries no explicit effort pick (Round 3 PR-3).
+   * Null (the default path with the cerebellum off) keeps agentOptions
+   * byte-identical to before.
+   */
+  effort?: SpawnedEffortResolver
 }
 
 /** Mount the scheduler; disposed with the plugin effect. */
@@ -473,12 +495,13 @@ export function applyScheduleScheduler(ctx: HostContext, options: ScheduleSchedu
   const tickSeconds = Math.max(1, options.tickSeconds ?? DEFAULT_TICK_SECONDS)
   const runTimeoutMs = options.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS
   const cwd = options.cwd ?? process.cwd()
+  const effort = options.effort
   let running = false
 
   const tick = (): void => {
     if (running) return
     running = true
-    void runScheduleSchedulerTick({ run, daemon, agents, agentPresets, modelPair, runTimeoutMs, cwd, tapEvents: (sessionId) => tapSessionEvents(ctx, sessionId) })
+    void runScheduleSchedulerTick({ run, daemon, agents, agentPresets, modelPair, runTimeoutMs, cwd, effort, tapEvents: (sessionId) => tapSessionEvents(ctx, sessionId) })
       .then((outcomes) => {
         reportScheduleOutcomes(ctx, outcomes)
         options.onTick?.(outcomes)

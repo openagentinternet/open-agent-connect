@@ -788,6 +788,14 @@ export interface CerebellumPluginConfigSection {
 export interface CerebellumRuntime {
   /** Resolve the per-call context (null = feature off for this call). */
   resolveCallContext(): Promise<{ config: ResolvedCerebellumConfig; fetchImpl: CerebellumFetchStack } | null>;
+  /**
+   * Sync mount probe (IDBots `cerebellumIntuitionAvailable` semantics):
+   * the pure config resolver over the bound plugin section. Best-effort —
+   * a free-relay outage degrades to "no verdict" at call time, not to a
+   * missing tool — so surfaces decide visibility with THIS, and executors
+   * still resolve the full runtime context lazily per call.
+   */
+  available(): boolean;
   /** The underlying client (tests; later gate/ranker PRs). */
   client: CerebellumClient;
 }
@@ -813,6 +821,7 @@ export function bindCerebellumCore(
     : { cerebellum: undefined };
   return {
     client,
+    available: () => resolveCerebellumConfig(appConfigShape) !== null,
     resolveCallContext: async () => {
       const config = await client.resolveRuntimeConfig(appConfigShape);
       if (!config) {

@@ -31,6 +31,7 @@ import { randomUUID } from 'node:crypto'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { isChipBotAvailable, presetIdForSlug, slugFromPresetId } from './chip-logic.js'
+import type { SpawnedEffortResolver } from './cerebellum-tools.js'
 import type { HostAgentLike, HostAgentsRegistryLike, HostContext, HostToolDefinition, HostUserMessage } from './context-types.js'
 import { withRemoteContentGuard } from './remote-content-guard.js'
 import { oacMessageSource } from './message-source.js'
@@ -288,10 +289,11 @@ export interface TwinOrchestrator {
 export function createTwinOrchestrator(
   ctx: HostContext,
   twinSlug: string,
-  options: { run?: RunFn; stepTimeoutMs?: number; sourceSessionId?: string } = {},
+  options: { run?: RunFn; stepTimeoutMs?: number; sourceSessionId?: string; effort?: SpawnedEffortResolver } = {},
 ): TwinOrchestrator {
   const run = options.run ?? runMetabot
   const stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
+  const effortResolver = options.effort
   const inFlight = new Map<string, InFlightAttempt>()
 
   const tasksUpdate = (payload: Record<string, unknown>) =>
@@ -467,6 +469,18 @@ export function createTwinOrchestrator(
       // deprecated synchronous log read — subscribe before the turn starts.
       const tap = tapSessionEvents(ctx, workerSessionId)
       try {
+        // Reasoning effort (Round 3 PR-3): an explicit worker-Bot pick wins
+        // untouched; otherwise the cerebellum selector (when enabled)
+        // resolves the rung from the delegation objective, sticky-keyed by
+        // the stable (task, step) pair. Null keeps agentOptions as before.
+        const effortRung = effortResolver
+          ? await effortResolver({
+            sessionKey: `twin:${taskId}:${stepId}`,
+            promptText: input.objective,
+            explicitEffort: modelPair.reasoningEffort,
+          })
+          : null
+        const reasoningEffort = effortRung ?? modelPair.reasoningEffort
         const handle = await agentsRegistry.create({
           sessionId: workerSessionId,
           // cwd keeps the session in the host workspace bucket: the DSH
@@ -481,7 +495,7 @@ export function createTwinOrchestrator(
           agentOptions: {
             provider: modelPair.provider,
             model: modelPair.model,
-            ...(modelPair.reasoningEffort ? { reasoningEffort: modelPair.reasoningEffort } : {}),
+            ...(reasoningEffort ? { reasoningEffort } : {}),
           },
           setup: async (agentCtx: unknown) => {
             await ctx.agentPresets?.mount?.(agentCtx, presetIdForSlug(workerSlug))
@@ -1089,7 +1103,7 @@ export function installTwinOnAgent(
   ctx: HostContext,
   agent: HostAgentLike,
   twinSlug: string,
-  options: { run?: RunFn; stepTimeoutMs?: number } = {},
+  options: { run?: RunFn; stepTimeoutMs?: number; effort?: SpawnedEffortResolver } = {},
 ): TwinOrchestrator {
   const sourceSessionId = typeof agent.session?.id === 'string' ? agent.session.id : undefined
   const orchestrator = createTwinOrchestrator(ctx, twinSlug, { ...options, sourceSessionId })
