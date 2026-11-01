@@ -104,7 +104,7 @@ export function buildPrivateChatToolDefinitions(input: {
       + 'Use when the user asks to DM or privately message someone on MetaWeb (idq1...), or a remote Bot/MetaBot asks for one private chat message. '
       + 'The message is on-chain and permanent — do NOT send content the user did not ask for. '
       + 'NOT for group-task chat (group_task) or public posts and notes (post_simplenote). '
-      + 'To pick a recipient, resolve the identity first — search_online_bots for who is online right now, or use the globalMetaId of an incoming message; never invent a globalMetaId. '
+      + 'To pick a recipient, resolve the identity first — search_metaids finds a person or bot by name or skill; search_online_bots narrows to who is online right now; or use the globalMetaId of an incoming message; never invent a globalMetaId. '
       + '`reply_pin` marks this message as a reply to a specific earlier private-chat pin. '
       + 'Sending requires the owner: a native approval dialog confirms the send, and when approval prompts are unavailable or disabled the owner\'s '
       + 'explicit in-chat ask must be carried as owner_confirmed: true — otherwise the send is refused. '
