@@ -2,6 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
+// Pin the in-process core loader to THIS repo's dist before the plugin loads
+// any core module: resolveLocalCliPath prefers env.OAC_METABOT_CLI_PATH, and
+// without the pin machines whose environment points that variable at an older
+// global open-agent-connect resolve core() against that runtime, so the
+// require.cache stubs below never intercept and real network calls fire
+// (1 search + 3 read failures). Same guard as metaweb-batch-tools.test.mjs.
+process.env.OAC_METABOT_CLI_PATH = new URL('../../dist/cli/main.js', import.meta.url).pathname
+
 const plugin = await import('../lib/metaweb-tools.js')
 
 function fakeHostContext() {
