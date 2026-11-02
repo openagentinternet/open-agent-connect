@@ -261,6 +261,61 @@ export const BROWSER_METAAPP_PANEL_CSS = `
         color: #fff;
         box-shadow: 0 2px 8px rgba(47, 111, 237, .2);
       }
+      .browser-nft-buy-token {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        padding: 14px 0;
+        border-bottom: 1px solid var(--browser-border);
+      }
+      .browser-nft-buy-image {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 72px;
+        height: 72px;
+        overflow: hidden;
+        border: 1px solid var(--browser-border);
+        border-radius: 9px;
+        background: var(--browser-surface2);
+        color: var(--browser-muted);
+      }
+      .browser-nft-buy-image-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .browser-nft-buy-image-fallback {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--browser-muted);
+      }
+      .browser-nft-buy-token-copy {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+      .browser-nft-buy-token-copy strong {
+        color: var(--browser-text);
+        font-size: 13px;
+        font-weight: 650;
+        overflow-wrap: anywhere;
+      }
+      .browser-nft-buy-token-copy span {
+        color: var(--browser-muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .browser-nft-buy-token-copy code {
+        color: var(--browser-muted);
+        font: 11px/1.35 var(--mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+      }
+      .browser-nft-buy-price {
+        color: var(--browser-accent) !important;
+        font: 650 12px/1.4 var(--mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace) !important;
+      }
       @media (max-width: 540px) {
         .browser-pin-write-field {
           grid-template-columns: 1fr;

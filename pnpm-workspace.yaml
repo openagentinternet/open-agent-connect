@@ -43,12 +43,12 @@ allowBuilds:
   protobufjs: true
 
 minimumReleaseAgeExclude:
-  - '@openagentinternet/agent-browser-core@0.6.3 || 0.7.0 || 0.7.1'
-  - '@openagentinternet/agent-browser-host-contract@0.6.3 || 0.7.0 || 0.7.1'
-  - '@openagentinternet/agent-browser-name-resolvers@0.6.3 || 0.7.0 || 0.7.1'
-  - '@openagentinternet/agent-browser-renderers@0.6.3 || 0.7.0 || 0.7.1'
-  - '@openagentinternet/agent-browser-ui@0.6.3 || 0.7.0 || 0.7.1'
-  - '@openagentinternet/agent-browser-test-harness@0.6.3 || 0.7.0 || 0.7.1'
+  - '@openagentinternet/agent-browser-core@0.6.3 || 0.7.0 || 0.7.1 || 0.8.1'
+  - '@openagentinternet/agent-browser-host-contract@0.6.3 || 0.7.0 || 0.7.1 || 0.8.1'
+  - '@openagentinternet/agent-browser-name-resolvers@0.6.3 || 0.7.0 || 0.7.1 || 0.8.1'
+  - '@openagentinternet/agent-browser-renderers@0.6.3 || 0.7.0 || 0.7.1 || 0.8.1'
+  - '@openagentinternet/agent-browser-ui@0.6.3 || 0.7.0 || 0.7.1 || 0.8.1'
+  - '@openagentinternet/agent-browser-test-harness@0.6.3 || 0.7.0 || 0.7.1 || 0.8.1'
 
 # Audit waivers for advisories with no patched upstream release (checked
 # 2026-10-07). Both are DoS-class issues in transitive dependencies:
