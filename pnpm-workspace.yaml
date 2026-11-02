@@ -19,6 +19,13 @@ overrides:
   '@protobufjs/utf8': 1.1.1
   bn.js: 4.12.4
   elliptic: 6.6.1
+  # 14.0.2 patches GHSA-3g3m-2fjr-6pw4 (moderate, AbortSignal cancellation
+  # bypass); reached via rimraf (^13.0.3 declared — this is a deliberate
+  # cross-major override, validated against the rimraf call sites).
+  glob: 14.0.2
+  # 11.0.1 patches GHSA-g3hv-75wg-m249 (moderate, globparts amplification);
+  # reached via glob ^10/^11 declared ranges under rimraf.
+  minimatch: 11.0.1
   patch-package: 8.0.1
   protobufjs: 7.6.5
   tmp: 0.2.7
