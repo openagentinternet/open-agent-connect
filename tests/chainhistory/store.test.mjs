@@ -382,7 +382,10 @@ test('corrupt record files are skipped, never fatal', async () => {
   );
 
   assert.equal(await store.getWrite('pin-corrupt-bad'), null);
-  const hits = await store.searchWrites({ query: 'fine' });
+  // Explicit window: searchWrites' implicit toMs is a SECOND Date.now() call,
+  // and a runner clock backstep between `now` above and that call filters the
+  // just-written record out (observed twice on CI runners, never locally).
+  const hits = await store.searchWrites({ query: 'fine', fromMs: now - DAY_MS, toMs: now + DAY_MS });
   assert.deepEqual(hits.map((record) => record.pinId), ['pin-corrupt-ok']);
   const dayStart = localDayStart(now);
   const listed = await store.listWritesForDay({ startMs: dayStart, endMs: dayStart + DAY_MS });
