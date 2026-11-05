@@ -1551,3 +1551,30 @@ export const QUOTEREPLY_CSS = `
    stretching the composer. min-width keeps the flex item shrinkable. */
 [data-composer-chip="oac-quote"] [class*="_label"] { max-width: 320px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
+
+/* Narrow viewports (phones / narrow splits — DSH 0.2.2's mobile line): the
+   multi-column bodies stack, the Bots page's fixed 188px nav becomes a
+   horizontal chip row, and two-column forms go single-column. Pure CSS
+   breakpoints, so the rules hold wherever a surface mounts (center-column
+   overlays and the sidebar's narrow states alike). The A2A list and the
+   group-task drawer cap their stacked rows and keep their internal scroll
+   (both already scroll their rows). */
+export const NARROWVIEW_CSS = `
+@media (max-width: 720px) {
+  .oac-split { grid-template-columns: minmax(0, 1fr); }
+  .oac-param-grid, .oac-apps-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .oac-apps-detail-field { grid-template-columns: 110px minmax(0, 1fr); }
+  .oac-bots-page { flex-direction: column; }
+  .oac-bots-page-nav { width: auto; flex-direction: row; align-items: center; gap: 10px; min-height: 0; padding: 12px 12px 0; }
+  .oac-bots-page-nav-title { flex: none; padding: 0 4px; font-size: 14px; line-height: 20px; }
+  .oac-bots-page-nav-list { flex: 1 1 auto; min-width: 0; flex-direction: row; gap: 2px; overflow-x: auto; overflow-y: hidden; }
+  .oac-bots-page-nav-item { flex: none; height: 34px; padding: 6px 12px; white-space: nowrap; }
+  .oac-bots-page-content { padding: 12px 14px 20px; }
+  .oac-a2a-body-with-list { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(140px, 38vh) minmax(0, 1fr); }
+  .oac-a2a-body-with-list > .oac-a2a-list { border-right: none; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+  .oac-gt-body-with-drawer { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 45vh); }
+  .oac-gt-body-with-drawer > .oac-gt-drawer { grid-column: 1; grid-row: 2; max-height: 45vh; overflow-y: auto; }
+  .oac-a2a-body-with-list.oac-gt-body-with-drawer { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(140px, 38vh) minmax(0, 1fr) minmax(0, 45vh); }
+  .oac-a2a-body-with-list.oac-gt-body-with-drawer > .oac-gt-drawer { grid-column: 1; grid-row: 3; }
+}
+`

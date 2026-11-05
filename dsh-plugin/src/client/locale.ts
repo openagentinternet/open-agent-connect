@@ -243,8 +243,13 @@ export const en = {
   updateVersion: 'Current {current} -> latest {latest}',
   updateNow: 'Update now',
   updating: 'Updating...',
+  updateStepChecking: 'Checking the new version...',
+  updateStepRemoving: 'Removing the current build...',
+  updateStepInstalling: 'Installing the new build...',
+  updateStepRestoring: 'Restoring the previous build...',
   updateRestart: 'Update installed. Restart DSH to finish loading it.',
   updateFailed: 'Update failed: {message}',
+  contextMenuEditBot: 'Edit Bot',
 
   // ── First-run runtime setup card (My Bots) ─────────────────────────────
   setupTitleMissing: 'Open Agent Connect runtime is missing',
@@ -814,8 +819,13 @@ export const zh = {
   updateVersion: '当前 {current} -> 最新 {latest}',
   updateNow: '更新',
   updating: '正在更新...',
+  updateStepChecking: '正在检查新版本...',
+  updateStepRemoving: '正在移除当前版本...',
+  updateStepInstalling: '正在安装新版本...',
+  updateStepRestoring: '正在恢复旧版本...',
   updateRestart: '已安装，请重启 DSH 加载它。',
   updateFailed: '更新失败：{message}',
+  contextMenuEditBot: '编辑 Bot',
 
   // ── First-run runtime setup card (My Bots) ─────────────────────────────
   setupTitleMissing: '缺少 Open Agent Connect 运行时',

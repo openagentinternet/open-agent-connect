@@ -183,3 +183,173 @@ test('applyPluginUpdate refuses a non-newer target before touching the profile',
   assert.equal(result.code, 'not_available')
   assert.equal(touched, false)
 })
+
+test('applyPluginUpdate prefers the native updateBundle on DSH 0.2.2+', async () => {
+  const calls = []
+  const manager = {
+    async listBundles() {
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.8', removable: true }]
+    },
+    async removeBundle() { calls.push('remove'); return { application: 'applied' } },
+    async installBundle() { calls.push('install'); return { application: 'applied' } },
+    async updateBundle(name, version, options) {
+      calls.push(['updateBundle', name, version, typeof options?.requestId])
+      return { from: '0.9.8', to: version, step: 'install', result: { application: 'applied', version: '0.9.9' } }
+    },
+  }
+  const { applyPluginUpdate, pluginUpdateProgress } = await import('../lib/plugin-update.js')
+  const result = await applyPluginUpdate(
+    { get: key => key === 'pluginManager' ? manager : undefined },
+    { check: async () => ({ ok: true, current: '0.9.8', latest: '0.9.9', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+  )
+  assert.equal(result.ok, true)
+  assert.equal(result.application, 'applied')
+  assert.equal(result.version, '0.9.9')
+  assert.deepEqual(calls, [['updateBundle', 'open-agent-connect-dsh', '0.9.9', 'string']])
+  assert.equal(pluginUpdateProgress().active, false)
+})
+
+test('applyPluginUpdate maps a native failure and reports the host restore', async () => {
+  const manager = {
+    async listBundles() {
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.8', removable: true }]
+    },
+    async updateBundle() {
+      return {
+        from: '0.9.8', to: '0.9.9', step: 'install',
+        result: { application: 'failed', error: { code: 'operation-error', diagnostic: 'pnpm install exited 1' } },
+        restore: { application: 'applied' },
+      }
+    },
+  }
+  const { applyPluginUpdate } = await import('../lib/plugin-update.js')
+  const result = await applyPluginUpdate(
+    { get: key => key === 'pluginManager' ? manager : undefined },
+    { check: async () => ({ ok: true, current: '0.9.8', latest: '0.9.9', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+  )
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'operation-error')
+  assert.match(result.message, /pnpm install exited 1/)
+  assert.match(result.message, /previously installed version was restored/)
+})
+
+test('applyPluginUpdate surfaces a native remove-stage failure', async () => {
+  const manager = {
+    async listBundles() {
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.8', removable: true }]
+    },
+    async updateBundle() {
+      return {
+        from: '0.9.8', to: '0.9.9', step: 'remove',
+        result: { application: 'failed', error: { code: 'lock-timeout', diagnostic: 'profile lock held' } },
+      }
+    },
+  }
+  const { applyPluginUpdate } = await import('../lib/plugin-update.js')
+  const result = await applyPluginUpdate(
+    { get: key => key === 'pluginManager' ? manager : undefined },
+    { check: async () => ({ ok: true, current: '0.9.8', latest: '0.9.9', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+  )
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'lock-timeout')
+})
+
+test('applyPluginUpdate keeps restart-required semantics on the native path', async () => {
+  const manager = {
+    async listBundles() {
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.8', removable: true }]
+    },
+    async updateBundle() {
+      return { from: '0.9.8', to: '0.9.9', step: 'install', result: { application: 'restart-required', version: '0.9.9' } }
+    },
+  }
+  const { applyPluginUpdate } = await import('../lib/plugin-update.js')
+  const result = await applyPluginUpdate(
+    { get: key => key === 'pluginManager' ? manager : undefined },
+    { check: async () => ({ ok: true, current: '0.9.8', latest: '0.9.9', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+  )
+  assert.equal(result.ok, true)
+  assert.equal(result.application, 'restart-required')
+})
+
+test('applyPluginUpdate reports a held-back native install as version_mismatch', async () => {
+  const calls = []
+  const manager = {
+    async listBundles() {
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.8', removable: true }]
+    },
+    async updateBundle() {
+      return { from: '0.9.8', to: '0.9.9', step: 'install', result: { application: 'applied', version: '0.9.8' } }
+    },
+    async installBundle(spec) { calls.push(spec); return { application: 'applied' } },
+  }
+  const { applyPluginUpdate } = await import('../lib/plugin-update.js')
+  const result = await applyPluginUpdate(
+    { get: key => key === 'pluginManager' ? manager : undefined },
+    { check: async () => ({ ok: true, current: '0.9.8', latest: '0.9.9', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+  )
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'version_mismatch')
+  assert.deepEqual(calls, [])
+})
+
+test('trackUpdateProgress follows plugin-manager/update-state events for the native request', async () => {
+  let emit = () => {}
+  let settleUpdate = () => {}
+  const listeners = []
+  const manager = {
+    async listBundles() {
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.8', removable: true }]
+    },
+    async updateBundle(name, version, options) {
+      emit = (step) => { for (const listener of listeners) listener({ requestId: options?.requestId, step }) }
+      emit('removing')
+      emit('installing')
+      await new Promise((resolve) => { settleUpdate = resolve })
+      return { from: '0.9.8', to: version, step: 'install', result: { application: 'applied', version } }
+    },
+  }
+  const { applyPluginUpdate, pluginUpdateProgress } = await import('../lib/plugin-update.js')
+  const pending = applyPluginUpdate(
+    {
+      get: key => key === 'pluginManager' ? manager : undefined,
+      on: (event, listener) => { listeners.push(listener); return () => { const at = listeners.indexOf(listener); if (at >= 0) listeners.splice(at, 1) } },
+    },
+    { check: async () => ({ ok: true, current: '0.9.8', latest: '0.9.9', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+  )
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(pluginUpdateProgress().active, true)
+  assert.equal(pluginUpdateProgress().step, 'installing')
+  assert.equal(pluginUpdateProgress().to, '0.9.9')
+  settleUpdate()
+  const result = await pending
+  assert.equal(result.ok, true)
+  const progress = pluginUpdateProgress()
+  assert.equal(progress.active, false)
+  assert.equal(progress.step, 'installing')
+})
+
+test('trackUpdateProgress ignores events for foreign request ids', async () => {
+  let emit = () => {}
+  const listeners = []
+  const manager = {
+    async listBundles() {
+      return [{ name: 'open-agent-connect-dsh', version: '0.9.8', removable: true }]
+    },
+    async updateBundle(name, version, options) {
+      emit = (step, requestId) => { for (const listener of listeners) listener({ requestId: requestId ?? options?.requestId, step }) }
+      emit('installing', 'some-other-request')
+      return { from: '0.9.8', to: version, step: 'install', result: { application: 'applied', version } }
+    },
+  }
+  const { applyPluginUpdate, pluginUpdateProgress } = await import('../lib/plugin-update.js')
+  const result = await applyPluginUpdate(
+    {
+      get: key => key === 'pluginManager' ? manager : undefined,
+      on: (event, listener) => { listeners.push(listener); return () => undefined },
+    },
+    { check: async () => ({ ok: true, current: '0.9.8', latest: '0.9.9', updateAvailable: true, registry: 'test', checkedAt: 1 }) },
+  )
+  assert.equal(result.ok, true)
+  assert.equal(pluginUpdateProgress().step, 'checking')
+})

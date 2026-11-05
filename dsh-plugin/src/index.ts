@@ -82,7 +82,7 @@ import type { HostAgentLike, HostContext, HostSessionEventLike, HostSessionLike,
 import { uploadFileBytes } from './file-upload.js'
 import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
-import { applyPluginUpdate, checkPluginUpdate } from './plugin-update.js'
+import { applyPluginUpdate, checkPluginUpdate, pluginUpdateProgress } from './plugin-update.js'
 import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 import { dispatchGroupTaskRoutes } from './grouptask.js'
 import { dispatchMetaTaskRoutes } from './metatask-routes.js'
@@ -608,6 +608,14 @@ function registerApi(
         writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
         return
       }
+      if (method === 'update/progress') {
+        if (req.method === 'GET') {
+          writeJson(res, 200, { ok: true, state: 'success', data: pluginUpdateProgress() })
+          return
+        }
+        writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+        return
+      }
       if (req.method !== 'POST') {
         writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
         return
@@ -828,6 +836,24 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     botHub,
     replaceHealth,
   ), 'oac-dsh: /oac/api routes')
+  // DSH 0.2.2+ announces provider catalog changes on `llm/models-updated`
+  // (older kernels never emit it, so the listener just stays quiet there).
+  // Debounced — one refresh can emit per provider — and relayed as one
+  // `llm-models-updated` SSE frame so mounted pickers refetch the directory.
+  ctx.effect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = ctx.on?.('llm/models-updated', () => {
+      if (timer !== null) return
+      timer = setTimeout(() => {
+        timer = null
+        botHub.notifyEvent('llm-models-updated', {})
+      }, 400)
+    })
+    return () => {
+      if (timer !== null) clearTimeout(timer)
+      if (typeof off === 'function') off()
+    }
+  }, 'oac-dsh: llm models feed')
 
   // Memory system: per-turn injection, post-turn extraction, and per-agent
   // memory tools for oac-* preset sessions. Each piece is config-gated and

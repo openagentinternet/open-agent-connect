@@ -31,7 +31,8 @@ import type { RuntimeCheckPayload, RuntimeInstallResult } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
 import type { MemoryLocaleKey } from './locale-memory.ts'
 import type { MemoryPanelInjected } from './MemoryPanel.tsx'
-import { useBotsRevision } from './bot-catalog.ts'
+import { useBotsRevision, useLlmDirectoryRevision } from './bot-catalog.ts'
+import { subscribeToBotEditorRequests } from './bot-editor-requests.ts'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
@@ -173,6 +174,10 @@ export function BotPanel({
   // Bot set refresh: CLI/daemon-side Bot writes update the My Bots list
   // without a manual refresh (route-driven creates already reload via tick).
   const botsRevision = useBotsRevision()
+  // DSH 0.2.2+ relays provider catalog changes as `llm-models-updated` SSE
+  // frames; mounted editors refetch the directory instead of showing a stale
+  // model list until reload (old kernels never emit the frame).
+  const llmDirectoryRevision = useLlmDirectoryRevision()
 
   useEffect(() => {
     let current = true
@@ -185,7 +190,20 @@ export function BotPanel({
 
   useEffect(() => {
     void llmDirectory().then(setDirectory).catch(() => setDirectory({ providers: [], modelsByProvider: {} }))
-  }, [llmDirectory])
+  }, [llmDirectory, llmDirectoryRevision])
+
+  // Editor requests (the DSH 0.2.2+ session context menu's "Edit Bot"):
+  // refetch the roster so the profile is fresh, then open its editor.
+  useEffect(() => subscribeToBotEditorRequests((slug) => {
+    setError(null)
+    void list().then(
+      (rows) => {
+        const bot = rows.find((row) => row.slug === slug)
+        if (bot !== undefined) setEditing(bot)
+      },
+      () => undefined,
+    )
+  }), [list])
 
   const reload = (): void => setTick((value) => value + 1)
 

@@ -9,21 +9,48 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
-import { pluginUpdateApply, pluginUpdateStatus, type PluginUpdateCheckPayload } from './api.ts'
+import { pluginUpdateApply, pluginUpdateProgress, pluginUpdateStatus, type PluginUpdateCheckPayload, type PluginUpdateProgressPayload } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
+
+const STEP_KEYS: Record<NonNullable<PluginUpdateProgressPayload['step']>, BotsLocaleKey> = {
+  checking: 'updateStepChecking',
+  removing: 'updateStepRemoving',
+  installing: 'updateStepInstalling',
+  restoring: 'updateStepRestoring',
+}
 
 export function PluginUpdateBanner({ t }: { t: Translate }): ReactNode {
   const [status, setStatus] = useState<PluginUpdateCheckPayload | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [step, setStep] = useState<PluginUpdateProgressPayload['step'] | null>(null)
 
   useEffect(() => {
     let live = true
     void pluginUpdateStatus().then((next) => { if (live) setStatus(next) }, () => undefined)
     return () => { live = false }
   }, [])
+
+  // Native DSH 0.2.2+ updates announce progress steps; poll while applying.
+  // Old kernels never report active progress, so the label stays on the
+  // generic "Updating..." text.
+  useEffect(() => {
+    if (!busy) {
+      setStep(null)
+      return
+    }
+    let live = true
+    const poll = (): void => {
+      void pluginUpdateProgress().then((next) => {
+        if (live && next?.active === true && next.step !== undefined) setStep(next.step)
+      }, () => undefined)
+    }
+    poll()
+    const timer = setInterval(poll, 1200)
+    return () => { live = false; clearInterval(timer) }
+  }, [busy])
 
   if (status === null || (status.updateAvailable === false && message === null)) return null
   const latest = status.latest ?? ''
@@ -68,7 +95,7 @@ export function PluginUpdateBanner({ t }: { t: Translate }): ReactNode {
         {message === null ? null : <span style={{ fontSize: 12, opacity: 0.8 }}>{message}</span>}
       </div>
       <Button variant="outline" size="sm" disabled={busy} onClick={apply}>
-        {busy ? t('updating') : t('updateNow')}
+        {busy ? (step === null ? t('updating') : t(STEP_KEYS[step])) : t('updateNow')}
       </Button>
     </div>
   )

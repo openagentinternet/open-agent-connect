@@ -260,3 +260,26 @@ test('host index: bots mutation routes notify the bot hub', async () => {
     assert.ok(next > 0 && next - at < 700, `${method} notifies the hub on success`)
   }
 })
+
+test('BotChangeEventHub: notifyEvent pushes arbitrary frames (llm-models-updated)', async () => {
+  const { BotChangeEventHub } = await import('../lib/bot-events.js')
+  const hub = new BotChangeEventHub()
+  const frames = []
+  const stop = hub.addClient((frame) => frames.push(frame))
+  hub.notifyEvent('llm-models-updated', { provider: 'deepseek' })
+  stop()
+  hub.notifyEvent('llm-models-updated', {})
+  assert.deepEqual(frames, [{ event: 'llm-models-updated', data: { provider: 'deepseek' } }])
+})
+
+test('llm models feed: DSH 0.2.2 event relayed to the client directory revision', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const host = await readFile(join(import.meta.dirname, '..', 'src', 'index.ts'), 'utf8')
+  assert.ok(host.includes("'llm/models-updated'"), 'the host listens for the DSH 0.2.2 llm event')
+  assert.ok(host.includes("notifyEvent('llm-models-updated'"), 'the host relays it as an SSE frame')
+  const catalog = await readFile(join(import.meta.dirname, '..', 'src', 'client', 'bot-catalog.ts'), 'utf8')
+  assert.ok(catalog.includes('llm-models-updated'), 'the client feed listens for the relayed frame')
+  assert.ok(catalog.includes('useLlmDirectoryRevision'), 'a directory revision hook exists')
+  const panel = await readFile(join(import.meta.dirname, '..', 'src', 'client', 'BotPanel.tsx'), 'utf8')
+  assert.ok(panel.includes('useLlmDirectoryRevision'), 'BotPanel refetches the directory on the push')
+})

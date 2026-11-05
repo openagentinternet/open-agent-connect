@@ -59,9 +59,14 @@ export class BotChangeEventHub {
   }
 
   notify(): void {
+    this.notifyEvent('bots-changed', {})
+  }
+
+  /** Push an arbitrary frame (e.g. `llm-models-updated`) to every connected client. */
+  notifyEvent(event: string, data: unknown): void {
     for (const client of [...this.clients]) {
       try {
-        client({ event: 'bots-changed', data: {} })
+        client({ event, data })
       } catch {
         // one dead client must not break the rest
       }

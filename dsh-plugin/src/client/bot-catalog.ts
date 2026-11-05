@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react'
 type Listener = () => void
 
 const listeners = new Set<Listener>()
+const llmListeners = new Set<Listener>()
 let source: EventSource | null = null
 
 /**
@@ -46,6 +47,15 @@ function ensureSource(): void {
       }
     }
   })
+  source.addEventListener('llm-models-updated', () => {
+    for (const listener of [...llmListeners]) {
+      try {
+        listener()
+      } catch {
+        // one refetch must not break the rest
+      }
+    }
+  })
 }
 
 /** Run `listener` on every `bots-changed` push; returns an unsubscribe. */
@@ -65,6 +75,32 @@ export function subscribeToBotChanges(listener: Listener): () => void {
 export function useBotsRevision(): number {
   const [revision, setRevision] = useState(0)
   useEffect(() => subscribeToBotChanges(() => {
+    setRevision((value) => value + 1)
+  }), [])
+  return revision
+}
+
+/**
+ * Run `listener` on every `llm-models-updated` push — the host relay of
+ * DSH 0.2.2+'s `llm/models-updated` event (a provider's catalog changed).
+ * Older kernels never emit the frame, so subscribers just stay quiet.
+ */
+export function subscribeToLlmDirectoryChanges(listener: Listener): () => void {
+  llmListeners.add(listener)
+  ensureSource()
+  return () => {
+    llmListeners.delete(listener)
+  }
+}
+
+/**
+ * A revision that increments on every `llm-models-updated` push. Add it to
+ * the directory effect's deps so the model catalog refetches when a
+ * provider advertises new models under a mounted picker.
+ */
+export function useLlmDirectoryRevision(): number {
+  const [revision, setRevision] = useState(0)
+  useEffect(() => subscribeToLlmDirectoryChanges(() => {
     setRevision((value) => value + 1)
   }), [])
   return revision
