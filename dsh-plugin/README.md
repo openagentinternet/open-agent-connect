@@ -8,9 +8,10 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
-Host kernel requirement: this plugin is built and verified against the DSH
-**0.2.1-rc.3** client surface and runs on the
-**0.1.5**, **0.1.6**, **0.1.7**, **0.2.0**, and **0.2.1** kernel lines — most peer ranges are
+Host kernel requirement: this plugin is built against the DSH
+**0.2.1-rc.3** client surface and verified compatible with DSH
+**0.2.2-rc.1** (2026-11 tag-level API audit; see below), and runs on the
+**0.1.5**, **0.1.6**, **0.1.7**, **0.2.0**, **0.2.1**, and **0.2.2** kernel lines — most peer ranges are
 `^0.1.5-alpha.1 || ^0.1.6-alpha.1 || ^0.1.7-alpha.1 || ^0.2.0-rc.1`, with the
 wider `^0.1.2-alpha.2 || ^0.1.3-alpha.1` spans kept on the packages the
 preset/persona surface still shares. The same build serves the DSH **desktop
@@ -29,6 +30,30 @@ the `webRuntime` service; npm plugin 0.9.5 still waits for it (`inject`), stays
 enforces the kernel Host/Origin fence and browser authentication. Replace an
 already installed older build and **fully restart DSH**; a browser refresh or
 profile HMR does not replace a host-half plugin that is already loaded.
+
+**DSH 0.2.2-rc.1 compatibility.** The current build runs on 0.2.2-rc.1
+unchanged (2026-11 tag-level audit against 0.2.1-rc.3). Every contract the
+plugin consumes survived additively: the client runtime externals
+(`dsh-client-ui-slots`, `dsh-client-ui-primitives`, `dsh-client-store`) lost no
+exports, every mount slot id and the `sidebar.workspaces` DOM anchor are
+intact, and the `window.__ModuleLoader__` boot contract is unchanged. On the
+host half, `connection.requestRejection`, the `session/event` listener shape,
+the `pluginManager` list/remove/install methods, the `agentPresets` registry
+methods, `llm.stream`, the `schedule` service, and the session-controller
+`list`/`scope` remotes are unchanged (the async Session Projection
+registration only affects plugins that register projections, which this
+plugin does not). The compatibility gate is untouched and `engines.dsh`
+(`>=0.1.5-alpha.1 <0.3.0-0`) already admits 0.2.2-rc.1, so no manifest change
+was needed. Two host-side notes: DSH 0.2.2 raised its own minimum Node.js to
+**24.9** (upgrade the host runtime alongside DSH; the plugin's own
+`engines.node >=20` and the `metabot` CLI Node range are unchanged), and the
+plugin registry now re-reads the host's current `standard.patch.yml` on every
+apply, so the 0.2.2 tool-composition edits (`apply_patch` config, subagent
+row reshuffle, plugin-manager tools enablement) are absorbed without plugin
+changes. DSH's new native third-party plugin update channel
+(`pluginManager.updateBundle` with progress events) is a candidate for a
+later migration of the in-product update bridge below; it is not required
+for compatibility.
 
 **Updating the plugin from inside OAC.** 0.9.6 also ships an in-product update
 bridge, so a working installation does not need a terminal for its next

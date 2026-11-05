@@ -28,10 +28,12 @@ start the first chat.
 ## Prerequisites
 
 - DeepSeek Harness with a `web` profile (`dsh web` already runs). The plugin
-  supports the 0.1.5, 0.1.6, 0.1.7, and 0.2.0 kernel lines (built and verified
-  against 0.2.0-rc.2); it does not load on
-  0.1.0-rc-era kernels.
-- Node.js `>=20 <25` for the `metabot` CLI. DSH itself may run on another Node.
+  supports the 0.1.5, 0.1.6, 0.1.7, 0.2.0, 0.2.1, and 0.2.2 kernel lines
+  (built against 0.2.1-rc.3; 0.2.2-rc.1 verified compatible by an API-surface
+  audit); it does not load on 0.1.0-rc-era kernels.
+- Node.js `>=20 <25` for the `metabot` CLI. DSH itself may run on another Node —
+  note that DSH 0.2.2 raised its own minimum to Node 24.9, so the DSH host must
+  be upgraded to Node 24.9+ before/with a DSH 0.2.2 install.
   The plugin looks for `OAC_NODE_PATH`, then `process.execPath` when that Node is
   in range, then nvm 20–24. Override the CLI entry with `OAC_METABOT_CLI_PATH`.
 - The OAC runtime (`open-agent-connect`, which provides the `metabot` CLI and
