@@ -51,19 +51,29 @@ plugin registry now re-reads the host's current `standard.patch.yml` on every
 apply, so the 0.2.2 tool-composition edits (`apply_patch` config, subagent
 row reshuffle, plugin-manager tools enablement) are absorbed without plugin
 changes. DSH's new native third-party plugin update channel
-(`pluginManager.updateBundle` with progress events) is a candidate for a
-later migration of the in-product update bridge below; it is not required
-for compatibility.
+(`pluginManager.updateBundle` with progress events) is adopted as the
+preferred apply path below, and two more 0.2.2 additions are wired in: the
+`llm/models-updated` event is relayed to mounted pickers as an SSE frame so
+the model directory refetches without a reload, and the unified session
+context menu gains an OAC action ("Edit Bot") on `oac-*` session rows —
+the session's `oac-<slug>` preset maps back to its Bot, the Bots page opens,
+and the editor focuses that profile. A narrow-viewport CSS pass (stacked
+A2A/group-task bodies, horizontal Bots-page nav on phones) follows DSH
+0.2.2's mobile line.
 
 **Updating the plugin from inside OAC.** 0.9.6 also ships an in-product update
 bridge, so a working installation does not need a terminal for its next
 upgrade. The Bots page asks the host for the npm `latest` version
 (`GET /oac/api/update/status`), and when a newer version exists it renders a
 small notice above the section content with an **Update now** button. The
-button posts to `/oac/api/update/apply`; the host then asks DSH's
-`pluginManager` to remove the current bundle and install the exact npm target,
-with the previously installed source retained as an automatic rollback if the
-install fails. The plugin never replaces package files itself.
+button posts to `/oac/api/update/apply`. On DSH 0.2.2+ the apply goes through
+the native `pluginManager.updateBundle`: the host resolves the registry, runs
+the compatibility gate, restores the previous version when the install fails,
+and announces `checking`/`removing`/`installing`/`restoring` progress that the
+banner follows via `GET /oac/api/update/progress`. On older kernels the host
+asks DSH's `pluginManager` to remove the current bundle and install the exact
+npm target, with the previously installed source retained as an automatic
+rollback if the install fails. The plugin never replaces package files itself.
 
 The update check is cached for six hours. `OAC_DSH_UPDATE_REGISTRY` may point
 `GET /oac/api/update/status` and the apply preflight at a mirror; set

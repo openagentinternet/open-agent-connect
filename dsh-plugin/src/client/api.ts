@@ -2379,3 +2379,29 @@ export async function pluginUpdateStatus(refresh = false): Promise<PluginUpdateC
 export async function pluginUpdateApply(): Promise<PluginUpdateApplyPayload> {
   return post<PluginUpdateApplyPayload>('update/apply')
 }
+
+export type PluginUpdateProgressPayload = {
+  active: boolean
+  step?: 'checking' | 'removing' | 'installing' | 'restoring'
+  from?: string
+  to?: string
+  startedAt?: number
+  updatedAt?: number
+}
+
+/** Read the last announced native update step (DSH 0.2.2+ pluginManager.updateBundle). */
+export async function pluginUpdateProgress(): Promise<PluginUpdateProgressPayload | null> {
+  try {
+    const response = await fetch('/oac/api/update/progress', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+    const json = await response.json() as { ok?: boolean; data?: unknown }
+    if (json.ok === true && json.data && typeof json.data === 'object') {
+      return json.data as PluginUpdateProgressPayload
+    }
+    return null
+  } catch {
+    return null
+  }
+}

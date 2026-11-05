@@ -49,6 +49,7 @@ import { BOTS_PANEL_ROW_MARK, SHOW_A2A_PANELLIST_ROW, startA2APanelRowIntercepto
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { subscribeToBotChanges } from './bot-catalog.ts'
+import { registerSessionMenu } from './session-menu.ts'
 import { startAgentLinkInterceptor } from './browser-links.ts'
 import { BotBrowserIframeBridge } from './browser-iframe.ts'
 import {
@@ -70,7 +71,7 @@ import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { startHeroIdentityMount } from './hero-identity.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BOTSPAGE_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, PRESETS_CSS, QUOTEREPLY_CSS, TRACKING_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BOTSPAGE_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, NARROWVIEW_CSS, PRESETS_CSS, QUOTEREPLY_CSS, TRACKING_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -83,6 +84,36 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.oac.memory': MemoryLocaleKey
     'settings.oac.user': UserLocaleKey
     'settings.oac.quoteReply': QuoteReplyLocaleKey
+  }
+}
+
+/** One action our session-menu contribution returns (structural subset). */
+interface OacContextMenuAction {
+  readonly id: string
+  readonly label: string
+  readonly disabled?: boolean
+  readonly danger?: boolean
+  readonly separatorBefore?: boolean
+  readonly run?: () => void | Promise<void>
+}
+
+/**
+ * Structural face of the DSH 0.2.2+ unified context-menu registry
+ * (ui-context-menu client plugin, `ctx.provide('contextMenus', ...)`).
+ * Declared non-optional like upstream; the only consumer reads it behind
+ * `ctx.inject(['contextMenus'])`, which never resolves on older kernels —
+ * that pending inject IS the feature detection.
+ */
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    contextMenus: {
+      register(contribution: {
+        readonly id: string
+        readonly target: 'session'
+        readonly order: number
+        readonly resolve: (target: { readonly sessionId: string; readonly displayTitle: string }) => readonly OacContextMenuAction[]
+      }): () => void
+    }
   }
 }
 
@@ -101,7 +132,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS + TRACKING_CSS + BOTSPAGE_CSS + QUOTEREPLY_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS + TRACKING_CSS + BOTSPAGE_CSS + QUOTEREPLY_CSS + NARROWVIEW_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -152,6 +183,19 @@ export function apply(ctx: ClientContext): void {
   // The Bots page is an overlay like A2A Chat: the right Sidebar stays
   // mounted, so the Bot Browser opens natively beside the page.
   const botsPagePanel = new BotsPagePanelStore()
+  // DSH 0.2.2+ unified session context menus: right-clicking an `oac-*`
+  // session row offers "Edit Bot" — the session's `oac-<slug>` preset maps
+  // to the Bot, the Bots page opens, and the editor focuses that profile.
+  // The `ctx.inject` below never resolves on kernels without the
+  // contextMenus service, which keeps the contribution 0.2.1-safe.
+  ctx.inject(['contextMenus', 'sessions'], (scope: ClientContext) => {
+    scope.effect(() => registerSessionMenu(
+      ctx.contextMenus,
+      scope.sessions,
+      botsPagePanel,
+      () => t('contextMenuEditBot'),
+    ), 'oac-dsh: session context menu')
+  })
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: BOT_BROWSER_TAB_ID,
     kind: BOT_BROWSER_TAB_KIND,
