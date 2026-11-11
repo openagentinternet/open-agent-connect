@@ -351,6 +351,20 @@ discipline as the bot runtime's delivery artifacts.
   routing decision. This is the milestone that produces the headline
   behavior: a grok bot message appears inside a live Claude Code session and
   drives it.
+  **(updated 2026-11-12): P3 landed** — `framing.ts` (the `<oac-message>`
+  peer-input frame with the send_message reply hint), the push adapters
+  (`adapters/claudeCode.ts`: the `{"type":"user",…}` frame over the
+  session's inbox socket recorded by discovery, 5s timeout, no token on
+  unix; `adapters/codex.ts`: `codex queue --thread <id> --message`, with
+  CODEX_HOME passthrough), and the router push matrix: enqueue first, then
+  attempt a direct push when `canWake && record.deliverable && tier==='push'`
+  with adapter material present (Claude: the socket must still exist; Codex:
+  the sessionId suffices — queue works for resumed threads) — success marks
+  the mail delivered (the queue entry becomes the receipt), any failure
+  degrades to the queue without losing mail. `canWake` is resolved in the
+  orchestrator from the trust tier (local/team/trusted/contact → wake;
+  stranger → queue-only; unwired evaluator → conservative no). The
+  `sessions.wakePolicy` config knob lands with P4.
 - **P4 — turn tier: hooks.** Hook handler binary + per-host hook config
   writes (Gemini, Copilot, Cursor, Grok CLI), cross-loaded-hooks detection,
   `message_status`.

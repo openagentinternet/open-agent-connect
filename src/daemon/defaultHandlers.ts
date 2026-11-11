@@ -7215,16 +7215,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
           tierResolver: peerTrustTierResolver,
         });
       },
-      // Local session adapters (P2b): mail for a conversation bound to a
-      // local agent session is enqueued into that session's inbox instead of
-      // driving a bot runtime turn. The shared machine-wide session layer
+      // Local session adapters (P2b/P3): mail for a conversation bound to a
+      // local agent session is delivered into that session (push tier when
+      // the wake policy allows, else the inbox queue) instead of driving a
+      // bot runtime turn. The shared machine-wide session layer
       // (localSessionLayer) is the same instance the /api/sessions/* verbs
-      // serve; routing failures fail open inside the orchestrator.
+      // serve; routing failures fail open inside the orchestrator. The wake
+      // tier gate is resolved in the orchestrator (canWake); the config knob
+      // (sessions.wakePolicy) lands with P4.
       routeInboundToLocalSession: async (input) => localSessionLayer.router.routeInbound({
         conversationId: input.conversationId,
         peerGlobalMetaId: input.peerGlobalMetaId,
         body: input.body,
         profileSlug: profileMetaBotSlug,
+        canWake: input.canWake,
       }),
     }, profileAutoReplyConfig);
 

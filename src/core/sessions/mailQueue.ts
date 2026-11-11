@@ -86,6 +86,8 @@ export interface SessionMailQueue {
   checkInbox(input: CheckInboxInput): Promise<SessionMailEntry[]>;
   /** Session ack: entries it has really seen become `read`. */
   ackRead(sessionKey: string, ids: string[]): Promise<SessionMailReceipt[]>;
+  /** Mark one entry delivered (the push adapters call this on success). */
+  markDelivered(id: string): Promise<SessionMailReceipt | null>;
   /** Content-free receipts for the given ids (all statuses, any session). */
   status(ids: string[]): Promise<SessionMailReceipt[]>;
   /** Pending (queued) count per session key — the unread-notice helper. */
@@ -279,6 +281,26 @@ export function createSessionMailQueue(input: SessionMailQueueInput): SessionMai
         }
         await writeState(state);
         return receipts;
+      });
+    },
+
+    async markDelivered(id) {
+      const normalizedId = id.trim();
+      if (!normalizedId) {
+        return null;
+      }
+      return serialized(async () => {
+        const state = await readState();
+        prune(state);
+        const entry = state.entries.find((candidate) => candidate.id === normalizedId);
+        if (!entry) {
+          return null;
+        }
+        if (!entry.deliveredAt && !entry.expiredAt) {
+          entry.deliveredAt = now();
+          await writeState(state);
+        }
+        return receiptOf(entry);
       });
     },
 
