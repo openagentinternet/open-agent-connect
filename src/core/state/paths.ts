@@ -424,3 +424,27 @@ export function resolveMetabotOwnerPaths(systemHomeDir: string): MetabotOwnerPat
     teamRegistryPath: path.join(ownerRoot, 'team-registry.json'),
   };
 }
+
+/**
+ * Machine-wide local-session-layer state paths (local session adapters
+ * design; storage-layout v2 amendment 2026-11-11). Local agent sessions
+ * are machine facts — they belong to no single Bot profile — so they live
+ * under `~/.metabot/sessions/`, NOT in the per-profile MetabotPaths model
+ * (same split as the owner layer above).
+ */
+export interface MetabotSessionPaths {
+  systemHomeDir: string;
+  sessionsRoot: string;
+  /** The local session registry (`.metabot/sessions/local-sessions.json`). */
+  localSessionsPath: string;
+}
+
+export function resolveMetabotSessionPaths(systemHomeDir: string): MetabotSessionPaths {
+  const normalizedSystemHomeDir = normalizeInputHomeDir(systemHomeDir);
+  const sessionsRoot = path.join(normalizedSystemHomeDir, '.metabot', 'sessions');
+  return {
+    systemHomeDir: normalizedSystemHomeDir,
+    sessionsRoot,
+    localSessionsPath: path.join(sessionsRoot, 'local-sessions.json'),
+  };
+}

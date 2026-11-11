@@ -69,6 +69,7 @@ CLI help:
 {{METABOT_CLI}} trust --help
 {{METABOT_CLI}} block --help
 {{METABOT_CLI}} team --help
+{{METABOT_CLI}} sessions --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill

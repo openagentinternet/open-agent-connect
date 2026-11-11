@@ -225,6 +225,7 @@ import { createOwnerDaemonHandlers } from './ownerHandlers';
 import { createTrustDaemonHandlers } from './trustHandlers';
 import { createBlockDaemonHandlers } from './blockHandlers';
 import { createTeamDaemonHandlers } from './teamHandlers';
+import { createSessionsDaemonHandlers } from './sessionsHandlers';
 import { createPeerTrustResolver } from '../core/trust/peerTrustResolver';
 import { createRootOwnerResolver } from '../core/trust/rootOwnerResolver';
 import { evaluatePeerPolicy } from '../core/trust/trustPolicy';
@@ -15209,6 +15210,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     team: createTeamDaemonHandlers({
       systemHomeDir: normalizedSystemHomeDir,
       rootOwnerResolver: createRootOwnerResolver({ systemHomeDir: normalizedSystemHomeDir }),
+    }),
+    // Local session directory (local session adapters P1): passive presence
+    // for this machine's agent sessions; discovery entries are read-only.
+    sessions: createSessionsDaemonHandlers({
+      systemHomeDir: normalizedSystemHomeDir,
     }),
     network: {
       listServices: async ({ online, query, cached }) => {

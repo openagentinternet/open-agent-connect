@@ -220,6 +220,12 @@ export interface MetabotDaemonHttpHandlers {
     add?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     remove?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  /** Local session directory (`metabot sessions *`, local session adapters
+   *  P1): passive presence for this machine's agent sessions (Claude Code,
+   *  Codex, …). Read-only in P1 — registration and delivery land in P2+. */
+  sessions?: {
+    list?: (input: { all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;

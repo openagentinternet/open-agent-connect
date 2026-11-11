@@ -132,6 +132,10 @@ export interface CliDependencies {
     add?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     remove?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  sessions?: {
+    /** Local session directory: passive presence for this machine's agent sessions. */
+    list?: (input: { all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;

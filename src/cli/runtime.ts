@@ -4383,6 +4383,18 @@ return {
       add: async (input) => requestJson(context, 'POST', '/api/team/add', input),
       remove: async (input) => requestJson(context, 'POST', '/api/team/remove', input),
     },
+    sessions: {
+      // Local session directory (local session adapters P1); discovery
+      // presence is refreshed machine-side on every list.
+      list: async (input) => {
+        const query = new URLSearchParams();
+        if (input.all === true) {
+          query.set('all', 'true');
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/sessions/list${suffix}`);
+      },
+    },
     network: {
       listServices: async (input) => {
         const query = new URLSearchParams();

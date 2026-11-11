@@ -189,10 +189,12 @@ New module: `src/core/sessions/`
 - `guards.ts` — session-drive loop-guard counters (extends, does not
   replace, `privateChatLoopGuards.ts`).
 
-State lives at `<profile>/.runtime/state/local-sessions.json` (v2 storage
-layout; lazy atomic write-then-rename, single-writer orchestrator — same
-discipline as `private-chat-wake.json`). Mail queue:
-`<profile>/.runtime/state/session-mail.json`.
+State lives at `<systemHome>/.metabot/sessions/local-sessions.json`
+(resolved by `resolveMetabotSessionPaths()`; v2 storage amendment 2026-11-12
+— sessions are machine facts that belong to no single Bot profile, so they
+sit outside the per-profile `.runtime/` model, same split as the owner
+layer; 0600, atomic write-then-rename, single-writer serialized registry).
+Mail queue (P3): `<systemHome>/.metabot/sessions/session-mail.json`.
 
 ### Session registration sources
 
@@ -303,6 +305,19 @@ discipline as the bot runtime's delivery artifacts.
   naming, discovery scans, `/api/sessions/*` daemon routes, `metabot
   sessions list`. No delivery. Verifiable alone: `sessions list` shows live
   Claude/Codex sessions with repo/branch/status.
+  **(updated 2026-11-12): P1 landed** — `src/core/sessions/` (types, naming,
+  registry, repo probe, `discovery/claude.ts` + `discovery/codex.ts`),
+  machine-wide state at `~/.metabot/sessions/local-sessions.json` via the new
+  `resolveMetabotSessionPaths()` (storage-layout v2 amendment), daemon
+  handler + `GET /api/sessions/list` route, `metabot sessions list [--all]`
+  CLI over the daemon, and `tests/sessions/localSessions.test.mjs` (14
+  tests). Claude discovery parses the live `~/.claude/sessions/<pid>.json`
+  registry (camelCase fields, pid-liveness filtered, messaging socket
+  recorded for P3); Codex discovery parses `~/.codex/session_index.jsonl`
+  (id/thread_name/updated_at, 24h freshness window). Discovery entries are
+  presence-only (`deliverable=false`, source `discovery`); name keeping,
+  `-2`/`-3` collisions, the 10-minute live window, and the 24h lapse TTL all
+  behave as specified.
 - **P2 — pull tier: `metabot mcp`.** MCP server, `check_inbox` long-poll,
   unread-notice helper for tool results, host wiring for ZCode first.
   Acceptance: a ZCode session sees and answers a remote bot message via MCP.

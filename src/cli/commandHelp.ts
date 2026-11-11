@@ -226,6 +226,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'trust', summary: 'Manage on-chain owner trust grants (/protocols/simpletrust): grant, revoke, list (trust tiers).' },
     { name: 'block', summary: 'Manage the device-level blocklist (applies to every local Bot; trust tiers).' },
     { name: 'team', summary: 'Manage the remote team Bot registry — Bots on your other devices (same root owner) available for cross-device group tasks (trust tiers).' },
+    { name: 'sessions', summary: 'Show the local session directory — this machine\'s live agent sessions (Claude Code, Codex, …) with repo, branch, and busy/idle (local session adapters).' },
     { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
     { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
@@ -3983,6 +3984,15 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [HELP_JSON_FLAG],
     successFields: ['entry', 'registry'],
     examples: ['metabot team add idq1myotherbot00000000000000000000'],
+  },
+  {
+    commandPath: ['sessions'],
+    summary: 'The local session directory (local session adapters): passive presence for this machine\'s agent sessions — Claude Code, Codex, and later other hosts. `list` runs the discovery scans daemon-side (Claude registry files, Codex session index), merges them into the machine-wide registry, and shows who is working on what right now. P1 is read-only: unwired sessions are presence-only (deliverable=false) and nothing is delivered to any session yet.',
+    usage: 'metabot sessions <subcommand>',
+    subcommands: [
+      { name: 'list', summary: 'Show live local agent sessions (name, agent, tier, repo@branch, status). --all includes offline records.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['knowledge-base'],
