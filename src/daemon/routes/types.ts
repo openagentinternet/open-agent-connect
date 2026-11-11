@@ -220,11 +220,24 @@ export interface MetabotDaemonHttpHandlers {
     add?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     remove?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
-  /** Local session directory (`metabot sessions *`, local session adapters
-   *  P1): passive presence for this machine's agent sessions (Claude Code,
-   *  Codex, …). Read-only in P1 — registration and delivery land in P2+. */
+  /** Local session directory + mail queue (`metabot sessions *` /
+   *  `metabot mcp`, local session adapters P1/P2a): passive presence for
+   *  this machine's agent sessions (Claude Code, Codex, …) plus the
+   *  pull-tier inbox verbs. The inbound flow routing lands in P2b. */
   sessions?: {
     list?: (input: { all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    register?: (input: {
+      agent: string;
+      sessionId?: string;
+      pid?: number;
+      name?: string;
+      cwd?: string;
+      status?: 'busy' | 'idle';
+      inboxSocketPath?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    inboxCheck?: (input: { sessionKey: string; waitSecs?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    inboxEnqueue?: (input: { sessionKey: string; from: string; fromName?: string; body: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    messageStatus?: (input: { ids: string[] }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;

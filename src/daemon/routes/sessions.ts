@@ -1,13 +1,24 @@
 /**
- * /api/sessions/* routes — the local session directory (`metabot sessions *`
- * CLI surface over HTTP, local session adapters P1). `list` is the read
- * verb (GET, `?all=true` includes offline records); it also refreshes
- * machine-local presence from the passive discovery scans. All responses
+ * /api/sessions/* routes — the local session directory and mail queue
+ * (`metabot sessions *` CLI + `metabot mcp` server over HTTP, local session
+ * adapters P1/P2a). `list` is a GET that also refreshes machine-local
+ * presence from the passive discovery scans; register/inbox/message verbs
+ * are POSTs (all localhost-only like the rest of the daemon). All responses
  * are MetabotCommandResult JSON bodies with HTTP 200.
  */
 
 import { commandFailed } from '../../core/contracts/commandResult';
-import type { RouteHandler } from './types';
+import type { MetabotDaemonHttpHandlers, RouteHandler } from './types';
+
+type SessionsHandlerGroup = NonNullable<MetabotDaemonHttpHandlers['sessions']>;
+type SessionsVerb = keyof SessionsHandlerGroup;
+
+const POST_VERBS: Record<string, SessionsVerb> = {
+  '/api/sessions/register': 'register',
+  '/api/sessions/inbox/check': 'inboxCheck',
+  '/api/sessions/inbox/enqueue': 'inboxEnqueue',
+  '/api/sessions/messages/status': 'messageStatus',
+};
 
 export const handleSessionsRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
@@ -31,6 +42,27 @@ export const handleSessionsRoutes: RouteHandler = async (context) => {
     return true;
   }
 
-  context.sendJson(404, commandFailed('not_found', `No route matched ${url.pathname}.`));
+  const verb = POST_VERBS[url.pathname];
+  if (!verb) {
+    context.sendJson(404, commandFailed('not_found', `No route matched ${url.pathname}.`));
+    return true;
+  }
+  if (req.method !== 'POST') {
+    context.sendMethodNotAllowed(['POST']);
+    return true;
+  }
+  const handler = handlers.sessions?.[verb];
+  if (!handler) {
+    context.sendJson(501, {
+      ok: false,
+      code: 'not_implemented',
+      message: `Sessions handler is not configured: ${String(verb)}`,
+    });
+    return true;
+  }
+
+  const input = await context.readJsonBody();
+  const dispatch = handler as (rawInput: Record<string, unknown>) => Promise<unknown>;
+  context.sendJson(200, await dispatch(input));
   return true;
 };

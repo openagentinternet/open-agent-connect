@@ -135,6 +135,22 @@ export interface CliDependencies {
   sessions?: {
     /** Local session directory: passive presence for this machine's agent sessions. */
     list?: (input: { all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Register (or refresh) the calling session as deliverable (pull tier). */
+    register?: (input: {
+      agent: string;
+      sessionId?: string;
+      pid?: number;
+      name?: string;
+      cwd?: string;
+      status?: 'busy' | 'idle';
+      inboxSocketPath?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Long-poll the session's inbox (pull tier). */
+    inboxCheck?: (input: { sessionKey: string; waitSecs?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Localhost handoff into a session's inbox. */
+    inboxEnqueue?: (input: { sessionKey: string; from: string; fromName?: string; body: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Content-free delivery receipts. */
+    messageStatus?: (input: { ids: string[] }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;

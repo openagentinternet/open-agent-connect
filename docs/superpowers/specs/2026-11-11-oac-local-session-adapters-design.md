@@ -321,6 +321,18 @@ discipline as the bot runtime's delivery artifacts.
 - **P2 — pull tier: `metabot mcp`.** MCP server, `check_inbox` long-poll,
   unread-notice helper for tool results, host wiring for ZCode first.
   Acceptance: a ZCode session sees and answers a remote bot message via MCP.
+  **(updated 2026-11-12): P2a landed** — the session mail queue
+  (`src/core/sessions/mailQueue.ts`, 24h TTL, delivered/read receipts,
+  25s long-poll ceiling) at `~/.metabot/sessions/session-mail.json`, the
+  daemon verbs (`/api/sessions/register|inbox/check|inbox/enqueue|messages/status`),
+  and a hand-rolled stdio MCP server (JSON-RPC 2.0, no SDK dependency — the
+  repo keeps protocol adapters in-house): `metabot mcp [--name <name>]
+  [--session <key>] [--agent <label>]` serving `list_sessions`,
+  `check_inbox` (long-poll + pending count for unread notices), and
+  `message_status` over the same daemon-backed dependency proxies the CLI
+  uses. The inbound-flow routing hook (conversation binding → queue) and
+  `send_message` outbound plumbing land in P2b; host wiring (ZCode MCP
+  config) in P2b/P2c.
 - **P3 — push tier: Claude Code + Codex.** Inbox-socket adapter, `codex
   queue` adapter, idle-wake policy, mail queue + TTL, session binding +
   routing decision. This is the milestone that produces the headline

@@ -227,6 +227,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'block', summary: 'Manage the device-level blocklist (applies to every local Bot; trust tiers).' },
     { name: 'team', summary: 'Manage the remote team Bot registry — Bots on your other devices (same root owner) available for cross-device group tasks (trust tiers).' },
     { name: 'sessions', summary: 'Show the local session directory — this machine\'s live agent sessions (Claude Code, Codex, …) with repo, branch, and busy/idle (local session adapters).' },
+    { name: 'mcp', summary: 'Run the local session MCP server on stdio — lets MCP hosts (ZCode, Claude Desktop, …) list sessions and long-poll a session inbox (local session adapters).' },
     { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
     { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
@@ -3993,6 +3994,17 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'list', summary: 'Show live local agent sessions (name, agent, tier, repo@branch, status). --all includes offline records.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['mcp'],
+    summary: 'The local session MCP server (local session adapters P2a): speaks JSON-RPC 2.0 over stdio so an MCP host (ZCode, Claude Desktop, any MCP client) can list this machine\'s sessions, long-poll its session inbox (check_inbox), and read delivery receipts (message_status). The tool handlers are daemon-backed (the daemon auto-starts). Session identity: --name <name> registers a named session; otherwise the process registers env-detected or as a generic MCP client keyed by pid. Runs until stdin closes.',
+    usage: 'metabot mcp [--name <name>]',
+    requiredFlags: [],
+    optionalFlags: [
+      { flag: '--name', value: '<name>', description: 'Register (or reuse) a named session and bind the inbox to it; otherwise the process registers env-detected or keyed by pid.' },
+      { flag: '--session', value: '<key>', description: 'Bind to an explicit session key (advanced).' },
+      { flag: '--agent', value: '<label>', description: 'Override the registering agent label (default: env-detected).' },
+    ],
   },
   {
     commandPath: ['knowledge-base'],

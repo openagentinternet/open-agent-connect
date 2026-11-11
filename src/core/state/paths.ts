@@ -437,6 +437,8 @@ export interface MetabotSessionPaths {
   sessionsRoot: string;
   /** The local session registry (`.metabot/sessions/local-sessions.json`). */
   localSessionsPath: string;
+  /** Per-session mail queue (`.metabot/sessions/session-mail.json`). */
+  sessionMailPath: string;
 }
 
 export function resolveMetabotSessionPaths(systemHomeDir: string): MetabotSessionPaths {
@@ -446,5 +448,6 @@ export function resolveMetabotSessionPaths(systemHomeDir: string): MetabotSessio
     systemHomeDir: normalizedSystemHomeDir,
     sessionsRoot,
     localSessionsPath: path.join(sessionsRoot, 'local-sessions.json'),
+    sessionMailPath: path.join(sessionsRoot, 'session-mail.json'),
   };
 }
