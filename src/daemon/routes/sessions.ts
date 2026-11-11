@@ -18,6 +18,9 @@ const POST_VERBS: Record<string, SessionsVerb> = {
   '/api/sessions/inbox/check': 'inboxCheck',
   '/api/sessions/inbox/enqueue': 'inboxEnqueue',
   '/api/sessions/messages/status': 'messageStatus',
+  '/api/sessions/bind': 'bind',
+  '/api/sessions/unbind': 'unbind',
+  '/api/sessions/messages/send': 'sendMessage',
 };
 
 export const handleSessionsRoutes: RouteHandler = async (context) => {

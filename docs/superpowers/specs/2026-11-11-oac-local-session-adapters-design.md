@@ -330,9 +330,22 @@ discipline as the bot runtime's delivery artifacts.
   [--session <key>] [--agent <label>]` serving `list_sessions`,
   `check_inbox` (long-poll + pending count for unread notices), and
   `message_status` over the same daemon-backed dependency proxies the CLI
-  uses. The inbound-flow routing hook (conversation binding → queue) and
-  `send_message` outbound plumbing land in P2b; host wiring (ZCode MCP
-  config) in P2b/P2c.
+  uses.
+  **(updated 2026-11-12): P2b landed** — the pull tier is end to end:
+  conversation binding (`boundConversations` on registry records, enriched
+  with the observed peer + owning profile on each routed mail — no
+  conversation-id parsing), the routing hook in `handleInboundMessage`
+  (after the trust gate; bound → enqueue, unbound → bot runtime unchanged,
+  routing failures fail open with a `session_route_failed` event), the
+  session reply path (`send_message` anchors to the binding's observed peer
+  and sends as the bound Bot profile through the existing `chat.private`
+  pipeline), `metabot sessions bind|unbind`, and ZCode host wiring
+  (`metabot sessions wire --host zcode [--remove]`, backup file, agents
+  fallback). One machine-wide session layer (`createSessionLayer`) is shared
+  by the sessions handlers and every profile's orchestrator — the registry
+  and queue stay single-writer. Loop-guard extension across session
+  deliveries is deferred to P3 (wake policy) — pull-tier sessions reply only
+  on their own schedule and both sides keep their rate limits.
 - **P3 — push tier: Claude Code + Codex.** Inbox-socket adapter, `codex
   queue` adapter, idle-wake policy, mail queue + TTL, session binding +
   routing decision. This is the milestone that produces the headline

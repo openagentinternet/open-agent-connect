@@ -369,11 +369,17 @@ test('createSessionsDaemonHandlers merges both scans into one directory listing'
 // ---------- CLI ----------
 
 test('runSessionsCommand rejects unknown subcommands and missing handlers', async () => {
-  const unknown = await runSessionsCommand(['bind', 'x'], { dependencies: {} });
+  const unknown = await runSessionsCommand(['frobnicate', 'x'], { dependencies: {} });
   assert.equal(unknown.ok, false);
   assert.equal(unknown.code, 'unknown_command');
 
   const notImplemented = await runSessionsCommand(['list'], { dependencies: {} });
   assert.equal(notImplemented.ok, false);
   assert.equal(notImplemented.code, 'not_implemented');
+
+  // P2b: bind/unbind are known verbs now — missing handlers surface as
+  // not_implemented, not unknown_command.
+  const bindNotImplemented = await runSessionsCommand(['bind', 'x', 'pc-1'], { dependencies: {} });
+  assert.equal(bindNotImplemented.ok, false);
+  assert.equal(bindNotImplemented.code, 'not_implemented');
 });

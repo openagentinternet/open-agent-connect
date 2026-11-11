@@ -3992,8 +3992,34 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot sessions <subcommand>',
     subcommands: [
       { name: 'list', summary: 'Show live local agent sessions (name, agent, tier, repo@branch, status). --all includes offline records.' },
+      { name: 'bind', summary: 'Bind a private-chat conversation to a local session: its mail goes to the session inbox (metabot mcp pull) instead of driving a bot runtime turn.' },
+      { name: 'unbind', summary: 'Drop a conversation binding; the bot runtime answers the conversation again.' },
+      { name: 'wire', summary: 'Write the metabot-sessions MCP server into a host MCP config (ZCode first) so its sessions can check their inbox.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['sessions', 'bind'],
+    summary: 'Bind a private-chat conversation to a local agent session (local session adapters P2b). Inbound mail for the conversation is enqueued into the session inbox (long-polled via metabot mcp check_inbox) instead of driving a bot runtime turn; the session replies with send_message as the bound Bot profile. The observed peer is recorded from the first routed message.',
+    usage: 'metabot sessions bind <sessionName|sessionKey> <conversationId> [--from <bot-slug>]',
+    optionalFlags: [
+      { flag: '--from', value: '<bot-slug>', description: 'The Bot profile owning the conversation (default: the Twin Bot).' },
+    ],
+  },
+  {
+    commandPath: ['sessions', 'unbind'],
+    summary: 'Drop the binding between a private-chat conversation and a local session; the bot runtime answers the conversation again.',
+    usage: 'metabot sessions unbind <conversationId>',
+    optionalFlags: [],
+  },
+  {
+    commandPath: ['sessions', 'wire'],
+    summary: 'Write the metabot-sessions MCP server entry into a host MCP config so the host sessions can pull their inbox. ZCode is the first supported host (~/.zcode/cli/config.json, falling back to ~/.agents/mcp.json); the edited file is backed up with .bak-sessions.',
+    usage: 'metabot sessions wire --host zcode [--remove]',
+    optionalFlags: [
+      { flag: '--host', value: '<host>', description: 'Which host to wire (supported: zcode).' },
+      { flag: '--remove', description: 'Remove the metabot-sessions entry instead of adding it.' },
+    ],
   },
   {
     commandPath: ['mcp'],
@@ -4004,6 +4030,9 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { flag: '--name', value: '<name>', description: 'Register (or reuse) a named session and bind the inbox to it; otherwise the process registers env-detected or keyed by pid.' },
       { flag: '--session', value: '<key>', description: 'Bind to an explicit session key (advanced).' },
       { flag: '--agent', value: '<label>', description: 'Override the registering agent label (default: env-detected).' },
+    ],
+    subcommands: [
+      { name: 'send_message', summary: 'MCP tool (not a CLI verb): replies to a remote bot through the session\'s bound conversation, as the bound Bot profile — use an inbox message\'s sender as "to".' },
     ],
   },
   {

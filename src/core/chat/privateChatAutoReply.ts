@@ -160,6 +160,25 @@ export interface PrivateChatAutoReplyDependencies {
    * reply, NO skills, and a `trust_policy_failed` send-failure event.
    */
   evaluatePeerTrustPolicy?: (peerGlobalMetaId: string) => Promise<PeerPolicyEvaluation>;
+  /**
+   * Local session adapters (P2b): route inbound mail for a private-chat
+   * conversation that is BOUND to a local agent session (Claude Code, Codex,
+   * …). Consulted AFTER the trust gate, only for `auto` behavior. A non-null
+   * result means the mail was enqueued into the session's inbox — no bot
+   * runtime turn runs for it (no silent fallback: bound conversations wait
+   * for their session). Absent or null = behavior unchanged.
+   */
+  routeInboundToLocalSession?: (input: {
+    conversationId: string;
+    peerGlobalMetaId: string;
+    body: string;
+    fromName?: string | null;
+  }) => Promise<{
+    delivered: true;
+    sessionKey: string;
+    sessionName: string;
+    mailId: string;
+  } | null>;
   now?: () => number;
 }
 
@@ -1962,6 +1981,30 @@ export function createPrivateChatAutoReplyOrchestrator(
           now,
         ).catch(() => undefined);
         return;
+      }
+
+      // ---- Local session adapters (P2b): a conversation BOUND to a local
+      // agent session takes the mail instead of the bot runtime turn. The
+      // trust gate already ran (auto behavior only reaches here); routing
+      // failures fail OPEN (bot runtime answers) — a broken session registry
+      // must not silence the bot. Absent dep / null result = unchanged.
+      if (deps.routeInboundToLocalSession) {
+        const routed = await deps.routeInboundToLocalSession({
+          conversationId: conversation.conversationId,
+          peerGlobalMetaId,
+          body: inboundWireContent.content,
+        }).catch((error) => {
+          deps.logSendFailure?.({
+            kind: 'session_route_failed',
+            peerGlobalMetaId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        });
+        if (routed) {
+          await deps.stateStore.upsertConversation(conversation);
+          return;
+        }
       }
 
       await runSerializedConversationTurn(conversation.conversationId, async () => {

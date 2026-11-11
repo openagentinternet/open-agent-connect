@@ -30,7 +30,11 @@ export type PrivateChatSendFailureKind =
   // Trust-tier policy (P4a): the per-peer policy evaluation itself failed
   // (e.g. a chain read error). The turn fails safe as a stranger with no
   // skills; the event makes the degraded decision diagnosable.
-  | 'trust_policy_failed';
+  | 'trust_policy_failed'
+  // Local session adapters (P2b): the inbound routing to a bound local
+  // session threw. The orchestrator fails OPEN (the bot runtime answers);
+  // the event makes the degraded routing diagnosable.
+  | 'session_route_failed';
 
 export interface PrivateChatSendFailureEvent {
   kind: PrivateChatSendFailureKind;

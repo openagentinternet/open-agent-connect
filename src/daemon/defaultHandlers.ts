@@ -225,7 +225,7 @@ import { createOwnerDaemonHandlers } from './ownerHandlers';
 import { createTrustDaemonHandlers } from './trustHandlers';
 import { createBlockDaemonHandlers } from './blockHandlers';
 import { createTeamDaemonHandlers } from './teamHandlers';
-import { createSessionsDaemonHandlers } from './sessionsHandlers';
+import { createSessionsDaemonHandlers, createSessionLayer } from './sessionsHandlers';
 import { createPeerTrustResolver } from '../core/trust/peerTrustResolver';
 import { createRootOwnerResolver } from '../core/trust/rootOwnerResolver';
 import { evaluatePeerPolicy } from '../core/trust/trustPolicy';
@@ -5355,6 +5355,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
   stopAppSessionRuntime: () => Promise<void>;
 } {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
+  // Local session adapters (P2a/P2b): one machine-wide session layer shared
+  // by the sessions handlers (API surface) and every profile's private-chat
+  // orchestrator (routing hook) — the registry and mail queue are
+  // single-writer stores and must not be instantiated twice.
+  const localSessionLayer = createSessionLayer(normalizedSystemHomeDir);
 
 /** Map a ChainBroadcastUnknownError (or a recorded prior unknown attempt for
  *  identical content) to manual_action_required with the candidate txids and
@@ -7210,6 +7215,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
           tierResolver: peerTrustTierResolver,
         });
       },
+      // Local session adapters (P2b): mail for a conversation bound to a
+      // local agent session is enqueued into that session's inbox instead of
+      // driving a bot runtime turn. The shared machine-wide session layer
+      // (localSessionLayer) is the same instance the /api/sessions/* verbs
+      // serve; routing failures fail open inside the orchestrator.
+      routeInboundToLocalSession: async (input) => localSessionLayer.router.routeInbound({
+        conversationId: input.conversationId,
+        peerGlobalMetaId: input.peerGlobalMetaId,
+        body: input.body,
+        profileSlug: profileMetaBotSlug,
+      }),
     }, profileAutoReplyConfig);
 
     // Accept-and-poll: a guided turn can take minutes (LLM + possible skill
@@ -15211,10 +15227,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
       systemHomeDir: normalizedSystemHomeDir,
       rootOwnerResolver: createRootOwnerResolver({ systemHomeDir: normalizedSystemHomeDir }),
     }),
-    // Local session directory (local session adapters P1): passive presence
-    // for this machine's agent sessions; discovery entries are read-only.
+    // Local session directory + mail queue + bindings (local session
+    // adapters P1/P2a/P2b). The reply path late-binds chat.private (the
+    // handlers object does not exist yet while this literal is evaluated).
     sessions: createSessionsDaemonHandlers({
       systemHomeDir: normalizedSystemHomeDir,
+      sessionLayer: localSessionLayer,
+      getChatPrivateSend: () => {
+        const chat = (daemonHandlers as MetabotDaemonHttpHandlers | null)?.chat;
+        return chat?.private
+          ? (rawInput: Record<string, unknown>) => chat.private!(rawInput)
+          : null;
+      },
     }),
     network: {
       listServices: async ({ online, query, cached }) => {

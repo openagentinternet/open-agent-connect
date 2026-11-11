@@ -29,6 +29,7 @@ import type {
   LocalSessionRecord,
   LocalSessionView,
   LocalSessionsState,
+  SessionConversationBinding,
   SessionDeliveryTier,
   SessionRegistrationSource,
   SessionActivityStatus,
@@ -101,7 +102,35 @@ function normalizeRecord(raw: unknown): LocalSessionRecord | null {
     inboxSocketPath: typeof record.inboxSocketPath === 'string' && record.inboxSocketPath.trim()
       ? record.inboxSocketPath.trim()
       : undefined,
+    boundConversations: normalizeBindings(record.boundConversations),
   };
+}
+
+function normalizeBindings(raw: unknown): SessionConversationBinding[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const bindings: SessionConversationBinding[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const binding = item as Record<string, unknown>;
+    const conversationId = typeof binding.conversationId === 'string' ? binding.conversationId.trim() : '';
+    if (!conversationId) {
+      continue;
+    }
+    bindings.push({
+      conversationId,
+      profileSlug: typeof binding.profileSlug === 'string' && binding.profileSlug.trim()
+        ? binding.profileSlug.trim()
+        : undefined,
+      peerGlobalMetaId: typeof binding.peerGlobalMetaId === 'string' && binding.peerGlobalMetaId.trim()
+        ? binding.peerGlobalMetaId.trim()
+        : undefined,
+    });
+  }
+  return bindings;
 }
 
 function normalizeState(raw: unknown): LocalSessionsState {
@@ -150,6 +179,23 @@ export interface LocalSessionRegistry {
   registerSession(input: RegisterSessionInput): Promise<LocalSessionRecord>;
   /** Merge a discovery scan's presence into the registry (idempotent). */
   applyDiscovery(entries: DiscoveredSession[]): Promise<void>;
+  /** Bind a private-chat conversation to a session (by name or key; P2b). */
+  bindConversation(input: {
+    sessionRef: string;
+    conversationId: string;
+    profileSlug?: string;
+    /** Observed peer enrichment (the router records it on each routed mail). */
+    peerGlobalMetaId?: string;
+  }): Promise<LocalSessionRecord>;
+  /** Drop a conversation binding (by conversation id). */
+  unbindConversation(conversationId: string): Promise<LocalSessionRecord | null>;
+  /**
+   * Resolve the session a conversation is bound to (deliverable or not —
+   * the caller decides what offline means for its tier).
+   */
+  findByConversation(conversationId: string): Promise<LocalSessionRecord | null>;
+  /** Resolve a session by name or key (bind/send surfaces). */
+  findByRef(sessionRef: string): Promise<LocalSessionRecord | null>;
 }
 
 export function createLocalSessionRegistry(input: LocalSessionRegistryInput): LocalSessionRegistry {
@@ -295,6 +341,8 @@ export function createLocalSessionRegistry(input: LocalSessionRegistryInput): Lo
           lastSeenAt: now(),
           startedAt: sessionInput.startedAt ?? existing?.startedAt ?? 0,
           inboxSocketPath: sessionInput.inboxSocketPath?.trim() || existing?.inboxSocketPath,
+          // Bindings survive re-registration (resume keeps the conversation).
+          boundConversations: existing?.boundConversations,
         };
         if (record.cwd && (!existing || existing.cwd !== record.cwd || !record.repo)) {
           const identity = await repoFor(record.cwd);
@@ -358,6 +406,84 @@ export function createLocalSessionRegistry(input: LocalSessionRegistryInput): Lo
         }
         pruneLapsed(state);
         await writeState(state);
+      });
+    },
+
+    async bindConversation(bindInput) {
+      const conversationId = bindInput.conversationId.trim();
+      const sessionRef = bindInput.sessionRef.trim();
+      if (!conversationId || !sessionRef) {
+        throw new Error('conversationId and sessionRef are required');
+      }
+      return serialized(async () => {
+        const state = await readState();
+        const record = state.sessions.find((entry) => entry.name === sessionRef || entry.sessionKey === sessionRef);
+        if (!record) {
+          throw new Error(`no local session matches "${sessionRef}"`);
+        }
+        const bindings = record.boundConversations ?? [];
+        const existing = bindings.find((binding) => binding.conversationId === conversationId);
+        if (existing) {
+          if (bindInput.profileSlug) {
+            existing.profileSlug = bindInput.profileSlug;
+          }
+          if (bindInput.peerGlobalMetaId) {
+            existing.peerGlobalMetaId = bindInput.peerGlobalMetaId;
+          }
+        } else {
+          bindings.push({
+            conversationId,
+            profileSlug: bindInput.profileSlug,
+            peerGlobalMetaId: bindInput.peerGlobalMetaId,
+          });
+        }
+        record.boundConversations = bindings;
+        await writeState(state);
+        return record;
+      });
+    },
+
+    async unbindConversation(conversationId) {
+      const normalizedId = conversationId.trim();
+      if (!normalizedId) {
+        return null;
+      }
+      return serialized(async () => {
+        const state = await readState();
+        const record = state.sessions.find((entry) =>
+          (entry.boundConversations ?? []).some((binding) => binding.conversationId === normalizedId));
+        if (!record) {
+          return null;
+        }
+        record.boundConversations = (record.boundConversations ?? [])
+          .filter((binding) => binding.conversationId !== normalizedId);
+        await writeState(state);
+        return record;
+      });
+    },
+
+    async findByConversation(conversationId) {
+      const normalizedId = conversationId.trim();
+      if (!normalizedId) {
+        return null;
+      }
+      return serialized(async () => {
+        const state = await readState();
+        return state.sessions.find((entry) =>
+          (entry.boundConversations ?? []).some((binding) => binding.conversationId === normalizedId))
+          ?? null;
+      });
+    },
+
+    async findByRef(sessionRef) {
+      const normalizedRef = sessionRef.trim();
+      if (!normalizedRef) {
+        return null;
+      }
+      return serialized(async () => {
+        const state = await readState();
+        return state.sessions.find((entry) => entry.name === normalizedRef || entry.sessionKey === normalizedRef)
+          ?? null;
       });
     },
   };

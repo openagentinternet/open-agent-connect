@@ -4399,6 +4399,9 @@ return {
       inboxCheck: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/check', input),
       inboxEnqueue: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/enqueue', input),
       messageStatus: async (input) => requestJson(context, 'POST', '/api/sessions/messages/status', input),
+      bind: async (input) => requestJson(context, 'POST', '/api/sessions/bind', input),
+      unbind: async (input) => requestJson(context, 'POST', '/api/sessions/unbind', input),
+      sendMessage: async (input) => requestJson(context, 'POST', '/api/sessions/messages/send', input),
     },
     network: {
       listServices: async (input) => {

@@ -133,9 +133,9 @@ test('mcpServer answers initialize, tools/list, tools/call and ignores notificat
   const [init, tools, inbox, status, ping, badObject, badJson, unknown] = responses;
   assert.equal(init.result.protocolVersion, '2025-03-26', 'initialize echoes the requested version');
   assert.equal(init.result.serverInfo.name, 'metabot-sessions');
-  assert.equal(tools.result.tools.length, 3);
+  assert.equal(tools.result.tools.length, 4);
   const toolNames = tools.result.tools.map((tool) => tool.name);
-  assert.deepEqual(toolNames, ['list_sessions', 'check_inbox', 'message_status']);
+  assert.deepEqual(toolNames, ['list_sessions', 'check_inbox', 'message_status', 'send_message']);
   assert.equal(inbox.result.isError, false);
   const inboxPayload = JSON.parse(inbox.result.content[0].text);
   assert.equal(inboxPayload.data.messages[0].body, 'hi');

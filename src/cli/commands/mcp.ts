@@ -53,6 +53,9 @@ export async function runMcpCommand(args: string[], context: CliRuntimeContext):
   if (!sessions?.list || !sessions?.register || !sessions?.inboxCheck || !sessions?.messageStatus) {
     return commandFailed('not_implemented', 'Sessions MCP handlers are not configured. Is the daemon running a build that supports them?');
   }
+  const sendMessage = sessions.sendMessage
+    ? async (input: { sessionKey: string; to: string; message: string }) => await sessions.sendMessage!(input)
+    : undefined;
 
   const explicitName = flagValue(args, '--name');
   const explicitKey = flagValue(args, '--session');
@@ -90,6 +93,7 @@ export async function runMcpCommand(args: string[], context: CliRuntimeContext):
     }),
     checkInbox: async (input) => await sessions.inboxCheck!({ sessionKey: input.sessionKey, waitSecs: input.waitSecs }),
     messageStatus: async (input) => await sessions.messageStatus!({ ids: input.ids }),
+    sendMessage,
   };
 
   // Bounded JSON lines from the context's stdin; protocol responses go to

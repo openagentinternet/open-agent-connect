@@ -21,6 +21,18 @@ export type SessionRegistrationSource = 'mcp' | 'hook' | 'claim' | 'discovery';
 /** Last-reported activity state from the session's own host. */
 export type SessionActivityStatus = 'busy' | 'idle' | 'unknown';
 
+/** A private-chat conversation routed to this session (local session adapters P2b). */
+export interface SessionConversationBinding {
+  conversationId: string;
+  /** The Bot profile whose conversation this is (its orchestrator routed mail). */
+  profileSlug?: string;
+  /**
+   * The remote peer observed on routed mail (enriched on each route). The
+   * send path anchors replies to this peer — no conversation-id parsing.
+   */
+  peerGlobalMetaId?: string;
+}
+
 export interface LocalSessionRecord {
   /** `<agent>:<session-id>`; discovery entries without an id use `<agent>:pid:<pid>`. */
   sessionKey: string;
@@ -54,6 +66,8 @@ export interface LocalSessionRecord {
   startedAt: number;
   /** Adapter material recorded at registration (e.g. Claude inbox socket; used in P3). */
   inboxSocketPath?: string;
+  /** Private-chat conversations routed to this session (P2b binding). */
+  boundConversations?: SessionConversationBinding[];
 }
 
 /** Registry list row: the stored record plus registry-computed liveness. */
