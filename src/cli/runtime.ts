@@ -6899,6 +6899,10 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     system: { ...defaults.system, ...provided.system },
     llm: { ...defaults.llm, ...provided.llm },
     bot: { ...defaults.bot, ...provided.bot },
+    sessions: { ...defaults.sessions, ...provided.sessions },
+    owner: { ...defaults.owner, ...provided.owner },
+    trust: { ...defaults.trust, ...provided.trust },
+    team: { ...defaults.team, ...provided.team },
   };
 }
 
