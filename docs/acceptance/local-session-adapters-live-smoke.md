@@ -98,6 +98,26 @@ metabot sessions unbind <conversationId>
 
 Backups (`*.bak-sessions`) can restore any pre-wire file verbatim.
 
+## 7. DSH (native push) — message drives a live DSH session
+
+The dsh-plugin is the in-process delivery agent: every live DSH session
+registers automatically (agent `dsh`, tier `push`), no wire step needed.
+
+1. Restart the daemon AND DSH (the plugin mounts with the host) after the
+   merge; hard-refresh the DSH web UI.
+2. Open a DSH session and work in it briefly (so it is live).
+3. `metabot sessions list` — the DSH session appears (`dsh:<hostId>`,
+   tier `push`, deliverable).
+4. Bind: `metabot sessions bind <conversationId> <sessionName>`.
+5. Send a message from the remote bot (grok bot).
+6. **Pass:** within ~a registration interval + poll cycle (≈1min worst
+   case), the `<oac-message>` block appears INSIDE the DSH session's own
+   conversation as a user turn, and the session starts working on it. The
+   turn's final text flows back to the remote peer as the DSH bot's reply
+   (`sessions send` anchored to the binding's peer).
+7. Mid-work injection: DSH's own followup queuing applies — the mail lands
+   as the next user turn when the host accepts it.
+
 ## Known deferrals (not in this smoke)
 
 - Copilot CLI / Grok CLI hook wiring (schemas unverified).

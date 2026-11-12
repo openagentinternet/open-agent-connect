@@ -3996,6 +3996,9 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'bind', summary: 'Bind a private-chat conversation to a local session: its mail goes to the session inbox (metabot mcp pull) instead of driving a bot runtime turn.' },
       { name: 'unbind', summary: 'Drop a conversation binding; the bot runtime answers the conversation again.' },
       { name: 'wire', summary: 'Wire a host for session mail: the metabot-sessions MCP server (ZCode) plus, for hook-tier hosts (cursor, gemini), the metabot hook handler into their hook configs — with file backups; --remove drops only our entries.' },
+      { name: 'register', summary: 'Register (or refresh) a local session as deliverable — the data-plane verb the dsh-plugin mail agent uses.' },
+      { name: 'inbox-check', summary: 'Long-poll a session inbox and hand over pending mail (marks it delivered); --wait caps the poll in seconds (max 25).' },
+      { name: 'send', summary: 'Send a bound session\'s reply: anchors to the binding\'s observed peer and sends as the bound Bot profile through the normal chat pipeline.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -4011,6 +4014,37 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     commandPath: ['sessions', 'unbind'],
     summary: 'Drop the binding between a private-chat conversation and a local session; the bot runtime answers the conversation again.',
     usage: 'metabot sessions unbind <conversationId>',
+    optionalFlags: [],
+  },
+  {
+    commandPath: ['sessions', 'register'],
+    summary: 'Register (or refresh) a local agent session as deliverable (local session adapters P5b): the data-plane verb behind the dsh-plugin mail agent — the plugin registers each live DSH session (agent dsh, the host session id) so bound conversations\' mail can be delivered into it. Name-keeping and the default tier table apply (dsh = push).',
+    usage: 'metabot sessions register --agent <agent> [--session <id>] [--name <name>] [--cwd <path>]',
+    requiredFlags: [{ flag: '--agent', value: '<agent>', description: 'The agent platform id (dsh, claude-code, …).' }],
+    optionalFlags: [
+      { flag: '--session', value: '<id>', description: 'The host session id (the registry key becomes <agent>:<id>).' },
+      { flag: '--name', value: '<name>', description: 'Requested directory name (honored when free).' },
+      { flag: '--cwd', value: '<path>', description: 'The session working directory (drives the default name and repo/branch).' },
+    ],
+  },
+  {
+    commandPath: ['sessions', 'inbox-check'],
+    summary: 'Long-poll a session inbox (local session adapters P5b): returns pending mail (marking it delivered) plus the remaining pending count — the unread-notice input. The dsh-plugin mail agent parks on this per bound session; delivery latency is one poll cycle.',
+    usage: 'metabot sessions inbox-check --session <key|name> [--wait <secs>]',
+    requiredFlags: [{ flag: '--session', value: '<key|name>', description: 'The session key or directory name.' }],
+    optionalFlags: [
+      { flag: '--wait', value: '<secs>', description: 'Seconds to wait when the inbox is empty (max 25; default 0 = return immediately).' },
+    ],
+  },
+  {
+    commandPath: ['sessions', 'send'],
+    summary: 'Send a bound session\'s reply (local session adapters P5b): resolves the session, requires a binding whose observed peer matches --to (refused rather than guessed otherwise), and sends the message as the bound Bot profile through the normal chat.private pipeline.',
+    usage: 'metabot sessions send --session <key|name> --to <peerGlobalMetaId> --message <text>',
+    requiredFlags: [
+      { flag: '--session', value: '<key|name>', description: 'The session key or directory name.' },
+      { flag: '--to', value: '<peerGlobalMetaId>', description: 'The remote peer (the sender of the inbox message being replied to).' },
+      { flag: '--message', value: '<text>', description: 'The reply text.' },
+    ],
     optionalFlags: [],
   },
   {

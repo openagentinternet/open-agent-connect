@@ -461,3 +461,76 @@ test('buildSessionsDoctorCheck reports registry state and wiring presence withou
   assert.equal(report.boundConversations, 1);
   assert.equal(report.note, undefined);
 });
+
+// ---------- P5b: dsh push tier + mail-agent CLI verbs ----------
+
+test('dsh defaults to the push tier; CLI mail verbs surface daemon data', async () => {
+  const root = await mkdtempTempRoot('metabot-sessions-p5b-');
+  const layer = createSessionLayer(root);
+  const created = await layer.registry.registerSession({ agent: 'dsh', sessionId: 'agent-7', source: 'mcp', deliverable: true });
+  assert.equal(created.tier, 'push', 'dsh sessions default to push');
+  assert.equal(created.name, 'session-dsh');
+});
+
+test('sessions CLI register/inbox-check/send wire to the daemon handlers', async () => {
+  const root = await mkdtempTempRoot('metabot-sessions-p5b-cli-');
+  const layer = createSessionLayer(root);
+  const ok = (data) => ({ ok: true, state: 'success', data });
+  const deps = {
+    sessions: {
+      list: async () => ok({ sessions: [] }),
+      register: async (input) => ok({
+        record: await layer.registry.registerSession({
+          agent: input.agent,
+          sessionId: input.sessionId,
+          name: input.name,
+          cwd: input.cwd,
+          source: 'mcp',
+          deliverable: true,
+        }),
+      }),
+      inboxCheck: async (input) => {
+        const messages = await layer.mailQueue.checkInbox({ sessionKey: input.sessionKey, waitSecs: input.waitSecs ?? 0 });
+        return { ok: true, state: 'success', data: { messages, pending: await layer.mailQueue.pendingCount(input.sessionKey) } };
+      },
+      sendMessage: async (input) => ok({ sent: true, ...input }),
+    },
+  };
+  const context = (argv) => ({
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    env: {},
+    cwd: '/x',
+    stdin: null,
+    readTextFile: async () => '',
+    dependencies: deps,
+    _argv: argv,
+  });
+  const { runSessionsCommand } = require('../../dist/cli/commands/sessions.js');
+
+  const registered = await runSessionsCommand(['register', '--agent', 'dsh', '--session', 'agent-9'], context());
+  assert.equal(registered.ok, true);
+  assert.equal(registered.data.record.sessionKey, 'dsh:agent-9');
+  assert.equal(registered.data.record.tier, 'push');
+
+  await layer.mailQueue.enqueue({ sessionKey: 'dsh:agent-9', from: 'peer-1', body: 'hello dsh' });
+  const checked = await runSessionsCommand(['inbox-check', '--session', 'dsh:agent-9', '--wait', '0'], context());
+  assert.equal(checked.ok, true);
+  assert.equal(checked.data.messages.length, 1);
+  assert.equal(checked.data.messages[0].body, 'hello dsh');
+
+  // Bind + route so the reply anchor exists.
+  await layer.registry.bindConversation({ sessionRef: 'dsh:agent-9', conversationId: 'pc-self-peer-1' });
+  await layer.router.routeInbound({ conversationId: 'pc-self-peer-1', peerGlobalMetaId: 'peer-1', body: 'again' });
+  const sent = await runSessionsCommand(['send', '--session', 'dsh:agent-9', '--to', 'peer-1', '--message', 'on it'], context());
+  assert.equal(sent.ok, true);
+  assert.equal(sent.data.sent, true);
+
+  const missing = await runSessionsCommand(['send', '--session', 'dsh:agent-9'], context());
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'invalid_session_send');
+
+  const noWait = await runSessionsCommand(['inbox-check'], context());
+  assert.equal(noWait.ok, false);
+  assert.equal(noWait.code, 'invalid_session_key');
+});

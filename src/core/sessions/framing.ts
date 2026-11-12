@@ -20,7 +20,7 @@ export interface PeerMessageFrameInput {
 export function buildPeerMessageFrame(input: PeerMessageFrameInput): string {
   const name = input.fromName?.trim();
   const fromAttr = name ? `${input.from} (${name})` : input.from;
-  const body = input.body.endsWith('\n') ? input.body : `${input.body}\n`;
+  const body = input.body;
   return [
     `<oac-message from="${fromAttr}" mail="${input.mailId}">`,
     body,
