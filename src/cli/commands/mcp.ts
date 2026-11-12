@@ -56,6 +56,13 @@ export async function runMcpCommand(args: string[], context: CliRuntimeContext):
   const sendMessage = sessions.sendMessage
     ? async (input: { sessionKey: string; to: string; message: string }) => await sessions.sendMessage!(input)
     : undefined;
+  const pendingFor = sessions.inboxPending
+    ? async (input: { sessionKey: string }) => {
+      const result = await sessions.inboxPending!(input);
+      const pending = (result as { data?: { pending?: unknown } })?.data?.pending;
+      return typeof pending === 'number' && Number.isFinite(pending) ? pending : 0;
+    }
+    : undefined;
 
   const explicitName = flagValue(args, '--name');
   const explicitKey = flagValue(args, '--session');
@@ -94,6 +101,7 @@ export async function runMcpCommand(args: string[], context: CliRuntimeContext):
     checkInbox: async (input) => await sessions.inboxCheck!({ sessionKey: input.sessionKey, waitSecs: input.waitSecs }),
     messageStatus: async (input) => await sessions.messageStatus!({ ids: input.ids }),
     sendMessage,
+    pendingFor,
   };
 
   // Bounded JSON lines from the context's stdin; protocol responses go to

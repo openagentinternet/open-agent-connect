@@ -16,6 +16,7 @@ type SessionsVerb = keyof SessionsHandlerGroup;
 const POST_VERBS: Record<string, SessionsVerb> = {
   '/api/sessions/register': 'register',
   '/api/sessions/inbox/check': 'inboxCheck',
+  '/api/sessions/inbox/pending': 'inboxPending',
   '/api/sessions/inbox/enqueue': 'inboxEnqueue',
   '/api/sessions/messages/status': 'messageStatus',
   '/api/sessions/bind': 'bind',

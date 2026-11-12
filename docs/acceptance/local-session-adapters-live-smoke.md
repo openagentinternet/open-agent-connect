@@ -49,9 +49,11 @@ file to be picked up (restart the CLI session).
    `metabot sessions bind <conversationId> <sessionName>` (conversationId
    from the conversations page/API for the peer you'll message from).
 4. From the other client's bot, send a message to this machine's bot.
-5. In the ZCode session, ask the agent to check its inbox
-   (`check_inbox`). The message arrives framed
-   (`<oac-message from=…>`), and `metabot sessions list` still shows the
+5. The pull tier is now self-driving: the NEXT metabot tool result in the
+   session carries `📬 N unread message(s) … call check_inbox now`, so
+   the agent pulls the mail unprompted (you can also just ask it to
+   check its inbox). The message arrives framed (`<oac-message from=…>`)
+   in the session transcript, and `metabot sessions list` still shows the
    binding.
 6. Reply from the session with the `send_message` tool — the remote side
    receives the reply as this machine's bot identity.

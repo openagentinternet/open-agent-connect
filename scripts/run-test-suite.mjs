@@ -21,6 +21,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const INTEGRATION_FILES = new Set([
   'tests/cli/runtime.test.mjs',
   'tests/skillpacks/buildSkillpacks.test.mjs',
+  'tests/skillpacks/hostBindSmoke.test.mjs',
   'tests/daemon/defaultLlmHandlers.test.mjs',
   'tests/e2e/localCrossHostDemo.test.mjs',
   'tests/npm/packageFiles.test.mjs',

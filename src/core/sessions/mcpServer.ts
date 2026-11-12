@@ -36,6 +36,8 @@ export interface McpToolBackend {
   messageStatus(input: { ids: string[] }): Promise<unknown>;
   /** Optional: the P2b reply path (absent = send_message errors gracefully). */
   sendMessage?(input: { sessionKey: string; to: string; message: string }): Promise<unknown>;
+  /** Optional: non-consuming pending count (P5c unread notices). */
+  pendingFor?(input: { sessionKey: string }): Promise<number>;
 }
 
 export interface McpServerIo {
@@ -159,6 +161,26 @@ export function createMcpSessionServer(io: McpServerIo, backend: McpToolBackend,
           content: [{ type: 'text', text: `Unknown tool: ${String(name)}` }],
           isError: true,
         };
+      }
+      // P5c unread notice (pull tier): a session cannot be woken, so every
+      // OTHER tool result tells it when mail is waiting — the trigger that
+      // makes check_inbox self-driving. check_inbox itself already returns
+      // the mail (its pending count is the post-handover remainder).
+      if (name !== 'check_inbox' && options.sessionKey && backend.pendingFor) {
+        try {
+          const pending = await backend.pendingFor({ sessionKey: options.sessionKey });
+          if (pending > 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: `${JSON.stringify(payload)}\n\n📬 ${pending} unread message(s) are waiting from remote bots — call check_inbox now to read them.`,
+              }],
+              isError: isRecord(payload) && payload.ok === false,
+            };
+          }
+        } catch {
+          // Notice is best-effort; never break the tool result.
+        }
       }
       return {
         content: [{ type: 'text', text: JSON.stringify(payload) }],

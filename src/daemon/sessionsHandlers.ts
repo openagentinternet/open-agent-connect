@@ -174,6 +174,18 @@ export function createSessionsDaemonHandlers(
       return commandSuccess({ receipts });
     },
 
+    // Non-consuming pending count (P5c unread notices): the MCP server
+    // appends it to other tool results so a pull-tier session learns mail
+    // is waiting WITHOUT handing it over.
+    inboxPending: async (rawInput) => {
+      const sessionKey = typeof rawInput.sessionKey === 'string' ? rawInput.sessionKey.trim() : '';
+      if (!sessionKey) {
+        return commandFailed('invalid_session_key', 'sessionKey is required.');
+      }
+      const pending = await mailQueue.pendingCount(sessionKey);
+      return commandSuccess({ pending });
+    },
+
     // P2b: bind/unbind a private-chat conversation to a local session. Mail
     // for a bound conversation is enqueued to the session instead of
     // driving a bot runtime turn (routed by the orchestrator hook).
