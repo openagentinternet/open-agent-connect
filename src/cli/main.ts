@@ -15,6 +15,9 @@ import { runOwnerCommand } from './commands/owner';
 import { runTrustCommand } from './commands/trust';
 import { runBlockCommand } from './commands/block';
 import { runTeamCommand } from './commands/team';
+import { runMcpCommand } from './commands/mcp';
+import { runHookCommand } from './commands/hook';
+import { runSessionsCommand } from './commands/sessions';
 import { runNetworkCommand } from './commands/network';
 import { runProviderCommand } from './commands/provider';
 import { runServicesCommand } from './commands/services';
@@ -156,6 +159,15 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'team':
           result = await runTeamCommand(rest, context);
+          break;
+        case 'mcp':
+          result = await runMcpCommand(rest, context);
+          break;
+        case 'hook':
+          result = await runHookCommand(rest, context);
+          break;
+        case 'sessions':
+          result = await runSessionsCommand(rest, context);
           break;
         case 'network':
           result = await runNetworkCommand(rest, context);

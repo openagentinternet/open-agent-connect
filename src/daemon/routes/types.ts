@@ -220,6 +220,28 @@ export interface MetabotDaemonHttpHandlers {
     add?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     remove?: (input: { globalMetaId: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  /** Local session directory + mail queue + bindings (`metabot sessions *` /
+   *  `metabot mcp`, local session adapters P1/P2a/P2b): passive presence for
+   *  this machine's agent sessions (Claude Code, Codex, …), the pull-tier
+   *  inbox verbs, conversation binding, and the session reply path. */
+  sessions?: {
+    list?: (input: { all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    register?: (input: {
+      agent: string;
+      sessionId?: string;
+      pid?: number;
+      name?: string;
+      cwd?: string;
+      status?: 'busy' | 'idle';
+      inboxSocketPath?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    inboxCheck?: (input: { sessionKey: string; waitSecs?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    inboxEnqueue?: (input: { sessionKey: string; from: string; fromName?: string; body: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    messageStatus?: (input: { ids: string[] }) => Awaitable<MetabotCommandResult<unknown>>;
+    bind?: (input: { sessionRef: string; conversationId: string; profileSlug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    unbind?: (input: { conversationId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    sendMessage?: (input: { sessionKey: string; to: string; message: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;

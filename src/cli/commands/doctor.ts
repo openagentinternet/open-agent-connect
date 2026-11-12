@@ -1,6 +1,7 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import { normalizeSystemHomeDir } from '../../core/state/homeSelection';
 import { buildCliRuntimeDoctorCheck, buildCliShimDoctorCheck } from '../../core/state/cliShimDoctor';
+import { buildSessionsDoctorCheck } from '../../core/sessions/sessionsDoctor';
 import { CLI_VERSION } from '../version';
 import type { CliRuntimeContext } from '../types';
 
@@ -31,6 +32,9 @@ export async function runDoctorCommand(_args: string[], context: CliRuntimeConte
     context.cwd,
     context.env.METABOT_CLI_CURRENT_ENTRY_PATH || process.argv[1],
   );
+  const sessionsCheck = await buildSessionsDoctorCheck(
+    normalizeSystemHomeDir(context.env, context.cwd),
+  );
 
   return {
     ...result,
@@ -41,6 +45,7 @@ export async function runDoctorCommand(_args: string[], context: CliRuntimeConte
         ...result.data.checks,
         cliShimCheck,
         ...(cliRuntimeCheck ? [cliRuntimeCheck] : []),
+        sessionsCheck,
       ],
     },
   };

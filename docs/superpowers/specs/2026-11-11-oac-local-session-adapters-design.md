@@ -189,10 +189,12 @@ New module: `src/core/sessions/`
 - `guards.ts` — session-drive loop-guard counters (extends, does not
   replace, `privateChatLoopGuards.ts`).
 
-State lives at `<profile>/.runtime/state/local-sessions.json` (v2 storage
-layout; lazy atomic write-then-rename, single-writer orchestrator — same
-discipline as `private-chat-wake.json`). Mail queue:
-`<profile>/.runtime/state/session-mail.json`.
+State lives at `<systemHome>/.metabot/sessions/local-sessions.json`
+(resolved by `resolveMetabotSessionPaths()`; v2 storage amendment 2026-11-12
+— sessions are machine facts that belong to no single Bot profile, so they
+sit outside the per-profile `.runtime/` model, same split as the owner
+layer; 0600, atomic write-then-rename, single-writer serialized registry).
+Mail queue (P3): `<systemHome>/.metabot/sessions/session-mail.json`.
 
 ### Session registration sources
 
@@ -303,19 +305,105 @@ discipline as the bot runtime's delivery artifacts.
   naming, discovery scans, `/api/sessions/*` daemon routes, `metabot
   sessions list`. No delivery. Verifiable alone: `sessions list` shows live
   Claude/Codex sessions with repo/branch/status.
+  **(updated 2026-11-12): P1 landed** — `src/core/sessions/` (types, naming,
+  registry, repo probe, `discovery/claude.ts` + `discovery/codex.ts`),
+  machine-wide state at `~/.metabot/sessions/local-sessions.json` via the new
+  `resolveMetabotSessionPaths()` (storage-layout v2 amendment), daemon
+  handler + `GET /api/sessions/list` route, `metabot sessions list [--all]`
+  CLI over the daemon, and `tests/sessions/localSessions.test.mjs` (14
+  tests). Claude discovery parses the live `~/.claude/sessions/<pid>.json`
+  registry (camelCase fields, pid-liveness filtered, messaging socket
+  recorded for P3); Codex discovery parses `~/.codex/session_index.jsonl`
+  (id/thread_name/updated_at, 24h freshness window). Discovery entries are
+  presence-only (`deliverable=false`, source `discovery`); name keeping,
+  `-2`/`-3` collisions, the 10-minute live window, and the 24h lapse TTL all
+  behave as specified.
 - **P2 — pull tier: `metabot mcp`.** MCP server, `check_inbox` long-poll,
   unread-notice helper for tool results, host wiring for ZCode first.
   Acceptance: a ZCode session sees and answers a remote bot message via MCP.
+  **(updated 2026-11-12): P2a landed** — the session mail queue
+  (`src/core/sessions/mailQueue.ts`, 24h TTL, delivered/read receipts,
+  25s long-poll ceiling) at `~/.metabot/sessions/session-mail.json`, the
+  daemon verbs (`/api/sessions/register|inbox/check|inbox/enqueue|messages/status`),
+  and a hand-rolled stdio MCP server (JSON-RPC 2.0, no SDK dependency — the
+  repo keeps protocol adapters in-house): `metabot mcp [--name <name>]
+  [--session <key>] [--agent <label>]` serving `list_sessions`,
+  `check_inbox` (long-poll + pending count for unread notices), and
+  `message_status` over the same daemon-backed dependency proxies the CLI
+  uses.
+  **(updated 2026-11-12): P2b landed** — the pull tier is end to end:
+  conversation binding (`boundConversations` on registry records, enriched
+  with the observed peer + owning profile on each routed mail — no
+  conversation-id parsing), the routing hook in `handleInboundMessage`
+  (after the trust gate; bound → enqueue, unbound → bot runtime unchanged,
+  routing failures fail open with a `session_route_failed` event), the
+  session reply path (`send_message` anchors to the binding's observed peer
+  and sends as the bound Bot profile through the existing `chat.private`
+  pipeline), `metabot sessions bind|unbind`, and ZCode host wiring
+  (`metabot sessions wire --host zcode [--remove]`, backup file, agents
+  fallback). One machine-wide session layer (`createSessionLayer`) is shared
+  by the sessions handlers and every profile's orchestrator — the registry
+  and queue stay single-writer. Loop-guard extension across session
+  deliveries is deferred to P3 (wake policy) — pull-tier sessions reply only
+  on their own schedule and both sides keep their rate limits.
 - **P3 — push tier: Claude Code + Codex.** Inbox-socket adapter, `codex
   queue` adapter, idle-wake policy, mail queue + TTL, session binding +
   routing decision. This is the milestone that produces the headline
   behavior: a grok bot message appears inside a live Claude Code session and
   drives it.
+  **(updated 2026-11-12): P3 landed** — `framing.ts` (the `<oac-message>`
+  peer-input frame with the send_message reply hint), the push adapters
+  (`adapters/claudeCode.ts`: the `{"type":"user",…}` frame over the
+  session's inbox socket recorded by discovery, 5s timeout, no token on
+  unix; `adapters/codex.ts`: `codex queue --thread <id> --message`, with
+  CODEX_HOME passthrough), and the router push matrix: enqueue first, then
+  attempt a direct push when `canWake && record.deliverable && tier==='push'`
+  with adapter material present (Claude: the socket must still exist; Codex:
+  the sessionId suffices — queue works for resumed threads) — success marks
+  the mail delivered (the queue entry becomes the receipt), any failure
+  degrades to the queue without losing mail. `canWake` is resolved in the
+  orchestrator from the trust tier (local/team/trusted/contact → wake;
+  stranger → queue-only; unwired evaluator → conservative no). The
+  `sessions.wakePolicy` config knob lands with P4.
 - **P4 — turn tier: hooks.** Hook handler binary + per-host hook config
   writes (Gemini, Copilot, Cursor, Grok CLI), cross-loaded-hooks detection,
   `message_status`.
+  **(updated 2026-11-12): P4a+P4b landed** — `hooks.ts` (the turn-tier
+  handler: payload parsing, env-beats-argument agent detection for
+  cross-loaded hooks, the takes-mail table, the Grok ignore rules, and the
+  per-host additionalContext dialects — hookSpecificOutput for
+  Claude/Gemini/Grok, `additional_context` for Cursor, `additionalContext`
+  for Copilot) with `metabot hook <event> [--agent]` (bounded stdin read,
+  8s overall cap, silent exit 0 on any failure — hooks never break their
+  host); turn-tier registration (gemini/copilot/cursor/grok default to
+  tier `turn`, so the router queues instead of pushing); and
+  `metabot sessions wire --host cursor|gemini` (hostHooks.ts: MCP server
+  entry + hook groups with reason-network's merge discipline — only our
+  entries, identified by the ` hook <host> ` command marker, are touched;
+  every edited file backed up). Verified against the local Cursor/Gemini
+  installs' config shapes. Copilot deferred (the reference's hook entries
+  carry a suspicious "shell" key and no local install exists to verify
+  against) and Grok CLI deferred (TOML config, no local install); the
+  `sessions.wakePolicy` config knob is likewise deferred — the tier gate
+  lives in the orchestrator with the conservative default.
 - **P5 — DSH push + UI + doctor.** Native DSH delivery, conversations-page
   provenance, doctor sessions check.
+  **(updated 2026-11-12): P5a landed** — the doctor sessions check
+  (`sessionsDoctor.ts`, wired into `metabot doctor` as
+  `local_sessions_layer`: registry state, live/deliverable/bound counts,
+  per-host wiring presence for zcode/kimi/cursor/gemini, informative note
+  when nothing is set up yet — the wiring probe reads the real user home
+  because wiring files are machine facts); the Kimi Code investigation and
+  wiring: kimi-code 2.0.2 reads the SAME `{"mcpServers": …}` stdio map at
+  `~/.kimi-code/mcp.json` and its config.toml exposes no hook surface, so
+  Kimi is wireable at the pull tier today (`metabot sessions wire --host
+  kimi`) and joins Claude/ZCode as a hooks candidate only if upstream adds
+  hooks; and the live-smoke runbook
+  (`docs/acceptance/local-session-adapters-live-smoke.md`: doctor baseline,
+  wire, bind, per-host message flows, stranger-tier no-wake check,
+  rollback). Deferred to P5b: DSH native push, conversations-page
+  provenance line, `sessions.wakePolicy` knob; Kimi/Copilot/Grok hook-tier
+  adapters wait on upstream surfaces.
 
 ## Code Areas
 
