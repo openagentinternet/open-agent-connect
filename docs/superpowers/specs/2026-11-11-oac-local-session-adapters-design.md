@@ -446,6 +446,16 @@ discipline as the bot runtime's delivery artifacts.
   the routing test extended to the verb wiring. Live smoke on the user's
   3080 DSH remains the acceptance gate (daemon + DSH restart needed — the
   runbook's DSH section).
+  **(updated 2026-11-12): P5c landed** — the unread notice: a
+  non-consuming `/api/sessions/inbox/pending` verb (`inboxPending`) plus
+  the MCP server appending `📬 N unread message(s) … call check_inbox now`
+  to EVERY non-check_inbox tool result when the bound session has waiting
+  mail. This closes the pull tier's trigger gap: a ZCode/Kimi session
+  needs no user nudge — any metabot tool call self-notifies the agent,
+  which pulls the mail itself; the moment it does, the framed message is
+  visible in the host UI's session transcript. check_inbox results carry
+  no notice (they already delivered); the pending query is non-consuming
+  and best-effort (never breaks a tool result).
 
 ## Code Areas
 

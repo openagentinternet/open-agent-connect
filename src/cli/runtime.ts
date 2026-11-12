@@ -4397,6 +4397,7 @@ return {
       },
       register: async (input) => requestJson(context, 'POST', '/api/sessions/register', input),
       inboxCheck: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/check', input),
+      inboxPending: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/pending', input),
       inboxEnqueue: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/enqueue', input),
       messageStatus: async (input) => requestJson(context, 'POST', '/api/sessions/messages/status', input),
       bind: async (input) => requestJson(context, 'POST', '/api/sessions/bind', input),

@@ -534,3 +534,98 @@ test('sessions CLI register/inbox-check/send wire to the daemon handlers', async
   assert.equal(noWait.ok, false);
   assert.equal(noWait.code, 'invalid_session_key');
 });
+
+// ---------- P5c: unread notice (non-consuming pending) ----------
+
+test('inboxPending counts without consuming; MCP list_sessions results carry the notice', async () => {
+  const root = await mkdtempTempRoot('metabot-sessions-notice-');
+  const layer = createSessionLayer(root);
+  const handlers = createSessionsDaemonHandlers({ systemHomeDir: root, sessionLayer: layer });
+  await handlers.register({ agent: 'mcp-client', sessionId: 'notice-1' });
+
+  const pendingBefore = await handlers.inboxPending({ sessionKey: 'mcp-client:notice-1' });
+  assert.equal(pendingBefore.ok, true);
+  assert.equal(pendingBefore.data.pending, 0);
+
+  await handlers.inboxEnqueue({ sessionKey: 'mcp-client:notice-1', from: 'peer', body: 'mail one' });
+  await handlers.inboxEnqueue({ sessionKey: 'mcp-client:notice-1', from: 'peer', body: 'mail two' });
+
+  const pending = await handlers.inboxPending({ sessionKey: 'mcp-client:notice-1' });
+  assert.equal(pending.data.pending, 2, 'pending counts without consuming');
+
+  // The MCP server surfaces it on OTHER tool results.
+  const { createMcpSessionServer } = require('../../dist/core/sessions/mcpServer.js');
+  const responses = [];
+  const server = createMcpSessionServer(
+    {
+      input: (async function* generate() {
+        yield JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_sessions', arguments: {} } });
+        yield JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'message_status', arguments: { ids: [] } } });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      })(),
+      write: (line) => responses.push(JSON.parse(line)),
+    },
+    {
+      listSessions: async () => ({ ok: true, state: 'success', data: { sessions: [] } }),
+      registerSession: async () => ({}),
+      checkInbox: async () => ({}),
+      messageStatus: async () => ({ ok: true, state: 'success', data: { receipts: [] } }),
+      pendingFor: async () => 2,
+    },
+    { sessionKey: 'mcp-client:notice-1' },
+  );
+  await server.run();
+  const listResult = responses[0].result.content[0].text;
+  assert.match(listResult, /📬 2 unread message\(s\) are waiting from remote bots/);
+  assert.match(listResult, /call check_inbox now/);
+  assert.equal(responses[0].result.isError, false);
+  // message_status (empty ids) gets the notice too — every non-check_inbox result does.
+  assert.match(responses[1].result.content[0].text, /📬 2 unread/);
+
+  // The pending count is unchanged (non-consuming).
+  const pendingAfter = await handlers.inboxPending({ sessionKey: 'mcp-client:notice-1' });
+  assert.equal(pendingAfter.data.pending, 2);
+
+  // check_inbox hands the mail over; pending drops to 0.
+  await handlers.inboxCheck({ sessionKey: 'mcp-client:notice-1' });
+  assert.equal((await handlers.inboxPending({ sessionKey: 'mcp-client:notice-1' })).data.pending, 0);
+
+  // No mail → no notice (the result text stays plain JSON).
+  const serverQuiet = createMcpSessionServer(
+    {
+      input: (async function* generate() {
+        yield JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'message_status', arguments: { ids: [] } } });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      })(),
+      write: (line) => responses.push(JSON.parse(line)),
+    },
+    {
+      listSessions: async () => ({}),
+      registerSession: async () => ({}),
+      checkInbox: async () => ({}),
+      messageStatus: async () => ({ ok: true, state: 'success', data: { receipts: [] } }),
+      pendingFor: async () => 0,
+    },
+    { sessionKey: 'mcp-client:notice-1' },
+  );
+  const quietResponses = [];
+  const quiet = createMcpSessionServer(
+    {
+      input: (async function* generate() {
+        yield JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'list_sessions', arguments: {} } });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      })(),
+      write: (line) => quietResponses.push(JSON.parse(line)),
+    },
+    {
+      listSessions: async () => ({ ok: true, state: 'success', data: {} }),
+      registerSession: async () => ({}),
+      checkInbox: async () => ({}),
+      messageStatus: async () => ({ ok: true, state: 'success', data: {} }),
+      pendingFor: async () => 0,
+    },
+    { sessionKey: 'mcp-client:notice-1' },
+  );
+  await quiet.run();
+  assert.equal(quietResponses[0].result.content[0].text.includes('📬'), false, 'no notice when inbox is empty');
+});

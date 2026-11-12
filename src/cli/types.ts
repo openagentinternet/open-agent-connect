@@ -147,6 +147,8 @@ export interface CliDependencies {
     }) => Awaitable<MetabotCommandResult<unknown>>;
     /** Long-poll the session's inbox (pull tier). */
     inboxCheck?: (input: { sessionKey: string; waitSecs?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Non-consuming pending count (the unread-notice input). */
+    inboxPending?: (input: { sessionKey: string }) => Awaitable<MetabotCommandResult<unknown>>;
     /** Localhost handoff into a session's inbox. */
     inboxEnqueue?: (input: { sessionKey: string; from: string; fromName?: string; body: string }) => Awaitable<MetabotCommandResult<unknown>>;
     /** Content-free delivery receipts. */

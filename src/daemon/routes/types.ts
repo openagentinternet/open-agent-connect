@@ -236,6 +236,7 @@ export interface MetabotDaemonHttpHandlers {
       inboxSocketPath?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
     inboxCheck?: (input: { sessionKey: string; waitSecs?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    inboxPending?: (input: { sessionKey: string }) => Awaitable<MetabotCommandResult<unknown>>;
     inboxEnqueue?: (input: { sessionKey: string; from: string; fromName?: string; body: string }) => Awaitable<MetabotCommandResult<unknown>>;
     messageStatus?: (input: { ids: string[] }) => Awaitable<MetabotCommandResult<unknown>>;
     bind?: (input: { sessionRef: string; conversationId: string; profileSlug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
