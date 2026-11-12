@@ -46,6 +46,10 @@ const STATE_FILE_MODE = 0o600;
 const DEFAULT_AGENT_TIERS: Record<string, SessionDeliveryTier> = {
   'claude-code': 'push',
   codex: 'push',
+  gemini: 'turn',
+  copilot: 'turn',
+  cursor: 'turn',
+  grok: 'turn',
 };
 
 function defaultTier(agent: string): SessionDeliveryTier {

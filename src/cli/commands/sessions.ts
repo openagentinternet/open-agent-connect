@@ -1,4 +1,5 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
+import { wireHostHooks } from '../../core/sessions/hostHooks';
 import { wireSessionsMcp } from '../../core/sessions/hostWire';
 import { commandUnknownSubcommand, redactSensitiveArgs } from './helpers';
 import type { CliRuntimeContext } from '../types';
@@ -48,16 +49,20 @@ export async function runSessionsCommand(args: string[], context: CliRuntimeCont
     return dependencies.unbind({ conversationId });
   }
 
-  // P2b: wire the sessions MCP server into a host's MCP config (ZCode
-  // first) so its sessions can pull their inbox with `metabot mcp`.
+  // P2b/P4b: wire the sessions MCP server (and, for hook-tier hosts, the
+  // hook handler) into a host's config so its sessions can receive mail.
   if (subcommand === 'wire') {
     const hostIndex = args.indexOf('--host');
     const host = hostIndex >= 0 ? args[hostIndex + 1] : undefined;
     if (!host) {
-      return commandFailed('invalid_sessions_wire', 'Usage: metabot sessions wire --host zcode [--remove]');
+      return commandFailed('invalid_sessions_wire', 'Usage: metabot sessions wire --host <zcode|cursor|gemini> [--remove]');
     }
     try {
-      const result = await wireSessionsMcp({ host, remove: args.includes('--remove') });
+      if (host === 'zcode') {
+        const result = await wireSessionsMcp({ host, remove: args.includes('--remove') });
+        return commandSuccess(result);
+      }
+      const result = await wireHostHooks({ host: host as 'cursor' | 'gemini', remove: args.includes('--remove') });
       return commandSuccess(result);
     } catch (error) {
       return commandFailed('sessions_wire_failed', error instanceof Error ? error.message : String(error));

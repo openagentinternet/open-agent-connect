@@ -368,6 +368,24 @@ discipline as the bot runtime's delivery artifacts.
 - **P4 — turn tier: hooks.** Hook handler binary + per-host hook config
   writes (Gemini, Copilot, Cursor, Grok CLI), cross-loaded-hooks detection,
   `message_status`.
+  **(updated 2026-11-12): P4a+P4b landed** — `hooks.ts` (the turn-tier
+  handler: payload parsing, env-beats-argument agent detection for
+  cross-loaded hooks, the takes-mail table, the Grok ignore rules, and the
+  per-host additionalContext dialects — hookSpecificOutput for
+  Claude/Gemini/Grok, `additional_context` for Cursor, `additionalContext`
+  for Copilot) with `metabot hook <event> [--agent]` (bounded stdin read,
+  8s overall cap, silent exit 0 on any failure — hooks never break their
+  host); turn-tier registration (gemini/copilot/cursor/grok default to
+  tier `turn`, so the router queues instead of pushing); and
+  `metabot sessions wire --host cursor|gemini` (hostHooks.ts: MCP server
+  entry + hook groups with reason-network's merge discipline — only our
+  entries, identified by the ` hook <host> ` command marker, are touched;
+  every edited file backed up). Verified against the local Cursor/Gemini
+  installs' config shapes. Copilot deferred (the reference's hook entries
+  carry a suspicious "shell" key and no local install exists to verify
+  against) and Grok CLI deferred (TOML config, no local install); the
+  `sessions.wakePolicy` config knob is likewise deferred — the tier gate
+  lives in the orchestrator with the conservative default.
 - **P5 — DSH push + UI + doctor.** Native DSH delivery, conversations-page
   provenance, doctor sessions check.
 

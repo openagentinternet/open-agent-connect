@@ -228,6 +228,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'team', summary: 'Manage the remote team Bot registry — Bots on your other devices (same root owner) available for cross-device group tasks (trust tiers).' },
     { name: 'sessions', summary: 'Show the local session directory — this machine\'s live agent sessions (Claude Code, Codex, …) with repo, branch, and busy/idle (local session adapters).' },
     { name: 'mcp', summary: 'Run the local session MCP server on stdio — lets MCP hosts (ZCode, Claude Desktop, …) list sessions and long-poll a session inbox (local session adapters).' },
+    { name: 'hook', summary: 'Host hook handler for the session turn tier (installed by metabot sessions wire) — registers the session and prints pending inbox mail as additionalContext.' },
     { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
     { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
@@ -3994,7 +3995,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'list', summary: 'Show live local agent sessions (name, agent, tier, repo@branch, status). --all includes offline records.' },
       { name: 'bind', summary: 'Bind a private-chat conversation to a local session: its mail goes to the session inbox (metabot mcp pull) instead of driving a bot runtime turn.' },
       { name: 'unbind', summary: 'Drop a conversation binding; the bot runtime answers the conversation again.' },
-      { name: 'wire', summary: 'Write the metabot-sessions MCP server into a host MCP config (ZCode first) so its sessions can check their inbox.' },
+      { name: 'wire', summary: 'Wire a host for session mail: the metabot-sessions MCP server (ZCode) plus, for hook-tier hosts (cursor, gemini), the metabot hook handler into their hook configs — with file backups; --remove drops only our entries.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -4014,10 +4015,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['sessions', 'wire'],
-    summary: 'Write the metabot-sessions MCP server entry into a host MCP config so the host sessions can pull their inbox. ZCode is the first supported host (~/.zcode/cli/config.json, falling back to ~/.agents/mcp.json); the edited file is backed up with .bak-sessions.',
-    usage: 'metabot sessions wire --host zcode [--remove]',
+    summary: 'Wire a host for session mail (local session adapters). ZCode gets the metabot-sessions MCP server (~/.zcode/cli/config.json, falling back to ~/.agents/mcp.json). Hook-tier hosts (cursor, gemini) additionally get the metabot hook handler in their hook configs (Cursor: ~/.cursor/hooks.json; Gemini: ~/.gemini/settings.json) so inbox mail reaches the model at the next tool call / turn end. Every edited file is backed up with .bak-sessions; --remove drops only our entries. Copilot and Grok CLI wiring is deferred until their hook schemas are verified.',
+    usage: 'metabot sessions wire --host <zcode|cursor|gemini> [--remove]',
     optionalFlags: [
-      { flag: '--host', value: '<host>', description: 'Which host to wire (supported: zcode).' },
+      { flag: '--host', value: '<host>', description: 'Which host to wire (supported: zcode, cursor, gemini).' },
       { flag: '--remove', description: 'Remove the metabot-sessions entry instead of adding it.' },
     ],
   },
@@ -4033,6 +4034,14 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     subcommands: [
       { name: 'send_message', summary: 'MCP tool (not a CLI verb): replies to a remote bot through the session\'s bound conversation, as the bound Bot profile — use an inbox message\'s sender as "to".' },
+    ],
+  },
+  {
+    commandPath: ['hook'],
+    summary: 'Host hook handler (local session adapters P4a): called by host hooks (session-start, user-prompt-submit, post-tool-use, stop, session-end, status). Registers/refreshes the session from the hook payload and, on mail-taking events (post-tool-use / stop for most hosts; session-start also for Claude/Codex), prints pending inbox mail as the host\'s additionalContext dialect (hookSpecificOutput for Claude/Gemini/Grok, additional_context for Cursor, additionalContext for Copilot). Env detection wins over --agent: Cursor/Copilot/Devin load Claude Code\'s hooks, so the settings-file agent cannot be trusted. Never fails its host: every error exits 0 silently.',
+    usage: 'metabot hook <event> [--agent <name>]',
+    optionalFlags: [
+      { flag: '--agent', value: '<name>', description: 'The agent from the settings file; overridden by env detection (CURSOR_AGENT, COPILOT_CLI, GEMINI_CLI, GROK_SESSION_ID, …).' },
     ],
   },
   {
