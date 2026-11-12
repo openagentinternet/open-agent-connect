@@ -178,22 +178,29 @@ test('runCli dispatches `metabot doctor` and preserves the doctor envelope', asy
 
   assert.equal(exitCode, 0);
   assert.deepEqual(harness.calls.doctor, [{ command: 'doctor' }]);
-  assert.deepEqual(parseLastJson(harness.stdout), {
-    ok: true,
-    state: 'success',
-    data: {
-      version: pkg.version,
-      checks: [
-        { code: 'daemon_reachable', ok: true },
-        { code: 'identity_loaded', ok: false },
-        {
-          code: 'canonical_cli_shim_preferred',
-          ok: true,
-          canonicalShimPath: null,
-        },
-      ],
+  const payload = parseLastJson(harness.stdout);
+  // The static checks keep their exact shapes; the sessions check is
+  // machine-dependent (it reads the real user's wiring files), so it is
+  // asserted by code below rather than in this deepEqual.
+  const dynamicChecks = payload.data.checks.filter((check) => check.code !== 'local_sessions_layer');
+  assert.deepEqual(dynamicChecks, [
+    { code: 'daemon_reachable', ok: true },
+    { code: 'identity_loaded', ok: false },
+    {
+      code: 'canonical_cli_shim_preferred',
+      ok: true,
+      canonicalShimPath: null,
     },
-  });
+  ]);
+  const sessionsCheck = payload.data.checks.find((check) => check.code === 'local_sessions_layer');
+  assert.ok(sessionsCheck, 'the local sessions layer check is present');
+  assert.equal(sessionsCheck.ok, true);
+  assert.equal(sessionsCheck.registryReadable, false, 'the harness home has no registry yet');
+  assert.equal(sessionsCheck.liveSessions, 0);
+  assert.equal(sessionsCheck.boundConversations, 0);
+  assert.match(sessionsCheck.note, /No sessions registered yet/);
+  // The wiring probe always reports all four supported hosts.
+  assert.deepEqual(Object.keys(sessionsCheck.wiring).sort(), ['cursor', 'gemini', 'kimi', 'zcode']);
 });
 
 test('runCli doctor reports when the invoked CLI entry differs from the canonical shim target', async () => {

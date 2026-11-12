@@ -4015,10 +4015,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['sessions', 'wire'],
-    summary: 'Wire a host for session mail (local session adapters). ZCode gets the metabot-sessions MCP server (~/.zcode/cli/config.json, falling back to ~/.agents/mcp.json). Hook-tier hosts (cursor, gemini) additionally get the metabot hook handler in their hook configs (Cursor: ~/.cursor/hooks.json; Gemini: ~/.gemini/settings.json) so inbox mail reaches the model at the next tool call / turn end. Every edited file is backed up with .bak-sessions; --remove drops only our entries. Copilot and Grok CLI wiring is deferred until their hook schemas are verified.',
-    usage: 'metabot sessions wire --host <zcode|cursor|gemini> [--remove]',
+    summary: 'Wire a host for session mail (local session adapters). ZCode gets the metabot-sessions MCP server (~/.zcode/cli/config.json, falling back to ~/.agents/mcp.json); Kimi Code gets the same MCP entry at ~/.kimi-code/mcp.json (pull tier, same shape — verified against a live install). Hook-tier hosts (cursor, gemini) additionally get the metabot hook handler in their hook configs (Cursor: ~/.cursor/hooks.json; Gemini: ~/.gemini/settings.json) so inbox mail reaches the model at the next tool call / turn end. Every edited file is backed up with .bak-sessions; --remove drops only our entries. Copilot and Grok CLI wiring is deferred until their hook schemas are verified.',
+    usage: 'metabot sessions wire --host <zcode|kimi|cursor|gemini> [--remove]',
     optionalFlags: [
-      { flag: '--host', value: '<host>', description: 'Which host to wire (supported: zcode, cursor, gemini).' },
+      { flag: '--host', value: '<host>', description: 'Which host to wire (supported: zcode, kimi, cursor, gemini).' },
       { flag: '--remove', description: 'Remove the metabot-sessions entry instead of adding it.' },
     ],
   },

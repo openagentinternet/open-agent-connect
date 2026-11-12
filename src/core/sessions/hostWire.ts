@@ -22,13 +22,14 @@ export interface SessionsMcpCommand {
 }
 
 export interface WireSessionsMcpInput {
-  /** Which host's MCP config to edit. P2b: `zcode`. */
+  /** Which host's MCP config to edit: `zcode` or `kimi` (both pull tier). */
   host: string;
   /** Injected command/args (defaults to the running metabot binary). */
   mcpCommand?: SessionsMcpCommand;
-  /** Overrides `~/.zcode` / `~/.agents` (tests). */
+  /** Overrides `~/.zcode` / `~/.agents` / `~/.kimi-code` (tests). */
   zcodeDir?: string;
   agentsDir?: string;
+  kimiDir?: string;
   remove?: boolean;
 }
 
@@ -49,6 +50,13 @@ function resolveMcpCommand(): SessionsMcpCommand {
 
 function candidateConfigFiles(input: WireSessionsMcpInput): string[] {
   const files: string[] = [];
+  if (input.host === 'kimi') {
+    // Kimi Code reads the same {"mcpServers": …} stdio map from
+    // ~/.kimi-code/mcp.json (verified against a live 2.0.2 install).
+    const kimiBase = input.kimiDir ?? path.join(os.homedir(), '.kimi-code');
+    files.push(path.join(kimiBase, 'mcp.json'));
+    return files;
+  }
   const zcodeBase = input.zcodeDir ?? path.join(os.homedir(), '.zcode');
   files.push(path.join(zcodeBase, 'cli', 'config.json'));
   const agentsBase = input.agentsDir ?? path.join(os.homedir(), '.agents');
@@ -57,8 +65,8 @@ function candidateConfigFiles(input: WireSessionsMcpInput): string[] {
 }
 
 export async function wireSessionsMcp(input: WireSessionsMcpInput): Promise<WireSessionsMcpResult> {
-  if (input.host !== 'zcode') {
-    throw new Error(`Unsupported host for sessions MCP wiring: ${input.host} (supported: zcode)`);
+  if (input.host !== 'zcode' && input.host !== 'kimi') {
+    throw new Error(`Unsupported host for sessions MCP wiring: ${input.host} (supported: zcode, kimi)`);
   }
   const mcpCommand = input.mcpCommand ?? resolveMcpCommand();
 

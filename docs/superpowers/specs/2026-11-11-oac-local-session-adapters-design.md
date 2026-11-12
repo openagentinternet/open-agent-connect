@@ -388,6 +388,22 @@ discipline as the bot runtime's delivery artifacts.
   lives in the orchestrator with the conservative default.
 - **P5 — DSH push + UI + doctor.** Native DSH delivery, conversations-page
   provenance, doctor sessions check.
+  **(updated 2026-11-12): P5a landed** — the doctor sessions check
+  (`sessionsDoctor.ts`, wired into `metabot doctor` as
+  `local_sessions_layer`: registry state, live/deliverable/bound counts,
+  per-host wiring presence for zcode/kimi/cursor/gemini, informative note
+  when nothing is set up yet — the wiring probe reads the real user home
+  because wiring files are machine facts); the Kimi Code investigation and
+  wiring: kimi-code 2.0.2 reads the SAME `{"mcpServers": …}` stdio map at
+  `~/.kimi-code/mcp.json` and its config.toml exposes no hook surface, so
+  Kimi is wireable at the pull tier today (`metabot sessions wire --host
+  kimi`) and joins Claude/ZCode as a hooks candidate only if upstream adds
+  hooks; and the live-smoke runbook
+  (`docs/acceptance/local-session-adapters-live-smoke.md`: doctor baseline,
+  wire, bind, per-host message flows, stranger-tier no-wake check,
+  rollback). Deferred to P5b: DSH native push, conversations-page
+  provenance line, `sessions.wakePolicy` knob; Kimi/Copilot/Grok hook-tier
+  adapters wait on upstream surfaces.
 
 ## Code Areas
 

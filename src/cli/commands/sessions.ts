@@ -55,10 +55,10 @@ export async function runSessionsCommand(args: string[], context: CliRuntimeCont
     const hostIndex = args.indexOf('--host');
     const host = hostIndex >= 0 ? args[hostIndex + 1] : undefined;
     if (!host) {
-      return commandFailed('invalid_sessions_wire', 'Usage: metabot sessions wire --host <zcode|cursor|gemini> [--remove]');
+      return commandFailed('invalid_sessions_wire', 'Usage: metabot sessions wire --host <zcode|kimi|cursor|gemini> [--remove]');
     }
     try {
-      if (host === 'zcode') {
+      if (host === 'zcode' || host === 'kimi') {
         const result = await wireSessionsMcp({ host, remove: args.includes('--remove') });
         return commandSuccess(result);
       }

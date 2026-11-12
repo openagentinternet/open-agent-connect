@@ -402,3 +402,62 @@ test('mcpServer send_message routes through the backend and errors without a ses
   assert.equal(noSessionResponses[0].result.isError, true);
   assert.match(noSessionResponses[0].result.content[0].text, /no bound session/);
 });
+
+// ---------- P5a: kimi wiring + doctor check ----------
+
+const { buildSessionsDoctorCheck } = require('../../dist/core/sessions/sessionsDoctor.js');
+const { mkdir: mkDir, readFile, writeFile } = fs;
+
+test('wireSessionsMcp supports the kimi host (~/.kimi-code/mcp.json, same stdio shape)', async () => {
+  const root = await mkdtempTempRoot('metabot-sessions-wire-kimi-');
+  const kimiDir = path.join(root, '.kimi-code');
+  await mkDir(kimiDir, { recursive: true });
+  await writeFile(path.join(kimiDir, 'mcp.json'), JSON.stringify({ mcpServers: { 'kimi-cu': { command: 'x' } } }));
+
+  const wired = await wireSessionsMcp({
+    host: 'kimi',
+    kimiDir,
+    mcpCommand: { command: '/usr/bin/node', args: ['/opt/metabot/main.js', 'mcp'] },
+  });
+  assert.equal(wired.wired, true);
+  assert.ok(wired.configFile.endsWith('.kimi-code/mcp.json'));
+  const parsed = JSON.parse(await readFile(wired.configFile, 'utf8'));
+  assert.deepEqual(parsed.mcpServers['metabot-sessions'], { command: '/usr/bin/node', args: ['/opt/metabot/main.js', 'mcp'] });
+  assert.ok(parsed.mcpServers['kimi-cu'], 'existing servers preserved');
+
+  const removed = await wireSessionsMcp({ host: 'kimi', kimiDir, remove: true, mcpCommand: { command: 'x', args: [] } });
+  assert.equal(removed.wired, false);
+  const after = JSON.parse(await readFile(removed.configFile, 'utf8'));
+  assert.equal(after.mcpServers['metabot-sessions'], undefined);
+  assert.ok(after.mcpServers['kimi-cu']);
+});
+
+test('buildSessionsDoctorCheck reports registry state and wiring presence without throwing', async () => {
+  const root = await mkdtempTempRoot('metabot-sessions-doctor-');
+  const kimiDir = path.join(root, '.kimi-code');
+  await mkDir(kimiDir, { recursive: true });
+  await writeFile(path.join(kimiDir, 'mcp.json'), JSON.stringify({ mcpServers: {} }));
+
+  // Nothing registered yet: still ok, with the setup note.
+  const empty = await buildSessionsDoctorCheck(root, { kimiDir, zcodeDir: path.join(root, 'no-zcode'), cursorDir: path.join(root, 'no-cursor'), geminiDir: path.join(root, 'no-gemini') });
+  assert.equal(empty.ok, true);
+  assert.equal(empty.liveSessions, 0);
+  assert.equal(empty.registryReadable, false);
+  assert.match(empty.note, /No sessions registered yet/);
+  assert.equal(empty.wiring.kimi, 'wired');
+  assert.equal(empty.wiring.zcode, 'not-wired');
+
+  // A registry with a live + deliverable session and one binding.
+  const registry = createLocalSessionRegistry({
+    statePath: require('../../dist/core/state/paths.js').resolveMetabotSessionPaths(root).localSessionsPath,
+    probeRepo: async () => ({ repo: 'r', branch: 'main' }),
+  });
+  const created = await registry.registerSession({ agent: 'mcp-client', sessionId: 'live1', source: 'mcp', deliverable: true });
+  await registry.bindConversation({ sessionRef: created.name, conversationId: 'pc-x-y' });
+  const report = await buildSessionsDoctorCheck(root, { kimiDir, zcodeDir: path.join(root, 'no-zcode'), cursorDir: path.join(root, 'no-cursor'), geminiDir: path.join(root, 'no-gemini') });
+  assert.equal(report.registryReadable, true);
+  assert.ok(report.liveSessions >= 1);
+  assert.ok(report.deliverableSessions >= 1);
+  assert.equal(report.boundConversations, 1);
+  assert.equal(report.note, undefined);
+});
