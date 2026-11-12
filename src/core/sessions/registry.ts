@@ -46,6 +46,9 @@ const STATE_FILE_MODE = 0o600;
 const DEFAULT_AGENT_TIERS: Record<string, SessionDeliveryTier> = {
   'claude-code': 'push',
   codex: 'push',
+  // DSH sessions are push: the dsh-plugin is the in-process delivery agent
+  // (registry.list + agent.followup), no external contract needed.
+  dsh: 'push',
   gemini: 'turn',
   copilot: 'turn',
   cursor: 'turn',

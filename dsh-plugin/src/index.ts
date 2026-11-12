@@ -89,6 +89,7 @@ import { dispatchMetaTaskRoutes } from './metatask-routes.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
 import { dispatchKbRoutes, importKbFile, KB_IMPORT_MAX_BYTES } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
+import { applySessionMailAgent } from './session-mail-agent.js'
 import { applyScheduleScheduler } from './schedule-scheduler.js'
 import { HostLlmExecutor, type HostAgentTurnRunner } from './host-llm-executor.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
@@ -1012,6 +1013,14 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     })
   }
 
+  // DSH session mail agent (local session adapters P5b): registers every
+  // live DSH session with the daemon's session registry and long-polls the
+  // inboxes of bound sessions, injecting remote-bot mail straight into the
+  // session's turn (agent.followup) and forwarding the turn's final text
+  // back to the peer as the bound Bot profile. Bounded, silent on failure —
+  // never destabilizes the host.
+  applySessionMailAgent(ctx)
+
   // Scheduled-task host claiming: ticks on a timer while the DSH host is
   // alive, heartbeats each Bot so the daemon tick stands down under the fresh
   // host lease, and runs claimed `auto`/`host` tasks as new DSH
@@ -1165,6 +1174,7 @@ export { dispatchSurfRoutes } from './surf-routes.js'
 export { dispatchScheduleRoutes, migrateLegacyScheduleTasks } from './schedule-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick, runHygieneTail } from './dream-scheduler.js'
+export { applySessionMailAgent, buildPeerMessageFrame } from './session-mail-agent.js'
 export {
   applyScheduleScheduler,
   createDaemonScheduleTransport,

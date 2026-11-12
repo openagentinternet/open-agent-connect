@@ -404,6 +404,48 @@ discipline as the bot runtime's delivery artifacts.
   rollback). Deferred to P5b: DSH native push, conversations-page
   provenance line, `sessions.wakePolicy` knob; Kimi/Copilot/Grok hook-tier
   adapters wait on upstream surfaces.
+  **(updated 2026-11-12): P5b design (in flight)** — DSH native push,
+  in-process (the spec's original DSH row, now concretely): the dsh-plugin
+  runs a **session mail agent** (`dsh-plugin/src/session-mail-agent.ts`,
+  mounted like the dream scheduler, disposed with the plugin effect):
+  1. *Registration tick* — `agents.list()` enumerates every live DSH
+     session (user-created included; `HostAgentsRegistryLike.list`), each
+     registers deliverable via the new `metabot sessions register --agent
+     dsh --session <id>` CLI verb; dsh defaults to tier `push` in the
+     daemon's tier table.
+  2. *Delivery long-poll* — per bound session (bindings revealed by the
+     register response), a loop parks on `metabot sessions inbox-check
+     --session <key> --wait 20`. The long-poll IS the push: delivery
+     latency ≈ one poll cycle; handover marks the mail delivered; daemon
+     unreachable → back off, the queue keeps mail.
+  3. *Injection + reply capture* — tap the session's events BEFORE
+     injecting (the group-task-worker discipline), deliver the framed mail
+     via `agent.followup({role:'user', …})`, await `whenIdle` (bounded
+     10min), forward the turn's final assistant text via `metabot sessions
+     send --session <key> --to <peer> --message <text>` — the daemon
+     anchors it to the binding's observed peer and sends as the bound Bot
+     profile through chat.private.
+  Scope decisions: reply capture is TURN-scoped (only the turn our
+  injection triggered, final text only, length-capped) — session output
+  never leaks wholesale; user sessions are NOT silently marked
+  remote-content-driven (the owner's bind is the consent record);
+  mid-turn injection follows DSH's own followup queuing semantics. The
+  frame mirrors `src/core/sessions/framing.ts` in the plugin (runtime
+  resolution, no build-time coupling). Bind→first-delivery latency ≤ the
+  registration interval (60s default). New CLI verbs (CLI-first): register /
+  inbox-check / send.
+  **(updated 2026-11-12): P5b landed** — the session mail agent
+  (`dsh-plugin/src/session-mail-agent.ts`, mounted next to the dream
+  scheduler, disposed with the plugin effect; 987/987 plugin suite green
+  with the new `session-mail-agent.test.mjs` covering frame fidelity,
+  bound-only polling, framed followup injection, turn-scoped reply
+  forwarding, timeout degradation, and unbound no-poll). The frame
+  normalization (no extra blank line before `</oac-message>`) landed in
+  BOTH framings, pinned byte-for-byte by the plugin test. Daemon side:
+  dsh → tier `push` default, the three CLI verbs with help entries, and
+  the routing test extended to the verb wiring. Live smoke on the user's
+  3080 DSH remains the acceptance gate (daemon + DSH restart needed — the
+  runbook's DSH section).
 
 ## Code Areas
 

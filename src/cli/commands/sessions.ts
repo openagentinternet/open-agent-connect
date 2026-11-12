@@ -69,5 +69,51 @@ export async function runSessionsCommand(args: string[], context: CliRuntimeCont
     }
   }
 
+  // P5b: the data-plane verbs behind the dsh-plugin's mail agent (and any
+  // scriptable delivery path). register marks a session deliverable;
+  // inbox-check long-polls its queue; send anchors a reply to the binding's
+  // observed peer through chat.private as the bound Bot profile.
+  if (subcommand === 'register' || subcommand === 'inbox-check' || subcommand === 'send') {
+    const dependencies = context.dependencies.sessions;
+    if (!dependencies?.register || !dependencies?.inboxCheck || !dependencies?.sendMessage) {
+      return commandFailed('not_implemented', 'Sessions mail handlers are not configured. Is the daemon running a build that supports them?');
+    }
+    const flag = (name: string): string | undefined => {
+      const index = args.indexOf(name);
+      return index >= 0 ? args[index + 1] : undefined;
+    };
+    if (subcommand === 'register') {
+      const agent = flag('--agent');
+      if (!agent) {
+        return commandFailed('invalid_session_agent', 'Usage: metabot sessions register --agent <agent> [--session <id>] [--name <name>] [--cwd <path>]');
+      }
+      return dependencies.register({
+        agent,
+        sessionId: flag('--session'),
+        name: flag('--name'),
+        cwd: flag('--cwd'),
+        pid: process.pid,
+      });
+    }
+    if (subcommand === 'inbox-check') {
+      const sessionKey = flag('--session');
+      if (!sessionKey) {
+        return commandFailed('invalid_session_key', 'Usage: metabot sessions inbox-check --session <key|name> [--wait <secs>]');
+      }
+      const waitRaw = flag('--wait');
+      const waitSecs = waitRaw !== undefined && waitRaw !== '' && Number.isFinite(Number(waitRaw))
+        ? Number(waitRaw)
+        : 0;
+      return dependencies.inboxCheck({ sessionKey, waitSecs });
+    }
+    const sessionKey = flag('--session');
+    const to = flag('--to');
+    const message = flag('--message');
+    if (!sessionKey || !to || !message) {
+      return commandFailed('invalid_session_send', 'Usage: metabot sessions send --session <key|name> --to <peerGlobalMetaId> --message <text>');
+    }
+    return dependencies.sendMessage({ sessionKey, to, message });
+  }
+
   return commandUnknownSubcommand(`sessions ${redactSensitiveArgs(args).join(' ')}`.trim());
 }
