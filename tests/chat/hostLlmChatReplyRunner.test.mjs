@@ -7,6 +7,7 @@ const {
   buildChatPrompt,
   buildChatSystemPrompt,
   createHostLlmChatReplyRunner,
+  isOperatorGuidanceEcho,
   parseRunnerOutput,
 } = require('../../dist/core/chat/hostLlmChatReplyRunner.js');
 const {
@@ -1937,4 +1938,84 @@ test('buildChatPrompt carries the full-form MetaWeb URI rule', () => {
   assert.match(prompt, /MetaWeb URIs are ALWAYS written in FULL/);
   assert.match(prompt, /never abbreviated, truncated, or shortened with an ellipsis/);
   assert.match(prompt, /64 lowercase hex chars/);
+});
+
+// ── Operator guidance (Steer) must never reach the peer verbatim ────────────
+// Regression: a guided turn on a fresh conversation echoed the operator's own
+// text back as the reply, because the guidance section carried no
+// do-not-copy rule and the prompt had no chat history to draw on.
+
+test('operator guidance section forbids copying the briefing into the reply', () => {
+  const prompt = buildChatPrompt(makeInput({
+    inboundMessage: null,
+    operatorGuidanceText: '把明天的交付时间和价格说清楚，别绕。',
+  }));
+  assert.match(prompt, /## Operator Guidance/);
+  assert.match(prompt, /states INTENT/);
+  assert.match(prompt, /Never copy the guidance text into the reply/);
+  assert.match(prompt, /it is a briefing, never a message body/);
+});
+
+test('isOperatorGuidanceEcho flags a reply that pastes the guidance', () => {
+  const guidance = '把明天的交付时间和价格说清楚，别绕。';
+  assert.equal(isOperatorGuidanceEcho(guidance, guidance), true);
+  // Same text with different spacing/punctuation still an echo.
+  assert.equal(isOperatorGuidanceEcho('把明天的交付时间和价格说清楚 别绕', guidance), true);
+  // Guidance spliced into a longer reply is still an echo.
+  assert.equal(
+    isOperatorGuidanceEcho(`${guidance} 我这边周五能交，价格按之前谈的。`, guidance),
+    true,
+  );
+});
+
+test('isOperatorGuidanceEcho leaves a genuine reply alone', () => {
+  const guidance = '把明天的交付时间和价格说清楚，别绕。';
+  // A real answer that never reproduces the briefing.
+  assert.equal(
+    isOperatorGuidanceEcho('周五一早可以交付，价格维持上次报的 0.002 SPACE。', guidance),
+    false,
+  );
+  // A fragment of the briefing is not itself the briefing.
+  assert.equal(isOperatorGuidanceEcho('价格维持上次报的。', guidance), false);
+});
+
+test('isOperatorGuidanceEcho ignores guidance too short to distinguish', () => {
+  // "好的" legitimately appears inside real replies.
+  assert.equal(isOperatorGuidanceEcho('好的，周五交付。', '好的'), false);
+  assert.equal(isOperatorGuidanceEcho('', '把时间说清楚'), false);
+  assert.equal(isOperatorGuidanceEcho('随便写点', ''), false);
+});
+
+test('parseRunnerOutput turns an operator-guidance echo into a retryable empty reply', () => {
+  const guidance = '把明天的交付时间和价格说清楚，别绕。';
+  const echoed = parseRunnerOutput(guidance, guidance);
+  assert.equal(echoed.state, 'empty_reply');
+  assert.equal(echoed.content ?? '', '');
+
+  // The same text without guidance in play is an ordinary reply.
+  const plain = parseRunnerOutput(guidance);
+  assert.equal(plain.state, 'reply');
+
+  // A genuine guided answer passes through untouched.
+  const genuine = parseRunnerOutput('周五一早交付，价格维持 0.002 SPACE。', guidance);
+  assert.equal(genuine.state, 'reply');
+  assert.equal(genuine.content, '周五一早交付，价格维持 0.002 SPACE。');
+});
+
+test('a guided turn whose host model echoes the guidance never reaches the peer', async () => {
+  const guidance = '把明天的交付时间和价格说清楚，别绕。';
+  const hostCalls = [];
+  const runner = createHostLlmChatReplyRunner({
+    hostLlmGenerate: async (input) => {
+      hostCalls.push(input);
+      return { ok: true, output: guidance };
+    },
+  });
+  const result = await runner(makeInput({
+    inboundMessage: null,
+    operatorGuidanceText: guidance,
+  }));
+  assert.equal(hostCalls.length, 1);
+  // Echo rejected, and a guided turn must never fall back to a template reply.
+  assert.equal(result.state, 'skip');
 });
