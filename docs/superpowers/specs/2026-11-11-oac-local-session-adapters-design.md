@@ -456,6 +456,29 @@ discipline as the bot runtime's delivery artifacts.
   visible in the host UI's session transcript. check_inbox results carry
   no notice (they already delivered); the pending query is non-consuming
   and best-effort (never breaks a tool result).
+- **P6 candidates — model selection for remote-driven sessions
+  (recorded 2026-11-14, user request).** Today the model belongs to the
+  session: the user picks it in the DSH UI before binding, unbound
+  conversations answer with the Bot's own LLM pair, and plugin-spawned
+  sessions (group-task workers) take the Worker Bot's pair via
+  `agentOptions`. Two variants for "pin the model of a remote-driven
+  session", in ascending ambition:
+  1. **Per-binding model override** — the bind record may name a model
+     (provider/model/reasoning effort); delivery asks DSH to switch that
+     session's next turn to it. BLOCKED on verifying a DSH plugin API for
+     session-level model switching: 0.2.2 exposes the models catalog and
+     the llm-models-updated SSE relay, but no verified "set session model"
+     entry exists.
+  2. **On-demand session spawn (mail-agent auto-create)** — when mail
+     arrives for a bound conversation with NO live DSH session, the
+     session mail agent creates one via `registry.create` with the bound
+     Bot's LLM pair (the group-task worker pattern) and delivers into it,
+     covering "drive a session that is not open yet". Needs a
+     session-lifecycle policy (dispose after the reply vs keep alive like
+     the worker's `(task, worker)` reuse) and a visibility marker so the
+     user can tell agent-created sessions from their own.
+  Recommendation unchanged: validate the daily flow with variant-0 (pick
+  the model when opening the session, then bind) first.
 
 ## Code Areas
 
