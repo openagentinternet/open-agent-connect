@@ -25,6 +25,9 @@ import { wrapMemoryInjection } from '../prompt/memoryInjection';
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
+// Below this many comparable characters an operator note is too short to
+// distinguish an echo from a legitimate phrase in a real reply.
+const MIN_GUIDANCE_ECHO_CHARS = 8;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 export const PRIVATE_CHAT_REPLY_GENERATION_ENV = 'METABOT_PRIVATE_CHAT_REPLY_GENERATION';
 // A chat history gap beyond this (or a close marker) starts a new session in
@@ -322,6 +325,8 @@ function buildChatPrompt(
       'This is local-only private guidance from the local operator for this one reply.',
       'Use it as private steering for your next turn.',
       'Do not present it as peer-authored text or mention that you received hidden guidance.',
+      '- The guidance states INTENT (what to achieve, which facts to convey), not text to deliver. Write the reply yourself in your own voice, in the conversation language.',
+      '- Never copy the guidance text into the reply, verbatim or near-verbatim, even when there is no chat history to draw on and it is the only text you have: it is a briefing, never a message body.',
       operatorGuidanceText,
     ].join('\n'));
   }
@@ -420,7 +425,36 @@ function buildChatPrompt(
   return sections.join('\n\n');
 }
 
-function parseRunnerOutput(rawOutput: string): ChatReplyRunnerResult {
+/** Lowercased, whitespace- and punctuation-insensitive form for containment checks. */
+function comparableText(value: string): string {
+  return value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+/**
+ * A guided turn (operator Steer) that echoes the operator's own text back at
+ * the peer has delivered nothing: the operator's words are a briefing, never
+ * a message body, and the peer must not receive them. Prompt rules alone left
+ * this open (a fresh guided turn has no chat history, so the guidance text is
+ * the only material the model has), so the reply is rejected here and treated
+ * as a retryable empty completion instead of being sent.
+ *
+ * The test is containment ONE way — the reply contains the whole guidance —
+ * so both leak shapes are caught (the guidance pasted as the reply, and the
+ * guidance spliced into a longer reply) without rejecting a legitimate short
+ * answer that merely happens to be a fragment of the briefing.
+ *
+ * Short guidance (under 8 comparable chars) is skipped: a note like "好的"
+ * legitimately appears inside a real reply and cannot be told apart.
+ */
+export function isOperatorGuidanceEcho(content: string, operatorGuidanceText: string): boolean {
+  const reply = comparableText(content);
+  const guidance = comparableText(operatorGuidanceText);
+  if (!reply || !guidance) return false;
+  if (guidance.length < MIN_GUIDANCE_ECHO_CHARS) return false;
+  return reply.includes(guidance);
+}
+
+function parseRunnerOutput(rawOutput: string, operatorGuidanceText?: string | null): ChatReplyRunnerResult {
   const output = normalizeText(stripPlanningPreamble(rawOutput));
   if (!output) {
     // A completed-but-empty final text (reasoning-only completion): retryable
@@ -430,6 +464,11 @@ function parseRunnerOutput(rawOutput: string): ChatReplyRunnerResult {
   }
   if (isPrivateChatNoReplySentinel(output)) {
     return { state: 'no_reply' };
+  }
+  // Operator-briefing echo: never deliver the operator's own words to the
+  // peer. Retryable emptiness, same handling as a reasoning-only completion.
+  if (operatorGuidanceText && isOperatorGuidanceEcho(output, operatorGuidanceText)) {
+    return { state: 'empty_reply' };
   }
 
   const content = canonicalizeFinalByeLine(output);
@@ -471,6 +510,7 @@ async function tryExecute(
   turnState: { attemptedExecution: boolean },
   onSkillExecutionStart?: () => void,
   chatWorkspaceDir?: string,
+  operatorGuidanceText?: string | null,
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
   const shouldMarkRuntimeUnavailable = markRuntimeUnavailableOnFailure;
   const stickyRuntimeId = stickyRuntime.get();
@@ -548,7 +588,7 @@ async function tryExecute(
             // Emptiness is model behavior, not a runtime failure — the
             // runtime stays healthy and sticky; the orchestrator retries
             // with a host notice (IDBots 2026-09-16 stall postmortem).
-            const parsed = parseRunnerOutput(result.output);
+            const parsed = parseRunnerOutput(result.output, operatorGuidanceText);
             stickyRuntime.onSuccess(resolved.runtime.id);
             pollDeadlineTracker.reset(resolved.runtime.id);
             return { result: parsed, bindingId: resolved.bindingId };
@@ -693,7 +733,7 @@ export function createHostLlmChatReplyRunner(options?: {
         ...(chatWorkspaceDir ? { cwd: chatWorkspaceDir } : {}),
       });
       if (outcome && outcome.ok && typeof outcome.output === 'string') {
-        const parsed = parseRunnerOutput(outcome.output);
+        const parsed = parseRunnerOutput(outcome.output, input.operatorGuidanceText);
         // A host completion with no final text is NOT a usable result: fall
         // through to the local-runtime chain (a different backend may not
         // have the reasoning-only failure mode) instead of accepting silence.
@@ -798,6 +838,7 @@ export function createHostLlmChatReplyRunner(options?: {
         turnState,
         notifySkillExecutionStart,
         chatWorkspaceDir || undefined,
+        input.operatorGuidanceText,
       );
       if (outcome) {
         // Track lastUsedAt on the binding that was successfully used.
