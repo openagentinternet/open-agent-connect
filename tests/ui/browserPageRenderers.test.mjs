@@ -249,9 +249,12 @@ test('pdf, image, and video render with content-specific elements', async () => 
   assert.match(image.nodes['[data-browser-viewport]'].innerHTML, /<img class="browser-image" src="https:\/\/files\.example\/a\.png" alt=""/);
 
   const video = runWithResolve(result({ type: 'video', contentType: 'video/mp4', url: 'https://files.example/a.mp4' }));
-  await waitFor(() => video.nodes['[data-browser-viewport]'].innerHTML.includes('data-browser-video-preview'), 'video preview render');
+  // ABC 0.11.0: direct-URL media (no metafile pin id) renders a real <video>
+  // element instead of the pending data-browser-video-preview slot, which is
+  // now reserved for metafile:// pin references.
+  await waitFor(() => video.nodes['[data-browser-viewport]'].innerHTML.includes('browser-media-stage'), 'video render');
   assert.match(video.nodes['[data-browser-viewport]'].innerHTML, /class="browser-pin-media-preview browser-pin-media-preview-video"/);
-  assert.match(video.nodes['[data-browser-viewport]'].innerHTML, /Loading video/);
+  assert.match(video.nodes['[data-browser-viewport]'].innerHTML, /<video controls src="https:\/\/files\.example\/a\.mp4"><\/video>/);
 });
 
 test('unsupported renderer keeps source details available for Inspector', async () => {

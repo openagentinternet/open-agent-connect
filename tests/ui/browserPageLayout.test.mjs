@@ -101,7 +101,9 @@ test('Browser owner panel is Browser chrome outside the renderer viewport', () =
 test('Browser owner chip participates in topbar chrome instead of renderer content', () => {
   const topbarBlock = cssBlock('.browser-topbar');
   assertDeclaration(topbarBlock, 'grid-row', '2');
-  assertDeclaration(topbarBlock, 'display', 'grid');
+  // ABC 0.11.0: the topbar's internal layout switched from grid to flex; the
+  // owner chip still renders inside the topbar row, not the renderer viewport.
+  assertDeclaration(topbarBlock, 'display', 'flex');
 
   const chipBlock = cssBlock('.browser-resource-chip');
   assertDeclaration(chipBlock, 'max-width', '230px');
