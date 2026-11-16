@@ -1534,6 +1534,37 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     + `Message from ${peerGlobalMetaId}: ${inboundWireContent.content.trim().slice(0, 200)}`, now).catch(() => undefined);
                 return;
             }
+            // ---- Local session adapters (P2b/P3): a conversation BOUND to a local
+            // agent session takes the mail instead of the bot runtime turn. The
+            // trust gate already ran (auto behavior only reaches here); routing
+            // failures fail OPEN (bot runtime answers) — a broken session registry
+            // must not silence the bot. canWake = the wake policy (local/team/
+            // trusted/contact tiers may push into a live push-capable session;
+            // strangers queue only; an unwired tier evaluator is conservative).
+            // Absent dep / null result = unchanged.
+            if (deps.routeInboundToLocalSession) {
+                const canWake = trustDecision.tier === 'local'
+                    || trustDecision.tier === 'team'
+                    || trustDecision.tier === 'trusted'
+                    || trustDecision.tier === 'contact';
+                const routed = await deps.routeInboundToLocalSession({
+                    conversationId: conversation.conversationId,
+                    peerGlobalMetaId,
+                    body: inboundWireContent.content,
+                    canWake,
+                }).catch((error) => {
+                    deps.logSendFailure?.({
+                        kind: 'session_route_failed',
+                        peerGlobalMetaId,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                    return null;
+                });
+                if (routed) {
+                    await deps.stateStore.upsertConversation(conversation);
+                    return;
+                }
+            }
             await runSerializedConversationTurn(conversation.conversationId, async () => {
                 // Re-read inside the per-conversation mutex so back-to-back inbound
                 // messages cannot lose turnCount increments to a read-modify-write

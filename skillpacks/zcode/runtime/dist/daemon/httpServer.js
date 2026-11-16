@@ -35,6 +35,7 @@ const owner_1 = require("./routes/owner");
 const trust_1 = require("./routes/trust");
 const block_1 = require("./routes/block");
 const team_1 = require("./routes/team");
+const sessions_1 = require("./routes/sessions");
 const network_1 = require("./routes/network");
 const provider_1 = require("./routes/provider");
 const metaapp_1 = require("./routes/metaapp");
@@ -74,6 +75,7 @@ const ROUTES = [
     trust_1.handleTrustRoutes,
     block_1.handleBlockRoutes,
     team_1.handleTeamRoutes,
+    sessions_1.handleSessionsRoutes,
     network_1.handleNetworkRoutes,
     provider_1.handleProviderRoutes,
     metaapp_1.handleMetaAppRoutes,

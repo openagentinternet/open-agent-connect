@@ -4,6 +4,7 @@ exports.runDoctorCommand = runDoctorCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
 const homeSelection_1 = require("../../core/state/homeSelection");
 const cliShimDoctor_1 = require("../../core/state/cliShimDoctor");
+const sessionsDoctor_1 = require("../../core/sessions/sessionsDoctor");
 const version_1 = require("../version");
 function hasDoctorChecks(data) {
     return Boolean(data)
@@ -21,6 +22,7 @@ async function runDoctorCommand(_args, context) {
     }
     const cliShimCheck = await (0, cliShimDoctor_1.buildCliShimDoctorCheck)((0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd), context.env, context.cwd);
     const cliRuntimeCheck = await (0, cliShimDoctor_1.buildCliRuntimeDoctorCheck)((0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd), context.env, context.cwd, context.env.METABOT_CLI_CURRENT_ENTRY_PATH || process.argv[1]);
+    const sessionsCheck = await (0, sessionsDoctor_1.buildSessionsDoctorCheck)((0, homeSelection_1.normalizeSystemHomeDir)(context.env, context.cwd));
     return {
         ...result,
         data: {
@@ -30,6 +32,7 @@ async function runDoctorCommand(_args, context) {
                 ...result.data.checks,
                 cliShimCheck,
                 ...(cliRuntimeCheck ? [cliRuntimeCheck] : []),
+                sessionsCheck,
             ],
         },
     };

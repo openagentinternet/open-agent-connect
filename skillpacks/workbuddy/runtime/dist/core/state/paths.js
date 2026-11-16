@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveMetabotPaths = resolveMetabotPaths;
 exports.resolveMetabotDaemonPaths = resolveMetabotDaemonPaths;
 exports.resolveMetabotOwnerPaths = resolveMetabotOwnerPaths;
+exports.resolveMetabotSessionPaths = resolveMetabotSessionPaths;
 const node_path_1 = __importDefault(require("node:path"));
 function normalizeInputHomeDir(homeDir) {
     const normalizedHomeDir = typeof homeDir === 'string' ? homeDir.trim() : '';
@@ -211,5 +212,15 @@ function resolveMetabotOwnerPaths(systemHomeDir) {
         trustCachePath: node_path_1.default.join(ownerRoot, 'trust-cache.json'),
         trustLocalPath: node_path_1.default.join(ownerRoot, 'trust-local.json'),
         teamRegistryPath: node_path_1.default.join(ownerRoot, 'team-registry.json'),
+    };
+}
+function resolveMetabotSessionPaths(systemHomeDir) {
+    const normalizedSystemHomeDir = normalizeInputHomeDir(systemHomeDir);
+    const sessionsRoot = node_path_1.default.join(normalizedSystemHomeDir, '.metabot', 'sessions');
+    return {
+        systemHomeDir: normalizedSystemHomeDir,
+        sessionsRoot,
+        localSessionsPath: node_path_1.default.join(sessionsRoot, 'local-sessions.json'),
+        sessionMailPath: node_path_1.default.join(sessionsRoot, 'session-mail.json'),
     };
 }

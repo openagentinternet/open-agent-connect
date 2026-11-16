@@ -33,6 +33,29 @@ export interface PrivateChatAutoReplyDependencies {
      * reply, NO skills, and a `trust_policy_failed` send-failure event.
      */
     evaluatePeerTrustPolicy?: (peerGlobalMetaId: string) => Promise<PeerPolicyEvaluation>;
+    /**
+     * Local session adapters (P2b/P3): route inbound mail for a private-chat
+     * conversation that is BOUND to a local agent session (Claude Code, Codex,
+     * …). Consulted AFTER the trust gate, only for `auto` behavior. A non-null
+     * result means the mail was enqueued into the session's inbox — no bot
+     * runtime turn runs for it (no silent fallback: bound conversations wait
+     * for their session). `canWake` carries the wake-policy decision (sender
+     * tier may push into a live push-capable session); false = queue-only.
+     * Absent or null = behavior unchanged.
+     */
+    routeInboundToLocalSession?: (input: {
+        conversationId: string;
+        peerGlobalMetaId: string;
+        body: string;
+        fromName?: string | null;
+        canWake: boolean;
+    }) => Promise<{
+        delivered: true;
+        sessionKey: string;
+        sessionName: string;
+        mailId: string;
+        pushed?: boolean;
+    } | null>;
     now?: () => number;
 }
 export interface PrivateChatAutoReplyOrchestrator {

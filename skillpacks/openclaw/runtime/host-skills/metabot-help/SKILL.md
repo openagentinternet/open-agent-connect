@@ -80,6 +80,7 @@ $HOME/.metabot/bin/metabot owner --help
 $HOME/.metabot/bin/metabot trust --help
 $HOME/.metabot/bin/metabot block --help
 $HOME/.metabot/bin/metabot team --help
+$HOME/.metabot/bin/metabot sessions --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill
