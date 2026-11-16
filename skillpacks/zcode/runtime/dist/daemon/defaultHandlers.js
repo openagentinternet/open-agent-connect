@@ -85,6 +85,7 @@ const ownerHandlers_1 = require("./ownerHandlers");
 const trustHandlers_1 = require("./trustHandlers");
 const blockHandlers_1 = require("./blockHandlers");
 const teamHandlers_1 = require("./teamHandlers");
+const sessionsHandlers_1 = require("./sessionsHandlers");
 const peerTrustResolver_1 = require("../core/trust/peerTrustResolver");
 const rootOwnerResolver_1 = require("../core/trust/rootOwnerResolver");
 const trustPolicy_1 = require("../core/trust/trustPolicy");
@@ -4021,6 +4022,11 @@ function trafficCommandFailure(error, fallbackCode) {
 }
 function createDefaultMetabotDaemonHandlers(input) {
     const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
+    // Local session adapters (P2a/P2b): one machine-wide session layer shared
+    // by the sessions handlers (API surface) and every profile's private-chat
+    // orchestrator (routing hook) — the registry and mail queue are
+    // single-writer stores and must not be instantiated twice.
+    const localSessionLayer = (0, sessionsHandlers_1.createSessionLayer)(normalizedSystemHomeDir);
     /** Map a ChainBroadcastUnknownError (or a recorded prior unknown attempt for
      *  identical content) to manual_action_required with the candidate txids and
      *  an explicit do-not-retry message. Records the attempt for dedup. */
@@ -5595,6 +5601,21 @@ function createDefaultMetabotDaemonHandlers(input) {
                     tierResolver: peerTrustTierResolver,
                 });
             },
+            // Local session adapters (P2b/P3): mail for a conversation bound to a
+            // local agent session is delivered into that session (push tier when
+            // the wake policy allows, else the inbox queue) instead of driving a
+            // bot runtime turn. The shared machine-wide session layer
+            // (localSessionLayer) is the same instance the /api/sessions/* verbs
+            // serve; routing failures fail open inside the orchestrator. The wake
+            // tier gate is resolved in the orchestrator (canWake); the config knob
+            // (sessions.wakePolicy) lands with P4.
+            routeInboundToLocalSession: async (input) => localSessionLayer.router.routeInbound({
+                conversationId: input.conversationId,
+                peerGlobalMetaId: input.peerGlobalMetaId,
+                body: input.body,
+                profileSlug: profileMetaBotSlug,
+                canWake: input.canWake,
+            }),
         }, profileAutoReplyConfig);
         // Accept-and-poll: a guided turn can take minutes (LLM + possible skill
         // execution), so it must not be awaited inside this HTTP request. The UI
@@ -12791,6 +12812,19 @@ function createDefaultMetabotDaemonHandlers(input) {
         team: (0, teamHandlers_1.createTeamDaemonHandlers)({
             systemHomeDir: normalizedSystemHomeDir,
             rootOwnerResolver: (0, rootOwnerResolver_1.createRootOwnerResolver)({ systemHomeDir: normalizedSystemHomeDir }),
+        }),
+        // Local session directory + mail queue + bindings (local session
+        // adapters P1/P2a/P2b). The reply path late-binds chat.private (the
+        // handlers object does not exist yet while this literal is evaluated).
+        sessions: (0, sessionsHandlers_1.createSessionsDaemonHandlers)({
+            systemHomeDir: normalizedSystemHomeDir,
+            sessionLayer: localSessionLayer,
+            getChatPrivateSend: () => {
+                const chat = daemonHandlers?.chat;
+                return chat?.private
+                    ? (rawInput) => chat.private(rawInput)
+                    : null;
+            },
         }),
         network: {
             listServices: async ({ online, query, cached }) => {

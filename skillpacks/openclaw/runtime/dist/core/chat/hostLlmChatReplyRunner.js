@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PRIVATE_CHAT_REPLY_GENERATION_ENV = void 0;
+exports.isOperatorGuidanceEcho = isOperatorGuidanceEcho;
 exports.createHostLlmChatReplyRunner = createHostLlmChatReplyRunner;
 exports.buildChatPrompt = buildChatPrompt;
 exports.buildChatSystemPrompt = buildChatSystemPrompt;
@@ -21,6 +22,9 @@ const memoryInjection_1 = require("../prompt/memoryInjection");
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
+// Below this many comparable characters an operator note is too short to
+// distinguish an echo from a legitimate phrase in a real reply.
+const MIN_GUIDANCE_ECHO_CHARS = 8;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 exports.PRIVATE_CHAT_REPLY_GENERATION_ENV = 'METABOT_PRIVATE_CHAT_REPLY_GENERATION';
 // A chat history gap beyond this (or a close marker) starts a new session in
@@ -267,6 +271,8 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
             'This is local-only private guidance from the local operator for this one reply.',
             'Use it as private steering for your next turn.',
             'Do not present it as peer-authored text or mention that you received hidden guidance.',
+            '- The guidance states INTENT (what to achieve, which facts to convey), not text to deliver. Write the reply yourself in your own voice, in the conversation language.',
+            '- Never copy the guidance text into the reply, verbatim or near-verbatim, even when there is no chat history to draw on and it is the only text you have: it is a briefing, never a message body.',
             operatorGuidanceText,
         ].join('\n'));
     }
@@ -355,7 +361,36 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     sections.push('Reply now:');
     return sections.join('\n\n');
 }
-function parseRunnerOutput(rawOutput) {
+/** Lowercased, whitespace- and punctuation-insensitive form for containment checks. */
+function comparableText(value) {
+    return value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+/**
+ * A guided turn (operator Steer) that echoes the operator's own text back at
+ * the peer has delivered nothing: the operator's words are a briefing, never
+ * a message body, and the peer must not receive them. Prompt rules alone left
+ * this open (a fresh guided turn has no chat history, so the guidance text is
+ * the only material the model has), so the reply is rejected here and treated
+ * as a retryable empty completion instead of being sent.
+ *
+ * The test is containment ONE way — the reply contains the whole guidance —
+ * so both leak shapes are caught (the guidance pasted as the reply, and the
+ * guidance spliced into a longer reply) without rejecting a legitimate short
+ * answer that merely happens to be a fragment of the briefing.
+ *
+ * Short guidance (under 8 comparable chars) is skipped: a note like "好的"
+ * legitimately appears inside a real reply and cannot be told apart.
+ */
+function isOperatorGuidanceEcho(content, operatorGuidanceText) {
+    const reply = comparableText(content);
+    const guidance = comparableText(operatorGuidanceText);
+    if (!reply || !guidance)
+        return false;
+    if (guidance.length < MIN_GUIDANCE_ECHO_CHARS)
+        return false;
+    return reply.includes(guidance);
+}
+function parseRunnerOutput(rawOutput, operatorGuidanceText) {
     const output = normalizeText(stripPlanningPreamble(rawOutput));
     if (!output) {
         // A completed-but-empty final text (reasoning-only completion): retryable
@@ -366,6 +401,11 @@ function parseRunnerOutput(rawOutput) {
     if ((0, privateChatLoopGuards_1.isPrivateChatNoReplySentinel)(output)) {
         return { state: 'no_reply' };
     }
+    // Operator-briefing echo: never deliver the operator's own words to the
+    // peer. Retryable emptiness, same handling as a reasoning-only completion.
+    if (operatorGuidanceText && isOperatorGuidanceEcho(output, operatorGuidanceText)) {
+        return { state: 'empty_reply' };
+    }
     const content = canonicalizeFinalByeLine(output);
     const hasEndMarker = hasFinalByeLine(content);
     return {
@@ -373,7 +413,7 @@ function parseRunnerOutput(rawOutput) {
         content,
     };
 }
-async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, systemPrompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, markRuntimeUnavailableOnFailure, stickyRuntime, pollDeadlineTracker, turnState, onSkillExecutionStart, chatWorkspaceDir) {
+async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, systemPrompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, markRuntimeUnavailableOnFailure, stickyRuntime, pollDeadlineTracker, turnState, onSkillExecutionStart, chatWorkspaceDir, operatorGuidanceText) {
     const shouldMarkRuntimeUnavailable = markRuntimeUnavailableOnFailure;
     const stickyRuntimeId = stickyRuntime.get();
     const resolved = await resolver.resolveRuntime({
@@ -448,7 +488,7 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, systemProm
                         // Emptiness is model behavior, not a runtime failure — the
                         // runtime stays healthy and sticky; the orchestrator retries
                         // with a host notice (IDBots 2026-09-16 stall postmortem).
-                        const parsed = parseRunnerOutput(result.output);
+                        const parsed = parseRunnerOutput(result.output, operatorGuidanceText);
                         stickyRuntime.onSuccess(resolved.runtime.id);
                         pollDeadlineTracker.reset(resolved.runtime.id);
                         return { result: parsed, bindingId: resolved.bindingId };
@@ -558,7 +598,7 @@ function createHostLlmChatReplyRunner(options) {
                 ...(chatWorkspaceDir ? { cwd: chatWorkspaceDir } : {}),
             });
             if (outcome && outcome.ok && typeof outcome.output === 'string') {
-                const parsed = parseRunnerOutput(outcome.output);
+                const parsed = parseRunnerOutput(outcome.output, input.operatorGuidanceText);
                 // A host completion with no final text is NOT a usable result: fall
                 // through to the local-runtime chain (a different backend may not
                 // have the reasoning-only failure mode) instead of accepting silence.
@@ -650,7 +690,7 @@ function createHostLlmChatReplyRunner(options) {
         }
         // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
         for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
-            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, systemPrompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, !allowedChatSkillsResolver, stickyRuntime, pollDeadlineTracker, turnState, notifySkillExecutionStart, chatWorkspaceDir || undefined);
+            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, systemPrompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, !allowedChatSkillsResolver, stickyRuntime, pollDeadlineTracker, turnState, notifySkillExecutionStart, chatWorkspaceDir || undefined, input.operatorGuidanceText);
             if (outcome) {
                 // Track lastUsedAt on the binding that was successfully used.
                 if (outcome.bindingId) {

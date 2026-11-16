@@ -3500,6 +3500,27 @@ function createDefaultCliDependencies(context) {
             add: async (input) => requestJson(context, 'POST', '/api/team/add', input),
             remove: async (input) => requestJson(context, 'POST', '/api/team/remove', input),
         },
+        sessions: {
+            // Local session directory (local session adapters P1/P2a); discovery
+            // presence is refreshed machine-side on every list, and the inbox
+            // verbs back the `metabot mcp` pull tier.
+            list: async (input) => {
+                const query = new URLSearchParams();
+                if (input.all === true) {
+                    query.set('all', 'true');
+                }
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestJson(context, 'GET', `/api/sessions/list${suffix}`);
+            },
+            register: async (input) => requestJson(context, 'POST', '/api/sessions/register', input),
+            inboxCheck: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/check', input),
+            inboxPending: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/pending', input),
+            inboxEnqueue: async (input) => requestJson(context, 'POST', '/api/sessions/inbox/enqueue', input),
+            messageStatus: async (input) => requestJson(context, 'POST', '/api/sessions/messages/status', input),
+            bind: async (input) => requestJson(context, 'POST', '/api/sessions/bind', input),
+            unbind: async (input) => requestJson(context, 'POST', '/api/sessions/unbind', input),
+            sendMessage: async (input) => requestJson(context, 'POST', '/api/sessions/messages/send', input),
+        },
         network: {
             listServices: async (input) => {
                 const query = new URLSearchParams();
@@ -5905,6 +5926,10 @@ function mergeCliDependencies(context) {
         system: { ...defaults.system, ...provided.system },
         llm: { ...defaults.llm, ...provided.llm },
         bot: { ...defaults.bot, ...provided.bot },
+        sessions: { ...defaults.sessions, ...provided.sessions },
+        owner: { ...defaults.owner, ...provided.owner },
+        trust: { ...defaults.trust, ...provided.trust },
+        team: { ...defaults.team, ...provided.team },
     };
 }
 async function serveCliDaemonProcess(context) {

@@ -16,7 +16,24 @@ export interface BuildChatPromptOptions {
 }
 declare function buildChatSystemPrompt(input: ChatReplyRunnerInput): string;
 declare function buildChatPrompt(input: ChatReplyRunnerInput, allowedSkillScope?: PrivateChatAllowedSkillScope, options?: BuildChatPromptOptions): string;
-declare function parseRunnerOutput(rawOutput: string): ChatReplyRunnerResult;
+/**
+ * A guided turn (operator Steer) that echoes the operator's own text back at
+ * the peer has delivered nothing: the operator's words are a briefing, never
+ * a message body, and the peer must not receive them. Prompt rules alone left
+ * this open (a fresh guided turn has no chat history, so the guidance text is
+ * the only material the model has), so the reply is rejected here and treated
+ * as a retryable empty completion instead of being sent.
+ *
+ * The test is containment ONE way — the reply contains the whole guidance —
+ * so both leak shapes are caught (the guidance pasted as the reply, and the
+ * guidance spliced into a longer reply) without rejecting a legitimate short
+ * answer that merely happens to be a fragment of the briefing.
+ *
+ * Short guidance (under 8 comparable chars) is skipped: a note like "好的"
+ * legitimately appears inside a real reply and cannot be told apart.
+ */
+export declare function isOperatorGuidanceEcho(content: string, operatorGuidanceText: string): boolean;
+declare function parseRunnerOutput(rawOutput: string, operatorGuidanceText?: string | null): ChatReplyRunnerResult;
 export declare function createHostLlmChatReplyRunner(options?: {
     runtimeResolver?: LlmRuntimeResolver;
     llmExecutor?: ChatLlmExecutor;
