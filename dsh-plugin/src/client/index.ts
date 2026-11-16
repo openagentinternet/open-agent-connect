@@ -87,36 +87,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** One action our session-menu contribution returns (structural subset). */
-interface OacContextMenuAction {
-  readonly id: string
-  readonly label: string
-  readonly disabled?: boolean
-  readonly danger?: boolean
-  readonly separatorBefore?: boolean
-  readonly run?: () => void | Promise<void>
-}
 
 /**
- * Structural face of the DSH 0.2.2+ unified context-menu registry
- * (ui-context-menu client plugin, `ctx.provide('contextMenus', ...)`).
- * Declared non-optional like upstream; the only consumer reads it behind
+ * The DSH 0.2.2+ unified context-menu registry (`ctx.provide('contextMenus',
+ * ...)`) is typed by upstream since 0.2.2 (`ContextMenus`); this module no
+ * longer declares it. The only consumer reads it behind
  * `ctx.inject(['contextMenus'])`, which never resolves on older kernels —
  * that pending inject IS the feature detection.
  */
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    contextMenus: {
-      register(contribution: {
-        readonly id: string
-        readonly target: 'session'
-        readonly order: number
-        readonly resolve: (target: { readonly sessionId: string; readonly displayTitle: string }) => readonly OacContextMenuAction[]
-      }): () => void
-    }
-  }
-}
-
 export const inject = [
   'slots',
   'locale',

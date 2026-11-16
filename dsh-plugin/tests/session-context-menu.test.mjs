@@ -17,7 +17,7 @@ test('session menu: the contribution registers behind the 0.2.2+ contextMenus se
   const entry = await readFile(join(root, 'src', 'client', 'index.ts'), 'utf8')
   assert.match(entry, /ctx\.inject\(\['contextMenus', 'sessions'\]/, 'the inject IS the feature detection (pending on 0.2.1)')
   assert.match(entry, /registerSessionMenu\(/, 'the contribution registers through the session-menu module')
-  assert.match(entry, /declare module '@deepseek-ai\/cordis'/, 'the contextMenus service face is declared structurally')
+  assert.doesNotMatch(entry, /declare module '@deepseek-ai\/cordis'/, 'upstream types Context.contextMenus since 0.2.2 — a structural redeclaration would conflict (TS2717)')
 })
 
 test('session menu: the resolver maps oac-<slug> presets and opens the editor', async () => {
