@@ -25,7 +25,7 @@ export function PluginUpdateBanner({ t }: { t: Translate }): ReactNode {
   const [status, setStatus] = useState<PluginUpdateCheckPayload | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const [step, setStep] = useState<PluginUpdateProgressPayload['step'] | null>(null)
+  const [step, setStep] = useState<NonNullable<PluginUpdateProgressPayload['step']> | null>(null)
 
   useEffect(() => {
     let live = true
