@@ -645,6 +645,38 @@ down, the tick falls back to the `metabot schedule due|claim|complete` CLI
 verbs — a dead daemon cannot race a claim. Per-run bookkeeping lives in
 `<profile>/.runtime/schedule/schedule.json`.
 
+## OAC MCP server in DSH's managed fleet (pull tier)
+
+DSH 0.2.2 added a managed MCP server fleet (`ctx.mcpManager`, surfaced in
+Settings → MCP), and the plugin registers the `metabot mcp` stdio server into
+it for the plugin's lifetime — server name **`oac`**, bound to the named
+session identity **`dsh`** (`metabot mcp --name dsh`; the child is the same
+dependency-proxy surface the metabot CLI uses and auto-starts the daemon on
+demand). Every DSH session therefore gains the `oac` MCP tools —
+`list_sessions`, `check_inbox`, `message_status`, `send_message` — so a
+session can pull ITS inbox and answer peers as the bound Bot profile: this
+is the local-session-adapter **pull tier**, complementing the mail agent's
+push tier.
+
+Identity discipline keeps the two tiers from racing: the mail agent (push)
+registers every live DSH session under its own session id and consumes those
+inboxes with its own poll loops; the MCP server binds the one separate `dsh`
+identity (registry key `cli:dsh` — the `cli` tier defaults to pull). A
+conversation reaches the pull tier only through an explicit bind to that
+identity (`metabot sessions bind dsh <conversationId>` on the private chat),
+and its mail then waits in the `dsh` inbox for whichever DSH session calls
+`check_inbox` instead of being pushed as a turn. Per-tool-call budget is
+120 s so `check_inbox` long-polls (the daemon caps the wait around 25 s) plus
+a daemon cold start fit comfortably.
+
+Degradation is silent and total: on pre-0.2.2 kernels the service inject
+never resolves and nothing registers; when the metabot CLI cannot be
+resolved the registration is skipped (the Bots-page setup card already
+guides CLI install); a refused registration (e.g. the name is already taken
+by a configured server) is logged and dropped — the plugin never
+destabilizes the host over it. Registered entries appear in Settings → MCP
+under the plugin's own entry.
+
 ## Long-term task board: `longtask_*` tools, and how they differ from the IDBots board
 
 Eleven native tools bridge the OAC CLI `metabot longtask …` surface (flag-only,

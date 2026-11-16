@@ -235,6 +235,12 @@ export interface HostContext {
   dshHomePath?: (...segments: string[]) => string
   /** Cordis event/waterfall surface (agent/pre-step, session/event, agent/created…). */
   on?(event: string, listener: (...args: any[]) => unknown, options?: { prepend?: boolean }): (() => void) | void
+  /**
+   * Cordis inject: the callback fires when all named services exist (and
+   * never on kernels without them — a pending inject IS feature detection).
+   * Services arrive as properties of the callback's scope.
+   */
+  inject?(services: string | readonly string[], callback: (scope: unknown) => unknown): (() => void) | void
   agents?: HostAgentsRegistryLike
   /** Present when the DSH web composition mounts user-approval. */
   approval?: HostApproval

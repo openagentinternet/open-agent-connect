@@ -90,6 +90,7 @@ import { dispatchMemoryRoutes } from './memory-routes.js'
 import { dispatchKbRoutes, importKbFile, KB_IMPORT_MAX_BYTES } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { applySessionMailAgent } from './session-mail-agent.js'
+import { applyMcpServerRegistration } from './mcp-register.js'
 import { applyScheduleScheduler } from './schedule-scheduler.js'
 import { HostLlmExecutor, type HostAgentTurnRunner } from './host-llm-executor.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
@@ -1021,6 +1022,12 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   // never destabilizes the host.
   applySessionMailAgent(ctx)
 
+  // OAC session MCP server into DSH's managed MCP fleet (DSH 0.2.2+):
+  // any DSH session can pull its bound inbox and answer peers through the
+  // `oac` MCP tools (the local-session-adapter pull tier) under the named
+  // `dsh` identity — separate from the mail agent's per-session push tier.
+  applyMcpServerRegistration(ctx)
+
   // Scheduled-task host claiming: ticks on a timer while the DSH host is
   // alive, heartbeats each Bot so the daemon tick stands down under the fresh
   // host lease, and runs claimed `auto`/`host` tasks as new DSH
@@ -1175,6 +1182,7 @@ export { dispatchScheduleRoutes, migrateLegacyScheduleTasks } from './schedule-r
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick, runHygieneTail } from './dream-scheduler.js'
 export { applySessionMailAgent, buildPeerMessageFrame } from './session-mail-agent.js'
+export { applyMcpServerRegistration, MCP_SERVER_NAME, MCP_SESSION_NAME } from './mcp-register.js'
 export {
   applyScheduleScheduler,
   createDaemonScheduleTransport,
