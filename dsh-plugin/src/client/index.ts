@@ -22,6 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import { IconBrowseOutline16 } from './icons.ts'
@@ -38,6 +39,7 @@ import { HeaderBotLabel, type HeaderBotLabelInjected } from './HeaderBotLabel.ts
 import { SessionIdHeader } from './SessionIdHeader.tsx'
 import { PluginSettingsPanel } from './PluginSettingsPanel.tsx'
 import { QuoteReplyOverlay, type QuoteReplyInjected } from './QuoteReplyOverlay.tsx'
+import { MetaidFenceCard, type MetaidFenceInjected } from './MetaidFenceCard.tsx'
 import { QUOTE_REPLY_SOURCE } from './quote-reply-source.ts'
 import { TrackingTasksPanel } from './TrackingTasksPanel.tsx'
 import { A2AUnreadController } from './a2a-unread-store.ts'
@@ -67,11 +69,12 @@ import { userEn, USER_NS, userZh, type UserLocaleKey } from './locale-user.ts'
 import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
 import { trafficEn, TRAFFIC_NS, trafficZh, type TrafficLocaleKey } from './locale-traffic.ts'
 import { qrEn, QR_NS, qrZh, type QuoteReplyLocaleKey } from './locale-quote-reply.ts'
+import { metaidEn, METAID_NS, metaidZh, type MetaidFenceLocaleKey } from './locale-metaid.ts'
 import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { startHeroIdentityMount } from './hero-identity.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BOTSPAGE_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, NARROWVIEW_CSS, PRESETS_CSS, QUOTEREPLY_CSS, TRACKING_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BOTSPAGE_CSS, BROWSER_CSS, CONVTABS_CSS, GROUPTASK_CSS, HERO_CSS, MEMORY_CSS, METAIDFENCE_CSS, NARROWVIEW_CSS, PRESETS_CSS, QUOTEREPLY_CSS, TRACKING_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -84,6 +87,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.oac.memory': MemoryLocaleKey
     'settings.oac.user': UserLocaleKey
     'settings.oac.quoteReply': QuoteReplyLocaleKey
+    'settings.oac.metaidFence': MetaidFenceLocaleKey
   }
 }
 
@@ -110,7 +114,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS + TRACKING_CSS + BOTSPAGE_CSS + QUOTEREPLY_CSS + NARROWVIEW_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + HERO_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS + CONVTABS_CSS + TRACKING_CSS + BOTSPAGE_CSS + QUOTEREPLY_CSS + NARROWVIEW_CSS + METAIDFENCE_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -123,6 +127,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(MEMORY_NS, { zh: memoryZh, en: memoryEn }), 'oac-dsh: memory dictionary')
   ctx.effect(() => ctx.locale.register(USER_NS, { zh: userZh, en: userEn }), 'oac-dsh: user dictionary')
   ctx.effect(() => ctx.locale.register(QR_NS, { zh: qrZh, en: qrEn }), 'oac-dsh: quote reply dictionary')
+  ctx.effect(() => ctx.locale.register(METAID_NS, { zh: metaidZh, en: metaidEn }), 'oac-dsh: metaid fence dictionary')
   const t = ctx.locale.bind(NS)
   const tBrowser = ctx.locale.bind(BROWSER_NS)
   const tConv = ctx.locale.bind(CONV_NS)
@@ -131,6 +136,7 @@ export function apply(ctx: ClientContext): void {
   const tTraffic = ctx.locale.bind(TRAFFIC_NS)
   const tMemory = ctx.locale.bind(MEMORY_NS)
   const tUser = ctx.locale.bind(USER_NS)
+  const tMetaid = ctx.locale.bind(METAID_NS)
 
   // Right-Sidebar Bot Browser: one store and one iframe bridge per activation.
   // The store is the reactive face the tab body/title read; the bridge tracks
@@ -152,6 +158,22 @@ export function apply(ctx: ClientContext): void {
     },
   }
   const openBrowserNow = (uri: string | null): Promise<void> => openBrowser(openFace, iframeBridge, uri)
+
+  // Chat code-block rendering by language (DSH 0.2.2+): a ```metaid fence in
+  // the Chat flow renders as a MetaID resource card (open in the Bot Browser
+  // + copy) instead of raw code; an unparseable fence keeps the plain block.
+  // The inject stays pending on kernels without the slot — that pending
+  // inject IS the feature detection.
+  ctx.slots.inject('conversation.chat.markdown.fence', () => ctx.slots.register({
+    name: 'conversation.chat.markdown.fence',
+    id: 'oac.metaid-card',
+    key: 'metaid',
+    inject: (): MetaidFenceInjected => ({
+      open: (uri) => { void openBrowserNow(uri) },
+      t: tMetaid,
+    }),
+  }, MetaidFenceCard))
+
   // A2A Chat overlay: one apply-scope open state. The panellist row's click
   // is capture-intercepted into a toggle (a kernel global-panel selection
   // would unmount the right Sidebar); navigation back to the conversation

@@ -677,6 +677,41 @@ by a configured server) is logged and dropped — the plugin never
 destabilizes the host over it. Registered entries appear in Settings → MCP
 under the plugin's own entry.
 
+## MetaID resource cards: chat code-block rendering by language
+
+DSH 0.2.2 lets plugins extend the Chat flow's code-block rendering by
+language: every Markdown fence that carries a language routes through the
+session-scoped `conversation.chat.markdown.fence` hoc slot, keyed by the
+lowercased language (a layer that omits `children` replaces the plain code
+block; one that renders `children` decorates it). The plugin registers one
+layer under the **`metaid`** key: a fence that names at least one
+MetaID-network URI renders as a resource card instead of raw code — a title
+row, one row per URI with **打开** (opens it in the Bot Browser through the
+shared open path) and a copy button, and an optional note. This gives
+agents and SOPs an explicit way to share MetaID resources with their user,
+independent of the bare-URI link interceptor (which already makes loose
+`metaid://` text in chat clickable — the card is for deliberate,
+structured shares; bare URIs wrapped in prose remain the interceptor's
+job).
+
+Fence shape (each nonblank line is one of; the info string after the
+language tag seeds the title):
+
+````metaid
+title: 从知识库找到的资源
+note: 作者主页也有类似作品
+metaid://pin/abcdef…
+metaapp://app/demo
+````
+
+Parsing lives in `metaid-fence-logic.ts` (plain module, tested directly):
+`title:`/`note:` metadata lines with first-occurrence-wins, every
+`metaid://`-family URI on any line (the same scheme families the link
+interceptor handles, minus bare i0 txids), trailing sentence punctuation
+stripped. A fence with no URI at all renders the plain code block it wraps
+— a malformed share can never hide its content. On pre-0.2.2 kernels the
+slot does not exist, the inject stays pending, and nothing registers.
+
 ## Long-term task board: `longtask_*` tools, and how they differ from the IDBots board
 
 Eleven native tools bridge the OAC CLI `metabot longtask …` surface (flag-only,
