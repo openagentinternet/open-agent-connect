@@ -1578,3 +1578,18 @@ export const NARROWVIEW_CSS = `
   .oac-a2a-body-with-list.oac-gt-body-with-drawer > .oac-gt-drawer { grid-column: 1; grid-row: 3; }
 }
 `
+
+/* The ```metaid fence card (chat code-block rendering by language, rc.2+):
+   one resource card per fence, neutral against both themes via dsw tokens. */
+export const METAIDFENCE_CSS = `
+.oac-metaid-fence { margin: 6px 0; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25)); border-radius: 10px; background: var(--dsw-alias-fill-l2, rgba(127,127,127,.08)); display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 20px; }
+.oac-metaid-fence-title { font-weight: 600; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
+.oac-metaid-fence-rows { display: flex; flex-direction: column; }
+.oac-metaid-fence-row { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.oac-metaid-fence-row + .oac-metaid-fence-row { border-top: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); }
+.oac-metaid-fence-uri { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.oac-metaid-fence-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+.oac-metaid-fence-open { border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.3)); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 18px; padding: 2px 10px; cursor: pointer; }
+.oac-metaid-fence-open:hover { background: var(--dsw-alias-fill-l2, rgba(127,127,127,.12)); }
+.oac-metaid-fence-note { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
+`
