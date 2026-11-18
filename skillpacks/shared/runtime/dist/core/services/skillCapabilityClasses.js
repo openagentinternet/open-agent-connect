@@ -41,6 +41,7 @@ exports.DEFAULT_SKILL_CAPABILITY_CLASSES = {
     'metabot-protocol': 'C2',
     'metabot-metaapp': 'C2',
     'metabot-call-remote-service': 'C2',
+    'metabot-post-skill': 'C2',
     'metabot-post-skillservice': 'C2',
     // Sandboxed local writes (profile-local corpora/memory state).
     'metabot-knowledge-base': 'C2',

@@ -17,6 +17,7 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-network-manage',
   'metabot-omni-reader',
   'metabot-post-buzz',
+  'metabot-post-skill',
   'metabot-post-skillservice',
   'metabot-create-wiki',
   'metabot-metaapp',
