@@ -22,7 +22,7 @@ const shippedSkills = readdirSync(skillsRoot, { withFileTypes: true })
 test('the registry covers every shipped SKILLs/* skill and nothing stale', () => {
   const registryKeys = Object.keys(DEFAULT_SKILL_CAPABILITY_CLASSES).sort();
   assert.deepEqual(registryKeys, shippedSkills, 'every shipped skill has exactly one registry entry');
-  assert.equal(shippedSkills.length, 29);
+  assert.equal(shippedSkills.length, 30);
 });
 
 test('classification sanity: the deliberately-chosen anchor skills', () => {
@@ -30,6 +30,7 @@ test('classification sanity: the deliberately-chosen anchor skills', () => {
   assert.equal(classifySkill('metabot-omni-reader'), 'C1', 'explicitly read-only');
   assert.equal(classifySkill('metabot-metaweb'), 'C1', 'search/read only');
   assert.equal(classifySkill('metabot-post-buzz'), 'C2', 'chain publish');
+  assert.equal(classifySkill('metabot-post-skill'), 'C2', 'chain publish of a skill package');
   assert.equal(classifySkill('metabot-grouptask'), 'C2', 'the C2 example par excellence');
   assert.equal(classifySkill('metabot-memory'), 'C2', 'sandboxed local writes');
   assert.equal(classifySkill('metabot-browser'), 'C3', 'drives the real local browser');

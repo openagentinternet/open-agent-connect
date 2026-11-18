@@ -24,6 +24,7 @@ const METABOT_SKILLS = [
   'metabot-chat-privatechat',
   'metabot-omni-reader',
   'metabot-post-buzz',
+  'metabot-post-skill',
   'metabot-metaweb',
   'metabot-post-skillservice',
   'metabot-create-wiki',

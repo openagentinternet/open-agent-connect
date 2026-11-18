@@ -22,6 +22,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-chat-privatechat',
   'metabot-omni-reader',
   'metabot-post-buzz',
+  'metabot-post-skill',
   'metabot-post-skillservice',
   'metabot-create-wiki',
   'metabot-metaapp',
@@ -942,6 +943,22 @@ test('buildAgentConnectSkillpacks publishes provider service lifecycle commands 
   assert.match(content, /services refunds settle --from <bot-slug> --order-id/);
   assert.match(content, /provider summary.*compatibility aliases/s);
   assert.match(content, /Prefer the `services \.\.\.` command names/);
+});
+
+test('buildAgentConnectSkillpacks publishes the free skill publish SOP in the shared pack', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-post-skill'), 'utf8');
+  assert.match(content, /^name:\s*metabot-post-skill$/m);
+  assert.match(content, /skills publish --dir/);
+  assert.match(content, /--skill-version/);
+  assert.match(content, /--from <bot-slug>/);
+  assert.match(content, /--confirm/);
+  assert.match(content, /4 MB/);
+  assert.match(content, /\/protocols\/metabot-skill/);
+  assert.match(content, /metabot skills install --pin <pinId> --confirm/);
+  assert.match(content, /metabot-post-skillservice/);
+  assert.match(content, /metabot-metaweb/);
 });
 
 test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skills in the shared pack', async () => {
