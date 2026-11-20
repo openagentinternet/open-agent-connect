@@ -31,6 +31,7 @@ import {
   toRootOwnerIdentityPublic,
 } from '../core/owner/rootOwnerIdentity';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
+import { createTrustCacheStore } from '../core/trust/trustCacheStore';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { ResolveSponsorWritePin } from '../core/signing/localMnemonicSigner';
 import type { Signer } from '../core/signing/signer';
@@ -174,6 +175,14 @@ export function createOwnerDaemonHandlers(
           signer,
           ...(input.requestSubsidy ? { requestSubsidy: input.requestSubsidy } : {}),
         });
+        // The published pin changes the device's root-owner resolution, but
+        // the shared trust cache may still hold the pre-bind "self-root"
+        // entry for up to its TTL — drop it so the Settings deviceBinding
+        // status and the next enforcement read re-resolve immediately
+        // (best-effort: a cache failure must not fail the bind result).
+        await createTrustCacheStore(systemHomeDir)
+          .invalidate(device.globalMetaId)
+          .catch(() => {});
         return commandSuccess({
           ownerBinding: {
             device: device.globalMetaId,

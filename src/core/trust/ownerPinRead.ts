@@ -1,15 +1,21 @@
 // Chain read for /info/owner pins: resolves the LATEST binding pin at
-// /info/owner for an arbitrary subject GlobalMetaID. Built on the same
-// public MANAPI endpoints the rest of the codebase reads (the
-// `lookupPeerChatPublicKey` / `manOwnerList` / omni-read conventions):
-//   1. GET /api/info/metaid/:globalMetaId  -> the subject's MVC address
-//   2. GET /api/address/pin/list/:address?path=/info/owner -> newest pin row
-//   3. GET /content/:pinId                 -> full (untruncated) payload
+// /info/owner for an arbitrary subject GlobalMetaID. Two public indexers,
+// split by what each actually serves (the omni-read convention):
+//   1. GET {infoBase}/api/v1/info/globalmetaid/:globalMetaId
+//      -> the subject's MVC address. The metafile-indexer is the ONLY public
+//      indexer serving globalmetaid user info — manapi's /api/info/metaid
+//      route answers a globalmetaid with an empty record (isInit:false,
+//      address:""), which silently resolved every subject to "unbound".
+//   2. GET {base}/api/address/pin/list/:address?path=/info/owner -> newest pin row
+//   3. GET {base}/content/:pinId                            -> full (untruncated) payload
+//      Steps 2-3 stay on the MANAPI base (the same endpoints the rest of the
+//      codebase reads: `lookupPeerChatPublicKey` / `manOwnerList`).
 // `contentSummary` in list rows is a truncated JSON preview, so the payload
 // is always re-fetched by pinId. All reads are read-only HTTP GETs.
 import { OWNER_BINDING_PATH } from '../owner/ownerBinding';
 
 export const DEFAULT_OWNER_PIN_MANAPI_BASE_URL = 'https://manapi.metaid.io';
+export const DEFAULT_OWNER_PIN_INFO_BASE_URL = 'https://file.metaid.io/metafile-indexer';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_LIST_SIZE = 20;
 
@@ -23,13 +29,17 @@ export interface LatestOwnerPin {
 export type OwnerPinReader = (globalMetaId: string) => Promise<LatestOwnerPin | null>;
 
 export interface OwnerPinReadOptions {
+  /** MANAPI base for the address-scoped routes (steps 2-3). */
   baseUrl?: string;
+  /** metafile-indexer base for the globalmetaid user-info route (step 1). */
+  infoBaseUrl?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
 
 interface ResolvedOwnerPinReadOptions {
   baseUrl: string;
+  infoBaseUrl: string;
   fetchImpl: typeof fetch;
   timeoutMs: number;
 }
@@ -41,6 +51,7 @@ function resolveOptions(options: OwnerPinReadOptions | undefined): ResolvedOwner
   }
   return {
     baseUrl: (options?.baseUrl ?? DEFAULT_OWNER_PIN_MANAPI_BASE_URL).replace(/\/+$/, ''),
+    infoBaseUrl: (options?.infoBaseUrl ?? DEFAULT_OWNER_PIN_INFO_BASE_URL).replace(/\/+$/, ''),
     fetchImpl,
     timeoutMs: options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
@@ -82,7 +93,7 @@ export async function resolveMetaIdOwnerAddress(
   const normalized = text(globalMetaId).toLowerCase();
   if (!normalized) return null;
   const body = await fetchJson(
-    `${resolved.baseUrl}/api/info/metaid/${encodeURIComponent(normalized)}`,
+    `${resolved.infoBaseUrl}/api/v1/info/globalmetaid/${encodeURIComponent(normalized)}`,
     resolved,
   );
   const data = readObject(body?.data) ?? body ?? {};
