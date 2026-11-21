@@ -57,6 +57,7 @@ export const BROWSER_DARK_THEME_CSS = `
       html[data-browser-resolved-theme="dark"] .browser-tab.is-active { background: var(--browser-window); color: var(--browser-text); }
       html[data-browser-resolved-theme="dark"] .browser-tab-close { color: #6b7a94; }
       html[data-browser-resolved-theme="dark"] .browser-tab-close:hover { background: rgba(31, 41, 55, .4); color: #e6edf7; }
+      html[data-browser-resolved-theme="dark"] .browser-tab-row-close:hover { background: rgba(31, 41, 55, .4); color: #e6edf7; }
       html[data-browser-resolved-theme="dark"] .browser-tab-new { color: #8a9ab8; }
       html[data-browser-resolved-theme="dark"] .browser-tab-new:hover { background: rgba(47, 111, 237, .2); color: var(--browser-accent); }
       html[data-browser-resolved-theme="dark"] .browser-window-actions span { border-color: #3a4a66; background: #1b2638; }
